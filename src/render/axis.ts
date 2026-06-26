@@ -110,6 +110,50 @@ export function drawTimeAxis(
   ctx.restore();
 }
 
+/**
+ * Draw the last-price line (dashed, across the plot) plus a filled price tag on
+ * the right axis, colored up/down. Updates cheaply with every live tick.
+ */
+export function drawLastPriceLabel(
+  ctx: CanvasRenderingContext2D,
+  priceScale: PriceScale,
+  price: number,
+  up: boolean,
+  layout: PlotLayout,
+  dpr: number,
+  style: AxisStyle = DEFAULT_AXIS_STYLE,
+): void {
+  const y = Math.round(priceScale.priceToY(price) * dpr);
+  if (y < 0 || y > layout.plotHeight * dpr) return;
+  const color = up ? '#26a69a' : '#ef5350';
+  const xStart = Math.round(layout.plotWidth * dpr);
+
+  ctx.save();
+  // dashed line across the plot
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, Math.round(dpr));
+  ctx.setLineDash([3 * dpr, 3 * dpr]);
+  ctx.beginPath();
+  ctx.moveTo(0, y + 0.5);
+  ctx.lineTo(xStart, y + 0.5);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // filled price tag on the right axis
+  const label = priceScale.format(price);
+  ctx.font = scaleFont(style.font, dpr);
+  const padX = 6 * dpr;
+  const boxH = 16 * dpr;
+  const textW = ctx.measureText(label).width;
+  ctx.fillStyle = color;
+  ctx.fillRect(xStart + 1, y - boxH / 2, textW + padX * 2, boxH);
+  ctx.fillStyle = '#0d0e12';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, xStart + 1 + padX, y);
+  ctx.restore();
+}
+
 function scaleFont(font: string, dpr: number): string {
   // Multiply the leading "<n>px" by dpr; leave the rest of the font string intact.
   return font.replace(/(\d+(?:\.\d+)?)px/, (_, px: string) => `${Number(px) * dpr}px`);

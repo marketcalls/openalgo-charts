@@ -64,6 +64,44 @@ export class DataLayer {
     this._rebuild();
   }
 
+  /**
+   * Apply a single live bar (ARCHITECTURE.md §4.2 hot path).
+   * - `time === lastTime` → mutate the last bar in place (intra-bar tick)
+   * - `time > lastTime`   → append a new bar (advances baseIndex)
+   * - `time < lastTime`   → out-of-order upsert by time
+   * Returns true if a new time point was added (the index space grew).
+   */
+  public update(id: SeriesId, bar: Bar): boolean {
+    const entry = this._series.get(id);
+    if (entry === undefined) throw new Error(`openalgo-charts: unknown series ${id}`);
+    const bars = entry.bars;
+    const last = bars[bars.length - 1];
+    if (last === undefined || bar.time > last.time) {
+      bars.push(bar);
+      this._appendTime(bar.time);
+      return true;
+    }
+    if (bar.time === last.time) {
+      bars[bars.length - 1] = bar; // mutate last
+      return false;
+    }
+    // out-of-order: upsert by time, keep sorted
+    const i = bars.findIndex((b) => b.time === bar.time);
+    if (i >= 0) {
+      bars[i] = bar;
+      return false;
+    }
+    this.addBars(id, [bar]);
+    return this._indexByTime.has(bar.time);
+  }
+
+  private _appendTime(time: number): void {
+    if (!this._indexByTime.has(time)) {
+      this._indexByTime.set(time, this._sortedTimes.length);
+      this._sortedTimes.push(time);
+    }
+  }
+
   /** Number of logical indices (distinct time points across all series). */
   public get length(): number {
     return this._sortedTimes.length;

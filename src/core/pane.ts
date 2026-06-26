@@ -10,7 +10,8 @@ import { DataLayer } from '../model/data-layer';
 import type { SeriesRecord } from '../model/series';
 import { computeGridLines, drawGrid, type GridStyle } from '../render/grid';
 import { drawCandles, type CandleDrawItem } from '../render/candles';
-import { drawPriceAxis, drawTimeAxis, type AxisStyle, DEFAULT_AXIS_STYLE, type PlotLayout } from '../render/axis';
+import { drawHistogram, type HistogramDrawItem } from '../render/histogram';
+import { drawPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, DEFAULT_AXIS_STYLE, type PlotLayout } from '../render/axis';
 import { drawCrosshair } from '../render/crosshair';
 
 export interface PaneTheme {
@@ -40,6 +41,8 @@ export class Pane {
   public readonly base: CanvasLayer;
   public readonly top: CanvasLayer;
   public readonly priceScale = new PriceScale();
+  /** Relative height weight within the chart (price=1, volume≈0.3). */
+  public weight = 1;
   private readonly _series: SeriesRecord[] = [];
   private _width = 0;
   private _height = 0;
@@ -113,19 +116,33 @@ export class Pane {
     const lines = computeGridLines(layout.plotWidth, layout.plotHeight, { spacing: 60 });
     drawGrid(g, lines, layout.plotWidth, layout.plotHeight, dpr, this._theme.grid);
 
-    // candles
+    // series
     const range = ctx.timeScale.visibleRange();
     const priceToY = (p: number): number => this.priceScale.priceToY(p);
+    let lastClose: number | null = null;
+    let lastUp = true;
     for (const s of this._series) {
-      const items: CandleDrawItem[] = [];
-      for (const ib of ctx.dataLayer.visibleBars(s.dataId, range.from, range.to)) {
-        items.push({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar });
+      const visible = ctx.dataLayer.visibleBars(s.dataId, range.from, range.to);
+      if (s.type === 'candlestick') {
+        const items: CandleDrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));
+        drawCandles(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style);
+        const all = ctx.dataLayer.indexedBars(s.dataId);
+        const last = all[all.length - 1];
+        if (last !== undefined) {
+          lastClose = last.bar.close;
+          lastUp = last.bar.close >= last.bar.open;
+        }
+      } else {
+        const items: HistogramDrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));
+        drawHistogram(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style);
       }
-      drawCandles(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style);
     }
 
     // axes
     drawPriceAxis(g, this.priceScale, layout, dpr, this._theme.axis);
+    if (lastClose !== null) {
+      drawLastPriceLabel(g, this.priceScale, lastClose, lastUp, layout, dpr);
+    }
     if (ctx.showTimeAxis) {
       drawTimeAxis(g, ctx.timeScale, ctx.dataLayer, layout, dpr, this._theme.axis);
     }

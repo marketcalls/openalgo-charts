@@ -9,8 +9,9 @@ import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop'
 import { Pane, type PaneTheme, DEFAULT_PANE_THEME, type PaneRenderContext } from './pane';
 import { TimeScale } from '../scale/time-scale';
 import { DataLayer } from '../model/data-layer';
-import { createCandlestickRecord, type SeriesApi, type SeriesType } from '../model/series';
+import { createCandlestickRecord, createHistogramRecord, type SeriesApi, type SeriesType } from '../model/series';
 import type { CandleStyle } from '../render/candles';
+import type { HistogramStyle } from '../render/histogram';
 import type { Bar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
@@ -26,6 +27,13 @@ export interface ChartOptions {
   crosshairMode?: CrosshairMode;
   /** Time source for kinetic animation (defaults to performance.now). */
   now?: () => number;
+}
+
+export interface AddSeriesOptions {
+  /** Target pane index (0 = price). Higher panes are created on demand. */
+  paneIndex?: number;
+  candleStyle?: Partial<CandleStyle>;
+  histogramStyle?: Partial<HistogramStyle>;
 }
 
 function defaultPixelRatio(): number {
@@ -107,20 +115,44 @@ export class Chart {
     return this._timeScale;
   }
 
-  /** Add a series (Phase 2: candlestick) and return its data handle. */
-  public addSeries(type: SeriesType, style?: Partial<CandleStyle>): SeriesApi {
-    if (type !== 'candlestick') {
-      throw new Error(`openalgo-charts: series type "${type}" arrives in a later phase`);
-    }
+  /** Add a series and return its data handle. */
+  public addSeries(type: SeriesType, options: AddSeriesOptions = {}): SeriesApi {
     const dataId = this._dataLayer.createSeries();
-    if (this._firstDataId.value === null) this._firstDataId.value = dataId;
-    const record = createCandlestickRecord(dataId, style);
-    // Phase 2: all series live on the first (price) pane.
-    this._panes[0].addSeries(record);
+    const paneIndex = options.paneIndex ?? 0;
+    this._ensurePane(paneIndex);
+    if (type === 'candlestick') {
+      if (this._firstDataId.value === null) this._firstDataId.value = dataId;
+      this._panes[paneIndex].addSeries(createCandlestickRecord(dataId, options.candleStyle));
+    } else {
+      this._panes[paneIndex].addSeries(createHistogramRecord(dataId, options.histogramStyle));
+    }
     return {
       setData: (bars: readonly Bar[]): void => this._setData(dataId, bars),
       prependData: (bars: readonly Bar[]): void => this._prependData(dataId, bars),
+      update: (bar: Bar): void => this._updateBar(dataId, bar),
     };
+  }
+
+  /** Apply one live bar; auto-scroll only when the latest bar is at the right edge. */
+  private _updateBar(dataId: number, bar: Bar): void {
+    const wasAtRight = this._timeScale.rightOffset >= 0;
+    const added = this._dataLayer.update(dataId, bar);
+    this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
+    if (added && !wasAtRight) {
+      // viewing history: compensate so existing bars don't drift
+      this._timeScale.setRightOffset(this._timeScale.rightOffset - 1);
+    }
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
+  private _ensurePane(index: number): void {
+    let changed = false;
+    while (this._panes.length <= index) {
+      // price pane (0) takes full weight; lower panes (volume/indicators) are shorter
+      this._addPane(this._panes.length === 0 ? 1 : 0.32);
+      changed = true;
+    }
+    if (changed) this._relayout();
   }
 
   private _setData(dataId: number, bars: readonly Bar[]): void {
@@ -143,8 +175,9 @@ export class Chart {
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
-  private _addPane(): Pane {
+  private _addPane(weight = 1): Pane {
     const pane = new Pane(this._doc, this._theme);
+    pane.weight = weight;
     this._panes.push(pane);
     this._container.appendChild(pane.element);
     return pane;
@@ -164,11 +197,20 @@ export class Chart {
     if (width === this._width && height === this._height) return;
     this._width = width;
     this._height = height;
-    const dpr = this._pixelRatio();
-    const paneHeight = this._panes.length > 0 ? height / this._panes.length : height;
-    for (const pane of this._panes) pane.resize(width, paneHeight, dpr);
-    this._timeScale.setWidth(Math.max(0, width - this._priceAxisWidth));
+    this._relayout();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
+  /** Distribute height across panes by weight; sync the shared time-scale width. */
+  private _relayout(): void {
+    const dpr = this._pixelRatio();
+    let total = 0;
+    for (const pane of this._panes) total += pane.weight;
+    if (total <= 0) total = 1;
+    for (const pane of this._panes) {
+      pane.resize(this._width, (this._height * pane.weight) / total, dpr);
+    }
+    this._timeScale.setWidth(Math.max(0, this._width - this._priceAxisWidth));
   }
 
   private _renderContext(showTimeAxis: boolean): PaneRenderContext {

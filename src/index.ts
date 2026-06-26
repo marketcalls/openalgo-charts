@@ -4,7 +4,7 @@
 export { VERSION, version } from './version';
 
 export { createChart, Chart } from './core/chart';
-export type { ChartOptions } from './core/chart';
+export type { ChartOptions, AddSeriesOptions } from './core/chart';
 export { Pane, DEFAULT_PANE_THEME } from './core/pane';
 export type { PaneTheme } from './core/pane';
 export { InvalidationLevel } from './core/invalidate-mask';
@@ -20,6 +20,11 @@ export { niceTicks, precisionForStep } from './scale/ticks';
 
 export { DEFAULT_CANDLE_STYLE, optimalBarWidth } from './render/candles';
 export type { CandleStyle } from './render/candles';
+export { DEFAULT_HISTOGRAM_STYLE } from './render/histogram';
+export type { HistogramStyle } from './render/histogram';
+
+export { CandleBuilder, DEFAULT_CANDLE_BUILDER_OPTIONS } from './feed/candle-builder';
+export type { CandleBuilderOptions, Tick, CandleUpdate, VolumeMode, LateTickPolicy } from './feed/candle-builder';
 
 export type { SeriesApi, SeriesType } from './model/series';
 export type { Bar, LinePoint, Whitespace, UTCSeconds, OriginalTime } from './model/bar';
