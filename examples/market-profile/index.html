@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenAlgo Charts — Market Profile (TPO) demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0e12; color: #c7ccd8; font: 13px/1.4 system-ui, sans-serif; }
+    .bar { padding: 8px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    select, button { background: #1c2030; color: #c7ccd8; border: 1px solid #2a3046; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+    #chart { position: absolute; top: 46px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
+    #status { margin-left: auto; opacity: .75; }
+    .legend { position: absolute; top: 54px; left: 16px; z-index: 10; pointer-events: none; font-size: 12px; text-shadow: 0 0 3px #0d0e12; }
+    .legend b { color: #e8eaf0; } .poc { color: #f0a020; } .va { color: #9fb4d8; } .ib { color: #b08a5a; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <strong>Market Profile (TPO)</strong>
+    <span style="opacity:.6">time-price-opportunity letters, not volume profile</span>
+    <select id="period" title="TPO period size">
+      <option value="6">30-min periods</option>
+      <option value="2">10-min periods</option>
+      <option value="12">60-min periods</option>
+    </select>
+    <button id="regen">Regenerate session</button>
+    <span id="status"></span>
+  </div>
+  <div id="chart"></div>
+  <div class="legend">
+    <b>Market Profile</b> — each letter (A, B, C …) is one <span id="plabel">30-min</span> period that traded at that price ·
+    <span class="poc">POC</span> · <span class="va">value area (70%)</span> · <span class="ib">initial balance</span>
+  </div>
+
+  <script type="module">
+    import { createChart } from '/dist/openalgo-charts.mjs';
+    import { computeTpo, priceBuckets } from '/dist/openalgo-charts.profile.mjs';
+
+    const SESSION_BARS = 48;   // 5-min bars (≈ 4-hour session)
+    let chart, price, tpo;
+
+    // Synthetic intraday session: a bounded random-walk of 5-min OHLC bars.
+    function genSession() {
+      const start = 1_700_000_000 - (1_700_000_000 % 300);
+      let mid = 100; const out = [];
+      for (let i = 0; i < SESSION_BARS; i++) {
+        const o = mid;
+        let hi = o, lo = o, c = o;
+        for (let k = 0; k < 5; k++) { c += (Math.random() - 0.5) * 0.6; hi = Math.max(hi, c); lo = Math.min(lo, c); }
+        out.push({ time: start + i * 300, open: o, high: hi, low: lo, close: c, volume: 0 });
+        mid = c;
+      }
+      return out;
+    }
+
+    // Collapse the session into TPO rows: price -> string of period letters.
+    function tpoLetters(bars, periodBars, tickSize) {
+      const rows = new Map();
+      const n = Math.ceil(bars.length / periodBars);
+      for (let p = 0; p < n; p++) {
+        const slice = bars.slice(p * periodBars, (p + 1) * periodBars);
+        if (!slice.length) continue;
+        let hi = -Infinity, lo = Infinity;
+        for (const b of slice) { hi = Math.max(hi, b.high); lo = Math.min(lo, b.low); }
+        const letter = String.fromCharCode(65 + (p % 26)); // A, B, C …
+        for (const bkt of priceBuckets(lo, hi, tickSize)) rows.set(bkt, (rows.get(bkt) || '') + letter);
+      }
+      return [...rows.entries()].map(([price, text]) => ({ price, text })).sort((a, b) => b.price - a.price);
+    }
+
+    // Custom pane primitive that draws the TPO letter grid + POC/VA/IB lines.
+    function makeTpoPrimitive() {
+      return {
+        rows: [], poc: 0, vah: 0, val: 0, ib: { high: 0, low: 0 },
+        zOrder: () => 'normal',
+        autoscaleInfo: () => null,
+        draw(ctx, rc) {
+          if (!this.rows.length) return;
+          const dpr = rc.dpr;
+          const hline = (p, color, dash) => {
+            const y = Math.round(rc.priceScale.priceToY(p) * dpr) + 0.5;
+            ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, Math.round(dpr));
+            if (dash) ctx.setLineDash([4 * dpr, 4 * dpr]);
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(rc.plotWidth * dpr, y); ctx.stroke(); ctx.setLineDash([]);
+          };
+          ctx.save();
+          // initial-balance band + value-area / POC reference lines
+          hline(this.ib.high, '#6e5636', true); hline(this.ib.low, '#6e5636', true);
+          hline(this.vah, '#5a6b8c'); hline(this.val, '#5a6b8c'); hline(this.poc, '#f0a020');
+          // TPO letters, left-aligned (row width = letter count → the profile shape)
+          ctx.font = `${10 * dpr}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+          ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+          for (const r of this.rows) {
+            const y = rc.priceScale.priceToY(r.price) * dpr;
+            const inVa = r.price <= this.vah && r.price >= this.val;
+            ctx.fillStyle = r.price === this.poc ? '#f0a020' : inVa ? '#aebfdc' : '#5d6678';
+            ctx.fillText(r.text, 10 * dpr, y);
+          }
+          ctx.restore();
+        },
+      };
+    }
+
+    function build() {
+      if (chart) chart.destroy();
+      document.getElementById('chart').innerHTML = '';
+      chart = createChart(document.getElementById('chart'), { priceAxisWidth: 64 });
+      // dim candles for price context; the bright TPO letters are the focus
+      price = chart.addSeries('candlestick', { style: { upColor: '#1b2a2e', downColor: '#2a1c1f', wickUpColor: '#2b3a3e', wickDownColor: '#3a2b2f', borderUpColor: '#2b3a3e', borderDownColor: '#3a2b2f' } });
+      tpo = makeTpoPrimitive();
+      chart.addPrimitive(tpo, 0);
+    }
+
+    function render() {
+      const periodBars = Number(document.getElementById('period').value);
+      document.getElementById('plabel').textContent = ({ 2: '10-min', 6: '30-min', 12: '60-min' })[periodBars];
+      const bars = genSession();
+      let hi = -Infinity, lo = Infinity;
+      for (const b of bars) { hi = Math.max(hi, b.high); lo = Math.min(lo, b.low); }
+      const tickSize = Math.max(0.05, Math.round((hi - lo) / 40 / 0.05) * 0.05); // ~40 rows
+      const res = computeTpo(bars, periodBars, tickSize, 0.7, 2);
+
+      build();
+      Object.assign(tpo, { rows: tpoLetters(bars, periodBars, tickSize), poc: res.poc, vah: res.vah, val: res.val, ib: res.ib });
+      price.setData(bars); // sets the price range → first paint draws the TPO grid
+
+      const periods = Math.ceil(bars.length / periodBars);
+      document.getElementById('status').textContent =
+        `${periods} periods · POC ${res.poc.toFixed(2)} · VA ${res.val.toFixed(2)}–${res.vah.toFixed(2)} · IB ${res.ib.low.toFixed(2)}–${res.ib.high.toFixed(2)}`;
+      window.__chart = () => chart;
+    }
+
+    document.getElementById('regen').addEventListener('click', render);
+    document.getElementById('period').addEventListener('change', render);
+    render();
+  </script>
+</body>
+</html>

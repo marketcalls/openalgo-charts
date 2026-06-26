@@ -480,12 +480,9 @@
       updatePositionLine(); // redraw the position line on the rebuilt chart
       if (bracket) { attachBracketLines(); updateBracket(); }
 
-      // OHLC legend tracks the crosshair; default to the latest bar. The open
-      // position's P&L marks to the hovered bar's close (else the latest close).
-      chart.subscribeCrosshairMove((e) => {
-        setLegend(e.bar ?? currentBars[currentBars.length - 1]);
-        if (position && posLine) posLine.setLeftLabel(positionLabel(e.bar ? e.bar.close : markPrice()));
-      });
+      // OHLC legend tracks the crosshair. The position P&L does NOT — it marks to
+      // the LTP (the latest close here; with a live feed, update it on each tick).
+      chart.subscribeCrosshairMove((e) => setLegend(e.bar ?? currentBars[currentBars.length - 1]));
       setLegend(currentBars[currentBars.length - 1]);
       window.__chart = () => chart;
     }

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenAlgo Charts — Order Flow / Footprint demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0e12; color: #c7ccd8; font: 13px/1.4 system-ui, sans-serif; }
+    .bar { padding: 8px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    select, button { background: #1c2030; color: #c7ccd8; border: 1px solid #2a3046; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+    #chart { position: absolute; top: 46px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
+    #status { margin-left: auto; opacity: .75; }
+    .legend { position: absolute; top: 54px; left: 16px; z-index: 10; pointer-events: none; font-size: 12px; text-shadow: 0 0 3px #0d0e12; }
+    .legend b { color: #e8eaf0; } .ask { color: #bfeee8; } .bid { color: #f6c9c8; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <strong>Order Flow / Footprint</strong>
+    <span style="opacity:.6">synthetic classified ticks → FootprintAggregator</span>
+    <select id="tf" title="bar size">
+      <option value="300">5-min bars</option>
+      <option value="180">3-min bars</option>
+      <option value="600">10-min bars</option>
+    </select>
+    <button id="regen">Regenerate ticks</button>
+    <span id="status"></span>
+  </div>
+  <div id="chart"></div>
+  <div class="legend">
+    <b>Footprint</b> — each bar shows <span class="bid">bid volume</span> · <span class="ask">ask volume</span> at every price;
+    tinted cells = diagonal imbalance. Lower pane: cumulative delta (Σ ask−bid).
+  </div>
+
+  <script type="module">
+    import { createChart } from '/dist/openalgo-charts.mjs';
+    import { FootprintAggregator, Footprint, cumulativeDelta } from '/dist/openalgo-charts.profile.mjs';
+
+    const TICK = 0.5;          // price tick size
+    const BARS = 14;           // how many footprint bars to generate
+    let chart, price, footprint, delta;
+
+    // Generate classified trade ticks (price, qty, bid/ask) as a bounded random
+    // walk, then aggregate into footprint bars + matching OHLC candles.
+    function generate(seconds) {
+      const agg = new FootprintAggregator({ mode: 'interval', seconds, anchorSec: 0 }, TICK);
+      const start = 1_700_000_000 - (1_700_000_000 % seconds); // aligned to the interval grid
+      const center = 100;
+      let mid = center, t = start;
+      const fpByTime = new Map();   // time -> latest footprint snapshot
+      const candleByTime = new Map();
+      const ticksPerBar = 130;
+      for (let i = 0; i < BARS * ticksPerBar; i++) {
+        t += 1 + Math.floor(Math.random() * 4);
+        // bounded walk with gentle mean reversion so each bar keeps a readable range
+        mid += (Math.random() - 0.5) * TICK * 1.3 + (center - mid) * 0.01;
+        const buy = Math.random() < 0.5 + (Math.random() - 0.5) * 0.25; // hit ask (buy) vs bid (sell)
+        const price = buy ? mid + TICK / 2 : mid - TICK / 2;
+        const qty = 1 + Math.floor(Math.random() * 18);
+        const side = buy ? 'ask' : 'bid';
+        const upd = agg.onTick({ time: t, price, qty, side });
+        const bt = upd.bar.time;
+        fpByTime.set(bt, upd.bar);
+        let c = candleByTime.get(bt);
+        if (!c) candleByTime.set(bt, { time: bt, open: price, high: price, low: price, close: price, volume: qty });
+        else { c.high = Math.max(c.high, price); c.low = Math.min(c.low, price); c.close = price; c.volume += qty; }
+      }
+      const fp = [...fpByTime.values()].sort((a, b) => a.time - b.time);
+      const candles = [...candleByTime.values()].sort((a, b) => a.time - b.time);
+      return { fp, candles };
+    }
+
+    function build() {
+      if (chart) chart.destroy();
+      document.getElementById('chart').innerHTML = '';
+      chart = createChart(document.getElementById('chart'), { priceAxisWidth: 64 });
+      price = chart.addSeries('candlestick', { style: { upColor: '#2b4d57', downColor: '#5a2f34', wickUpColor: '#3a6b78', wickDownColor: '#7a3f46' } });
+      footprint = new Footprint({ cellWidth: 46, imbalanceRatio: 3 });
+      chart.addPrimitive(footprint, 0);
+      delta = chart.addSeries('baseline', { paneIndex: 1, style: { baseValue: 0 } });
+    }
+
+    function render(seconds) {
+      const { fp, candles } = generate(seconds);
+      build();
+      price.setData(candles);
+      footprint.setBars(fp);
+      // cumulative delta as a baseline series in the lower pane (above/below zero shaded)
+      const cum = cumulativeDelta(fp);
+      delta.setData(fp.map((b, i) => ({ time: b.time, open: cum[i], high: cum[i], low: cum[i], close: cum[i] })));
+      const last = fp[fp.length - 1];
+      document.getElementById('status').textContent =
+        `${fp.length} bars · last delta ${last.delta >= 0 ? '+' : ''}${last.delta} · cum delta ${cum[cum.length - 1] >= 0 ? '+' : ''}${cum[cum.length - 1]}`;
+      window.__chart = () => chart;
+    }
+
+    const go = () => render(Number(document.getElementById('tf').value));
+    document.getElementById('regen').addEventListener('click', go);
+    document.getElementById('tf').addEventListener('change', go);
+    go();
+  </script>
+</body>
+</html>

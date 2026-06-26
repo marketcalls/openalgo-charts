@@ -13,7 +13,7 @@ Scope:
   - `D:\testing\openalgo\docs\scanner-architecture.md`
 - Security perspective included: client-side secret exposure, transport, XSS/code-injection scan, supply-chain checks, and package metadata.
 
-Repo state before this file was added: clean (`git status --short` produced no changes).
+Repo state before this file was updated: clean (`git status --short` produced no changes).
 
 ## Executive Summary
 
@@ -73,7 +73,7 @@ Notable commits after `f13d317`:
 | V2-M1 `subscribeBars` API trap | Fixed at interface level | `DataFeed.subscribeBars` is optional; `OpenAlgoDataFeed` is history-only; `OpenAlgoLiveDataFeed` exists. See new V3-H1 for live feed correctness/testability. |
 | V2-M2 transform tier tree-shaking | Fixed | `package.json` lists transform side effects and `registerTransformChartTypes()` is exported and idempotent. |
 | V2-M3 primitive lifecycle | Fixed | `Pane.destroy()` detaches primitives; `Chart.destroy()` calls it; lifecycle unit test added. |
-| V2-L1 README stale numbers | Fixed in README | README now says 190+ tests and about 26 KB Brotli. Other docs remain stale; see V3-M3. |
+| V2-L1 README stale numbers | Reopened as docs drift | README was refreshed after v2, but fresh verification is now 215 tests / 27.69 KB Brotli while README still says 190+ / about 26 KB. See V3-M2. |
 | Architecture section 10.1 | Mostly fixed | It now notes `subscribeBars` is optional and names `OpenAlgoLiveDataFeed`; the code block still shows `subscribeBars` as required. |
 
 ## New / Remaining Findings
@@ -123,24 +123,30 @@ Add a minimal Playwright suite before calling the package production-ready:
 - Exercise pan, wheel zoom, crosshair, pane hit-testing, right-click order menu, order-line drag, grid toggles, screenshot export, and destroy/remount.
 - Add a small golden-pixel set for candles, lines, histograms, axes, crosshair, and a trade line at DPR 1 and 2.
 
-### V3-H3. Live OpenAlgo adapter schemas still need a real smoke test
+### V3-H3. WS adapter is closer to the current docs, but live schema validation is still required
 
 Evidence:
 
-- Offline tests verify request bodies and WS helper shapes, but no test hit a running OpenAlgo server.
-- README and architecture still correctly warn that exact WS/trade wire schemas must be verified against a running OpenAlgo build.
-- The WS helper still sends `apikey` and `mode` along with `symbols`; local docs previously showed only `action` and `symbols` in the example. That may be accepted by the real proxy, but it is not proven here.
+- `src/feed/openalgo-ws.ts` now sends `{ action: "authenticate", api_key }` first.
+- `formatSubscribe()` now sends `{ action, symbol, exchange, mode: 1|2|3 }` and optional `depth_level`.
+- `parseMessage()` handles nested `market_data` payloads and ISO timestamps.
+- `isPing()` responds to plain `ping` and `{ type: "ping" }`.
+- This matches `D:\testing\openalgo\docs\prompt\websockets-format.md`.
+- Older docs such as `docs\websocket-quote-feed.md` and `docs\scanner-architecture.md` still show batched `symbols` arrays and string modes.
 
 Impact:
 
-The adapters are much closer than in v2, but production integration is not fully proven until a real server accepts history, live LTP/Quote/Depth subscriptions, order place/modify/cancel, orderbook, and positionbook end to end.
+Offline protocol tests are good, but real compatibility depends on which OpenAlgo WS implementation is running. The adapter is probably aligned with the newer prompt spec, but it is not proven end to end.
 
 Recommendation:
 
 Create a credential-gated smoke test script that is skipped by default and enabled with environment variables. It should verify:
 
-- `/api/v1/history` payload with IST `start_date`/`end_date`.
-- WS connect, subscribe, first LTP, first Quote, first Depth.
+- Auth success and auth failure.
+- LTP, Quote, Depth subscribe/unsubscribe.
+- First market-data frame parsing.
+- Ping/pong.
+- Reconnect and re-subscribe.
 - Analyzer/paper order place, modify, cancel, orderbook, and positionbook mappings.
 - No API key is logged in failures.
 
@@ -167,8 +173,9 @@ Add a short "Current 0.1.0 implementation status" table near the top of `ARCHITE
 Evidence:
 
 - `package.json:3` is `0.1.0`, but `package-lock.json:3` and `package-lock.json:9` still say `0.0.0`.
-- `docs/getting-started.md:4` says the full package is about 22 KB Brotli; fresh measured output is 26.11 KB.
-- `CHANGELOG.md:7` also says about 22 KB Brotli.
+- `README.md` says 190+ tests and about 26 KB Brotli; fresh verification is 215 tests and 27.69 KB.
+- `docs/getting-started.md:4` says the full package is about 22 KB Brotli.
+- `CHANGELOG.md:7` says about 22 KB Brotli and `CHANGELOG.md` still mentions 154 unit tests.
 - `docs/api/variables/index.VERSION.html` still documents `VERSION` as `0.0.0`.
 - `docs/api/hierarchy.html` does not show `OpenAlgoLiveDataFeed`, so the generated API docs are from an older source state.
 
@@ -180,7 +187,7 @@ Recommendation:
 
 - Run a lockfile-only refresh so the root lock metadata matches `0.1.0`.
 - Regenerate TypeDoc after the current source changes.
-- Update `docs/getting-started.md` and `CHANGELOG.md` to measured 26.11 KB or a less brittle "about 26 KB".
+- Update README/getting-started/changelog to 215 tests and about 28 KB Brotli, or use less brittle phrasing such as "under 30 KB Brotli".
 
 ### V3-M3. Visible-range lookup remains linear despite architecture wording
 
@@ -198,19 +205,51 @@ Recommendation:
 
 For production-scale data, store per-series indexed rows and binary-search by logical index. Cache the last visible window per series and invalidate only when data or range changes.
 
+### V3-M4. Base-tier size headroom is now tight
+
+Evidence:
+
+- Base engine is 16.68 KB Brotli against a 17 KB limit.
+- Base + trade is 21.52 KB Brotli against a 22 KB limit.
+- Full package remains comfortable at 27.69 KB against a 50 KB limit.
+- `.size-limit.json` now names RSI/ATR/Supertrend as part of the base tier.
+
+Impact:
+
+Not a failure, but the next base-tier feature can break CI. The package still meets its published budget, but per-tier limits are close.
+
+Recommendation:
+
+Treat new base-tier features as size-sensitive. Prefer lazy tiers for optional indicators/tools, and require size diffs in review.
+
+### V3-M5. Repository hygiene regression: committed Python bytecode
+
+Evidence:
+
+- `examples/yfinance/__pycache__/server.cpython-314.pyc` is present in the repo.
+- `npm pack --dry-run` excludes it because `package.json` ships only `dist/**`, but it is still committed repository noise.
+
+Impact:
+
+Low. It does not affect the npm package, but it should not be source-controlled.
+
+Recommendation:
+
+Remove `examples/yfinance/__pycache__/` and add `__pycache__/` / `*.pyc` to `.gitignore` if missing.
+
 ## Security Review
 
-### Confirmed security issues
+### Confirmed package-code security issues
 
-No high-confidence security vulnerability was found in the current package code.
+No high-confidence security vulnerability was found in the packaged library code.
 
 Specific checks:
 
-- No `eval`, `new Function`, executable string timers, shell execution, cookie access, or package-code `postMessage` usage found.
-- Example `innerHTML = ''` calls only clear known chart containers with a constant empty string; no user-controlled HTML injection path was found.
-- Canvas text/data rendering does not insert untrusted feed values into the DOM.
 - `npm audit --audit-level=moderate` reported 0 vulnerabilities.
 - `npm ls --omit=dev` reported no runtime dependencies.
+- `npm pack --dry-run` ships only `dist/**`, README, LICENSE, and package metadata.
+- No package-code `eval`, `new Function`, executable string timers, shell execution, cookie access, or package-code `postMessage` usage found.
+- Canvas text/data rendering does not insert untrusted feed values into the DOM.
 - `package.json` has no install lifecycle scripts (`preinstall`, `postinstall`, `prepare`) that would execute for consumers.
 
 ### V3-S1. Browser-side OpenAlgo API keys are a deployment risk
@@ -233,7 +272,41 @@ Recommendation:
 - Do not let untrusted users control `baseUrl` or `wsUrl`; otherwise the app can leak its API key to an attacker-controlled endpoint.
 - Ensure errors and logs redact `apikey`.
 
-### V3-S2. Live trading needs explicit production safety controls outside this package
+### V3-S2. Demo-only DOM XSS in yfinance legend
+
+Evidence:
+
+- `examples/yfinance/index.html` reads free-text `symbol` from an `<input>`.
+- `setLegend()` interpolates `nameOf(req.symbol)` and `exchangeOf(req.symbol)` into template strings.
+- It assigns those strings to `legend.innerHTML`.
+- Other demo status updates use `textContent`, so this issue is localized to the legend path.
+
+Impact:
+
+Demo scope, not npm package scope. If the yfinance server/page is shared with untrusted users, a crafted symbol containing HTML can execute script in the demo origin.
+
+Recommendation:
+
+Build the legend with DOM nodes and `textContent`, or HTML-escape every interpolated value before assigning `innerHTML`.
+
+### V3-S3. yfinance local demo server is permissive by design
+
+Evidence:
+
+- `examples/yfinance/server.py` binds to `127.0.0.1`.
+- It serves the package root and exposes `/api/history`.
+- It sets `Access-Control-Allow-Origin: *`.
+- `symbol`, `interval`, and `period` are passed to yfinance without local allowlists.
+
+Impact:
+
+Low in the intended localhost demo mode. If exposed beyond localhost, any web page could drive the local API endpoint and trigger outbound yfinance requests. There are no OpenAlgo secrets in this server, but it is not production-hardened.
+
+Recommendation:
+
+Keep it localhost-only and document it as a demo server. Add small allowlists for interval/period and basic symbol length/character validation. Remove the wildcard CORS header unless it is needed.
+
+### V3-S4. Live trading needs explicit production safety controls outside this package
 
 Evidence:
 
@@ -270,4 +343,4 @@ These remain documented deferrals and are not hidden defects:
 
 Status: strong 0.1.0 pre-release, not production-ready yet.
 
-The original correctness/safety gaps from v1 and v2 are largely closed. The new concern is narrower: the composed `OpenAlgoLiveDataFeed` should not be treated as production-ready until it seeds live candles correctly and can be tested with an injectable socket. After that, the remaining production bar is validation breadth: browser/pixel E2E, real OpenAlgo smoke tests, and security-hardening guidance for deployments that expose trading features beyond a trusted local operator UI.
+The chart core and offline adapter tests are materially stronger than in the first audits, and the new feature work passes the full local verification suite. The remaining blockers are specific and practical: seed/test the composed live feed, run a real OpenAlgo smoke test, add browser/pixel E2E for the canvas and demo trading workflows, fix stale release docs, remove the committed Python bytecode, and fix the yfinance demo legend XSS.
