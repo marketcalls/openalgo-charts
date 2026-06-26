@@ -114,6 +114,12 @@ export function drawTimeAxis(
  * Draw the last-price line (dashed, across the plot) plus a filled price tag on
  * the right axis, colored up/down. Updates cheaply with every live tick.
  */
+export interface LastPriceColors {
+  up: string;
+  down: string;
+  text: string;
+}
+
 export function drawLastPriceLabel(
   ctx: CanvasRenderingContext2D,
   priceScale: PriceScale,
@@ -122,10 +128,11 @@ export function drawLastPriceLabel(
   layout: PlotLayout,
   dpr: number,
   style: AxisStyle = DEFAULT_AXIS_STYLE,
+  colors: LastPriceColors = { up: '#26a69a', down: '#ef5350', text: '#0d0e12' },
 ): void {
   const y = Math.round(priceScale.priceToY(price) * dpr);
   if (y < 0 || y > layout.plotHeight * dpr) return;
-  const color = up ? '#26a69a' : '#ef5350';
+  const color = up ? colors.up : colors.down;
   const xStart = Math.round(layout.plotWidth * dpr);
 
   ctx.save();
@@ -147,7 +154,7 @@ export function drawLastPriceLabel(
   const textW = ctx.measureText(label).width;
   ctx.fillStyle = color;
   ctx.fillRect(xStart + 1, y - boxH / 2, textW + padX * 2, boxH);
-  ctx.fillStyle = '#0d0e12';
+  ctx.fillStyle = colors.text;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, xStart + 1 + padX, y);

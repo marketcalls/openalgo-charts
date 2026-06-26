@@ -8,24 +8,13 @@ import { PriceScale } from '../scale/price-scale';
 import { TimeScale } from '../scale/time-scale';
 import { DataLayer } from '../model/data-layer';
 import type { SeriesRecord } from '../model/series';
-import { computeGridLines, drawGrid, type GridStyle } from '../render/grid';
+import { computeGridLines, drawGrid } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
 import { conflationGroupSize, conflateItems } from '../model/conflation';
-import { drawPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, DEFAULT_AXIS_STYLE, type PlotLayout } from '../render/axis';
+import { drawPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, type PlotLayout } from '../render/axis';
 import { drawCrosshair } from '../render/crosshair';
 import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
-
-export interface PaneTheme {
-  background: string;
-  grid: GridStyle;
-  axis: AxisStyle;
-}
-
-export const DEFAULT_PANE_THEME: PaneTheme = {
-  background: '#0d0e12',
-  grid: { color: '#161a26', lineWidth: 1 },
-  axis: DEFAULT_AXIS_STYLE,
-};
+import type { ChartTheme } from '../theme';
 
 export interface PaneRenderContext {
   timeScale: TimeScale;
@@ -39,6 +28,8 @@ export interface PaneRenderContext {
   conflate: boolean;
   /** Conflation aggressiveness (1 = perf only; higher = more smoothing). */
   conflationFactor: number;
+  /** Active palette — drives chrome, series defaults, and trade colors. */
+  theme: ChartTheme;
 }
 
 export class Pane {
@@ -52,10 +43,8 @@ export class Pane {
   private readonly _primitives: IPrimitive[] = [];
   private _width = 0;
   private _height = 0;
-  private readonly _theme: PaneTheme;
 
-  public constructor(doc: Document, theme: PaneTheme = DEFAULT_PANE_THEME) {
-    this._theme = theme;
+  public constructor(doc: Document) {
     this.element = doc.createElement('div');
     this.element.style.position = 'relative';
     this.element.style.width = '100%';
@@ -99,6 +88,7 @@ export class Pane {
       plotHeight: layout.plotHeight,
       priceAxisWidth: ctx.priceAxisWidth,
       dpr: ctx.dpr,
+      theme: ctx.theme,
     };
   }
 
@@ -128,6 +118,7 @@ export class Pane {
   public autoscale(ctx: PaneRenderContext): void {
     const layout = this._layout(ctx);
     this.priceScale.setHeight(layout.plotHeight);
+    if (!this.priceScale.autoScale) return; // manual (axis-dragged) range — leave it
     const range = ctx.timeScale.visibleRange();
     let low = Infinity;
     let high = -Infinity;
@@ -156,13 +147,19 @@ export class Pane {
     const g = this.base.ctx;
     this.base.clearBitmap();
 
+    const axisStyle: AxisStyle = {
+      textColor: ctx.theme.axisText,
+      lineColor: ctx.theme.axisLine,
+      font: '11px system-ui, sans-serif',
+    };
+
     // background (full pane)
-    g.fillStyle = this._theme.background;
+    g.fillStyle = ctx.theme.background;
     g.fillRect(0, 0, Math.round(this._width * dpr), Math.round(this._height * dpr));
 
     // grid within the plot area
     const lines = computeGridLines(layout.plotWidth, layout.plotHeight, { spacing: 60 });
-    drawGrid(g, lines, layout.plotWidth, layout.plotHeight, dpr, this._theme.grid);
+    drawGrid(g, lines, layout.plotWidth, layout.plotHeight, dpr, { color: ctx.theme.grid, lineWidth: 1 });
 
     // bottom-layer primitives (background zones) draw behind series
     const prc = this._primitiveContext(ctx);
@@ -183,7 +180,7 @@ export class Pane {
       if (groupSize > 1) items = conflateItems(items, groupSize);
       let maxVolume = 0;
       for (const it of items) if ((it.bar.volume ?? 0) > maxVolume) maxVolume = it.bar.volume ?? 0;
-      const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume };
+      const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume, theme: ctx.theme };
       entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
       if (entry.isPriceSeries) {
         const all = ctx.dataLayer.indexedBars(s.dataId);
@@ -199,12 +196,14 @@ export class Pane {
     for (const p of this._primitives) if (p.zOrder() === 'normal') p.draw(g, prc);
 
     // axes
-    drawPriceAxis(g, this.priceScale, layout, dpr, this._theme.axis);
+    drawPriceAxis(g, this.priceScale, layout, dpr, axisStyle);
     if (lastClose !== null) {
-      drawLastPriceLabel(g, this.priceScale, lastClose, lastUp, layout, dpr);
+      drawLastPriceLabel(g, this.priceScale, lastClose, lastUp, layout, dpr, axisStyle, {
+        up: ctx.theme.lastPriceUp, down: ctx.theme.lastPriceDown, text: ctx.theme.lastPriceText,
+      });
     }
     if (ctx.showTimeAxis) {
-      drawTimeAxis(g, ctx.timeScale, ctx.dataLayer, layout, dpr, this._theme.axis);
+      drawTimeAxis(g, ctx.timeScale, ctx.dataLayer, layout, dpr, axisStyle);
     }
   }
 
@@ -215,7 +214,9 @@ export class Pane {
     for (const p of this._primitives) if (p.zOrder() === 'top') p.draw(this.top.ctx, prc);
     if (crosshair === null) return;
     const layout = this._layout(ctx);
-    drawCrosshair(this.top.ctx, crosshair.x, crosshair.y, layout.plotWidth, layout.plotHeight, ctx.dpr);
+    drawCrosshair(this.top.ctx, crosshair.x, crosshair.y, layout.plotWidth, layout.plotHeight, ctx.dpr, {
+      color: ctx.theme.crosshair, lineWidth: 1, dash: [4, 4],
+    });
   }
 
   /** Price at a media-px y on this pane (for crosshair magnet). */

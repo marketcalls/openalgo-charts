@@ -1,3 +1,4 @@
+import { darkTheme } from '../src/theme';
 import { describe, it, expect } from 'vitest';
 import { computeVolumeProfile } from '../src/profile/volume-profile';
 import { computeTpo } from '../src/profile/tpo';
@@ -121,7 +122,7 @@ describe('profile primitives render', () => {
     const timeScale = new TimeScale();
     timeScale.setWidth(600);
     timeScale.setBaseIndex(dl.baseIndex);
-    return { timeScale, priceScale, dataLayer: dl, plotWidth: 600, plotHeight: 400, priceAxisWidth: 56, dpr: 1 };
+    return { timeScale, priceScale, dataLayer: dl, plotWidth: 600, plotHeight: 400, priceAxisWidth: 56, dpr: 1, theme: darkTheme };
   }
 
   it('HorizontalProfile draws bars + POC/VA lines', () => {

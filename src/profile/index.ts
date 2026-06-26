@@ -24,3 +24,8 @@ export {
   type HorizontalProfileOptions,
   type FootprintOptions,
 } from './profile-primitive';
+export {
+  FootprintAggregator,
+  type FootprintTick,
+  type FootprintUpdate,
+} from './footprint-aggregator';

@@ -6,7 +6,8 @@
  */
 import { InvalidateMask, InvalidationLevel } from './invalidate-mask';
 import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop';
-import { Pane, type PaneTheme, DEFAULT_PANE_THEME, type PaneRenderContext } from './pane';
+import { Pane, type PaneRenderContext } from './pane';
+import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale } from '../scale/time-scale';
 import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi } from '../model/series';
@@ -24,7 +25,8 @@ export interface ChartOptions {
   document?: Document;
   pixelRatio?: () => number;
   raf?: { schedule: RafScheduler; cancel?: RafCanceller };
-  theme?: PaneTheme;
+  /** Full palette; pass `darkTheme` (default), `lightTheme`, or a custom ChartTheme. */
+  theme?: ChartTheme;
   priceAxisWidth?: number;
   timeAxisHeight?: number;
   /** Crosshair behaviour: 'normal' (free) or 'magnet' (snap to O/H/L/C). */
@@ -52,7 +54,7 @@ export class Chart {
   private readonly _container: HTMLElement;
   private readonly _doc: Document;
   private readonly _pixelRatio: () => number;
-  private readonly _theme: PaneTheme;
+  private readonly _theme: ChartTheme;
   private readonly _panes: Pane[] = [];
   private readonly _loop: RenderLoop;
   private readonly _dataLayer = new DataLayer();
@@ -90,12 +92,18 @@ export class Chart {
   private _dragId: string | null = null; // externalId of the primitive being dragged
   private _dragCb: ((externalId: string, price: number) => void) | null = null;
   private _dragEndCb: ((externalId: string, price: number) => void) | null = null;
+  // axis-drag rescale (price axis = vertical, time axis = horizontal)
+  private _axisDrag: 'price' | 'time' | null = null;
+  private _axisStartCoord = 0;
+  private _axisStartMin = 0;
+  private _axisStartMax = 0;
+  private _axisStartSpacing = 0;
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._container = container;
     this._doc = options.document ?? container.ownerDocument;
     this._pixelRatio = options.pixelRatio ?? defaultPixelRatio;
-    this._theme = options.theme ?? DEFAULT_PANE_THEME;
+    this._theme = options.theme ?? DEFAULT_THEME;
     this._priceAxisWidth = options.priceAxisWidth ?? 56;
     this._timeAxisHeight = options.timeAxisHeight ?? 22;
     this._crosshairMode = options.crosshairMode ?? 'magnet';
@@ -106,6 +114,7 @@ export class Chart {
     container.style.position = container.style.position || 'relative';
     container.style.display = 'flex';
     container.style.flexDirection = 'column';
+    container.style.background = this._theme.background;
 
     this._loop = options.raf
       ? new RenderLoop(() => this._onFrame(), options.raf.schedule, options.raf.cancel)
@@ -258,7 +267,7 @@ export class Chart {
   }
 
   private _addPane(weight = 1): Pane {
-    const pane = new Pane(this._doc, this._theme);
+    const pane = new Pane(this._doc);
     pane.weight = weight;
     this._panes.push(pane);
     this._container.appendChild(pane.element);
@@ -305,6 +314,7 @@ export class Chart {
       showTimeAxis,
       conflate: this._conflate,
       conflationFactor: this._conflationFactor,
+      theme: this._theme,
     };
   }
 
@@ -368,6 +378,29 @@ export class Chart {
     this._downLocalY = p.localY;
     this._container.setPointerCapture?.(e.pointerId);
 
+    // Axis-drag rescale: dragging the price axis (right strip) rescales Y;
+    // dragging the time axis (bottom strip of the last pane) rescales X.
+    const plotWidth = Math.max(0, this._width - this._priceAxisWidth);
+    const paneHeight = this._height / Math.max(1, this._panes.length);
+    const onPriceAxis = p.x >= plotWidth;
+    const onTimeAxis = p.pane === this._panes.length - 1 && p.localY >= paneHeight - this._timeAxisHeight;
+    if (onPriceAxis) {
+      this._axisDrag = 'price';
+      this._axisStartCoord = p.localY;
+      const r = this._panes[p.pane].priceScale.priceRange();
+      this._axisStartMin = r.min;
+      this._axisStartMax = r.max;
+      this._dragging = false;
+      return;
+    }
+    if (onTimeAxis) {
+      this._axisDrag = 'time';
+      this._axisStartCoord = p.x;
+      this._axisStartSpacing = this._timeScale.barSpacing;
+      this._dragging = false;
+      return;
+    }
+
     // If the press lands on a draggable line (order/SL/TP), drag it — don't pan.
     const hit = this._panes[p.pane]?.hitTestPrimitives(p.x, p.localY, this._renderContext(p.pane === this._panes.length - 1));
     if (hit && hit.cursor === 'ns-resize' && this._dragCb !== null) {
@@ -388,6 +421,25 @@ export class Chart {
 
   private readonly _onPointerMove = (e: PointerEvent): void => {
     const p = this._localPoint(e);
+    if (this._axisDrag === 'price') {
+      // drag up (dy<0) → expand (zoom in); drag down → compress (zoom out)
+      const dy = p.localY - this._axisStartCoord;
+      const factor = Math.exp(dy * 0.005);
+      const centre = (this._axisStartMin + this._axisStartMax) / 2;
+      const half = ((this._axisStartMax - this._axisStartMin) / 2) * factor;
+      const ps = this._panes[this._downPane].priceScale;
+      ps.setPriceRange({ min: centre - half, max: centre + half });
+      ps.setAutoScale(false);
+      this.invalidate((m) => m.invalidatePane(this._downPane, { level: InvalidationLevel.Light, autoScale: false }));
+      return;
+    }
+    if (this._axisDrag === 'time') {
+      // drag right (dx>0) → expand (wider bars); drag left → compress
+      const dx = p.x - this._axisStartCoord;
+      this._timeScale.setBarSpacing(this._axisStartSpacing * Math.exp(dx * 0.005));
+      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      return;
+    }
     if (this._dragId !== null) {
       const price = this._panes[this._downPane].priceScale.yToPrice(p.localY);
       this._dragCb?.(this._dragId, price);
@@ -411,6 +463,10 @@ export class Chart {
 
   private readonly _onPointerUp = (e: PointerEvent): void => {
     this._container.releasePointerCapture?.(e.pointerId);
+    if (this._axisDrag !== null) {
+      this._axisDrag = null;
+      return;
+    }
     if (this._dragId !== null) {
       const p = this._localPoint(e);
       const price = this._panes[this._downPane].priceScale.yToPrice(p.localY);
@@ -448,6 +504,7 @@ export class Chart {
 
   private readonly _onDblClick = (): void => {
     if (this._dataLayer.length > 0) this._timeScale.fitContent(this._dataLayer.length);
+    for (const pane of this._panes) pane.priceScale.setAutoScale(true); // undo manual Y rescale
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   };
 

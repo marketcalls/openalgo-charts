@@ -1,3 +1,4 @@
+import { darkTheme } from '../src/theme';
 import { describe, it, expect } from 'vitest';
 import '../src/transform/index'; // side effect: registers point-figure & kagi renderers
 import { runTransform, ensureIncreasingTimes } from '../src/transform/transform';
@@ -98,7 +99,7 @@ describe('Family-B rendering (recording context)', () => {
     const cols = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3 }), closes([100, 101, 102, 103, 99]));
     const items: DrawItem[] = cols.map((b, i) => ({ x: 10 + i * 20, bar: b }));
     const { ctx, rec } = makeCtx();
-    getChartType('point-figure').draw(ctx, items, toY, 20, 1, { boxSize: 1, upColor: '#0a0', downColor: '#a00' }, { plotHeight: 1000, maxVolume: 0 });
+    getChartType('point-figure').draw(ctx, items, toY, 20, 1, { boxSize: 1, upColor: '#0a0', downColor: '#a00' }, { plotHeight: 1000, maxVolume: 0, theme: darkTheme });
     expect(rec.count('stroke')).toBeGreaterThan(0);
   });
 
@@ -107,7 +108,7 @@ describe('Family-B rendering (recording context)', () => {
     const verts = runTransform(new KagiTransform({ reversal: 2 }), closes([10, 13, 11, 14, 9]));
     const items: DrawItem[] = verts.map((b, i) => ({ x: 10 + i * 20, bar: b }));
     const { ctx, rec } = makeCtx();
-    getChartType('kagi').draw(ctx, items, toY, 20, 1, { thickColor: '#0a0', thinColor: '#a00' }, { plotHeight: 1000, maxVolume: 0 });
+    getChartType('kagi').draw(ctx, items, toY, 20, 1, { thickColor: '#0a0', thinColor: '#a00' }, { plotHeight: 1000, maxVolume: 0, theme: darkTheme });
     expect(rec.count('stroke')).toBe(items.length - 1); // one stepped segment per gap
   });
 });

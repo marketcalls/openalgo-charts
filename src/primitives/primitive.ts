@@ -7,6 +7,7 @@
 import type { TimeScale } from '../scale/time-scale';
 import type { PriceScale } from '../scale/price-scale';
 import type { DataLayer } from '../model/data-layer';
+import type { ChartTheme } from '../theme';
 
 export type ZOrder = 'bottom' | 'normal' | 'top';
 
@@ -18,6 +19,7 @@ export interface PrimitiveRenderContext {
   plotHeight: number;
   priceAxisWidth: number;
   dpr: number;
+  theme: ChartTheme;
 }
 
 export interface PrimitiveHit {

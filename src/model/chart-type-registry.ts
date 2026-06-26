@@ -6,6 +6,7 @@
  */
 import type { Bar } from './bar';
 import type { SeriesStyle } from '../render/series-style';
+import type { ChartTheme } from '../theme';
 import { drawCandles, DEFAULT_CANDLE_STYLE, type CandleStyle } from '../render/candles';
 import { drawBars, drawColumns } from '../render/bars';
 import { drawLine, drawArea, drawBaseline, drawHlcArea } from '../render/line';
@@ -36,6 +37,7 @@ export interface DrawItem {
 export interface SeriesRenderContext {
   plotHeight: number;
   maxVolume: number;
+  theme: ChartTheme;
 }
 
 export interface RendererEntry {
@@ -55,15 +57,15 @@ export interface RendererEntry {
   extents(bar: Bar, style: SeriesStyle): { min: number; max: number };
 }
 
-function candleStyle(s: SeriesStyle, extra: Partial<CandleStyle> = {}): CandleStyle {
+function candleStyle(s: SeriesStyle, theme: ChartTheme, extra: Partial<CandleStyle> = {}): CandleStyle {
   return {
     ...DEFAULT_CANDLE_STYLE,
-    upColor: s.upColor ?? DEFAULT_CANDLE_STYLE.upColor,
-    downColor: s.downColor ?? DEFAULT_CANDLE_STYLE.downColor,
-    borderUpColor: s.borderUpColor ?? DEFAULT_CANDLE_STYLE.borderUpColor,
-    borderDownColor: s.borderDownColor ?? DEFAULT_CANDLE_STYLE.borderDownColor,
-    wickUpColor: s.wickUpColor ?? DEFAULT_CANDLE_STYLE.wickUpColor,
-    wickDownColor: s.wickDownColor ?? DEFAULT_CANDLE_STYLE.wickDownColor,
+    upColor: s.upColor ?? theme.upColor,
+    downColor: s.downColor ?? theme.downColor,
+    borderUpColor: s.borderUpColor ?? theme.upColor,
+    borderDownColor: s.borderDownColor ?? theme.downColor,
+    wickUpColor: s.wickUpColor ?? theme.wickUpColor,
+    wickDownColor: s.wickDownColor ?? theme.wickDownColor,
     borderVisible: s.borderVisible ?? DEFAULT_CANDLE_STYLE.borderVisible,
     wickVisible: s.wickVisible ?? DEFAULT_CANDLE_STYLE.wickVisible,
     ...extra,
@@ -95,15 +97,20 @@ export function registeredChartTypes(): SeriesType[] {
 
 // ── Family A registrations ────────────────────────────────────────────────
 
+// Fill common up/down color defaults from the theme.
+const ud = (s: SeriesStyle, t: ChartTheme): SeriesStyle => ({
+  ...s, upColor: s.upColor ?? t.upColor, downColor: s.downColor ?? t.downColor,
+});
+
 registerChartType('candlestick', {
   defaultStyle: {}, isPriceSeries: true,
-  draw: (g, items, toY, bs, dpr, s) => drawCandles(g, items, toY, bs, dpr, candleStyle(s)),
+  draw: (g, items, toY, bs, dpr, s, rc) => drawCandles(g, items, toY, bs, dpr, candleStyle(s, rc.theme)),
   extents: hiLo,
 });
 
 registerChartType('hollow-candle', {
   defaultStyle: {}, isPriceSeries: true,
-  draw: (g, items, toY, bs, dpr, s) => drawCandles(g, items, toY, bs, dpr, candleStyle(s, { hollow: true })),
+  draw: (g, items, toY, bs, dpr, s, rc) => drawCandles(g, items, toY, bs, dpr, candleStyle(s, rc.theme, { hollow: true })),
   extents: hiLo,
 });
 
@@ -111,7 +118,7 @@ registerChartType('volume-candle', {
   defaultStyle: {}, isPriceSeries: true,
   draw: (g, items, toY, bs, dpr, s, rc) => {
     const max = rc.maxVolume;
-    const scaled = candleStyle(s, { widthScale: (b) => (max > 0 ? (b.volume ?? 0) / max : 1) });
+    const scaled = candleStyle(s, rc.theme, { widthScale: (b) => (max > 0 ? (b.volume ?? 0) / max : 1) });
     drawCandles(g, items, toY, bs, dpr, scaled);
   },
   extents: hiLo,
@@ -119,49 +126,60 @@ registerChartType('volume-candle', {
 
 registerChartType('bar', {
   defaultStyle: {}, isPriceSeries: true,
-  draw: (g, items, toY, bs, dpr, s) => drawBars(g, items, toY, bs, dpr, s),
+  draw: (g, items, toY, bs, dpr, s, rc) => drawBars(g, items, toY, bs, dpr, ud(s, rc.theme)),
   extents: hiLo,
 });
 
 registerChartType('high-low', {
   defaultStyle: {}, isPriceSeries: true,
-  draw: (g, items, toY, bs, dpr, s) => drawBars(g, items, toY, bs, dpr, s, true),
+  draw: (g, items, toY, bs, dpr, s, rc) => drawBars(g, items, toY, bs, dpr, ud(s, rc.theme), true),
   extents: hiLo,
 });
 
 registerChartType('line', {
-  defaultStyle: { color: '#4f8cff', lineWidth: 1.5 }, isPriceSeries: true,
-  draw: (g, items, toY, _bs, dpr, s) => drawLine(g, items, toY, dpr, s),
+  defaultStyle: { lineWidth: 1.5 }, isPriceSeries: true,
+  draw: (g, items, toY, _bs, dpr, s, rc) => drawLine(g, items, toY, dpr, { ...s, color: s.color ?? rc.theme.lineColor }),
   extents: closeOnly,
 });
 
 registerChartType('line-markers', {
-  defaultStyle: { color: '#4f8cff', lineWidth: 1.5, markers: true }, isPriceSeries: true,
-  draw: (g, items, toY, _bs, dpr, s) => drawLine(g, items, toY, dpr, { ...s, markers: true }),
+  defaultStyle: { lineWidth: 1.5, markers: true }, isPriceSeries: true,
+  draw: (g, items, toY, _bs, dpr, s, rc) => drawLine(g, items, toY, dpr, { ...s, color: s.color ?? rc.theme.lineColor, markers: true }),
   extents: closeOnly,
 });
 
 registerChartType('step', {
-  defaultStyle: { color: '#4f8cff', lineWidth: 1.5, step: true }, isPriceSeries: true,
-  draw: (g, items, toY, _bs, dpr, s) => drawLine(g, items, toY, dpr, { ...s, step: true }),
+  defaultStyle: { lineWidth: 1.5, step: true }, isPriceSeries: true,
+  draw: (g, items, toY, _bs, dpr, s, rc) => drawLine(g, items, toY, dpr, { ...s, color: s.color ?? rc.theme.lineColor, step: true }),
   extents: closeOnly,
 });
 
 registerChartType('area', {
-  defaultStyle: { color: '#4f8cff', lineWidth: 1.5 }, isPriceSeries: true,
-  draw: (g, items, toY, _bs, dpr, s, rc) => drawArea(g, items, toY, dpr, rc.plotHeight, s),
+  defaultStyle: { lineWidth: 1.5 }, isPriceSeries: true,
+  draw: (g, items, toY, _bs, dpr, s, rc) => drawArea(g, items, toY, dpr, rc.plotHeight, {
+    ...s,
+    color: s.color ?? rc.theme.lineColor,
+    areaTopColor: s.areaTopColor ?? rc.theme.areaTopColor,
+    areaBottomColor: s.areaBottomColor ?? rc.theme.areaBottomColor,
+  }),
   extents: closeOnly,
 });
 
 registerChartType('hlc-area', {
   defaultStyle: { lineWidth: 1.5 }, isPriceSeries: true,
-  draw: (g, items, toY, _bs, dpr, s) => drawHlcArea(g, items, toY, dpr, s),
+  draw: (g, items, toY, _bs, dpr, s, rc) => drawHlcArea(g, items, toY, dpr, { ...s, closeColor: s.closeColor ?? rc.theme.lineColor }),
   extents: hiLo,
 });
 
 registerChartType('baseline', {
-  defaultStyle: { baseValue: 0, topColor: '#26a69a', bottomColor: '#ef5350', lineWidth: 1.5 }, isPriceSeries: true,
-  draw: (g, items, toY, _bs, dpr, s) => drawBaseline(g, items, toY, dpr, s),
+  defaultStyle: { baseValue: 0, lineWidth: 1.5 }, isPriceSeries: true,
+  draw: (g, items, toY, _bs, dpr, s, rc) => drawBaseline(g, items, toY, dpr, {
+    ...s,
+    topColor: s.topColor ?? rc.theme.baselineTopLine,
+    bottomColor: s.bottomColor ?? rc.theme.baselineBottomLine,
+    areaTopColor: s.areaTopColor ?? rc.theme.baselineTopFill,
+    areaBottomColor: s.areaBottomColor ?? rc.theme.baselineBottomFill,
+  }),
   extents: (bar, s) => {
     const base = s.baseValue ?? 0;
     return { min: Math.min(base, bar.close), max: Math.max(base, bar.close) };
@@ -170,7 +188,7 @@ registerChartType('baseline', {
 
 registerChartType('column', {
   defaultStyle: { base: 0 }, isPriceSeries: false,
-  draw: (g, items, toY, bs, dpr, s) => drawColumns(g, items, toY, bs, dpr, s),
+  draw: (g, items, toY, bs, dpr, s, rc) => drawColumns(g, items, toY, bs, dpr, ud(s, rc.theme)),
   extents: fromBase,
 });
 

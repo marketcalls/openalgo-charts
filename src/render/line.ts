@@ -4,6 +4,7 @@
  */
 import type { Bar } from '../model/bar';
 import type { SeriesStyle } from './series-style';
+import { verticalGradient } from './gradient';
 
 export interface LineDrawItem {
   x: number; // bar center, media px
@@ -86,7 +87,12 @@ export function drawArea(
   for (const p of pts) ctx.lineTo(p.x * dpr, p.y * dpr);
   ctx.lineTo(pts[pts.length - 1].x * dpr, baseY);
   ctx.closePath();
-  ctx.fillStyle = style.areaTopColor ?? 'rgba(79,140,255,0.25)';
+  // vertical gradient: solid-ish near the line fading toward the baseline
+  ctx.fillStyle = verticalGradient(
+    ctx, baseY,
+    style.areaTopColor ?? 'rgba(79,140,255,0.40)',
+    style.areaBottomColor ?? 'rgba(79,140,255,0.00)',
+  );
   ctx.fill();
   ctx.restore();
   drawLine(ctx, items, toY, dpr, { color: style.color ?? '#4f8cff', lineWidth: style.lineWidth ?? 1.5 });
@@ -102,6 +108,37 @@ export function drawBaseline(
   const baseValue = style.baseValue ?? 0;
   const baseY = toY(baseValue) * dpr;
   const pts = valuePoints(items, toY);
+  if (pts.length === 0) return;
+
+  // Gradient fills: above-base region fades down from topFill, below-base fades up
+  // from bottomFill. Built as one area polygon to the base line, clipped at baseY.
+  const minX = pts[0].x * dpr;
+  const maxX = pts[pts.length - 1].x * dpr;
+  const buildArea = (): void => {
+    ctx.beginPath();
+    ctx.moveTo(minX, baseY);
+    for (const p of pts) ctx.lineTo(p.x * dpr, p.y * dpr);
+    ctx.lineTo(maxX, baseY);
+    ctx.closePath();
+  };
+  const topFill = style.areaTopColor ?? 'rgba(38,166,154,0.20)';
+  const botFill = style.areaBottomColor ?? 'rgba(239,83,80,0.20)';
+  const BIG = 1e5;
+  // above base
+  ctx.save();
+  ctx.beginPath(); ctx.rect(minX, baseY - BIG, maxX - minX, BIG); ctx.clip();
+  buildArea();
+  ctx.fillStyle = verticalGradient(ctx, baseY, topFill, 'rgba(0,0,0,0)');
+  ctx.fill();
+  ctx.restore();
+  // below base
+  ctx.save();
+  ctx.beginPath(); ctx.rect(minX, baseY, maxX - minX, BIG); ctx.clip();
+  buildArea();
+  ctx.fillStyle = botFill;
+  ctx.fill();
+  ctx.restore();
+
   ctx.save();
   // split stroke: above-base in topColor, below-base in bottomColor
   for (let i = 1; i < pts.length; i++) {

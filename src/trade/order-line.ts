@@ -7,9 +7,6 @@
 import type { IPrimitive, PrimitiveHost, PrimitiveRenderContext, PrimitiveHit, ZOrder } from '../primitives/primitive';
 import type { Order } from './types';
 
-const BUY = '#26a69a';
-const SELL = '#ef5350';
-
 export class WorkingOrderLine implements IPrimitive {
   private _order: Order;
   private _ltp = NaN;
@@ -47,7 +44,7 @@ export class WorkingOrderLine implements IPrimitive {
     const price = this._price();
     const y = Math.round(rc.priceScale.priceToY(price) * rc.dpr) + 0.5;
     if (y < 0 || y > rc.plotHeight * rc.dpr) return;
-    const color = this._order.side === 'BUY' ? BUY : SELL;
+    const color = this._order.side === 'BUY' ? rc.theme.buy : rc.theme.sell;
     const xEnd = Math.round(rc.plotWidth * rc.dpr);
 
     ctx.save();

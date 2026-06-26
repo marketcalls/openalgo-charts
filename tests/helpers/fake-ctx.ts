@@ -37,6 +37,12 @@ export class RecordingContext {
     this.ops.push({ type: 'strokeRect', args: [x, y, w, h], strokeStyle: this.strokeStyle });
   }
   public setLineDash(_d: number[]): void { this.ops.push({ type: 'setLineDash', args: [] }); }
+  public rect(x: number, y: number, w: number, h: number): void { this.ops.push({ type: 'rect', args: [x, y, w, h] }); }
+  public clip(): void { this.ops.push({ type: 'clip', args: [] }); }
+  public createLinearGradient(): { addColorStop(o: number, c: string): void } {
+    this.ops.push({ type: 'createLinearGradient', args: [] });
+    return { addColorStop: () => { this.ops.push({ type: 'addColorStop', args: [] }); } };
+  }
   public fillText(_t: string, x: number, y: number): void { this.ops.push({ type: 'fillText', args: [x, y] }); }
   public measureText(t: string): { width: number } { return { width: t.length * 6 }; }
   public setTransform(): void { this.ops.push({ type: 'setTransform', args: [] }); }

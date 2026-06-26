@@ -1,3 +1,4 @@
+import { darkTheme } from '../src/theme';
 import { describe, it, expect } from 'vitest';
 import { bestHit, type PrimitiveRenderContext } from '../src/primitives/primitive';
 import { PriceLine } from '../src/primitives/price-line';
@@ -23,7 +24,7 @@ function makeRc(): { rc: PrimitiveRenderContext; dl: DataLayer; seriesId: number
   timeScale.setWidth(600);
   timeScale.setBaseIndex(dl.baseIndex);
   return {
-    rc: { timeScale, priceScale, dataLayer: dl, plotWidth: 600, plotHeight: 400, priceAxisWidth: 56, dpr: 1 },
+    rc: { timeScale, priceScale, dataLayer: dl, plotWidth: 600, plotHeight: 400, priceAxisWidth: 56, dpr: 1, theme: darkTheme },
     dl,
     seriesId,
   };

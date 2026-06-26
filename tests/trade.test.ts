@@ -1,3 +1,4 @@
+import { darkTheme } from '../src/theme';
 import { describe, it, expect } from 'vitest';
 import { unrealizedPnl, unrealizedPnlPercent, breakeven, riskReward, bracketValid } from '../src/trade/pnl';
 import { TradeController, type TradeHost } from '../src/trade/trade-controller';
@@ -128,7 +129,7 @@ describe('trade primitives render (recording context)', () => {
     priceScale.setPriceRange({ min: 80, max: 120 });
     const timeScale = new TimeScale();
     timeScale.setWidth(600);
-    return { timeScale, priceScale, dataLayer: dl, plotWidth: 600, plotHeight: 400, priceAxisWidth: 56, dpr: 1 };
+    return { timeScale, priceScale, dataLayer: dl, plotWidth: 600, plotHeight: 400, priceAxisWidth: 56, dpr: 1, theme: darkTheme };
   }
 
   it('order line, position marker, bracket all draw without error', () => {

@@ -44,6 +44,7 @@ export class PriceScale {
   private _height = 0;
   private _min = 0;
   private _max = 1;
+  private _autoScale = true;
 
   public constructor(options: Partial<PriceScaleOptions> = {}) {
     this._options = { ...DEFAULT_PRICE_SCALE_OPTIONS, ...options };
@@ -68,6 +69,28 @@ export class PriceScale {
 
   public priceRange(): PriceRange {
     return { min: this._min, max: this._max };
+  }
+
+  /** Whether the range tracks the data (true) or has been set manually (false). */
+  public get autoScale(): boolean {
+    return this._autoScale;
+  }
+
+  public setAutoScale(on: boolean): void {
+    this._autoScale = on;
+  }
+
+  /**
+   * Manually scale the visible range around its centre. `factor` > 1 widens the
+   * range (compress / zoom out), < 1 narrows it (expand / zoom in). Switches the
+   * scale to manual mode so autoscale stops overriding it.
+   */
+  public scaleAroundCenter(factor: number): void {
+    const centre = (this._min + this._max) / 2;
+    const half = ((this._max - this._min) / 2) * factor;
+    this._min = centre - half;
+    this._max = centre + half;
+    this._autoScale = false;
   }
 
   /** Recompute the visible range from data extremes + configured margins. */

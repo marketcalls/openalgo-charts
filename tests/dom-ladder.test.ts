@@ -1,3 +1,4 @@
+import { darkTheme } from '../src/theme';
 import { describe, it, expect } from 'vitest';
 import { DomLadder, ladderCapability, buildRows, visibleRows } from '../src/trade/dom-ladder';
 import { FakeBroker } from '../src/trade/fake-broker';
@@ -16,7 +17,7 @@ function rc(): PrimitiveRenderContext {
   priceScale.setPriceRange({ min: 95, max: 105 });
   const timeScale = new TimeScale();
   timeScale.setWidth(600);
-  return { timeScale, priceScale, dataLayer: new DataLayer(), plotWidth: 600, plotHeight: 400, priceAxisWidth: 56, dpr: 1 };
+  return { timeScale, priceScale, dataLayer: new DataLayer(), plotWidth: 600, plotHeight: 400, priceAxisWidth: 56, dpr: 1, theme: darkTheme };
 }
 
 describe('ladder capability (graceful degradation)', () => {

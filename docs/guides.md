@@ -93,6 +93,61 @@ Implement `IPrimitive` (`zOrder`, `draw`, optional `hitTest` / `autoscaleInfo` /
 lifecycle) and attach it with `chart.addPrimitive(primitive, paneIndex)`. This
 is the same API the trade layer, markers, and profiles are built on.
 
+## Themes
+
+Pass a full palette — `darkTheme` (default), `lightTheme`, or your own `ChartTheme`:
+
+```ts
+import { createChart, lightTheme } from 'openalgo-charts';
+const chart = createChart(el, { theme: lightTheme });
+// or a custom palette: { ...darkTheme, upColor: '#00b386', background: '#0b0f17', ... }
+```
+
+The theme drives chrome (background/grid/axes/crosshair), series defaults
+(up/down, line, area gradient, last-price tag), and the trade layer
+(buy/sell/profit/loss). Per-series `style` overrides always win over the theme.
+
+## Gradient area / baseline
+
+`area` and `baseline` use real vertical gradients. Colours come from the theme
+or per-series style:
+
+```ts
+chart.addSeries('area', { style: { areaTopColor: 'rgba(79,140,255,0.5)', areaBottomColor: 'rgba(79,140,255,0)' } });
+```
+
+## Axis-drag rescale
+
+- **Wheel** — zoom both axes around the cursor.
+- **Drag the price (Y) axis** ↕ — up expands, down compresses the price scale
+  (switches that pane to manual scale).
+- **Drag the time (X) axis** ↔ — right expands (wider bars), left compresses.
+- **Double-click** — reset: fit content + re-enable price autoscale.
+
+## Tick aggregation &amp; live orderflow
+
+Aggregate raw trade ticks into bars by clock interval, tick count, or volume:
+
+```ts
+import { TickBarAggregator } from 'openalgo-charts';
+const agg = new TickBarAggregator({ mode: 'volume', perBar: 5000 }); // or {mode:'ticks',count:100} / {mode:'interval',seconds:60}
+ws.onTrade(t => { const u = agg.onTick({ time: t.timeSec, price: t.price, qty: t.qty }); if (u) series.update(u.bar); });
+```
+
+For footprint/orderflow, feed **classified** ticks (bid vs ask) to the streaming
+aggregator:
+
+```ts
+import { FootprintAggregator } from 'openalgo-charts/profile';
+const fa = new FootprintAggregator({ mode: 'interval', seconds: 60 }, 0.05);
+ws.onTrade(t => { const u = fa.onTick({ time: t.timeSec, price: t.price, qty: t.qty, side: t.atBid ? 'bid' : 'ask' });
+  footprint.setBars(/* accumulate u.bar */); });
+```
+
+Tick-count and volume bars (and footprint) require real trade ticks — OHLCV
+alone can't produce them, and bid/ask classification needs a live feed or a
+tick-recorder backend.
+
 ## Performance
 
 Enable conflation for very large, zoomed-out datasets:

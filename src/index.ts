@@ -5,8 +5,10 @@ export { VERSION, version } from './version';
 
 export { createChart, Chart } from './core/chart';
 export type { ChartOptions, AddSeriesOptions } from './core/chart';
-export { Pane, DEFAULT_PANE_THEME } from './core/pane';
-export type { PaneTheme } from './core/pane';
+export { Pane } from './core/pane';
+export { darkTheme, lightTheme, DEFAULT_THEME } from './theme';
+export type { ChartTheme } from './theme';
+export { verticalGradient } from './render/gradient';
 export { InvalidationLevel } from './core/invalidate-mask';
 export type { PaneInvalidation, TimeScaleOp } from './core/invalidate-mask';
 export { bitmapSize, snapToDevicePixel } from './core/canvas';
@@ -58,6 +60,8 @@ export type { DataFeed, TradeFeed, BarsRequest, MarketDepth, DepthLevel, OrderSi
 export { OpenAlgoDataFeed, mapHistoryResponse, rowTimeToUtcSeconds } from './feed/openalgo-rest';
 export type { OpenAlgoConfig } from './feed/openalgo-rest';
 export { FakeDataFeed, generateBars } from './feed/fake-feed';
+export { TickBarAggregator } from './feed/tick-aggregator';
+export type { TickTimeframe, AggTick, BarUpdate } from './feed/tick-aggregator';
 export {
   epochMsToUtcSeconds,
   istStringToUtcSeconds,

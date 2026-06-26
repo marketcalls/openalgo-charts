@@ -1,3 +1,4 @@
+import { darkTheme } from '../src/theme';
 import { describe, it, expect } from 'vitest';
 import { getChartType, registeredChartTypes, type SeriesType, type DrawItem } from '../src/model/chart-type-registry';
 import type { Bar } from '../src/model/bar';
@@ -65,36 +66,36 @@ describe('renderers draw expected primitives (recording context)', () => {
 
   it('candlestick fills one body per bar (+ wicks)', () => {
     const { ctx, rec } = makeCtx();
-    getChartType('candlestick').draw(ctx, data, identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100 });
+    getChartType('candlestick').draw(ctx, data, identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100, theme: darkTheme });
     // 3 bodies + 3 wicks = 6 fillRects
     expect(rec.count('fillRect')).toBe(6);
   });
 
   it('hollow candle outlines the up body (strokeRect)', () => {
     const { ctx, rec } = makeCtx();
-    getChartType('hollow-candle').draw(ctx, [data[0]], identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100 });
+    getChartType('hollow-candle').draw(ctx, [data[0]], identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100, theme: darkTheme });
     expect(rec.count('strokeRect')).toBeGreaterThanOrEqual(1); // bar 0 is up → hollow
   });
 
   it('column draws one rect per bar', () => {
     const { ctx, rec } = makeCtx();
-    getChartType('column').draw(ctx, data, identityY, bs, dpr, { base: 0 }, { plotHeight: 1000, maxVolume: 100 });
+    getChartType('column').draw(ctx, data, identityY, bs, dpr, { base: 0 }, { plotHeight: 1000, maxVolume: 100, theme: darkTheme });
     expect(rec.count('fillRect')).toBe(3);
   });
 
   it('ohlc bar draws 3 rects per bar; high-low draws 1', () => {
     const a = makeCtx();
-    getChartType('bar').draw(a.ctx, data, identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100 });
+    getChartType('bar').draw(a.ctx, data, identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100, theme: darkTheme });
     expect(a.rec.count('fillRect')).toBe(9); // 3 bars × (vertical + open tick + close tick)
 
     const b = makeCtx();
-    getChartType('high-low').draw(b.ctx, data, identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100 });
+    getChartType('high-low').draw(b.ctx, data, identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100, theme: darkTheme });
     expect(b.rec.count('fillRect')).toBe(3); // vertical only
   });
 
   it('line strokes a single polyline over N points', () => {
     const { ctx, rec } = makeCtx();
-    getChartType('line').draw(ctx, data, identityY, bs, dpr, { color: '#fff' }, { plotHeight: 1000, maxVolume: 100 });
+    getChartType('line').draw(ctx, data, identityY, bs, dpr, { color: '#fff' }, { plotHeight: 1000, maxVolume: 100, theme: darkTheme });
     expect(rec.count('moveTo')).toBe(1);
     expect(rec.count('lineTo')).toBe(2); // N-1 segments
     expect(rec.count('stroke')).toBe(1);
@@ -102,14 +103,14 @@ describe('renderers draw expected primitives (recording context)', () => {
 
   it('line-markers adds a dot per point', () => {
     const { ctx, rec } = makeCtx();
-    getChartType('line-markers').draw(ctx, data, identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100 });
+    getChartType('line-markers').draw(ctx, data, identityY, bs, dpr, {}, { plotHeight: 1000, maxVolume: 100, theme: darkTheme });
     expect(rec.count('arc')).toBe(3);
   });
 
   it('every registered type draws without error', () => {
     for (const t of ALL) {
       const { ctx } = makeCtx();
-      expect(() => getChartType(t).draw(ctx, data, identityY, bs, dpr, getChartType(t).defaultStyle, { plotHeight: 1000, maxVolume: 100 })).not.toThrow();
+      expect(() => getChartType(t).draw(ctx, data, identityY, bs, dpr, getChartType(t).defaultStyle, { plotHeight: 1000, maxVolume: 100, theme: darkTheme })).not.toThrow();
     }
   });
 });

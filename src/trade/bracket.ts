@@ -58,7 +58,7 @@ export class BracketGroup implements IPrimitive {
     ctx.fillRect(0, Math.min(yEntry, yTarget), xEnd, Math.abs(yTarget - yEntry));
 
     // SL and TP lines
-    for (const [y, color, tag] of [[yStop, '#ef5350', 'SL'], [yTarget, '#26a69a', 'TP']] as const) {
+    for (const [y, color, tag] of [[yStop, rc.theme.loss, 'SL'], [yTarget, rc.theme.profit, 'TP']] as const) {
       ctx.strokeStyle = color;
       ctx.lineWidth = Math.max(1, Math.round(rc.dpr));
       ctx.setLineDash([4 * rc.dpr, 4 * rc.dpr]);

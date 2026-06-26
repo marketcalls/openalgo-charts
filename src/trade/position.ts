@@ -41,11 +41,11 @@ export class PositionMarker implements IPrimitive {
     const entryY = Math.round(rc.priceScale.priceToY(this._position.avgPrice) * rc.dpr) + 0.5;
     const xEnd = Math.round(rc.plotWidth * rc.dpr);
     const pnl = Number.isNaN(this._ltp) ? 0 : unrealizedPnl(this._position, this._ltp);
-    const color = pnl >= 0 ? '#26a69a' : '#ef5350';
+    const color = pnl >= 0 ? rc.theme.profit : rc.theme.loss;
 
     ctx.save();
     // entry line (solid)
-    ctx.strokeStyle = '#c7ccd8';
+    ctx.strokeStyle = rc.theme.axisText;
     ctx.lineWidth = Math.max(1, Math.round(rc.dpr));
     ctx.beginPath();
     ctx.moveTo(0, entryY);
@@ -69,7 +69,7 @@ export class PositionMarker implements IPrimitive {
     const textW = ctx.measureText(label).width;
     ctx.fillStyle = color;
     ctx.fillRect(xEnd + 1, entryY - boxH / 2, textW + padX * 2, boxH);
-    ctx.fillStyle = '#0d0e12';
+    ctx.fillStyle = rc.theme.lastPriceText;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, xEnd + 1 + padX, entryY);
