@@ -46,6 +46,9 @@ export type { ChartEvent } from './primitives/event-markers';
 
 // indicators
 export { ema, emaSeries } from './indicators/ema';
+export { rsi, rsiSeries } from './indicators/rsi';
+export { atr, trueRange } from './indicators/atr';
+export { supertrend, supertrendSeries, type SupertrendPoint } from './indicators/supertrend';
 
 // optional OHLC-preserving conflation / downsampling (§4.4)
 export { conflationGroupSize, conflateBars, conflateItems, mergeBars } from './model/conflation';

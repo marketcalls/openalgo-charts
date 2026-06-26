@@ -47,6 +47,8 @@
       <option value="hlc-area">HLC Area</option>
       <option value="baseline">Baseline</option>
     </select>
+    <label class="chk"><input type="checkbox" id="st" checked /> Supertrend</label>
+    <label class="chk"><input type="checkbox" id="rsi" checked /> RSI</label>
     <label class="chk"><input type="checkbox" id="vgrid" checked /> V Grid</label>
     <label class="chk"><input type="checkbox" id="hgrid" checked /> H Grid</label>
     <button id="load">Load</button>
@@ -57,7 +59,7 @@
   <div id="legend"></div>
 
   <script type="module">
-    import { createChart } from '/dist/openalgo-charts.mjs';
+    import { createChart, rsiSeries, supertrendSeries } from '/dist/openalgo-charts.mjs';
 
     // A broker-agnostic DataFeed for yfinance: getBars hits this demo's /api/history,
     // which already returns the chart's Bar shape (time in UTC seconds).
@@ -134,10 +136,29 @@
         const avg = currentBars.reduce((s, b) => s + b.close, 0) / (currentBars.length || 1);
         style.baseValue = avg;
       }
-      price = chart.addSeries(type, { style });
+      price = chart.addSeries(type, { style }); // first series → drives the OHLC legend
       volume = chart.addSeries('histogram', { paneIndex: 1, style: { color: '#33415e' } });
       price.setData(currentBars);
       volume.setData(currentBars.map((b) => ({ time: b.time, open: 0, high: b.volume, low: 0, close: b.volume })));
+
+      // Supertrend(10, 3) overlay on the price pane — green uptrend / red downtrend
+      // (mirrors openalgo.ta.supertrend: direction -1 = up/support, +1 = down/resistance).
+      if (el('st').checked) {
+        const { up, down } = supertrendSeries(currentBars, 10, 3);
+        chart.addSeries('line', { style: { color: UP, lineWidth: 2 } }).setData(up);
+        chart.addSeries('line', { style: { color: DOWN, lineWidth: 2 } }).setData(down);
+      }
+
+      // RSI(14) in its own bottom pane with 70/30 zone guides + 50 midline
+      // (mirrors openalgo.ta.rsi).
+      if (el('rsi').checked) {
+        const rsiPane = 2; // below price (0) and volume (1)
+        chart.addSeries('line', { paneIndex: rsiPane, style: { color: '#e0b020', lineWidth: 1.5 } })
+          .setData(rsiSeries(currentBars, 14));
+        chart.addPriceLine({ price: 70, color: DOWN, lineWidth: 1, dashed: true, id: 'rsi-70', label: '70' }, rsiPane);
+        chart.addPriceLine({ price: 30, color: UP, lineWidth: 1, dashed: true, id: 'rsi-30', label: '30' }, rsiPane);
+        chart.addPriceLine({ price: 50, color: '#5a6072', lineWidth: 1, dashed: true, id: 'rsi-50', label: '50' }, rsiPane);
+      }
 
       // OHLC legend tracks the crosshair; default to the latest bar.
       chart.subscribeCrosshairMove((e) => setLegend(e.bar ?? currentBars[currentBars.length - 1]));
@@ -172,8 +193,8 @@
       a.href = chart.takeScreenshot().toDataURL('image/png');
       a.click();
     });
-    // switching chart type re-renders cached bars instantly (no network round-trip)
-    el('ctype').addEventListener('change', () => { if (currentBars.length) render(); });
+    // switching chart type / toggling indicators re-renders cached bars (no network round-trip)
+    ['ctype', 'st', 'rsi'].forEach((id) => el(id).addEventListener('change', () => { if (currentBars.length) render(); }));
     // toggle grid lines live (no rebuild needed)
     const applyGrid = () => chart && chart.setGridOptions({ vertLines: el('vgrid').checked, horzLines: el('hgrid').checked });
     el('vgrid').addEventListener('change', applyGrid);

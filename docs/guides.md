@@ -47,6 +47,23 @@ import { emaSeries } from 'openalgo-charts';
 chart.addSeries('line', { style: { color: '#f0a020' } }).setData(emaSeries(bars, 21));
 ```
 
+Built-in indicators (EMA, RSI, ATR, Supertrend) mirror `openalgo.ta` semantics
+and return plottable bars (warmup slots carry NaN, which the line renderer skips):
+
+```ts
+import { rsiSeries, supertrendSeries } from 'openalgo-charts';
+
+// Supertrend overlay — green uptrend / red downtrend (direction -1 = up, +1 = down)
+const { up, down } = supertrendSeries(bars, 10, 3);
+chart.addSeries('line', { style: { color: '#26a69a', lineWidth: 2 } }).setData(up);
+chart.addSeries('line', { style: { color: '#ef5350', lineWidth: 2 } }).setData(down);
+
+// RSI(14) in its own pane with 70/30 guides
+chart.addSeries('line', { paneIndex: 2, style: { color: '#e0b020' } }).setData(rsiSeries(bars, 14));
+chart.addPriceLine({ price: 70, color: '#ef5350', lineWidth: 1, dashed: true, id: 'rsi-70' }, 2);
+chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id: 'rsi-30' }, 2);
+```
+
 ## OHLC legend / tooltip
 
 `subscribeCrosshairMove` fires the hovered bar of the primary price series on

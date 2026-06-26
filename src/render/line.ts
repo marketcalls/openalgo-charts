@@ -38,9 +38,15 @@ export function stepPoints(pts: readonly Pt[]): Pt[] {
 
 function strokePolyline(ctx: CanvasRenderingContext2D, pts: readonly Pt[], dpr: number): void {
   if (pts.length === 0) return;
+  // Break the line across non-finite points (whitespace gaps) so indicators with
+  // holes — RSI warmup, the Supertrend up/down split — render as separate segments.
   ctx.beginPath();
-  ctx.moveTo(pts[0].x * dpr, pts[0].y * dpr);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x * dpr, pts[i].y * dpr);
+  let drawing = false;
+  for (const p of pts) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) { drawing = false; continue; }
+    if (drawing) ctx.lineTo(p.x * dpr, p.y * dpr);
+    else { ctx.moveTo(p.x * dpr, p.y * dpr); drawing = true; }
+  }
   ctx.stroke();
 }
 
@@ -62,6 +68,7 @@ export function drawLine(
     const r = (style.markerRadius ?? 2) * dpr;
     ctx.fillStyle = style.color ?? '#4f8cff';
     for (const p of base) {
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
       ctx.beginPath();
       ctx.arc(p.x * dpr, p.y * dpr, r, 0, Math.PI * 2);
       ctx.fill();
