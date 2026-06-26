@@ -12,19 +12,31 @@ export type { PaneInvalidation, TimeScaleOp } from './core/invalidate-mask';
 export { bitmapSize, snapToDevicePixel } from './core/canvas';
 export type { Size } from './core/canvas';
 
+export { PriceScale, autoscaleRange, DEFAULT_PRICE_SCALE_OPTIONS } from './scale/price-scale';
+export type { PriceRange, PriceScaleOptions } from './scale/price-scale';
+export { TimeScale, DEFAULT_TIME_SCALE_OPTIONS } from './scale/time-scale';
+export type { LogicalRange, TimeScaleOptions } from './scale/time-scale';
+export { niceTicks, precisionForStep } from './scale/ticks';
+
+export { DEFAULT_CANDLE_STYLE, optimalBarWidth } from './render/candles';
+export type { CandleStyle } from './render/candles';
+
+export type { SeriesApi, SeriesType } from './model/series';
 export type { Bar, LinePoint, Whitespace, UTCSeconds, OriginalTime } from './model/bar';
 export { isWhitespace } from './model/bar';
 
-export type {
-  DataFeed,
-  TradeFeed,
-  BarsRequest,
-  MarketDepth,
-  DepthLevel,
-  OrderSide,
-  OrderType,
-  PlaceOrder,
-  UnsubscribeFn,
-} from './feed/types';
+export type { DataFeed, TradeFeed, BarsRequest, MarketDepth, DepthLevel, OrderSide, OrderType, PlaceOrder, UnsubscribeFn } from './feed/types';
+export { OpenAlgoDataFeed, mapHistoryResponse, rowTimeToUtcSeconds } from './feed/openalgo-rest';
+export type { OpenAlgoConfig } from './feed/openalgo-rest';
+export { FakeDataFeed, generateBars } from './feed/fake-feed';
+export {
+  epochMsToUtcSeconds,
+  istStringToUtcSeconds,
+  utcSecondsToIstParts,
+  formatIstTime,
+  formatIstDate,
+  isNewIstDay,
+  IST_OFFSET_SECONDS,
+} from './feed/time';
 
 export { clamp, lerp, roundToTick } from './helpers/math';

@@ -1,0 +1,99 @@
+/**
+ * Shared data layer (ARCHITECTURE.md §4.1). One per chart. Merges all series by
+ * time onto a single logical-index space (0..N-1) so price + volume + indicator
+ * panes stay aligned, and so non-trading gaps collapse (an absent time simply
+ * has no logical index). Per-series rows are addressable by that shared index.
+ */
+import type { Bar } from './bar';
+
+export type SeriesId = number;
+
+interface SeriesEntry {
+  /** Bars sorted ascending by time. */
+  bars: Bar[];
+}
+
+export interface IndexedBar {
+  index: number;
+  bar: Bar;
+}
+
+export class DataLayer {
+  private readonly _series = new Map<SeriesId, SeriesEntry>();
+  private _sortedTimes: number[] = [];
+  private readonly _indexByTime = new Map<number, number>();
+  private _nextId: SeriesId = 1;
+
+  /** Register a new series; returns its id. */
+  public createSeries(): SeriesId {
+    const id = this._nextId++;
+    this._series.set(id, { bars: [] });
+    return id;
+  }
+
+  public removeSeries(id: SeriesId): void {
+    this._series.delete(id);
+    this._rebuild();
+  }
+
+  /** Bulk-load (full replace) one series' data, then re-merge the time axis. */
+  public setSeriesData(id: SeriesId, bars: readonly Bar[]): void {
+    const entry = this._series.get(id);
+    if (entry === undefined) throw new Error(`openalgo-charts: unknown series ${id}`);
+    entry.bars = bars.slice().sort((a, b) => a.time - b.time);
+    this._rebuild();
+  }
+
+  /** Number of logical indices (distinct time points across all series). */
+  public get length(): number {
+    return this._sortedTimes.length;
+  }
+
+  /** Logical index of the latest real bar (length - 1), or -1 if empty. */
+  public get baseIndex(): number {
+    return this._sortedTimes.length - 1;
+  }
+
+  public indexToTime(index: number): number | undefined {
+    return this._sortedTimes[index];
+  }
+
+  public timeToIndex(time: number): number | undefined {
+    return this._indexByTime.get(time);
+  }
+
+  /** All bars of a series paired with their shared logical index. */
+  public indexedBars(id: SeriesId): IndexedBar[] {
+    const entry = this._series.get(id);
+    if (entry === undefined) return [];
+    const out: IndexedBar[] = [];
+    for (const bar of entry.bars) {
+      const index = this._indexByTime.get(bar.time);
+      if (index !== undefined) out.push({ index, bar });
+    }
+    return out;
+  }
+
+  /** Bars of a series whose logical index lies within [fromIndex, toIndex]. */
+  public visibleBars(id: SeriesId, fromIndex: number, toIndex: number): IndexedBar[] {
+    const lo = Math.max(0, Math.floor(fromIndex));
+    const hi = Math.min(this.baseIndex, Math.ceil(toIndex));
+    const out: IndexedBar[] = [];
+    for (const ib of this.indexedBars(id)) {
+      if (ib.index >= lo && ib.index <= hi) out.push(ib);
+    }
+    return out;
+  }
+
+  private _rebuild(): void {
+    const times = new Set<number>();
+    for (const entry of this._series.values()) {
+      for (const bar of entry.bars) times.add(bar.time);
+    }
+    this._sortedTimes = Array.from(times).sort((a, b) => a - b);
+    this._indexByTime.clear();
+    for (let i = 0; i < this._sortedTimes.length; i++) {
+      this._indexByTime.set(this._sortedTimes[i], i);
+    }
+  }
+}
