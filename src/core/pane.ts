@@ -75,6 +75,15 @@ export class Pane {
     primitive.attached?.(host);
   }
 
+  /** Remove a primitive if present; returns true if it was found. */
+  public removePrimitive(primitive: IPrimitive): boolean {
+    const i = this._primitives.indexOf(primitive);
+    if (i < 0) return false;
+    this._primitives.splice(i, 1);
+    primitive.detached?.();
+    return true;
+  }
+
   private _primitiveContext(ctx: PaneRenderContext): PrimitiveRenderContext {
     const layout = this._layout(ctx);
     return {

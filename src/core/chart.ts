@@ -175,6 +175,24 @@ export class Chart {
     this.invalidate((m) => m.invalidatePane(paneIndex, { level: InvalidationLevel.Light, autoScale: false }));
   }
 
+  /** Remove a primitive from whichever pane holds it. */
+  public removePrimitive(primitive: IPrimitive): void {
+    for (let i = 0; i < this._panes.length; i++) {
+      if (this._panes[i].removePrimitive(primitive)) {
+        this.invalidate((m) => m.invalidatePane(i, { level: InvalidationLevel.Light, autoScale: false }));
+        return;
+      }
+    }
+  }
+
+  /** A host for the (lazy-loaded) trade layer to attach/detach its primitives on a pane. */
+  public tradeHost(paneIndex = 0): { addPrimitive(p: IPrimitive): void; removePrimitive(p: IPrimitive): void } {
+    return {
+      addPrimitive: (p: IPrimitive): void => this._addPrimitive(paneIndex, p),
+      removePrimitive: (p: IPrimitive): void => this.removePrimitive(p),
+    };
+  }
+
   /** Apply one live bar; auto-scroll only when the latest bar is at the right edge. */
   private _updateBar(dataId: number, bar: Bar): void {
     const wasAtRight = this._timeScale.rightOffset >= 0;
