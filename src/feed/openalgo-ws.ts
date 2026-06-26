@@ -1,19 +1,24 @@
 /**
- * OpenAlgo WebSocket adapter (ARCHITECTURE.md §10, C2). Subscribes to the
- * OpenAlgo unified WS proxy (default port 8765) for LTP / Quote / Depth and maps
- * events into typed callbacks the chart consumes (candle builder, last price,
- * DOM ladder depth).
+ * OpenAlgo WebSocket adapter (ARCHITECTURE.md §10, C2). Speaks the documented
+ * OpenAlgo WS proxy protocol (default port 8765, or wss://host/ws in production):
  *
- * The socket is injectable (like the REST adapter's fetch) so the adapter is
- * unit-testable with a fake socket and no network. The subscribe-message and
- * inbound-message *schemas* below follow OpenAlgo's documented LTP/Quote/Depth
- * modes but MUST be verified against your running OpenAlgo build before
- * production — the parse/format helpers are isolated and pure for that reason.
+ *   1. authenticate: { action:'authenticate', api_key }
+ *   2. subscribe   : { action:'subscribe', symbol, exchange, mode }   mode 1=LTP 2=Quote 3=Depth
+ *                    (Depth adds depth_level, e.g. 5/20/30/50)
+ *   3. server pushes { type:'market_data', mode, topic:'SYM.EXCH', data:{...} }
+ *   4. heartbeat   : server 'ping' → client 'pong' (30s)
+ *
+ * Maps inbound LTP / Quote / Depth into typed callbacks the chart consumes
+ * (candle builder, last price, DOM ladder). The socket is injectable so the
+ * adapter is unit-testable with a fake socket and no network.
  */
 import type { MarketDepth } from './types';
 import { epochMsToUtcSeconds } from './time';
 
 export type WsMode = 'LTP' | 'Quote' | 'Depth';
+
+/** OpenAlgo numeric data modes (websockets-format.md §Data Modes). */
+const MODE_NUMBER: Record<WsMode, number> = { LTP: 1, Quote: 2, Depth: 3 };
 
 /** Minimal socket surface (the browser WebSocket satisfies this). */
 export interface SocketLike {
@@ -29,7 +34,7 @@ export interface SocketLike {
 export type SocketFactory = (url: string) => SocketLike;
 
 export interface OpenAlgoWsConfig {
-  url: string; // e.g. ws://127.0.0.1:8765
+  url: string; // e.g. ws://127.0.0.1:8765 (or wss://host/ws)
   apiKey: string;
   socketFactory?: SocketFactory;
 }
@@ -42,51 +47,80 @@ export interface LtpEvent {
   timeSec: number;
 }
 
+/** Pure: the auth handshake message that must precede any subscription. */
+export function formatAuthenticate(apiKey: string): string {
+  return JSON.stringify({ action: 'authenticate', api_key: apiKey });
+}
+
 /**
- * Pure: build the JSON subscribe message. OpenAlgo's WS proxy takes a `symbols`
- * array of `EXCHANGE:SYMBOL` strings (per the API-playground docs); `apikey` and
- * `mode` are included for auth + feed selection. Verify against your build.
+ * Pure: build a subscribe message — `{ action, symbol, exchange, mode }`, where
+ * `mode` is the numeric OpenAlgo data mode. Depth subscriptions may request a
+ * `depth_level` (broker-dependent: 5/20/30/50).
  */
-export function formatSubscribe(apiKey: string, mode: WsMode, symbol: string, exchange: string): string {
-  return JSON.stringify({ action: 'subscribe', apikey: apiKey, mode, symbols: [`${exchange}:${symbol}`] });
+export function formatSubscribe(mode: WsMode, symbol: string, exchange: string, depthLevel?: number): string {
+  const msg: Record<string, unknown> = { action: 'subscribe', symbol, exchange, mode: MODE_NUMBER[mode] };
+  if (mode === 'Depth' && depthLevel !== undefined) msg.depth_level = depthLevel;
+  return JSON.stringify(msg);
 }
 
-export function formatUnsubscribe(apiKey: string, mode: WsMode, symbol: string, exchange: string): string {
-  return JSON.stringify({ action: 'unsubscribe', apikey: apiKey, mode, symbols: [`${exchange}:${symbol}`] });
+export function formatUnsubscribe(mode: WsMode, symbol: string, exchange: string): string {
+  return JSON.stringify({ action: 'unsubscribe', symbol, exchange, mode: MODE_NUMBER[mode] });
 }
 
-type RawMsg = {
-  type?: string;
-  mode?: string;
+interface DepthLevel { price: number; quantity: number; orders?: number }
+interface RawData {
   symbol?: string;
   exchange?: string;
   ltp?: number;
   last_price?: number;
+  last_trade_quantity?: number;
   ltq?: number;
   timestamp?: number | string;
-  depth?: { buy?: { price: number; quantity: number }[]; sell?: { price: number; quantity: number }[] };
-};
+  depth?: { buy?: DepthLevel[]; sell?: DepthLevel[] };
+}
+interface RawMsg {
+  type?: string;
+  mode?: number;
+  topic?: string;
+  data?: RawData;
+}
 
+/** Coerce a WS timestamp (epoch s/ms or ISO-8601 string) to UTC seconds. */
 function toSec(ts: number | string | undefined): number {
   if (typeof ts === 'number') return ts > 1e12 ? epochMsToUtcSeconds(ts) : Math.floor(ts);
+  if (typeof ts === 'string' && ts.trim() !== '') {
+    const ms = Date.parse(ts); // ISO-8601 with 'Z' is unambiguous UTC
+    if (!Number.isNaN(ms)) return Math.floor(ms / 1000);
+  }
   return 0;
 }
 
-/** Pure: classify + normalise an inbound message into an LTP or Depth event. */
+/** True if the inbound frame is a heartbeat ping (plain "ping" or { type:'ping' }). */
+export function isPing(raw: unknown): boolean {
+  if (raw === 'ping') return true;
+  return typeof raw === 'object' && raw !== null && (raw as { type?: string }).type === 'ping';
+}
+
+/**
+ * Pure: classify + normalise an inbound message into an LTP or Depth event.
+ * Payload fields live under `data` per the protocol, but the parser also
+ * tolerates a flat shape for resilience across broker adapters.
+ */
 export function parseMessage(raw: unknown): { kind: 'ltp'; event: LtpEvent } | { kind: 'depth'; symbol: string; exchange: string; depth: MarketDepth } | null {
   if (typeof raw !== 'object' || raw === null) return null;
-  const m = raw as RawMsg;
-  const symbol = m.symbol ?? '';
-  const exchange = m.exchange ?? '';
-  if (m.depth && (m.depth.buy || m.depth.sell)) {
-    const bids = (m.depth.buy ?? []).map((b) => ({ price: b.price, qty: b.quantity }));
-    const asks = (m.depth.sell ?? []).map((a) => ({ price: a.price, qty: a.quantity }));
-    const ltp = m.ltp ?? m.last_price ?? (bids[0]?.price ?? 0);
+  const m = raw as RawMsg & RawData;
+  const d: RawData = m.data ?? m;
+  const symbol = d.symbol ?? '';
+  const exchange = d.exchange ?? '';
+  if (d.depth && (d.depth.buy || d.depth.sell)) {
+    const bids = (d.depth.buy ?? []).map((b) => ({ price: b.price, qty: b.quantity }));
+    const asks = (d.depth.sell ?? []).map((a) => ({ price: a.price, qty: a.quantity }));
+    const ltp = d.ltp ?? d.last_price ?? (bids[0]?.price ?? 0);
     return { kind: 'depth', symbol, exchange, depth: { bids, asks, ltp } };
   }
-  const price = m.ltp ?? m.last_price;
+  const price = d.ltp ?? d.last_price;
   if (typeof price === 'number') {
-    return { kind: 'ltp', event: { symbol, exchange, ltp: price, ltq: m.ltq, timeSec: toSec(m.timestamp) } };
+    return { kind: 'ltp', event: { symbol, exchange, ltp: price, ltq: d.last_trade_quantity ?? d.ltq, timeSec: toSec(d.timestamp) } };
   }
   return null;
 }
@@ -111,12 +145,19 @@ export class OpenAlgoWsFeed {
     if (this._sock !== null) return;
     const sock = this._factory(this._config.url);
     sock.onmessage = (ev): void => this._dispatch(ev.data);
-    sock.onopen = (): void => { this._open = true; this._flush(); };
+    sock.onopen = (): void => this._onOpen();
     sock.onclose = (): void => { this._open = false; };
-    // Some sockets connect synchronously (readyState OPEN) before onopen fires.
-    if (sock.readyState === 1) this._open = true;
     this._sock = sock;
-    if (this._open) this._flush();
+    // Some sockets connect synchronously (readyState OPEN) before onopen fires.
+    if (sock.readyState === 1) this._onOpen();
+  }
+
+  /** Authenticate first, then flush any queued subscriptions (protocol order). */
+  private _onOpen(): void {
+    if (this._open) return;
+    this._open = true;
+    this._sock?.send(formatAuthenticate(this._config.apiKey));
+    this._flush();
   }
 
   /** Send now if open; otherwise queue until onopen (browsers throw on send-before-open). */
@@ -141,12 +182,12 @@ export class OpenAlgoWsFeed {
     return () => this._depthCbs.delete(cb);
   }
 
-  public subscribe(mode: WsMode, symbol: string, exchange: string): void {
-    this._send(formatSubscribe(this._config.apiKey, mode, symbol, exchange));
+  public subscribe(mode: WsMode, symbol: string, exchange: string, depthLevel?: number): void {
+    this._send(formatSubscribe(mode, symbol, exchange, depthLevel));
   }
 
   public unsubscribe(mode: WsMode, symbol: string, exchange: string): void {
-    this._send(formatUnsubscribe(this._config.apiKey, mode, symbol, exchange));
+    this._send(formatUnsubscribe(mode, symbol, exchange));
   }
 
   public close(): void {
@@ -158,7 +199,8 @@ export class OpenAlgoWsFeed {
 
   private _dispatch(data: string): void {
     let raw: unknown;
-    try { raw = JSON.parse(data); } catch { return; }
+    try { raw = JSON.parse(data); } catch { raw = data; } // heartbeats may be plain text
+    if (isPing(raw)) { this._sock?.send(JSON.stringify({ action: 'pong' })); return; }
     const parsed = parseMessage(raw);
     if (parsed === null) return;
     if (parsed.kind === 'ltp') for (const cb of this._ltpCbs) cb(parsed.event);

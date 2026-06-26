@@ -53,13 +53,12 @@ describe('V2-H1 — trade adapter matches OpenAlgo order contract', () => {
 });
 
 describe('V2-H2 — WS schema + send-before-open queueing', () => {
-  it('uses the documented symbols array schema', () => {
-    const msg = JSON.parse(formatSubscribe('k', 'LTP', 'SBIN', 'NSE'));
-    expect(msg.symbols).toEqual(['NSE:SBIN']);
-    expect(msg.action).toBe('subscribe');
+  it('uses the documented per-symbol subscribe schema (numeric mode)', () => {
+    const msg = JSON.parse(formatSubscribe('LTP', 'SBIN', 'NSE'));
+    expect(msg).toEqual({ action: 'subscribe', symbol: 'SBIN', exchange: 'NSE', mode: 1 });
   });
 
-  it('queues subscribes until the socket opens, then flushes', () => {
+  it('authenticates then queues subscribes until the socket opens, then flushes', () => {
     const sent: string[] = [];
     let sock!: SocketLike;
     const feed = new OpenAlgoWsFeed({
@@ -69,10 +68,12 @@ describe('V2-H2 — WS schema + send-before-open queueing', () => {
     feed.connect();
     feed.subscribe('LTP', 'SBIN', 'NSE'); // before open → queued, not sent
     expect(sent).toHaveLength(0);
-    sock.onopen?.(); // socket opens → queue flushes
-    expect(sent).toHaveLength(1);
-    feed.subscribe('LTP', 'RELIANCE', 'NSE'); // after open → immediate
+    sock.onopen?.(); // socket opens → authenticate first, then queue flushes
     expect(sent).toHaveLength(2);
+    expect(JSON.parse(sent[0])).toEqual({ action: 'authenticate', api_key: 'k' });
+    expect(JSON.parse(sent[1])).toMatchObject({ action: 'subscribe', symbol: 'SBIN', mode: 1 });
+    feed.subscribe('LTP', 'RELIANCE', 'NSE'); // after open → immediate
+    expect(sent).toHaveLength(3);
   });
 });
 

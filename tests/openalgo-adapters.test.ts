@@ -3,17 +3,21 @@ import { parseMessage, formatSubscribe, OpenAlgoWsFeed, type SocketLike } from '
 import { OpenAlgoTradeFeed, mapOrder } from '../src/feed/openalgo-trade';
 import { PriceScale } from '../src/scale/price-scale';
 
-describe('OpenAlgo WS — pure helpers', () => {
-  it('formats a subscribe message (symbols array schema)', () => {
-    const msg = JSON.parse(formatSubscribe('k', 'LTP', 'SBIN', 'NSE'));
-    expect(msg).toMatchObject({ action: 'subscribe', apikey: 'k', mode: 'LTP', symbols: ['NSE:SBIN'] });
+describe('OpenAlgo WS — pure helpers (documented protocol)', () => {
+  it('formats a subscribe message (action/symbol/exchange/numeric mode)', () => {
+    expect(JSON.parse(formatSubscribe('LTP', 'SBIN', 'NSE'))).toEqual({ action: 'subscribe', symbol: 'SBIN', exchange: 'NSE', mode: 1 });
+    expect(JSON.parse(formatSubscribe('Depth', 'SBIN', 'NSE', 5))).toMatchObject({ action: 'subscribe', mode: 3, depth_level: 5 });
   });
-  it('parses an LTP message', () => {
-    const r = parseMessage({ symbol: 'SBIN', exchange: 'NSE', ltp: 772.5, ltq: 10, timestamp: 1_700_000_000 });
-    expect(r).toEqual({ kind: 'ltp', event: { symbol: 'SBIN', exchange: 'NSE', ltp: 772.5, ltq: 10, timeSec: 1_700_000_000 } });
+  it('parses an LTP market_data message (data-nested, ISO timestamp)', () => {
+    const r = parseMessage({ type: 'market_data', mode: 1, topic: 'SBIN.NSE', data: { symbol: 'SBIN', exchange: 'NSE', ltp: 772.5, timestamp: '2025-05-28T10:30:45.000Z' } });
+    expect(r?.kind).toBe('ltp');
+    if (r?.kind === 'ltp') {
+      expect(r.event).toMatchObject({ symbol: 'SBIN', exchange: 'NSE', ltp: 772.5 });
+      expect(r.event.timeSec).toBe(Math.floor(Date.parse('2025-05-28T10:30:45.000Z') / 1000));
+    }
   });
-  it('parses a depth message into MarketDepth', () => {
-    const r = parseMessage({ symbol: 'SBIN', exchange: 'NSE', depth: { buy: [{ price: 100, quantity: 50 }], sell: [{ price: 100.05, quantity: 40 }] } });
+  it('parses a depth market_data message into MarketDepth', () => {
+    const r = parseMessage({ type: 'market_data', mode: 3, data: { symbol: 'SBIN', exchange: 'NSE', depth: { buy: [{ price: 100, quantity: 50, orders: 3 }], sell: [{ price: 100.05, quantity: 40, orders: 2 }] } } });
     expect(r?.kind).toBe('depth');
     if (r?.kind === 'depth') {
       expect(r.depth.bids[0]).toEqual({ price: 100, qty: 50 });
@@ -34,20 +38,30 @@ describe('OpenAlgo WS — feed with injected socket', () => {
     return { sock, sent, emit: (data) => sock.onmessage?.({ data }) };
   }
 
-  it('dispatches LTP and depth events to subscribers', () => {
+  it('authenticates on connect, then dispatches LTP and depth events', () => {
     const f = fakeSocket();
     const feed = new OpenAlgoWsFeed({ url: 'ws://x', apiKey: 'k', socketFactory: () => f.sock });
     feed.connect();
+    expect(JSON.parse(f.sent[0])).toEqual({ action: 'authenticate', api_key: 'k' }); // auth first
     let ltp = 0;
     let depthRows = 0;
     feed.onLtp((e) => { ltp = e.ltp; });
     feed.onDepth((_s, _e, d) => { depthRows = d.bids.length; });
     feed.subscribe('LTP', 'SBIN', 'NSE');
-    expect(f.sent).toHaveLength(1);
-    f.emit(JSON.stringify({ symbol: 'SBIN', exchange: 'NSE', ltp: 101.2 }));
-    f.emit(JSON.stringify({ symbol: 'SBIN', exchange: 'NSE', depth: { buy: [{ price: 100, quantity: 5 }, { price: 99.95, quantity: 7 }], sell: [] } }));
+    expect(f.sent).toHaveLength(2); // authenticate + subscribe
+    f.emit(JSON.stringify({ type: 'market_data', mode: 1, data: { symbol: 'SBIN', exchange: 'NSE', ltp: 101.2 } }));
+    f.emit(JSON.stringify({ type: 'market_data', mode: 3, data: { symbol: 'SBIN', exchange: 'NSE', depth: { buy: [{ price: 100, quantity: 5 }, { price: 99.95, quantity: 7 }], sell: [] } } }));
     expect(ltp).toBe(101.2);
     expect(depthRows).toBe(2);
+  });
+
+  it('replies to heartbeat pings', () => {
+    const f = fakeSocket();
+    const feed = new OpenAlgoWsFeed({ url: 'ws://x', apiKey: 'k', socketFactory: () => f.sock });
+    feed.connect();
+    f.sent.length = 0; // ignore the auth frame
+    f.emit('ping');
+    expect(JSON.parse(f.sent[0])).toEqual({ action: 'pong' });
   });
 });
 
