@@ -246,6 +246,26 @@ export class Chart {
   }
 
   /**
+   * Map a price to a container-relative Y in media (CSS) px, for positioning DOM
+   * overlays (order panels, tooltips) over a pane. Returns null if the pane
+   * doesn't exist. The inverse is `coordinateToPrice`.
+   */
+  public priceToCoordinate(price: number, paneIndex = 0): number | null {
+    const pane = this._panes[paneIndex];
+    if (pane === undefined) return null;
+    const top = this._paneLayout()[paneIndex]?.top ?? 0;
+    return top + pane.priceScale.priceToY(price);
+  }
+
+  /** Map a container-relative media-px Y back to a price on a pane (inverse of priceToCoordinate). */
+  public coordinateToPrice(y: number, paneIndex = 0): number | null {
+    const pane = this._panes[paneIndex];
+    if (pane === undefined) return null;
+    const top = this._paneLayout()[paneIndex]?.top ?? 0;
+    return pane.priceScale.yToPrice(y - top);
+  }
+
+  /**
    * Toggle the vertical (time) and/or horizontal (price) grid lines at runtime.
    * Omitted fields keep their current visibility. Repaints every pane.
    */

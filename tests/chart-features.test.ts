@@ -52,6 +52,22 @@ describe('takeScreenshot composites every layer', () => {
   });
 });
 
+describe('price <-> coordinate conversion', () => {
+  it('round-trips a price through priceToCoordinate / coordinateToPrice', () => {
+    const doc = recordingDoc();
+    const container = doc.createElement('div') as unknown as Record<string, unknown>;
+    container.clientWidth = 800; container.clientHeight = 600;
+    const chart = new Chart(container as unknown as HTMLElement, {
+      document: doc, pixelRatio: () => 1, raf: { schedule: (cb) => { cb(); return 1; }, cancel: () => {} },
+    });
+    chart.addSeries('candlestick').setData([bar(1000, 90), bar(1060, 100), bar(1120, 110)]);
+    const y = chart.priceToCoordinate(100);
+    expect(y).not.toBeNull();
+    expect(chart.coordinateToPrice(y as number)).toBeCloseTo(100, 6);
+    expect(chart.priceToCoordinate(100, 5)).toBeNull(); // no such pane
+  });
+});
+
 describe('grid line toggle', () => {
   const dl = new DataLayer();
   const id = dl.createSeries();

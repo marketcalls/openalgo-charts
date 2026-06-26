@@ -26,6 +26,26 @@
     #legend .name { color: #e8eaf0; font-weight: 600; }
     #legend .meta { opacity: .5; }
     #legend .lbl { opacity: .55; margin-left: 8px; }
+
+    /* Sahi-style bracket panel: pills glued to the entry/TP/SL prices, draggable */
+    #bracket { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+    #bracket .bk {
+      position: absolute; left: 16px; transform: translateY(-50%); display: inline-flex; align-items: center;
+      gap: 10px; font: 11px/1 system-ui, sans-serif; padding: 5px 9px; border-radius: 7px; white-space: nowrap;
+      pointer-events: auto; box-shadow: 0 2px 8px rgba(0,0,0,.45); user-select: none;
+    }
+    #bracket .bk b { color: #fff; font-weight: 600; }
+    #bracket .bk.tp { background: #0e9c84; color: #d7f5ee; cursor: ns-resize; }
+    #bracket .bk.sl { background: #c0414c; color: #fadadd; cursor: ns-resize; }
+    #bracket .bk.entry { background: #161b2b; border: 1px solid #2c3349; color: #aeb6c8; cursor: move; }
+    #bracket .bk .pnl { font-weight: 700; color: #fff; }
+    #bracket .bk button {
+      font: 11px/1 system-ui; border-radius: 5px; padding: 4px 9px; cursor: pointer; border: 1px solid transparent; color: #fff;
+    }
+    #bracket .bk .bk-x { background: transparent; color: #9aa3b2; border-color: #2c3349; padding: 3px 8px; }
+    #bracket .bk .bk-buy { background: #1f9e88; }
+    #bracket .bk .bk-sell { background: #d6485a; }
+    #bracket .bk .bk-mod { background: #2c3349; color: #c7ccd8; }
   </style>
 </head>
 <body>
@@ -58,18 +78,36 @@
     <button id="load">Load</button>
     <button id="save" title="Save the full chart as a PNG (right-click only captures the overlay)">Save PNG</button>
     <span class="sep"></span>
-    <input type="number" id="qty" value="1" min="1" title="order quantity" />
-    <button id="buy" title="Place a simulated BUY LIMIT line, then drag it to modify">Buy Limit</button>
-    <button id="sell" title="Place a simulated SELL LIMIT line, then drag it to modify">Sell Limit</button>
-    <button id="cancel" title="Cancel all simulated orders">Cancel All</button>
+    <input type="number" id="qty" value="100" min="1" title="order quantity" />
+    <button id="buy" title="Place a Buy bracket (entry / target / stop) — drag the pills to modify">Buy</button>
+    <button id="sell" title="Place a Sell bracket (entry / target / stop) — drag the pills to modify">Sell</button>
+    <button id="cancel" title="Cancel the bracket">Cancel</button>
     <span id="status"></span>
   </div>
   <div id="chart"></div>
   <div id="legend"></div>
 
+  <!-- Sahi-style bracket panel (positions tracked to price every frame) -->
+  <div id="bracket" hidden>
+    <div class="bk tp" id="bk-tp">
+      <span>TP: <b class="pts">0</b> Pts (<span class="pct">0%</span>)</span>
+      <span class="pnl">+0</span>
+    </div>
+    <div class="bk entry" id="bk-entry">
+      <button class="bk-x" data-act="cancel" title="Cancel bracket">x</button>
+      <span>Qty: <b class="q">0</b></span>
+      <span>Risk/Reward: <b class="rr">0</b></span>
+      <button class="bk-buy" data-act="place">1-Click</button>
+      <button class="bk-mod" data-act="modify">Modify</button>
+    </div>
+    <div class="bk sl" id="bk-sl">
+      <span>SL: <b class="pts">0</b> Pts (<span class="pct">0%</span>)</span>
+      <span class="pnl">-0</span>
+    </div>
+  </div>
+
   <script type="module">
     import { createChart, rsiSeries, supertrendSeries } from '/dist/openalgo-charts.mjs';
-    import { FakeBroker, TradeController } from '/dist/openalgo-charts.trade.mjs';
 
     // A broker-agnostic DataFeed for yfinance: getBars hits this demo's /api/history,
     // which already returns the chart's Bar shape (time in UTC seconds).
@@ -86,21 +124,13 @@
     const feed = new YFinanceDataFeed();
     const UP = '#26a69a', DOWN = '#ef5350';
     let chart, price, volume;
-
-    // Simulated chart trading: an in-memory broker drives draggable order lines
-    // through a TradeController, with no real broker/network. `tc` is rebound to
-    // each freshly-built chart; the broker (and its order book) persists.
-    const broker = new FakeBroker();
-    let tc = null;
-    broker.onBook((orders, positions) => tc && tc.reconcile(orders, positions));
-    broker.onLtp((sym, ltp) => tc && tc.onLtp(sym, ltp));
-    const round2 = (n) => Math.round(n * 100) / 100;
     let currentBars = [];          // cached so a chart-type switch needs no refetch
     const idxByTime = new Map();   // bar time -> array index (for previous-close lookup)
     let req = {};                  // last-loaded request (symbol/interval/period)
 
     const el = (id) => document.getElementById(id);
     const fmt = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const round2 = (n) => Math.round(n * 100) / 100;
     function fmtVol(v) {
       if (v == null) return '';
       const a = Math.abs(v);
@@ -119,8 +149,7 @@
     }
     const nameOf = (sym) => sym.toUpperCase().replace(/\.(NS|BO)$/, '');
 
-    // Title + O H L C V + change(%), TradingView-style. Driven by the crosshair;
-    // falls back to the last bar when the pointer is off the plot.
+    // Title + O H L C V + change(%). Driven by the crosshair; falls back to the last bar.
     function setLegend(bar) {
       const legend = el('legend');
       const head = `<span class="name">${nameOf(req.symbol || '')}</span>`
@@ -139,6 +168,130 @@
       legend.innerHTML = head + v('O', bar.open) + v('H', bar.high) + v('L', bar.low) + v('C', bar.close) + ' ' + vol + change;
     }
 
+    // ── Sahi-style bracket (entry / target / stop) ──────────────────────────
+    let bracket = null;   // { side, entry, target, stop, qty }
+    let bLines = null;    // { entry, tp, sl } price-line primitives on the current chart
+    const rupee = (n) => (n < 0 ? '-' : '+') + '₹' + Math.round(Math.abs(n)).toLocaleString('en-IN');
+    const chartTop = () => el('chart').getBoundingClientRect().top;
+
+    function makeBracket(side) {
+      if (!currentBars.length) return;
+      const entry = round2(currentBars[currentBars.length - 1].close);
+      const qty = Math.max(1, Number(el('qty').value) || 1);
+      bracket = {
+        side, entry, qty,
+        target: round2(side === 'BUY' ? entry * 1.012 : entry * 0.988),
+        stop: round2(side === 'BUY' ? entry * 0.99 : entry * 1.01),
+      };
+      attachBracketLines();
+      el('bracket').hidden = false;
+      el('bk-entry').querySelector('[data-act="place"]').className = side === 'BUY' ? 'bk-buy' : 'bk-sell';
+      updateBracket();
+    }
+
+    // (Re)create the three dashed price lines on the current chart. They auto-sync
+    // with pan/zoom and are draggable through the chart's subscribeDrag.
+    function attachBracketLines() {
+      if (!bracket) return;
+      const pl = (price, color, id) => chart.addPriceLine({ price, color, lineWidth: 1, dashed: true, id, cursor: 'ns-resize' }, 0);
+      bLines = {
+        entry: pl(bracket.entry, '#8a93a7', 'bk-entry'),
+        tp: pl(bracket.target, UP, 'bk-tp'),
+        sl: pl(bracket.stop, DOWN, 'bk-sl'),
+      };
+    }
+
+    // Move one leg (or the whole bracket via the entry) and keep TP/SL on the
+    // correct side of entry, then refresh lines, labels and pill positions.
+    function setBracketPrice(which, raw) {
+      if (!bracket) return;
+      const p = round2(raw);
+      const buy = bracket.side === 'BUY';
+      if (which === 'entry') {
+        const d = p - bracket.entry;
+        bracket.entry = p; bracket.target = round2(bracket.target + d); bracket.stop = round2(bracket.stop + d);
+      } else if (which === 'tp') {
+        bracket.target = buy ? Math.max(p, bracket.entry + 0.01) : Math.min(p, bracket.entry - 0.01);
+      } else {
+        bracket.stop = buy ? Math.min(p, bracket.entry - 0.01) : Math.max(p, bracket.entry + 0.01);
+      }
+      updateBracket();
+    }
+
+    function updateBracket() {
+      if (!bracket || !bLines) return;
+      bLines.entry.setPrice(bracket.entry); bLines.tp.setPrice(bracket.target); bLines.sl.setPrice(bracket.stop);
+      const sign = bracket.side === 'BUY' ? 1 : -1;
+      const tpPts = Math.abs(bracket.target - bracket.entry);
+      const slPts = Math.abs(bracket.entry - bracket.stop);
+      const tpPnl = sign * (bracket.target - bracket.entry) * bracket.qty;
+      const slPnl = sign * (bracket.stop - bracket.entry) * bracket.qty;
+      const rr = slPts > 0 ? tpPts / slPts : 0;
+      const set = (id, pts, pnl) => {
+        const n = el(id);
+        n.querySelector('.pts').textContent = fmt(pts);
+        n.querySelector('.pct').textContent = (pts / bracket.entry * 100).toFixed(2) + '%';
+        n.querySelector('.pnl').textContent = rupee(pnl);
+      };
+      set('bk-tp', tpPts, tpPnl);
+      set('bk-sl', slPts, slPnl);
+      const e = el('bk-entry');
+      e.querySelector('.q').textContent = bracket.qty;
+      e.querySelector('.rr').textContent = rr.toFixed(2);
+      e.querySelector('[data-act="place"]').textContent = '1-Click ' + (bracket.side === 'BUY' ? 'Buy' : 'Sell');
+      positionPills();
+    }
+
+    // Glue each pill to its price (container Y -> viewport Y), hiding off-screen ones.
+    function positionPills() {
+      if (!bracket || el('bracket').hidden) return;
+      const ct = chartTop();
+      const at = { 'bk-tp': bracket.target, 'bk-entry': bracket.entry, 'bk-sl': bracket.stop };
+      for (const id in at) {
+        const y = chart ? chart.priceToCoordinate(at[id], 0) : null;
+        const node = el(id);
+        if (y == null) { node.style.display = 'none'; continue; }
+        node.style.display = '';
+        node.style.top = (ct + y) + 'px';
+      }
+    }
+    function removeBracket() {
+      if (bLines && chart) for (const k in bLines) chart.removePrimitive(bLines[k]);
+      bracket = null; bLines = null; el('bracket').hidden = true;
+    }
+    // Keep pills locked to price across pan / zoom / rescale / kinetic.
+    (function frame() { positionPills(); requestAnimationFrame(frame); })();
+
+    // Drag a pill vertically to modify its leg (entry pill moves the whole bracket).
+    function dragify(id, which) {
+      const node = el(id);
+      node.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) return; // let buttons handle their own clicks
+        node.setPointerCapture(e.pointerId); node._drag = true; e.preventDefault();
+      });
+      node.addEventListener('pointermove', (e) => {
+        if (!node._drag) return;
+        const p = chart && chart.coordinateToPrice(e.clientY - chartTop(), 0);
+        if (p != null) setBracketPrice(which, p);
+      });
+      const end = (e) => { node._drag = false; try { node.releasePointerCapture(e.pointerId); } catch (_) {} };
+      node.addEventListener('pointerup', end);
+      node.addEventListener('pointercancel', end);
+    }
+    dragify('bk-tp', 'tp'); dragify('bk-entry', 'entry'); dragify('bk-sl', 'sl');
+
+    el('bracket').addEventListener('click', (e) => {
+      const act = e.target.getAttribute && e.target.getAttribute('data-act');
+      if (!act || !bracket) return;
+      if (act === 'cancel') { removeBracket(); el('status').textContent = 'bracket cancelled'; }
+      else if (act === 'place') {
+        el('status').textContent = `placed ${bracket.side} ${bracket.qty} @ ${fmt(bracket.entry)}  TP ${fmt(bracket.target)}  SL ${fmt(bracket.stop)}`;
+      } else if (act === 'modify') {
+        const rr = (Math.abs(bracket.target - bracket.entry) / Math.max(1e-9, Math.abs(bracket.entry - bracket.stop))).toFixed(2);
+        el('status').textContent = `bracket — entry ${fmt(bracket.entry)} · TP ${fmt(bracket.target)} · SL ${fmt(bracket.stop)} · R:R ${rr}`;
+      }
+    });
+
     // (Re)build the chart for the currently selected type using cached bars.
     function render() {
       if (chart) chart.destroy();
@@ -151,7 +304,6 @@
       const type = el('ctype').value;
       const style = {};
       if (type === 'baseline') {
-        // anchor the baseline at the average close so up/down shading is meaningful
         const avg = currentBars.reduce((s, b) => s + b.close, 0) / (currentBars.length || 1);
         style.baseValue = avg;
       }
@@ -160,18 +312,16 @@
       price.setData(currentBars);
       volume.setData(currentBars.map((b) => ({ time: b.time, open: 0, high: b.volume, low: 0, close: b.volume })));
 
-      // Supertrend(10, 3) overlay on the price pane — green uptrend / red downtrend
-      // (mirrors openalgo.ta.supertrend: direction -1 = up/support, +1 = down/resistance).
+      // Supertrend(10, 3) overlay — green uptrend / red downtrend (openalgo.ta.supertrend).
       if (el('st').checked) {
         const { up, down } = supertrendSeries(currentBars, 10, 3);
         chart.addSeries('line', { style: { color: UP, lineWidth: 2 } }).setData(up);
         chart.addSeries('line', { style: { color: DOWN, lineWidth: 2 } }).setData(down);
       }
 
-      // RSI(14) in its own bottom pane with 70/30 zone guides + 50 midline
-      // (mirrors openalgo.ta.rsi).
+      // RSI(14) in its own bottom pane with 70/30 guides + 50 midline (openalgo.ta.rsi).
       if (el('rsi').checked) {
-        const rsiPane = 2; // below price (0) and volume (1)
+        const rsiPane = 2;
         chart.addSeries('line', { paneIndex: rsiPane, style: { color: '#e0b020', lineWidth: 1.5 } })
           .setData(rsiSeries(currentBars, 14));
         chart.addPriceLine({ price: 70, color: DOWN, lineWidth: 1, dashed: true, id: 'rsi-70', label: '70' }, rsiPane);
@@ -179,23 +329,12 @@
         chart.addPriceLine({ price: 50, color: '#5a6072', lineWidth: 1, dashed: true, id: 'rsi-50', label: '50' }, rsiPane);
       }
 
-      // Chart trading: bind a TradeController to the rebuilt chart and let working
-      // order lines be dragged to modify (drag → broker.modify → book re-reconciles
-      // → the line follows the cursor live).
-      tc = new TradeController({
-        addPrimitive: (prim) => chart.addPrimitive(prim, 0),
-        removePrimitive: (prim) => chart.removePrimitive(prim),
+      // Chart trading: the bracket lines are draggable directly (in addition to the
+      // pills) — drag a dashed line and the matching leg follows.
+      chart.subscribeDrag((externalId, p) => {
+        if (externalId.startsWith('bk-')) setBracketPrice(externalId.slice(3), p);
       });
-      chart.subscribeDrag(
-        (externalId, p) => {
-          if (!externalId.startsWith('order:')) return;
-          broker.modify(externalId.slice('order:'.length), { price: round2(p) });
-        },
-        (externalId, p) => { el('status').textContent = `order ${externalId.replace('order:', '#')} modified -> ${fmt(p)}`; },
-      );
-      tc.reconcile(broker.orders(), broker.positions()); // redraw any existing orders
-      const last = currentBars.length ? currentBars[currentBars.length - 1].close : null;
-      if (last !== null) broker.emitLtp(req.symbol, last);
+      if (bracket) { attachBracketLines(); updateBracket(); } // re-draw bracket on the rebuilt chart
 
       // OHLC legend tracks the crosshair; default to the latest bar.
       chart.subscribeCrosshairMove((e) => setLegend(e.bar ?? currentBars[currentBars.length - 1]));
@@ -212,7 +351,7 @@
         currentBars = bars;
         idxByTime.clear();
         bars.forEach((b, i) => idxByTime.set(b.time, i));
-        broker.setBook([], []); // new symbol → drop simulated orders from the prior one
+        removeBracket(); // new symbol → drop the bracket from the prior one
         render();
         status.textContent = `${req.symbol} · ${bars.length} bars · ${req.interval}/${req.period}`;
       } catch (e) {
@@ -220,19 +359,10 @@
       }
     }
 
-    // Place a simulated LIMIT order ~2% away from the last price → a draggable line.
-    function place(side) {
-      if (!currentBars.length) return;
-      const last = currentBars[currentBars.length - 1].close;
-      const price = round2(side === 'BUY' ? last * 0.98 : last * 1.02);
-      const qty = Math.max(1, Number(el('qty').value) || 1);
-      broker.place({ symbol: req.symbol, side, type: 'LIMIT', qty, price, mode: 'live' });
-      broker.emitLtp(req.symbol, last);
-      el('status').textContent = `${side} LIMIT ${qty} ${req.symbol} @ ${fmt(price)} — drag the line to modify`;
-    }
-    el('buy').addEventListener('click', () => place('BUY'));
-    el('sell').addEventListener('click', () => place('SELL'));
-    el('cancel').addEventListener('click', () => { broker.setBook([], []); el('status').textContent = 'all orders cancelled'; });
+    el('buy').addEventListener('click', () => makeBracket('BUY'));
+    el('sell').addEventListener('click', () => makeBracket('SELL'));
+    el('cancel').addEventListener('click', () => { removeBracket(); el('status').textContent = 'bracket cancelled'; });
+    el('qty').addEventListener('change', () => { if (bracket) { bracket.qty = Math.max(1, Number(el('qty').value) || 1); updateBracket(); } });
 
     el('load').addEventListener('click', load);
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
