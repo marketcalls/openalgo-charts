@@ -37,10 +37,25 @@ const js = Object.entries(entries).map(([key, input]) => ({
   ],
 }));
 
+// Standalone IIFE for plain <script> / CDN drop-in (base bundle → window.OpenAlgoCharts).
+const iife = {
+  input: entries.index,
+  output: {
+    file: 'dist/openalgo-charts.standalone.js',
+    format: 'iife',
+    name: 'OpenAlgoCharts',
+    sourcemap: true,
+  },
+  plugins: [
+    typescript({ tsconfig: './tsconfig.build.json' }),
+    terser({ format: { comments: false } }),
+  ],
+};
+
 const types = Object.entries(entries).map(([key, input]) => ({
   input,
   output: { file: `dist/${typesFile[key]}.d.ts`, format: 'es' },
   plugins: [dts()],
 }));
 
-export default [...js, ...types];
+export default [...js, iife, ...types];

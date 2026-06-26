@@ -11,18 +11,31 @@ export interface PriceRange {
   max: number;
 }
 
+/**
+ * Price-scale mode. `linear` and `logarithmic` are full coordinate transforms;
+ * `percentage`/`indexed-to-100` (rebase to a baseline) and overlay scales are
+ * not yet implemented — see END_TO_END_AUDIT.md / README known limitations.
+ */
+export type PriceScaleMode = 'linear' | 'logarithmic';
+
 export interface PriceScaleOptions {
   /** Fraction of pane height kept empty at top/bottom (default 0.1 each). */
   marginTop: number;
   marginBottom: number;
   /** Instrument tick size (minMove), e.g. 0.05. 0 → infer from range. */
   minMove: number;
+  /** Linear or logarithmic price↔y mapping. */
+  mode: PriceScaleMode;
+  /** Flip the axis (price increases downward) — for spread/short views. */
+  inverted: boolean;
 }
 
 export const DEFAULT_PRICE_SCALE_OPTIONS: PriceScaleOptions = {
   marginTop: 0.1,
   marginBottom: 0.1,
   minMove: 0,
+  mode: 'linear',
+  inverted: false,
 };
 
 /**
@@ -98,17 +111,30 @@ export class PriceScale {
     this.setPriceRange(autoscaleRange(low, high, this._options.marginTop, this._options.marginBottom));
   }
 
-  /** Price → y (media px). Higher price → smaller y (top of pane). */
+  /** Coordinate transform for the active mode (identity for linear, log10 for log). */
+  private _t(v: number): number {
+    return this._options.mode === 'logarithmic' ? Math.log10(Math.max(1e-10, v)) : v;
+  }
+
+  private _tInv(c: number): number {
+    return this._options.mode === 'logarithmic' ? Math.pow(10, c) : c;
+  }
+
+  /** Price → y (media px). Higher price → smaller y (top of pane), unless inverted. */
   public priceToY(price: number): number {
-    const span = this._max - this._min;
+    const lo = this._t(this._min);
+    const span = this._t(this._max) - lo;
     if (span <= 0) return this._height / 2;
-    return this._height * (1 - (price - this._min) / span);
+    const r = (this._t(price) - lo) / span; // 0 at min … 1 at max
+    return this._options.inverted ? this._height * r : this._height * (1 - r);
   }
 
   /** y (media px) → price. */
   public yToPrice(y: number): number {
-    const span = this._max - this._min;
-    return this._min + (1 - y / this._height) * span;
+    const lo = this._t(this._min);
+    const span = this._t(this._max) - lo;
+    const r = this._options.inverted ? y / this._height : 1 - y / this._height;
+    return this._tInv(lo + r * span);
   }
 
   /** Decimal precision implied by minMove (or the visible range if unset). */

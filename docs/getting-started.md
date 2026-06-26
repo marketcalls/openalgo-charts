@@ -57,8 +57,25 @@ Only pay for what you use — each tier is a separate entry point:
 import { OpenAlgoDataFeed } from 'openalgo-charts';
 
 const feed = new OpenAlgoDataFeed({ baseUrl: 'http://127.0.0.1:5000', apiKey: 'YOUR_KEY' });
-const bars = await feed.getBars({ symbol: 'RELIANCE', exchange: 'NSE', interval: '1m' });
+// from/to are UTC seconds; the adapter converts them to IST YYYY-MM-DD for OpenAlgo.
+const day = 86400;
+const bars = await feed.getBars({
+  symbol: 'RELIANCE', exchange: 'NSE', interval: '1m',
+  from: Math.floor(Date.now() / 1000) - 7 * day, to: Math.floor(Date.now() / 1000),
+});
 series.setData(bars);
+```
+
+Live LTP / Quote / Depth come from the WS adapter — feed its LTP ticks through a
+`CandleBuilder` and call `series.update()`:
+
+```ts
+import { OpenAlgoWsFeed, CandleBuilder } from 'openalgo-charts';
+const ws = new OpenAlgoWsFeed({ url: 'ws://127.0.0.1:8765', apiKey: 'YOUR_KEY' });
+const builder = new CandleBuilder({ intervalSec: 60, volumeMode: 'ltq-sum' });
+ws.connect();
+ws.onLtp((e) => { const u = builder.onTick({ time: e.timeSec, price: e.ltp, ltq: e.ltq }); if (u) series.update(u.bar); });
+ws.subscribe('LTP', 'RELIANCE', 'NSE');
 ```
 
 The chart depends only on the `DataFeed` / `TradeFeed` interfaces, so any broker

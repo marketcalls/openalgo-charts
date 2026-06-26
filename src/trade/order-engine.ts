@@ -11,6 +11,7 @@ import type { OrderSide, OrderType } from './types';
 
 export interface PlaceRequest {
   symbol: string;
+  exchange?: string;
   side: OrderSide;
   type: OrderType;
   qty: number;

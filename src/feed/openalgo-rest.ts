@@ -100,7 +100,9 @@ export class OpenAlgoDataFeed implements DataFeed {
   }
 
   public subscribeBars(_req: BarsRequest, _onBar: (bar: Bar) => void): UnsubscribeFn {
-    // Live subscription is wired in Phase 4 (WS + candle builder).
+    // Live bars come from the WS adapter, not REST: wire `OpenAlgoWsFeed` LTP
+    // events through a `CandleBuilder` and call `series.update()`. This REST
+    // adapter intentionally does not open a socket. See docs/guides.md.
     return () => {};
   }
 }

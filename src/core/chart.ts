@@ -296,13 +296,32 @@ export class Chart {
   /** Distribute height across panes by weight; sync the shared time-scale width. */
   private _relayout(): void {
     const dpr = this._pixelRatio();
-    let total = 0;
-    for (const pane of this._panes) total += pane.weight;
-    if (total <= 0) total = 1;
+    const total = this._weightTotal();
     for (const pane of this._panes) {
+      // DOM box and canvas use the SAME weighted height so layout == hit-test.
+      pane.element.style.flex = `${pane.weight} 1 0`;
       pane.resize(this._width, (this._height * pane.weight) / total, dpr);
     }
     this._timeScale.setWidth(Math.max(0, this._width - this._priceAxisWidth));
+  }
+
+  private _weightTotal(): number {
+    let total = 0;
+    for (const pane of this._panes) total += pane.weight;
+    return total <= 0 ? 1 : total;
+  }
+
+  /** Cumulative top + height of each pane, by weight (the source of truth for hit-testing). */
+  private _paneLayout(): { top: number; height: number }[] {
+    const total = this._weightTotal();
+    const out: { top: number; height: number }[] = [];
+    let top = 0;
+    for (const pane of this._panes) {
+      const h = (this._height * pane.weight) / total;
+      out.push({ top, height: h });
+      top += h;
+    }
+    return out;
   }
 
   private _renderContext(showTimeAxis: boolean): PaneRenderContext {
@@ -362,13 +381,16 @@ export class Chart {
     el.addEventListener('dblclick', this._onDblClick);
   }
 
-  private _localPoint(e: { clientX: number; clientY: number }): { x: number; y: number; pane: number; localY: number } {
+  private _localPoint(e: { clientX: number; clientY: number }): { x: number; y: number; pane: number; localY: number; paneHeight: number } {
     const rect = this._container.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const paneHeight = this._height / Math.max(1, this._panes.length);
-    const pane = Math.min(this._panes.length - 1, Math.max(0, Math.floor(y / paneHeight)));
-    return { x, y, pane, localY: y - pane * paneHeight };
+    // Map Y to a pane by cumulative *weighted* heights — matches the DOM/canvas layout.
+    const layout = this._paneLayout();
+    let pane = 0;
+    for (let i = 0; i < layout.length; i++) if (y >= layout[i].top) pane = i;
+    const pl = layout[pane] ?? { top: 0, height: this._height };
+    return { x, y, pane, localY: y - pl.top, paneHeight: pl.height };
   }
 
   private readonly _onPointerDown = (e: PointerEvent): void => {
@@ -382,9 +404,8 @@ export class Chart {
     // Axis-drag rescale: dragging the price axis (right strip) rescales Y;
     // dragging the time axis (bottom strip of the last pane) rescales X.
     const plotWidth = Math.max(0, this._width - this._priceAxisWidth);
-    const paneHeight = this._height / Math.max(1, this._panes.length);
     const onPriceAxis = p.x >= plotWidth;
-    const onTimeAxis = p.pane === this._panes.length - 1 && p.localY >= paneHeight - this._timeAxisHeight;
+    const onTimeAxis = p.pane === this._panes.length - 1 && p.localY >= p.paneHeight - this._timeAxisHeight;
     if (onPriceAxis) {
       this._axisDrag = 'price';
       this._axisStartCoord = p.localY;
