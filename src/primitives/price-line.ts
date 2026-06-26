@@ -10,7 +10,16 @@ export interface PriceLineOptions {
   color: string;
   lineWidth: number;
   dashed: boolean;
+  /** Right-axis tag text. Defaults to the formatted price. */
   label?: string;
+  /** Optional tag drawn at the LEFT end of the line (NinjaTrader-style order tag). */
+  leftLabel?: string;
+  /**
+   * Fraction of the plot width the line spans, measured from the right (price)
+   * axis. 1 = full width (default); 0.3 = only the rightmost 30% — like a
+   * NinjaTrader order line. The right-axis tag is always drawn.
+   */
+  extentFromRight?: number;
   /** Stable id returned by hit-test (for click/drag routing). */
   id: string;
   /** Cursor hint when hovered (e.g. 'ns-resize' for draggable lines). */
@@ -59,28 +68,41 @@ export class PriceLine implements IPrimitive {
     const y = Math.round(rc.priceScale.priceToY(this._opts.price) * rc.dpr) + 0.5;
     if (y < 0 || y > rc.plotHeight * rc.dpr) return;
     const xEnd = Math.round(rc.plotWidth * rc.dpr);
+    const extent = Math.max(0, Math.min(1, this._opts.extentFromRight ?? 1));
+    const xStart = Math.round(rc.plotWidth * (1 - extent) * rc.dpr);
 
     ctx.save();
     ctx.strokeStyle = this._opts.color;
     ctx.lineWidth = Math.max(1, Math.round(this._opts.lineWidth * rc.dpr));
     if (this._opts.dashed) ctx.setLineDash([4 * rc.dpr, 4 * rc.dpr]);
     ctx.beginPath();
-    ctx.moveTo(0, y);
+    ctx.moveTo(xStart, y);
     ctx.lineTo(xEnd, y);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    const label = this._opts.label ?? rc.priceScale.format(this._opts.price);
     ctx.font = `${11 * rc.dpr}px system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
     const padX = 6 * rc.dpr;
     const boxH = 16 * rc.dpr;
+
+    // right-axis price tag
+    const label = this._opts.label ?? rc.priceScale.format(this._opts.price);
     const textW = ctx.measureText(label).width;
     ctx.fillStyle = this._opts.color;
     ctx.fillRect(xEnd + 1, y - boxH / 2, textW + padX * 2, boxH);
     ctx.fillStyle = '#0d0e12';
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
     ctx.fillText(label, xEnd + 1 + padX, y);
+
+    // optional left-end order tag (e.g. "BUY 100 LIMIT")
+    if (this._opts.leftLabel) {
+      const lw = ctx.measureText(this._opts.leftLabel).width;
+      ctx.fillStyle = this._opts.color;
+      ctx.fillRect(xStart, y - boxH / 2, lw + padX * 2, boxH);
+      ctx.fillStyle = '#0d0e12';
+      ctx.fillText(this._opts.leftLabel, xStart + padX, y);
+    }
     ctx.restore();
   }
 

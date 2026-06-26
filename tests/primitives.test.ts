@@ -64,6 +64,19 @@ describe('PriceLine primitive', () => {
     expect(pl.price).toBe(55);
     expect(updates).toBe(1);
   });
+
+  it('extentFromRight draws only the rightmost fraction; leftLabel adds an end tag', () => {
+    const { rc } = makeRc(); // plotWidth 600, dpr 1
+    const full = makeCtx();
+    new PriceLine({ price: 50, color: '#fff', lineWidth: 1, dashed: false, id: 'a' }).draw(full.ctx, rc);
+    expect(full.rec.ops.find((o) => o.type === 'moveTo')!.args[0]).toBe(0); // full width
+
+    const partial = makeCtx();
+    new PriceLine({ price: 50, color: '#fff', lineWidth: 1, dashed: false, id: 'b', extentFromRight: 0.3, leftLabel: 'BUY 100 LIMIT' })
+      .draw(partial.ctx, rc);
+    expect(partial.rec.ops.find((o) => o.type === 'moveTo')!.args[0]).toBe(420); // 600 * (1 - 0.3)
+    expect(partial.rec.count('fillRect')).toBe(2); // right price tag + left order tag
+  });
 });
 
 describe('SeriesMarkers', () => {
