@@ -167,6 +167,27 @@
     let posLine = null;    // PriceLine for the position
     let fills = [];        // marker list for executed market orders
     let markersApi = null; // SeriesMarkers handle on the price series
+
+    // Persist trade state per symbol so orders/bracket/position survive a refresh.
+    const STORE_KEY = (sym) => 'oa-charts-trade:' + sym;
+    function saveState() {
+      if (!req.symbol) return;
+      try {
+        localStorage.setItem(STORE_KEY(req.symbol), JSON.stringify({
+          orders: orders.map((o) => ({ id: o.id, side: o.side, type: o.type, price: o.price, qty: o.qty, product: o.product })),
+          nextOrderId, bracket, position, fills,
+        }));
+      } catch (_) {}
+    }
+    function restoreState(sym) {
+      let s = null;
+      try { s = JSON.parse(localStorage.getItem(STORE_KEY(sym)) || 'null'); } catch (_) {}
+      orders = s && s.orders ? s.orders.map((o) => ({ ...o, line: null })) : [];
+      nextOrderId = s && s.nextOrderId ? s.nextOrderId : 1;
+      bracket = s ? s.bracket || null : null;
+      position = s ? s.position || null : null;
+      fills = s && s.fills ? s.fills : [];
+    }
     let currentBars = [];          // cached so a chart-type switch needs no refetch
     const idxByTime = new Map();   // bar time -> array index (for previous-close lookup)
     let req = {};                  // last-loaded request (symbol/interval/period)
@@ -230,6 +251,7 @@
       el('bracket').hidden = false;
       el('bk-entry').querySelector('[data-act="place"]').className = side === 'BUY' ? 'bk-buy' : 'bk-sell';
       updateBracket();
+      saveState();
     }
 
     // (Re)create the three dashed price lines on the current chart. They auto-sync
@@ -260,6 +282,7 @@
         bracket.stop = buy ? Math.min(p, bracket.entry - 0.01) : Math.max(p, bracket.entry + 0.01);
       }
       updateBracket();
+      saveState();
     }
 
     function updateBracket() {
@@ -322,6 +345,7 @@
       if (o.line && chart) chart.removePrimitive(o.line);
       orders = orders.filter((x) => x !== o);
       el('status').textContent = `cancelled ${o.side} ${o.type} @ ${fmt(o.price)}`;
+      saveState();
     }
     function placeOrder(side, type, price) {
       const qty = Math.max(1, Number(el('qty').value) || 1);
@@ -330,6 +354,7 @@
       o.line = chart ? orderLine(o) : null;
       orders.push(o);
       el('status').textContent = `${side} ${type} ${qty} ${req.symbol} @ ${fmt(o.price)} (${o.product}) — drag the line to modify`;
+      saveState();
     }
     function attachOrderLines() { for (const o of orders) o.line = orderLine(o); } // on chart rebuild
     function removeAllOrders() {
@@ -367,6 +392,7 @@
       el('status').textContent = p
         ? `${side} MARKET ${qty} filled @ ${fmt(price)} → ${p.netQty > 0 ? 'LONG' : 'SHORT'} ${Math.abs(p.netQty)} @ ${fmt(p.avgPrice)}`
         : `${side} MARKET ${qty} filled @ ${fmt(price)} → flat`;
+      saveState();
     }
     // P&L of the open position marked at `mp` (defaults to the latest close).
     function markPrice() { return currentBars.length ? currentBars[currentBars.length - 1].close : 0; }
@@ -413,7 +439,7 @@
     el('bracket').addEventListener('click', (e) => {
       const act = e.target.getAttribute && e.target.getAttribute('data-act');
       if (!act || !bracket) return;
-      if (act === 'cancel') { removeBracket(); el('status').textContent = 'bracket cancelled'; }
+      if (act === 'cancel') { removeBracket(); saveState(); el('status').textContent = 'bracket cancelled'; }
       else if (act === 'place') {
         el('status').textContent = `placed ${bracket.side} OCO bracket — ${bracket.qty} entry ${fmt(bracket.entry)} · TP ${fmt(bracket.target)} · SL ${fmt(bracket.stop)} (target/stop are OCO)`;
       } else if (act === 'modify') {
@@ -468,17 +494,21 @@
         if (externalId.startsWith('bk-')) { setBracketPrice(externalId.slice(3), p); return; }
         if (externalId.startsWith('order:')) {
           const o = orders.find((x) => `order:${x.id}` === externalId);
-          if (o && o.line) { o.price = round2(p); o.line.setPrice(o.price); el('status').textContent = `${o.side} ${o.type} order -> ${fmt(o.price)}`; }
+          if (o && o.line) { o.price = round2(p); o.line.setPrice(o.price); el('status').textContent = `${o.side} ${o.type} order -> ${fmt(o.price)}`; saveState(); }
         }
       });
       // Click the cancel box on a line: cancel that order, or close the position.
       chart.subscribeClick((id) => {
-        if (id === 'position::close') { clearPosition(); el('status').textContent = 'position closed'; return; }
+        if (id === 'position::close') { clearPosition(); saveState(); el('status').textContent = 'position closed'; return; }
         if (id.endsWith('::close')) cancelOrder(id.slice(0, -'::close'.length));
       });
       attachOrderLines();
       updatePositionLine(); // redraw the position line on the rebuilt chart
-      if (bracket) { attachBracketLines(); updateBracket(); }
+      if (bracket) {
+        el('bracket').hidden = false;
+        el('bk-entry').querySelector('[data-act="place"]').className = bracket.side === 'BUY' ? 'bk-buy' : 'bk-sell';
+        attachBracketLines(); updateBracket();
+      }
 
       // OHLC legend tracks the crosshair. The position P&L does NOT — it marks to
       // the LTP (the latest close here; with a live feed, update it on each tick).
@@ -496,7 +526,8 @@
         currentBars = bars;
         idxByTime.clear();
         bars.forEach((b, i) => idxByTime.set(b.time, i));
-        removeBracket(); removeAllOrders(); clearPosition(); // new symbol → flat slate
+        removeBracket(); removeAllOrders(); clearPosition(); // detach old chart's lines + reset vars
+        restoreState(req.symbol);                            // repopulate this symbol's saved orders/bracket/position
         render();
         status.textContent = `${req.symbol} · ${bars.length} bars · ${req.interval}/${req.period}`;
       } catch (e) {
@@ -506,8 +537,8 @@
 
     el('buy').addEventListener('click', () => makeBracket('BUY'));
     el('sell').addEventListener('click', () => makeBracket('SELL'));
-    el('cancel').addEventListener('click', () => { removeBracket(); removeAllOrders(); clearPosition(); el('status').textContent = 'cancelled / flat'; });
-    el('qty').addEventListener('change', () => { if (bracket) { bracket.qty = Math.max(1, Number(el('qty').value) || 1); updateBracket(); } });
+    el('cancel').addEventListener('click', () => { removeBracket(); removeAllOrders(); clearPosition(); saveState(); el('status').textContent = 'cancelled / flat'; });
+    el('qty').addEventListener('change', () => { if (bracket) { bracket.qty = Math.max(1, Number(el('qty').value) || 1); updateBracket(); saveState(); } });
 
     // ── NinjaTrader-style right-click order entry ───────────────────────────
     // Right-click the chart to open a menu and place an order at the cursor price.
@@ -540,7 +571,7 @@
       e.stopPropagation();
       hideCtx();
       if (btn.getAttribute('data-act') === 'cancelall') {
-        removeAllOrders(); removeBracket(); clearPosition(); el('status').textContent = 'all orders cancelled / flat'; return;
+        removeAllOrders(); removeBracket(); clearPosition(); saveState(); el('status').textContent = 'all orders cancelled / flat'; return;
       }
       placeOrder(btn.getAttribute('data-side'), btn.getAttribute('data-type'), ctxPrice);
     });
