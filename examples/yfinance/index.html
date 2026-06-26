@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenAlgo Charts — yfinance historical demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0e12; color: #c7ccd8; font: 13px/1.4 system-ui, sans-serif; }
+    .bar { padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input, select, button { background: #1c2030; color: #c7ccd8; border: 1px solid #2a3046; border-radius: 6px; padding: 4px 8px; }
+    input { width: 90px; }
+    button { cursor: pointer; }
+    #chart { position: absolute; top: 46px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
+    #status { margin-left: auto; opacity: .75; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <strong>yfinance</strong>
+    <input id="symbol" value="AAPL" title="Yahoo Finance symbol (AAPL, MSFT, RELIANCE.NS, ^NSEI, BTC-USD)" />
+    <select id="interval" title="bar interval">
+      <option>1d</option><option>1h</option><option>30m</option><option>15m</option><option>5m</option><option>1wk</option>
+    </select>
+    <select id="period" title="history range">
+      <option>1mo</option><option selected>1y</option><option>6mo</option><option>5y</option><option>max</option>
+    </select>
+    <button id="load">Load</button>
+    <span id="status"></span>
+  </div>
+  <div id="chart"></div>
+
+  <script type="module">
+    import { createChart } from '/dist/openalgo-charts.mjs';
+
+    // A broker-agnostic DataFeed for yfinance: getBars hits this demo's /api/history,
+    // which already returns the chart's Bar shape (time in UTC seconds).
+    class YFinanceDataFeed {
+      async getBars(req) {
+        const url = `/api/history?symbol=${encodeURIComponent(req.symbol)}&interval=${req.interval}&period=${req.period}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (!res.ok || json.error) throw new Error(json.error || `history failed (${res.status})`);
+        return json; // already Bar[]
+      }
+    }
+
+    const feed = new YFinanceDataFeed();
+    let chart, price, volume;
+
+    function build() {
+      if (chart) chart.destroy();
+      document.getElementById('chart').innerHTML = '';
+      chart = createChart(document.getElementById('chart'), { priceAxisWidth: 72, crosshairMode: 'magnet' });
+      price = chart.addSeries('candlestick');
+      volume = chart.addSeries('histogram', { paneIndex: 1, style: { color: '#33415e' } });
+    }
+
+    async function load() {
+      const status = document.getElementById('status');
+      const req = {
+        symbol: document.getElementById('symbol').value.trim(),
+        interval: document.getElementById('interval').value,
+        period: document.getElementById('period').value,
+      };
+      status.textContent = `loading ${req.symbol} ${req.interval}…`;
+      try {
+        const bars = await feed.getBars(req);
+        build();
+        price.setData(bars);
+        volume.setData(bars.map((b) => ({ time: b.time, open: 0, high: b.volume, low: 0, close: b.volume })));
+        status.textContent = `${req.symbol} · ${bars.length} bars · ${req.interval}/${req.period}`;
+      } catch (e) {
+        status.textContent = 'error: ' + e.message;
+      }
+    }
+
+    document.getElementById('load').addEventListener('click', load);
+    document.getElementById('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+    load();
+    window.__chart = () => chart;
+  </script>
+</body>
+</html>
