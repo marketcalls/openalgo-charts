@@ -11,6 +11,7 @@ import type { SeriesRecord } from '../model/series';
 import { computeGridLines, drawGrid, type GridStyle } from '../render/grid';
 import { drawCandles, type CandleDrawItem } from '../render/candles';
 import { drawPriceAxis, drawTimeAxis, type AxisStyle, DEFAULT_AXIS_STYLE, type PlotLayout } from '../render/axis';
+import { drawCrosshair } from '../render/crosshair';
 
 export interface PaneTheme {
   background: string;
@@ -130,8 +131,16 @@ export class Pane {
     }
   }
 
-  /** Top (overlay) canvas: crosshair/hover land here in Phase 3. */
-  public paintTop(): void {
+  /** Top (overlay) canvas: crosshair/hover. Cheap — only this repaints on cursor moves. */
+  public paintTop(crosshair: { x: number; y: number } | null, ctx: PaneRenderContext): void {
     this.top.clearBitmap();
+    if (crosshair === null) return;
+    const layout = this._layout(ctx);
+    drawCrosshair(this.top.ctx, crosshair.x, crosshair.y, layout.plotWidth, layout.plotHeight, ctx.dpr);
+  }
+
+  /** Price at a media-px y on this pane (for crosshair magnet). */
+  public yToPrice(y: number): number {
+    return this.priceScale.yToPrice(y);
   }
 }

@@ -92,9 +92,28 @@ export class TimeScale {
     return { from, to };
   }
 
-  /** Pan by a pixel delta (positive dx scrolls toward older bars). */
+  /**
+   * Pan by a pixel delta. Positive `dx` drags chart content to the right
+   * (revealing older bars), matching a natural left-button drag.
+   */
   public scrollByPixels(dx: number): void {
-    this._rightOffset += dx / this._barSpacing;
+    this._rightOffset -= dx / this._barSpacing;
+  }
+
+  /**
+   * Zoom around an anchor x (the cursor): change bar spacing by `factor`
+   * while keeping whatever logical index sits under `focusX` pinned there.
+   * `factor` > 1 zooms in (wider bars).
+   */
+  public zoomAtX(focusX: number, factor: number): void {
+    const focusIndex = this.xToIndex(focusX);
+    const before = this._barSpacing;
+    this.setBarSpacing(before * factor);
+    if (this._barSpacing === before) return; // clamped — nothing moved
+    // Re-anchor: indexToX(focusIndex) must still equal focusX.
+    // width - (rightEdge - focusIndex) * bs = focusX
+    const rightEdge = focusIndex + (this._width - focusX) / this._barSpacing;
+    this._rightOffset = rightEdge - this._baseIndex;
   }
 
   /** Choose bar spacing so `barCount` bars fit the width, anchored at the right edge. */

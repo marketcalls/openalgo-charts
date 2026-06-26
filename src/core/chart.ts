@@ -12,6 +12,8 @@ import { DataLayer } from '../model/data-layer';
 import { createCandlestickRecord, type SeriesApi, type SeriesType } from '../model/series';
 import type { CandleStyle } from '../render/candles';
 import type { Bar } from '../model/bar';
+import { KineticAnimation } from '../input/kinetic';
+import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
 
 export interface ChartOptions {
   document?: Document;
@@ -20,6 +22,10 @@ export interface ChartOptions {
   theme?: PaneTheme;
   priceAxisWidth?: number;
   timeAxisHeight?: number;
+  /** Crosshair behaviour: 'normal' (free) or 'magnet' (snap to O/H/L/C). */
+  crosshairMode?: CrosshairMode;
+  /** Time source for kinetic animation (defaults to performance.now). */
+  now?: () => number;
 }
 
 function defaultPixelRatio(): number {
@@ -43,6 +49,22 @@ export class Chart {
   private _height = 0;
   private _hasFitContent = false;
 
+  // interaction state
+  private readonly _crosshairMode: CrosshairMode;
+  private readonly _now: () => number;
+  private _cursorPane: number | null = null;
+  private _cursor: { x: number; y: number } | null = null;
+  private _dragging = false;
+  private _dragStartX = 0;
+  private _dragStartOffset = 0;
+  private _lastDragX = 0;
+  private _lastDragT = 0;
+  private _dragVelocity = 0;
+  private _kineticHandle: number | null = null;
+  private readonly _firstDataId: { value: number | null } = { value: null };
+  private _historyLoader: (() => void) | null = null;
+  private _loadingHistory = false;
+
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._container = container;
     this._doc = options.document ?? container.ownerDocument;
@@ -50,6 +72,8 @@ export class Chart {
     this._theme = options.theme ?? DEFAULT_PANE_THEME;
     this._priceAxisWidth = options.priceAxisWidth ?? 56;
     this._timeAxisHeight = options.timeAxisHeight ?? 22;
+    this._crosshairMode = options.crosshairMode ?? 'magnet';
+    this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
 
     container.style.position = container.style.position || 'relative';
     container.style.display = 'flex';
@@ -61,7 +85,18 @@ export class Chart {
 
     this._addPane();
     this._observeSize();
+    this._attachInput();
     this.applySize(container.clientWidth, container.clientHeight);
+  }
+
+  /** Register a callback fired when the user pans near the left (oldest) edge. */
+  public setHistoryLoader(loader: () => void): void {
+    this._historyLoader = loader;
+  }
+
+  /** Call after a history-paging load resolves to re-enable the trigger. */
+  public historyLoadComplete(): void {
+    this._loadingHistory = false;
   }
 
   public get dataLayer(): DataLayer {
@@ -78,11 +113,13 @@ export class Chart {
       throw new Error(`openalgo-charts: series type "${type}" arrives in a later phase`);
     }
     const dataId = this._dataLayer.createSeries();
+    if (this._firstDataId.value === null) this._firstDataId.value = dataId;
     const record = createCandlestickRecord(dataId, style);
     // Phase 2: all series live on the first (price) pane.
     this._panes[0].addSeries(record);
     return {
       setData: (bars: readonly Bar[]): void => this._setData(dataId, bars),
+      prependData: (bars: readonly Bar[]): void => this._prependData(dataId, bars),
     };
   }
 
@@ -94,6 +131,15 @@ export class Chart {
       this._timeScale.fitContent(this._dataLayer.length);
       this._hasFitContent = true;
     }
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
+  /** History paging: merge older bars, preserving the viewport (§4.2). */
+  private _prependData(dataId: number, bars: readonly Bar[]): void {
+    this._dataLayer.addBars(dataId, bars);
+    // baseIndex shifts up by the inserted count; updating it keeps the same
+    // bars on screen because (rightEdge − index) is invariant.
+    this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
@@ -159,14 +205,166 @@ export class Chart {
       const ctx = this._renderContext(isBottom);
       if (level >= InvalidationLevel.Full || perPane?.autoScale) pane.autoscale(ctx);
       if (level >= InvalidationLevel.Light) pane.paintBase(ctx);
-      if (level >= InvalidationLevel.Cursor) pane.paintTop();
+      if (level >= InvalidationLevel.Cursor) {
+        const cross = this._cursorPane === i && this._cursor !== null ? this._cursor : null;
+        pane.paintTop(cross, ctx);
+      }
+    }
+  }
+
+  // ── input handling ──────────────────────────────────────────────────────
+
+  private _attachInput(): void {
+    if (typeof window === 'undefined') return;
+    const el = this._container;
+    el.addEventListener('pointerdown', this._onPointerDown);
+    el.addEventListener('pointermove', this._onPointerMove);
+    el.addEventListener('pointerup', this._onPointerUp);
+    el.addEventListener('pointerleave', this._onPointerLeave);
+    el.addEventListener('wheel', this._onWheel, { passive: false });
+    el.addEventListener('dblclick', this._onDblClick);
+  }
+
+  private _localPoint(e: { clientX: number; clientY: number }): { x: number; y: number; pane: number; localY: number } {
+    const rect = this._container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const paneHeight = this._height / Math.max(1, this._panes.length);
+    const pane = Math.min(this._panes.length - 1, Math.max(0, Math.floor(y / paneHeight)));
+    return { x, y, pane, localY: y - pane * paneHeight };
+  }
+
+  private readonly _onPointerDown = (e: PointerEvent): void => {
+    this._stopKinetic();
+    this._dragging = true;
+    const p = this._localPoint(e);
+    this._dragStartX = p.x;
+    this._dragStartOffset = this._timeScale.rightOffset;
+    this._lastDragX = p.x;
+    this._lastDragT = this._now();
+    this._dragVelocity = 0;
+    this._container.setPointerCapture?.(e.pointerId);
+  };
+
+  private readonly _onPointerMove = (e: PointerEvent): void => {
+    const p = this._localPoint(e);
+    if (this._dragging) {
+      const dx = p.x - this._dragStartX;
+      this._timeScale.setRightOffset(this._dragStartOffset - dx / this._timeScale.barSpacing);
+      const t = this._now();
+      const dt = t - this._lastDragT;
+      if (dt > 0) this._dragVelocity = (p.x - this._lastDragX) / dt;
+      this._lastDragX = p.x;
+      this._lastDragT = t;
+      this._maybeLoadHistory();
+      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      return;
+    }
+    this._updateCursor(p.pane, p.x, p.localY);
+  };
+
+  private readonly _onPointerUp = (e: PointerEvent): void => {
+    this._dragging = false;
+    this._container.releasePointerCapture?.(e.pointerId);
+    if (KineticAnimation.shouldAnimate(this._dragVelocity)) this._startKinetic(this._dragVelocity);
+  };
+
+  private readonly _onPointerLeave = (): void => {
+    if (this._cursor !== null) {
+      const pane = this._cursorPane;
+      this._cursor = null;
+      this._cursorPane = null;
+      if (pane !== null) this.invalidate((m) => m.invalidatePane(pane, { level: InvalidationLevel.Cursor, autoScale: false }));
+    }
+  };
+
+  private readonly _onWheel = (e: WheelEvent): void => {
+    e.preventDefault();
+    const p = this._localPoint(e);
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    this._timeScale.zoomAtX(p.x, factor);
+    this._maybeLoadHistory();
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  };
+
+  private readonly _onDblClick = (): void => {
+    if (this._dataLayer.length > 0) this._timeScale.fitContent(this._dataLayer.length);
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  };
+
+  private _updateCursor(paneIndex: number, x: number, localY: number): void {
+    const plotWidth = Math.max(0, this._width - this._priceAxisWidth);
+    if (x > plotWidth) {
+      this._onPointerLeave();
+      return;
+    }
+    const pane = this._panes[paneIndex];
+    let y = localY;
+    if (this._crosshairMode === 'magnet' && this._firstDataId.value !== null) {
+      const index = Math.round(this._timeScale.xToIndex(x));
+      const bars = this._dataLayer.visibleBars(this._firstDataId.value, index, index);
+      if (bars.length > 0) {
+        const snapped = magnetSnapPrice(pane.yToPrice(localY), bars[0].bar);
+        y = pane.priceScale.priceToY(snapped);
+      }
+    }
+    this._cursorPane = paneIndex;
+    this._cursor = { x, y };
+    this.invalidate((m) => m.invalidatePane(paneIndex, { level: InvalidationLevel.Cursor, autoScale: false }));
+  }
+
+  private _maybeLoadHistory(): void {
+    if (this._historyLoader === null || this._loadingHistory) return;
+    const range = this._timeScale.visibleRange();
+    if (range.from < 10) {
+      this._loadingHistory = true;
+      this._historyLoader();
+    }
+  }
+
+  private _startKinetic(velocity: number): void {
+    const anim = new KineticAnimation(velocity);
+    if (anim.durationMs <= 0) return;
+    const start = this._now();
+    let lastDist = 0;
+    const step = (): void => {
+      const elapsed = this._now() - start;
+      const dist = anim.distanceAt(elapsed);
+      const delta = dist - lastDist;
+      lastDist = dist;
+      this._timeScale.setRightOffset(this._timeScale.rightOffset - delta / this._timeScale.barSpacing);
+      this._maybeLoadHistory();
+      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      if (!anim.finished(elapsed)) {
+        this._kineticHandle = requestAnimationFrame(step);
+      } else {
+        this._kineticHandle = null;
+      }
+    };
+    this._kineticHandle = requestAnimationFrame(step);
+  }
+
+  private _stopKinetic(): void {
+    if (this._kineticHandle !== null) {
+      cancelAnimationFrame(this._kineticHandle);
+      this._kineticHandle = null;
     }
   }
 
   public destroy(): void {
     this._loop.stop();
+    this._stopKinetic();
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;
+    if (typeof window !== 'undefined') {
+      const el = this._container;
+      el.removeEventListener('pointerdown', this._onPointerDown);
+      el.removeEventListener('pointermove', this._onPointerMove);
+      el.removeEventListener('pointerup', this._onPointerUp);
+      el.removeEventListener('pointerleave', this._onPointerLeave);
+      el.removeEventListener('wheel', this._onWheel);
+      el.removeEventListener('dblclick', this._onDblClick);
+    }
     for (const pane of this._panes) pane.element.remove();
     this._panes.length = 0;
   }

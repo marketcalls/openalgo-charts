@@ -20,6 +20,8 @@ export interface SeriesRecord {
 export interface SeriesApi {
   /** Bulk-load (replace) this series' data. */
   setData(bars: readonly Bar[]): void;
+  /** Merge older bars at the front (history paging); preserves the viewport. */
+  prependData(bars: readonly Bar[]): void;
 }
 
 export function createCandlestickRecord(dataId: SeriesId, style?: Partial<CandleStyle>): SeriesRecord {

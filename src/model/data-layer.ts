@@ -44,6 +44,26 @@ export class DataLayer {
     this._rebuild();
   }
 
+  /**
+   * Upsert bars into a series by time (used for history paging / backfill /
+   * out-of-order corrections — ARCHITECTURE.md §4.2). Existing times are
+   * replaced; new times are inserted; the result stays time-sorted.
+   *
+   * Prepending older bars shifts every existing logical index up by the
+   * inserted count — callers preserve the viewport by re-reading `baseIndex`
+   * (the invariant `rightEdge − index` is unchanged, so visible bars don't move).
+   */
+  public addBars(id: SeriesId, bars: readonly Bar[]): void {
+    const entry = this._series.get(id);
+    if (entry === undefined) throw new Error(`openalgo-charts: unknown series ${id}`);
+    if (bars.length === 0) return;
+    const byTime = new Map<number, Bar>();
+    for (const b of entry.bars) byTime.set(b.time, b);
+    for (const b of bars) byTime.set(b.time, b);
+    entry.bars = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+    this._rebuild();
+  }
+
   /** Number of logical indices (distinct time points across all series). */
   public get length(): number {
     return this._sortedTimes.length;
