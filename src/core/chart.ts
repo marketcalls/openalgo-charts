@@ -224,13 +224,14 @@ export class Chart {
     };
   }
 
-  /** Apply one live bar; auto-scroll only when the latest bar is at the right edge. */
+  /** Apply one live bar; auto-scroll only on a genuine right-edge append. */
   private _updateBar(dataId: number, bar: Bar): void {
     const wasAtRight = this._timeScale.rightOffset >= 0;
-    const added = this._dataLayer.update(dataId, bar);
+    const kind = this._dataLayer.update(dataId, bar);
     this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
-    if (added && !wasAtRight) {
-      // viewing history: compensate so existing bars don't drift
+    // Only a real append advances the view; late/historical inserts must not
+    // be treated as a new right-edge bar (would wrongly auto-scroll / shift).
+    if (kind === 'append' && !wasAtRight) {
       this._timeScale.setRightOffset(this._timeScale.rightOffset - 1);
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));

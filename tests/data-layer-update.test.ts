@@ -9,8 +9,8 @@ describe('DataLayer.update (live hot path)', () => {
     const dl = new DataLayer();
     const id = dl.createSeries();
     dl.setSeriesData(id, [bar(100, 1), bar(200, 2)]);
-    const grew = dl.update(id, { time: 200, open: 2, high: 5, low: 2, close: 4 });
-    expect(grew).toBe(false);
+    const kind = dl.update(id, { time: 200, open: 2, high: 5, low: 2, close: 4 });
+    expect(kind).toBe('replace');
     expect(dl.length).toBe(2);
     const last = dl.indexedBars(id)[1].bar;
     expect(last).toMatchObject({ high: 5, close: 4 });
@@ -20,8 +20,8 @@ describe('DataLayer.update (live hot path)', () => {
     const dl = new DataLayer();
     const id = dl.createSeries();
     dl.setSeriesData(id, [bar(100, 1), bar(200, 2)]);
-    const grew = dl.update(id, bar(300, 3));
-    expect(grew).toBe(true);
+    const kind = dl.update(id, bar(300, 3));
+    expect(kind).toBe('append');
     expect(dl.length).toBe(3);
     expect(dl.baseIndex).toBe(2);
     expect(dl.timeToIndex(300)).toBe(2);

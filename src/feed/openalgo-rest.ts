@@ -9,7 +9,7 @@
  */
 import type { Bar } from '../model/bar';
 import type { BarsRequest, DataFeed, UnsubscribeFn } from './types';
-import { epochMsToUtcSeconds, istStringToUtcSeconds } from './time';
+import { epochMsToUtcSeconds, istStringToUtcSeconds, utcSecondsToIstDateString } from './time';
 
 export interface OpenAlgoConfig {
   baseUrl: string;
@@ -78,6 +78,11 @@ export class OpenAlgoDataFeed implements DataFeed {
   }
 
   public async getBars(req: BarsRequest): Promise<Bar[]> {
+    // OpenAlgo /api/v1/history requires start_date/end_date as IST YYYY-MM-DD
+    // (mandatory). Convert the internal UTC-seconds range to IST date strings.
+    if (req.from === undefined || req.to === undefined) {
+      throw new Error('openalgo-charts: getBars requires `from` and `to` (UTC seconds) — OpenAlgo history needs a date range');
+    }
     const res = await this._fetch(`${this._config.baseUrl}/api/v1/history`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -86,8 +91,8 @@ export class OpenAlgoDataFeed implements DataFeed {
         symbol: req.symbol,
         exchange: req.exchange,
         interval: req.interval,
-        start_date: req.from,
-        end_date: req.to,
+        start_date: utcSecondsToIstDateString(req.from),
+        end_date: utcSecondsToIstDateString(req.to),
       }),
     });
     if (!res.ok) throw new Error(`openalgo-charts: history request failed (${res.status})`);

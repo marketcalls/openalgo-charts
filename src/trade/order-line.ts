@@ -29,6 +29,7 @@ export class WorkingOrderLine implements IPrimitive {
 
   public setLtp(ltp: number): void {
     this._ltp = ltp;
+    this._host?.requestUpdate(); // refresh the distance-to-LTP label
   }
 
   public autoscaleInfo(): { min: number; max: number } {

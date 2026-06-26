@@ -4,11 +4,18 @@ A from-scratch, dependency-free HTML5-canvas charting engine for OpenAlgo:
 professional-grade interactive financial-chart rendering plus advanced on-chart
 trading and trade management. Target: **< 50 KB Brotli** for the full package.
 
-> Status: **all 12 build phases complete** — standard chart types, transforms,
-> the trade terminal, depth ladder, and profiles, with 154 unit tests. The full
-> package measures **~22 KB Brotli**. See [`ARCHITECTURE.md`](./ARCHITECTURE.md)
-> for the design, [`docs/getting-started.md`](./docs/getting-started.md) to begin,
-> and [`examples/index.html`](./examples/index.html) for runnable demos.
+> Status: **pre-release (0.1.0)** — all 12 build phases of the engine are
+> implemented (standard chart types, transforms, trade terminal, depth ladder,
+> profiles) with 170+ unit tests, full package **~24 KB Brotli**. See
+> [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`docs/getting-started.md`](./docs/getting-started.md),
+> and [`examples/index.html`](./examples/index.html).
+>
+> **Known limitations (not yet production-complete):** the OpenAlgo WS/trade
+> adapters ship but their exact message/endpoint schemas must be verified against
+> your running OpenAlgo build; there is **no real-browser/pixel test suite yet**
+> (logic is covered by a recording-canvas harness); multi-touch pinch, separate
+> axis-widget canvases, and overlay/indexed-to-100 price scales are not
+> implemented. See [`END_TO_END_AUDIT.md`](./END_TO_END_AUDIT.md) for the full list.
 
 ## What's built
 

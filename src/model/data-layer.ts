@@ -65,13 +65,13 @@ export class DataLayer {
   }
 
   /**
-   * Apply a single live bar (ARCHITECTURE.md §4.2 hot path).
-   * - `time === lastTime` → mutate the last bar in place (intra-bar tick)
-   * - `time > lastTime`   → append a new bar (advances baseIndex)
-   * - `time < lastTime`   → out-of-order upsert by time
-   * Returns true if a new time point was added (the index space grew).
+   * Apply a single live bar (ARCHITECTURE.md §4.2 hot path). Returns the kind of
+   * change so the chart auto-scrolls only on a genuine right-edge append:
+   * - `'append'`  → newer than the last bar (advances baseIndex)
+   * - `'replace'` → same time as the last bar (intra-bar tick) or an existing time
+   * - `'insert'`  → an older time inserted into history (late / out-of-order)
    */
-  public update(id: SeriesId, bar: Bar): boolean {
+  public update(id: SeriesId, bar: Bar): 'append' | 'replace' | 'insert' {
     const entry = this._series.get(id);
     if (entry === undefined) throw new Error(`openalgo-charts: unknown series ${id}`);
     const bars = entry.bars;
@@ -79,20 +79,20 @@ export class DataLayer {
     if (last === undefined || bar.time > last.time) {
       bars.push(bar);
       this._appendTime(bar.time);
-      return true;
+      return 'append';
     }
     if (bar.time === last.time) {
       bars[bars.length - 1] = bar; // mutate last
-      return false;
+      return 'replace';
     }
-    // out-of-order: upsert by time, keep sorted
+    // older than the last bar: replace if the time exists, else insert into history
     const i = bars.findIndex((b) => b.time === bar.time);
     if (i >= 0) {
       bars[i] = bar;
-      return false;
+      return 'replace';
     }
     this.addBars(id, [bar]);
-    return this._indexByTime.has(bar.time);
+    return 'insert';
   }
 
   private _appendTime(time: number): void {

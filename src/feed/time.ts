@@ -69,6 +69,12 @@ export function formatIstTime(utcSeconds: number): string {
   return `${pad2(p.hour)}:${pad2(p.minute)}`;
 }
 
+/** Format UTC seconds as an IST `YYYY-MM-DD` date (for OpenAlgo history requests). */
+export function utcSecondsToIstDateString(utcSeconds: number): string {
+  const p = utcSecondsToIstParts(utcSeconds);
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** Format UTC seconds as an IST `DD Mon` date label. */

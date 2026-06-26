@@ -53,17 +53,26 @@ describe('OpenAlgoDataFeed.getBars (offline, injected fetch)', () => {
     }) as unknown as typeof fetch;
 
     const feed = new OpenAlgoDataFeed({ baseUrl: 'http://localhost:5000', apiKey: 'k', fetchImpl: fakeFetch });
-    const bars = await feed.getBars({ symbol: 'RELIANCE', exchange: 'NSE', interval: '1m' });
+    // 2024-01-15 09:15 IST and 2024-01-20 IST (as UTC seconds)
+    const from = Date.UTC(2024, 0, 15, 3, 45) / 1000;
+    const to = Date.UTC(2024, 0, 20, 3, 45) / 1000;
+    const bars = await feed.getBars({ symbol: 'RELIANCE', exchange: 'NSE', interval: '1m', from, to });
 
     expect(calledUrl).toBe('http://localhost:5000/api/v1/history');
-    expect(calledBody).toMatchObject({ apikey: 'k', symbol: 'RELIANCE', exchange: 'NSE', interval: '1m' });
+    // dates must be IST YYYY-MM-DD strings, not raw seconds
+    expect(calledBody).toMatchObject({ apikey: 'k', symbol: 'RELIANCE', exchange: 'NSE', interval: '1m', start_date: '2024-01-15', end_date: '2024-01-20' });
     expect(bars).toHaveLength(1);
     expect(bars[0]).toMatchObject({ time: 1_700_000_000, close: 1.5, volume: 5 });
+  });
+
+  it('requires a from/to date range', async () => {
+    const feed = new OpenAlgoDataFeed({ baseUrl: 'http://x', apiKey: 'k', fetchImpl: (async () => ({}) as Response) as unknown as typeof fetch });
+    await expect(feed.getBars({ symbol: 'X', exchange: 'NSE', interval: '1m' })).rejects.toThrow();
   });
 
   it('throws on a non-ok response', async () => {
     const fakeFetch = (async () => ({ ok: false, status: 500 } as Response)) as unknown as typeof fetch;
     const feed = new OpenAlgoDataFeed({ baseUrl: 'http://x', apiKey: 'k', fetchImpl: fakeFetch });
-    await expect(feed.getBars({ symbol: 'X', exchange: 'NSE', interval: '1m' })).rejects.toThrow();
+    await expect(feed.getBars({ symbol: 'X', exchange: 'NSE', interval: '1m', from: 1_700_000_000, to: 1_700_500_000 })).rejects.toThrow();
   });
 });

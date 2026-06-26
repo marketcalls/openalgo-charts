@@ -39,6 +39,8 @@ export interface OrderEngineOptions {
   minModifyIntervalMs?: number;
   now?: () => number;
   idGen?: () => string;
+  /** Called when a drag-modify price fails validation (so the UI can snap back). */
+  onValidationError?: (reason: string) => void;
 }
 
 export interface PlaceResult {
@@ -65,6 +67,7 @@ export class OrderEngine {
   private readonly _minModifyMs: number;
   private readonly _now: () => number;
   private readonly _idGen: () => string;
+  private readonly _onValidationError?: (reason: string) => void;
 
   private readonly _orders = new Map<string, Tracked>();
   private readonly _byBroker = new Map<string, string>();
@@ -82,6 +85,7 @@ export class OrderEngine {
     this._minModifyMs = opts.minModifyIntervalMs ?? 150;
     this._now = opts.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
     this._idGen = opts.idGen ?? (() => `c${++this._counter}`);
+    this._onValidationError = opts.onValidationError;
   }
 
   public get mode(): TradeMode { return this._mode; }
@@ -121,6 +125,9 @@ export class OrderEngine {
       return { ok: true, clientId: token, state: tracked.state };
     } catch (err) {
       tracked.state = transition(tracked.state, 'reject');
+      // The broker never accepted it — release the token so the caller can retry
+      // the same idempotent request after a transient transport failure.
+      this._sentTokens.delete(token);
       return { ok: false, clientId: token, state: tracked.state, reason: String((err as Error).message ?? err) };
     }
   }
@@ -137,13 +144,20 @@ export class OrderEngine {
     if (a && b) { a.ocoPeer = clientIdB; b.ocoPeer = clientIdA; }
   }
 
-  /** Rate-limited modify (drag): coalesces to the latest, sends at most every minModifyMs. */
+  /**
+   * Rate-limited modify (drag): coalesces to the latest, sends at most every
+   * minModifyMs. An invalid price (tick/band/freeze) is NOT enqueued or sent —
+   * it surfaces via `onValidationError` so the UI can snap the line back.
+   */
   public requestModify(clientId: string, price: number): void {
     const o = this._orders.get(clientId);
     if (o === undefined || isTerminal(o.state)) return;
-    const snapped = validateOrder(price, o.req.qty, this._constraints);
-    const target = snapped.ok ? (snapped.price ?? price) : price;
-    this._pendingModify.set(clientId, { price: target });
+    const v = validateOrder(price, o.req.qty, this._constraints);
+    if (!v.ok) {
+      this._onValidationError?.(v.reason ?? 'invalid modify price');
+      return; // do NOT send an out-of-band modify to the broker
+    }
+    this._pendingModify.set(clientId, { price: v.price ?? price });
     const last = this._lastModifyAt.get(clientId) ?? -Infinity;
     if (this._now() - last >= this._minModifyMs) void this._flushModify(clientId);
   }

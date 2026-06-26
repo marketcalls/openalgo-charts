@@ -79,19 +79,28 @@ const fromBase = (bar: Bar, s: SeriesStyle): { min: number; max: number } => {
   return { min: Math.min(base, bar.close), max: Math.max(base, bar.close) };
 };
 
-const registry = new Map<SeriesType, RendererEntry>();
+const registry = new Map<string, RendererEntry>();
 
-export function registerChartType(type: SeriesType, entry: RendererEntry): void {
+/** Series types that live in the lazy transform tier (registered on its import). */
+const TRANSFORM_TIER_TYPES: ReadonlySet<string> = new Set(['point-figure', 'kagi']);
+
+/** Register a chart type. `type` accepts a built-in `SeriesType` or any custom string. */
+export function registerChartType(type: SeriesType | (string & {}), entry: RendererEntry): void {
   registry.set(type, entry);
 }
 
-export function getChartType(type: SeriesType): RendererEntry {
+export function getChartType(type: SeriesType | (string & {})): RendererEntry {
   const e = registry.get(type);
-  if (e === undefined) throw new Error(`openalgo-charts: unknown series type "${type}"`);
+  if (e === undefined) {
+    if (TRANSFORM_TIER_TYPES.has(type)) {
+      throw new Error(`openalgo-charts: series type "${type}" needs the transform tier — import 'openalgo-charts/transform' first`);
+    }
+    throw new Error(`openalgo-charts: unknown series type "${type}"`);
+  }
   return e;
 }
 
-export function registeredChartTypes(): SeriesType[] {
+export function registeredChartTypes(): string[] {
   return Array.from(registry.keys());
 }
 

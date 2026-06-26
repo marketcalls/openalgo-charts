@@ -27,7 +27,7 @@
     const INTERVAL = 60;
     const chart = createChart(document.getElementById('chart'), { priceAxisWidth: 64, crosshairMode: 'magnet' });
     const price = chart.addSeries('candlestick');
-    const volume = chart.addSeries('histogram', { paneIndex: 1, histogramStyle: { color: '#33415e' } });
+    const volume = chart.addSeries('histogram', { paneIndex: 1, style: { color: '#33415e' } });
 
     // Seed with deterministic history.
     let t0 = 1_705_286_700;

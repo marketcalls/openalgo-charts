@@ -66,6 +66,7 @@ export {
   epochMsToUtcSeconds,
   istStringToUtcSeconds,
   utcSecondsToIstParts,
+  utcSecondsToIstDateString,
   formatIstTime,
   formatIstDate,
   isNewIstDay,
