@@ -27,6 +27,7 @@ export class RecordingContext {
   public moveTo(x: number, y: number): void { this.ops.push({ type: 'moveTo', args: [x, y] }); }
   public lineTo(x: number, y: number): void { this.ops.push({ type: 'lineTo', args: [x, y] }); }
   public arc(x: number, y: number, r: number): void { this.ops.push({ type: 'arc', args: [x, y, r] }); }
+  public ellipse(x: number, y: number, rx: number, ry: number): void { this.ops.push({ type: 'ellipse', args: [x, y, rx, ry] }); }
   public stroke(): void { this.ops.push({ type: 'stroke', args: [], strokeStyle: this.strokeStyle }); }
   public fill(): void { this.ops.push({ type: 'fill', args: [], fillStyle: this.fillStyle }); }
   public fillRect(x: number, y: number, w: number, h: number): void {

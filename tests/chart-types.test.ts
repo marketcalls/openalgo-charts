@@ -5,6 +5,7 @@ import { stepPoints, valuePoints } from '../src/render/line';
 import { barGeometry } from '../src/render/bars';
 import { makeCtx } from './helpers/fake-ctx';
 
+// Base-tier types (point-figure/kagi register only with the transform tier).
 const ALL: SeriesType[] = [
   'candlestick', 'hollow-candle', 'volume-candle', 'bar', 'high-low',
   'line', 'line-markers', 'step', 'area', 'hlc-area', 'baseline', 'column', 'histogram',
@@ -17,7 +18,7 @@ const items = (bars: Bar[]): DrawItem[] => bars.map((b, i) => ({ x: 10 + i * 10,
 const identityY = (v: number): number => 1000 - v; // higher value → smaller y
 
 describe('chart-type registry', () => {
-  it('registers all 13 Family-A + histogram types', () => {
+  it('registers all base-tier chart types', () => {
     const reg = registeredChartTypes();
     for (const t of ALL) expect(reg).toContain(t);
     expect(reg.length).toBe(ALL.length);

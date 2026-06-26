@@ -35,4 +35,12 @@ export interface SeriesStyle {
 
   // histogram / column family
   base?: number;
+
+  // point & figure / kagi family
+  /** Box size for stacking P&F X/O glyphs. */
+  boxSize?: number;
+  /** Kagi thick (yang) line color. */
+  thickColor?: string;
+  /** Kagi thin (yin) line color. */
+  thinColor?: string;
 }

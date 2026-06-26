@@ -44,6 +44,10 @@ export type { ChartEvent } from './primitives/event-markers';
 
 // indicators
 export { ema, emaSeries } from './indicators/ema';
+
+// Family-B transforms live in the lazy 'openalgo-charts/transform' entry point
+// (importing it also registers the 'point-figure' and 'kagi' renderers), so they
+// are intentionally NOT re-exported from the base bundle.
 export type { Bar, LinePoint, Whitespace, UTCSeconds, OriginalTime } from './model/bar';
 export { isWhitespace } from './model/bar';
 

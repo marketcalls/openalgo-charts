@@ -24,7 +24,9 @@ export type SeriesType =
   | 'hlc-area'
   | 'baseline'
   | 'column'
-  | 'histogram';
+  | 'histogram'
+  | 'point-figure'
+  | 'kagi';
 
 export interface DrawItem {
   x: number; // bar center, media px
@@ -180,3 +182,7 @@ registerChartType('histogram', {
   },
   extents: fromBase,
 });
+
+// NOTE: 'point-figure' and 'kagi' are registered by the transform tier
+// (src/transform/index.ts) so their renderers stay out of the base bundle.
+// They are valid SeriesType names but only resolve once that tier is loaded.
