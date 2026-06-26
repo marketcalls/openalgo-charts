@@ -31,6 +31,10 @@ export interface PaneRenderContext {
   conflationFactor: number;
   /** Active palette — drives chrome, series defaults, and trade colors. */
   theme: ChartTheme;
+  /** Draw the vertical (time) grid lines. */
+  showVertGrid: boolean;
+  /** Draw the horizontal (price) grid lines. */
+  showHorzGrid: boolean;
 }
 
 export class Pane {
@@ -165,9 +169,14 @@ export class Pane {
     g.fillStyle = ctx.theme.background;
     g.fillRect(0, 0, Math.round(this._width * dpr), Math.round(this._height * dpr));
 
-    // grid within the plot area
-    const lines = computeGridLines(layout.plotWidth, layout.plotHeight, { spacing: 60 });
-    drawGrid(g, lines, layout.plotWidth, layout.plotHeight, dpr, { color: ctx.theme.grid, lineWidth: 1 });
+    // grid within the plot area (vertical/horizontal independently toggleable)
+    if (ctx.showVertGrid || ctx.showHorzGrid) {
+      const lines = computeGridLines(layout.plotWidth, layout.plotHeight, { spacing: 60 });
+      drawGrid(g, {
+        verticals: ctx.showVertGrid ? lines.verticals : [],
+        horizontals: ctx.showHorzGrid ? lines.horizontals : [],
+      }, layout.plotWidth, layout.plotHeight, dpr, { color: ctx.theme.grid, lineWidth: 1 });
+    }
 
     // bottom-layer primitives (background zones) draw behind series
     const prc = this._primitiveContext(ctx);

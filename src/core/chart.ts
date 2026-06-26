@@ -29,7 +29,11 @@ export interface ChartOptions {
   theme?: ChartTheme;
   priceAxisWidth?: number;
   timeAxisHeight?: number;
-  /** Crosshair behaviour: 'normal' (free) or 'magnet' (snap to O/H/L/C). */
+  /**
+   * Crosshair behaviour. 'normal' (default) — the cross follows the pointer
+   * exactly. 'magnet' — the horizontal line snaps to the nearest O/H/L/C of the
+   * bar under the cursor (price pane only).
+   */
   crosshairMode?: CrosshairMode;
   /** Time source for kinetic animation (defaults to performance.now). */
   now?: () => number;
@@ -37,6 +41,8 @@ export interface ChartOptions {
   conflate?: boolean;
   /** Conflation aggressiveness (default 1). */
   conflationFactor?: number;
+  /** Grid line visibility. Both default to true. */
+  grid?: { vertLines?: boolean; horzLines?: boolean };
 }
 
 export interface AddSeriesOptions {
@@ -91,6 +97,8 @@ export class Chart {
   private readonly _now: () => number;
   private readonly _conflate: boolean;
   private readonly _conflationFactor: number;
+  private _gridVert = true;
+  private _gridHorz = true;
   private _cursorPane: number | null = null;
   private _cursor: { x: number; y: number } | null = null;
   private _dragging = false;
@@ -101,6 +109,8 @@ export class Chart {
   private _dragVelocity = 0;
   private _kineticHandle: number | null = null;
   private readonly _firstDataId: { value: number | null } = { value: null };
+  /** Pane holding the primary price series (only this pane gets magnet snapping). */
+  private _firstPaneIndex = 0;
   private _historyLoader: (() => void) | null = null;
   private _loadingHistory = false;
   private _clickCb: ((externalId: string) => void) | null = null;
@@ -126,10 +136,12 @@ export class Chart {
     this._theme = options.theme ?? DEFAULT_THEME;
     this._priceAxisWidth = options.priceAxisWidth ?? 56;
     this._timeAxisHeight = options.timeAxisHeight ?? 22;
-    this._crosshairMode = options.crosshairMode ?? 'magnet';
+    this._crosshairMode = options.crosshairMode ?? 'normal';
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
+    this._gridVert = options.grid?.vertLines ?? true;
+    this._gridHorz = options.grid?.horzLines ?? true;
 
     // Respect a position set via CSS (absolute/relative/fixed); only force
     // 'relative' when the container is statically positioned. Reading
@@ -176,9 +188,10 @@ export class Chart {
     const dataId = this._dataLayer.createSeries();
     const paneIndex = options.paneIndex ?? 0;
     this._ensurePane(paneIndex);
-    // The first price-type series on pane 0 drives the magnet crosshair.
+    // The first price-type series drives the magnet crosshair + OHLC legend.
     if (this._firstDataId.value === null && getChartType(type).isPriceSeries) {
       this._firstDataId.value = dataId;
+      this._firstPaneIndex = paneIndex;
     }
     this._panes[paneIndex].addSeries(createSeriesRecord(dataId, type, options.style));
     return {
@@ -230,6 +243,45 @@ export class Chart {
   /** Public: attach any primitive (indicators, profiles, custom overlays) to a pane. */
   public addPrimitive(primitive: IPrimitive, paneIndex = 0): void {
     this._addPrimitive(paneIndex, primitive);
+  }
+
+  /**
+   * Toggle the vertical (time) and/or horizontal (price) grid lines at runtime.
+   * Omitted fields keep their current visibility. Repaints every pane.
+   */
+  public setGridOptions(opts: { vertLines?: boolean; horzLines?: boolean }): void {
+    if (opts.vertLines !== undefined) this._gridVert = opts.vertLines;
+    if (opts.horzLines !== undefined) this._gridHorz = opts.horzLines;
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
+  /** Current grid line visibility. */
+  public gridOptions(): { vertLines: boolean; horzLines: boolean } {
+    return { vertLines: this._gridVert, horzLines: this._gridHorz };
+  }
+
+  /**
+   * Flatten every pane's base + overlay canvas into one opaque canvas (device
+   * px). The chart renders as stacked layered canvases, so the browser's native
+   * right-click "Save image" only captures the layer under the pointer (usually
+   * the transparent crosshair overlay) — use this to export the full chart.
+   */
+  public takeScreenshot(): HTMLCanvasElement {
+    const dpr = this._pixelRatio();
+    const out = this._doc.createElement('canvas');
+    out.width = Math.max(1, Math.round(this._width * dpr));
+    out.height = Math.max(1, Math.round(this._height * dpr));
+    const g = out.getContext('2d');
+    if (g === null) return out;
+    g.fillStyle = this._theme.background;
+    g.fillRect(0, 0, out.width, out.height);
+    const layout = this._paneLayout();
+    for (let i = 0; i < this._panes.length; i++) {
+      const y = Math.round((layout[i]?.top ?? 0) * dpr);
+      g.drawImage(this._panes[i].base.element, 0, y);
+      g.drawImage(this._panes[i].top.element, 0, y);
+    }
+    return out;
   }
 
   private _addPrimitive(paneIndex: number, primitive: IPrimitive): void {
@@ -371,6 +423,8 @@ export class Chart {
       conflate: this._conflate,
       conflationFactor: this._conflationFactor,
       theme: this._theme,
+      showVertGrid: this._gridVert,
+      showHorzGrid: this._gridHorz,
     };
   }
 
@@ -586,7 +640,9 @@ export class Chart {
       const bars = this._dataLayer.visibleBars(this._firstDataId.value, index, index);
       if (bars.length > 0) {
         hoveredBar = bars[0].bar;
-        if (this._crosshairMode === 'magnet') {
+        // Magnet only snaps within the pane that holds the price series — never
+        // in the volume/indicator panes (their scale isn't a price scale).
+        if (this._crosshairMode === 'magnet' && paneIndex === this._firstPaneIndex) {
           const snapped = magnetSnapPrice(pane.yToPrice(localY), hoveredBar);
           y = pane.priceScale.priceToY(snapped);
         }

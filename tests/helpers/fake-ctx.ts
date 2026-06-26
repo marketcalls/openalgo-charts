@@ -48,6 +48,7 @@ export class RecordingContext {
   public setTransform(): void { this.ops.push({ type: 'setTransform', args: [] }); }
   public clearRect(x: number, y: number, w: number, h: number): void { this.ops.push({ type: 'clearRect', args: [x, y, w, h] }); }
   public scale(): void { this.ops.push({ type: 'scale', args: [] }); }
+  public drawImage(_img: unknown, x: number, y: number): void { this.ops.push({ type: 'drawImage', args: [x, y] }); }
 
   public count(type: string): number {
     return this.ops.filter((o) => o.type === type).length;

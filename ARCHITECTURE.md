@@ -412,7 +412,7 @@ Each renderer is a pure-ish function: `(ctx, drawData, scope) => void`. No inter
 - **candles.ts**: compute `barWidth = optimalBarWidth(barSpacing, dpr)` (odd/even parity matched to crosshair for symmetry — a subtle but important parity trick); draw body rect + high/low wick; up/down/doji colors; hollow option. Batches same-color bars to minimize `fillStyle` changes.
 - **line.ts**: walk-line algorithm — single `ctx.beginPath()` over the visible range, `lineTo` each point, one `stroke()`. Optional area fill with a cached vertical gradient. Step/curved/straight modes.
 - **histogram.ts**: volume bars in the volume pane; per-bar color (up/down). Base value configurable.
-- **crosshair.ts**: vertical + horizontal dashed lines on the overlay canvas; magnet mode snaps the horizontal line to the nearest OHLC value. Drives the axis labels.
+- **crosshair.ts**: vertical + horizontal dashed lines on the overlay canvas. Default 'normal' mode tracks the pointer exactly; opt-in 'magnet' mode snaps the horizontal line to the nearest OHLC value (price pane only). Drives the axis labels.
 - **grid.ts**: vertical lines at time ticks, horizontal at price ticks, drawn on the data canvas behind series.
 - **axis.ts**: price-axis labels (right), time-axis labels (bottom), the moving crosshair label box, and last-price label.
 

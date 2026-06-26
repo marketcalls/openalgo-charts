@@ -8,7 +8,9 @@
     html, body { margin: 0; height: 100%; background: #0d0e12; color: #c7ccd8; font: 13px/1.4 system-ui, sans-serif; }
     .bar { padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     input, select, button { background: #1c2030; color: #c7ccd8; border: 1px solid #2a3046; border-radius: 6px; padding: 4px 8px; }
-    input { width: 90px; }
+    input[type="text"] { width: 90px; }
+    input[type="checkbox"] { width: auto; }
+    label.chk { display: inline-flex; gap: 4px; align-items: center; user-select: none; opacity: .85; }
     button { cursor: pointer; }
     #chart { position: absolute; top: 46px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
     #status { margin-left: auto; opacity: .75; }
@@ -25,7 +27,7 @@
 <body>
   <div class="bar">
     <strong>yfinance</strong>
-    <input id="symbol" value="AAPL" title="Yahoo Finance symbol (AAPL, MSFT, RELIANCE.NS, ^NSEI, BTC-USD)" />
+    <input type="text" id="symbol" value="AAPL" title="Yahoo Finance symbol (AAPL, MSFT, RELIANCE.NS, ^NSEI, BTC-USD)" />
     <select id="interval" title="bar interval">
       <option>1d</option><option>1h</option><option>30m</option><option>15m</option><option>5m</option><option>1wk</option>
     </select>
@@ -45,7 +47,10 @@
       <option value="hlc-area">HLC Area</option>
       <option value="baseline">Baseline</option>
     </select>
+    <label class="chk"><input type="checkbox" id="vgrid" checked /> V Grid</label>
+    <label class="chk"><input type="checkbox" id="hgrid" checked /> H Grid</label>
     <button id="load">Load</button>
+    <button id="save" title="Save the full chart as a PNG (right-click only captures the overlay)">Save PNG</button>
     <span id="status"></span>
   </div>
   <div id="chart"></div>
@@ -117,7 +122,10 @@
     function render() {
       if (chart) chart.destroy();
       el('chart').innerHTML = '';
-      chart = createChart(el('chart'), { priceAxisWidth: 72, crosshairMode: 'magnet' });
+      chart = createChart(el('chart'), {
+        priceAxisWidth: 72, // free crosshair (follows pointer)
+        grid: { vertLines: el('vgrid').checked, horzLines: el('hgrid').checked },
+      });
 
       const type = el('ctype').value;
       const style = {};
@@ -155,8 +163,21 @@
 
     el('load').addEventListener('click', load);
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+    // Export the full chart (all layers composited) — native right-click "Save image"
+    // only grabs the canvas under the pointer (the transparent crosshair overlay).
+    el('save').addEventListener('click', () => {
+      if (!chart) return;
+      const a = document.createElement('a');
+      a.download = `${nameOf(req.symbol || 'chart')}_${(req.interval || '').toLowerCase()}.png`;
+      a.href = chart.takeScreenshot().toDataURL('image/png');
+      a.click();
+    });
     // switching chart type re-renders cached bars instantly (no network round-trip)
     el('ctype').addEventListener('change', () => { if (currentBars.length) render(); });
+    // toggle grid lines live (no rebuild needed)
+    const applyGrid = () => chart && chart.setGridOptions({ vertLines: el('vgrid').checked, horzLines: el('hgrid').checked });
+    el('vgrid').addEventListener('change', applyGrid);
+    el('hgrid').addEventListener('change', applyGrid);
     load();
   </script>
 </body>

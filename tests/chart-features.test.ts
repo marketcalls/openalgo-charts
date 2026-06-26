@@ -1,0 +1,102 @@
+import { describe, it, expect } from 'vitest';
+import { Chart } from '../src/core/chart';
+import { Pane, type PaneRenderContext } from '../src/core/pane';
+import { TimeScale } from '../src/scale/time-scale';
+import { DataLayer } from '../src/model/data-layer';
+import { createSeriesRecord } from '../src/model/series';
+import { darkTheme } from '../src/theme';
+import { fakeDocument } from './helpers/fake-dom';
+import { RecordingContext } from './helpers/fake-ctx';
+import type { Bar } from '../src/model/bar';
+
+const bar = (time: number, c: number): Bar => ({ time, open: c, high: c + 2, low: c - 2, close: c, volume: 100 });
+
+// A fake document whose canvases each keep their own recording context on `__rec`,
+// so a composited output canvas can be inspected after takeScreenshot().
+function recordingDoc(): Document {
+  const make = (tag: string): Record<string, unknown> => {
+    const el: Record<string, unknown> = {
+      tagName: tag.toUpperCase(), style: {}, children: [],
+      appendChild(c: unknown) { (el.children as unknown[]).push(c); return c; },
+      remove() {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+      addEventListener() {}, removeEventListener() {},
+    };
+    if (tag === 'canvas') {
+      el.width = 0; el.height = 0;
+      const rec = new RecordingContext();
+      el.__rec = rec;
+      el.getContext = () => rec as unknown as CanvasRenderingContext2D;
+    }
+    return el;
+  };
+  return { createElement: (t: string) => make(t) } as unknown as Document;
+}
+
+describe('takeScreenshot composites every layer', () => {
+  it('flattens all panes (base + overlay) into one device-px canvas', () => {
+    const doc = recordingDoc();
+    const container = doc.createElement('div') as unknown as Record<string, unknown>;
+    container.clientWidth = 800; container.clientHeight = 600;
+    const chart = new Chart(container as unknown as HTMLElement, {
+      document: doc, pixelRatio: () => 2, raf: { schedule: () => 0, cancel: () => {} },
+    });
+    chart.addSeries('candlestick').setData([bar(1000, 10), bar(1060, 11)]);
+    chart.addSeries('histogram', { paneIndex: 1 }).setData([{ time: 1000, open: 0, high: 5, low: 0, close: 5 }]);
+
+    const shot = chart.takeScreenshot() as unknown as { width: number; height: number; __rec: RecordingContext };
+    expect(shot.width).toBe(1600);  // 800 media px * dpr 2
+    expect(shot.height).toBe(1200); // 600 media px * dpr 2
+    // 2 panes × (base + top overlay) = 4 drawImage calls
+    expect(shot.__rec.count('drawImage')).toBe(4);
+  });
+});
+
+describe('grid line toggle', () => {
+  const dl = new DataLayer();
+  const id = dl.createSeries();
+  dl.setSeriesData(id, [bar(1000, 10), bar(1060, 11), bar(1120, 12)]);
+  const ts = new TimeScale({ barSpacing: 30 });
+  ts.setWidth(600);
+  ts.setBaseIndex(dl.baseIndex);
+
+  const context = (showVertGrid: boolean, showHorzGrid: boolean): PaneRenderContext => ({
+    timeScale: ts, dataLayer: dl, dpr: 1, priceAxisWidth: 56, timeAxisHeight: 22,
+    showTimeAxis: true, conflate: false, conflationFactor: 1, theme: darkTheme,
+    showVertGrid, showHorzGrid,
+  });
+
+  // moveTo count: every other element is identical between renders, so the delta
+  // is purely the grid lines that were (or weren't) drawn.
+  function moveTos(showVertGrid: boolean, showHorzGrid: boolean): number {
+    const pane = new Pane(fakeDocument());
+    pane.addSeries(createSeriesRecord(id, 'candlestick'));
+    pane.resize(600, 400, 1);
+    pane.paintBase(context(showVertGrid, showHorzGrid));
+    return (pane.base.ctx as unknown as RecordingContext).count('moveTo');
+  }
+
+  it('draws no grid lines when both are disabled, more when enabled', () => {
+    const off = moveTos(false, false);
+    const both = moveTos(true, true);
+    const vOnly = moveTos(true, false);
+    const hOnly = moveTos(false, true);
+    expect(both).toBeGreaterThan(off);
+    expect(vOnly).toBeGreaterThan(off);
+    expect(hOnly).toBeGreaterThan(off);
+    // vertical and horizontal lines add independently
+    expect(both).toBe(off + (vOnly - off) + (hOnly - off));
+  });
+
+  it('exposes runtime grid state via gridOptions()', () => {
+    const doc = recordingDoc();
+    const container = doc.createElement('div') as unknown as Record<string, unknown>;
+    container.clientWidth = 800; container.clientHeight = 600;
+    const chart = new Chart(container as unknown as HTMLElement, {
+      document: doc, raf: { schedule: () => 0, cancel: () => {} }, grid: { vertLines: false },
+    });
+    expect(chart.gridOptions()).toEqual({ vertLines: false, horzLines: true });
+    chart.setGridOptions({ horzLines: false });
+    expect(chart.gridOptions()).toEqual({ vertLines: false, horzLines: false });
+  });
+});
