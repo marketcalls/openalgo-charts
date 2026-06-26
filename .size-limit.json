@@ -2,25 +2,36 @@
   {
     "name": "Base engine (ESM, all standard chart types)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "30 KB",
+    "limit": "16 KB",
     "brotli": true
   },
   {
     "name": "Base + trade layer",
     "path": ["dist/openalgo-charts.mjs", "dist/openalgo-charts.trade.mjs"],
-    "limit": "50 KB",
+    "limit": "22 KB",
     "brotli": true
   },
   {
     "name": "Transform tier (Renko/Range/P&F/Kagi/Line-break/HA)",
     "path": "dist/openalgo-charts.transform.mjs",
-    "limit": "6 KB",
+    "limit": "5 KB",
     "brotli": true
   },
   {
     "name": "Profile tier (Volume Profile/TPO/Footprint/Orderflow)",
     "path": "dist/openalgo-charts.profile.mjs",
-    "limit": "8 KB",
+    "limit": "4 KB",
+    "brotli": true
+  },
+  {
+    "name": "Everything (all tiers, full package)",
+    "path": [
+      "dist/openalgo-charts.mjs",
+      "dist/openalgo-charts.trade.mjs",
+      "dist/openalgo-charts.transform.mjs",
+      "dist/openalgo-charts.profile.mjs"
+    ],
+    "limit": "50 KB",
     "brotli": true
   }
 ]

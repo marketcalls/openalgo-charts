@@ -45,6 +45,9 @@ export type { ChartEvent } from './primitives/event-markers';
 // indicators
 export { ema, emaSeries } from './indicators/ema';
 
+// optional OHLC-preserving conflation / downsampling (§4.4)
+export { conflationGroupSize, conflateBars, conflateItems, mergeBars } from './model/conflation';
+
 // Family-B transforms live in the lazy 'openalgo-charts/transform' entry point
 // (importing it also registers the 'point-figure' and 'kagi' renderers), so they
 // are intentionally NOT re-exported from the base bundle.

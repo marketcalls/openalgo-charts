@@ -10,6 +10,7 @@ import { DataLayer } from '../model/data-layer';
 import type { SeriesRecord } from '../model/series';
 import { computeGridLines, drawGrid, type GridStyle } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
+import { conflationGroupSize, conflateItems } from '../model/conflation';
 import { drawPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, DEFAULT_AXIS_STYLE, type PlotLayout } from '../render/axis';
 import { drawCrosshair } from '../render/crosshair';
 import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
@@ -34,6 +35,10 @@ export interface PaneRenderContext {
   timeAxisHeight: number;
   /** Only the bottom pane draws the time axis. */
   showTimeAxis: boolean;
+  /** Enable OHLC-preserving conflation when bars fall below ~0.5px (§4.4). */
+  conflate: boolean;
+  /** Conflation aggressiveness (1 = perf only; higher = more smoothing). */
+  conflationFactor: number;
 }
 
 export class Pane {
@@ -168,10 +173,14 @@ export class Pane {
     const priceToY = (p: number): number => this.priceScale.priceToY(p);
     let lastClose: number | null = null;
     let lastUp = true;
+    const groupSize = ctx.conflate
+      ? conflationGroupSize(ctx.timeScale.barSpacing, dpr, 0.5, ctx.conflationFactor)
+      : 1;
     for (const s of this._series) {
       const entry = getChartType(s.type);
       const visible = ctx.dataLayer.visibleBars(s.dataId, range.from, range.to);
-      const items: DrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));
+      let items: DrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));
+      if (groupSize > 1) items = conflateItems(items, groupSize);
       let maxVolume = 0;
       for (const it of items) if ((it.bar.volume ?? 0) > maxVolume) maxVolume = it.bar.volume ?? 0;
       const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume };

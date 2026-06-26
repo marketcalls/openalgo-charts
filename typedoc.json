@@ -1,0 +1,14 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/index.ts",
+    "src/trade/index.ts",
+    "src/transform/index.ts",
+    "src/profile/index.ts"
+  ],
+  "out": "docs/api",
+  "tsconfig": "tsconfig.json",
+  "excludeInternal": true,
+  "readme": "none",
+  "name": "OpenAlgo Charts API"
+}

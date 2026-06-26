@@ -31,6 +31,10 @@ export interface ChartOptions {
   crosshairMode?: CrosshairMode;
   /** Time source for kinetic animation (defaults to performance.now). */
   now?: () => number;
+  /** Enable OHLC-preserving conflation when zoomed out (§4.4). Default false. */
+  conflate?: boolean;
+  /** Conflation aggressiveness (default 1). */
+  conflationFactor?: number;
 }
 
 export interface AddSeriesOptions {
@@ -64,6 +68,8 @@ export class Chart {
   // interaction state
   private readonly _crosshairMode: CrosshairMode;
   private readonly _now: () => number;
+  private readonly _conflate: boolean;
+  private readonly _conflationFactor: number;
   private _cursorPane: number | null = null;
   private _cursor: { x: number; y: number } | null = null;
   private _dragging = false;
@@ -94,6 +100,8 @@ export class Chart {
     this._timeAxisHeight = options.timeAxisHeight ?? 22;
     this._crosshairMode = options.crosshairMode ?? 'magnet';
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
+    this._conflate = options.conflate ?? false;
+    this._conflationFactor = options.conflationFactor ?? 1;
 
     container.style.position = container.style.position || 'relative';
     container.style.display = 'flex';
@@ -295,6 +303,8 @@ export class Chart {
       priceAxisWidth: this._priceAxisWidth,
       timeAxisHeight: this._timeAxisHeight,
       showTimeAxis,
+      conflate: this._conflate,
+      conflationFactor: this._conflationFactor,
     };
   }
 

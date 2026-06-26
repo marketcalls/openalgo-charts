@@ -4,8 +4,21 @@ A from-scratch, dependency-free HTML5-canvas charting engine for OpenAlgo:
 professional-grade interactive financial-chart rendering plus advanced on-chart
 trading and trade management. Target: **< 50 KB Brotli** for the full package.
 
-> Status: **early development**. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the
-> full design and the phased roadmap. This README tracks what is actually built.
+> Status: **all 12 build phases complete** — standard chart types, transforms,
+> the trade terminal, depth ladder, and profiles, with 154 unit tests. The full
+> package measures **~22 KB Brotli**. See [`ARCHITECTURE.md`](./ARCHITECTURE.md)
+> for the design, [`docs/getting-started.md`](./docs/getting-started.md) to begin,
+> and [`examples/index.html`](./examples/index.html) for runnable demos.
+
+## What's built
+
+- **Chart types:** candles, hollow/volume candles, bars, high-low, line,
+  line+markers, step, area, HLC-area, baseline, columns, histogram.
+- **Transforms:** Heikin Ashi, Renko, Range bars, Line Break, Point &amp; Figure, Kagi.
+- **Profiles &amp; order flow:** Volume Profile, Market Profile (TPO), Footprint, cumulative delta.
+- **Trading:** order/position/bracket lines, live P&amp;L, one-click + drag-to-modify,
+  OCO, validation, analyzer mode, and a depth-of-market ladder (5→200 levels).
+- **Live + historical** data, markers/signals, earnings/dividend events, EMA indicator.
 
 ## Install (once published)
 
