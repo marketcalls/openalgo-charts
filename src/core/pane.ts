@@ -12,9 +12,10 @@ import { computeGridLines, drawGrid } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
 import { conflationGroupSize, conflateItems } from '../model/conflation';
 import { drawPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, type PlotLayout } from '../render/axis';
-import { drawCrosshair } from '../render/crosshair';
+import { drawCrosshair, drawCrosshairTag } from '../render/crosshair';
 import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
 import type { ChartTheme } from '../theme';
+import { formatIstCrosshairLabel } from '../feed/time';
 
 export interface PaneRenderContext {
   timeScale: TimeScale;
@@ -214,16 +215,42 @@ export class Pane {
     }
   }
 
-  /** Top (overlay) canvas: top-layer primitives + crosshair. Cheap repaint on cursor moves. */
-  public paintTop(crosshair: { x: number; y: number } | null, ctx: PaneRenderContext): void {
+  /**
+   * Top (overlay) canvas: top-layer primitives + crosshair. Cheap repaint on
+   * cursor moves. `cross.x` is the shared plot x (vertical line, drawn in every
+   * pane for a global crosshair); `cross.yLocal` is the price-line y for the
+   * hovered pane only (null elsewhere); `cross.showTimeTag` draws the date tag
+   * on the bottom pane's axis strip.
+   */
+  public paintTop(
+    cross: { x: number; yLocal: number | null; showTimeTag: boolean } | null,
+    ctx: PaneRenderContext,
+  ): void {
     this.top.clearBitmap();
     const prc = this._primitiveContext(ctx);
     for (const p of this._primitives) if (p.zOrder() === 'top') p.draw(this.top.ctx, prc);
-    if (crosshair === null) return;
+    if (cross === null) return;
+
     const layout = this._layout(ctx);
-    drawCrosshair(this.top.ctx, crosshair.x, crosshair.y, layout.plotWidth, layout.plotHeight, ctx.dpr, {
-      color: ctx.theme.crosshair, lineWidth: 1, dash: [4, 4],
-    });
+    const g = this.top.ctx;
+    const dpr = ctx.dpr;
+    drawCrosshair(g, cross.x, cross.yLocal, layout.plotWidth, layout.plotHeight, dpr, ctx.theme.crosshair);
+
+    // price tag on the right axis (hovered pane only)
+    if (cross.yLocal !== null) {
+      const price = this.priceScale.yToPrice(cross.yLocal);
+      drawCrosshairTag(g, this.priceScale.format(price), layout.plotWidth * dpr, cross.yLocal * dpr, dpr,
+        ctx.theme.crosshair, ctx.theme.lastPriceText, 'right');
+    }
+    // date/time tag on the bottom pane's axis strip
+    if (cross.showTimeTag && cross.x >= 0 && cross.x <= layout.plotWidth) {
+      const idx = Math.round(ctx.timeScale.xToIndex(cross.x));
+      const t = ctx.dataLayer.indexToTime(idx);
+      if (t !== undefined) {
+        drawCrosshairTag(g, formatIstCrosshairLabel(t), cross.x * dpr, layout.plotHeight * dpr, dpr,
+          ctx.theme.crosshair, ctx.theme.lastPriceText, 'bottom');
+      }
+    }
   }
 
   /** Price at a media-px y on this pane (for crosshair magnet). */

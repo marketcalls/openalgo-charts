@@ -83,6 +83,19 @@ export function formatIstDate(utcSeconds: number): string {
   return `${pad2(p.day)} ${MONTHS[p.month - 1]}`;
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * Crosshair time-tag label in IST, matching the reference style:
+ * `Wed 21 May '26`, with ` HH:MM` appended for intraday (non-midnight) bars.
+ */
+export function formatIstCrosshairLabel(utcSeconds: number): string {
+  const p = utcSecondsToIstParts(utcSeconds);
+  let s = `${WEEKDAYS[p.weekday]} ${pad2(p.day)} ${MONTHS[p.month - 1]} '${String(p.year).slice(-2)}`;
+  if (p.hour !== 0 || p.minute !== 0) s += ` ${pad2(p.hour)}:${pad2(p.minute)}`;
+  return s;
+}
+
 /** True if the two UTC-second instants fall on different IST calendar days. */
 export function isNewIstDay(prevUtcSeconds: number, utcSeconds: number): boolean {
   const a = utcSecondsToIstParts(prevUtcSeconds);

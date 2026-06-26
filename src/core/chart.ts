@@ -369,7 +369,12 @@ export class Chart {
       if (level >= InvalidationLevel.Full || perPane?.autoScale) pane.autoscale(ctx);
       if (level >= InvalidationLevel.Light) pane.paintBase(ctx);
       if (level >= InvalidationLevel.Cursor) {
-        const cross = this._cursorPane === i && this._cursor !== null ? this._cursor : null;
+        // Global crosshair: every pane draws the vertical line at the shared x;
+        // only the hovered pane draws the horizontal line + price tag; the bottom
+        // pane draws the date tag.
+        const cross = this._cursor === null
+          ? null
+          : { x: this._cursor.x, yLocal: i === this._cursorPane ? this._cursor.y : null, showTimeTag: isBottom };
         pane.paintTop(cross, ctx);
       }
     }
@@ -515,10 +520,10 @@ export class Chart {
 
   private readonly _onPointerLeave = (): void => {
     if (this._cursor !== null) {
-      const pane = this._cursorPane;
       this._cursor = null;
       this._cursorPane = null;
-      if (pane !== null) this.invalidate((m) => m.invalidatePane(pane, { level: InvalidationLevel.Cursor, autoScale: false }));
+      // clear the crosshair from every pane (global vertical line)
+      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
     }
   };
 
@@ -555,7 +560,8 @@ export class Chart {
     }
     this._cursorPane = paneIndex;
     this._cursor = { x, y };
-    this.invalidate((m) => m.invalidatePane(paneIndex, { level: InvalidationLevel.Cursor, autoScale: false }));
+    // global crosshair → repaint every pane's overlay (cheap; base untouched)
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
   }
 
   private _maybeLoadHistory(): void {
