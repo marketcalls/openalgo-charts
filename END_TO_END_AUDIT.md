@@ -431,8 +431,56 @@ OpenAlgo Charts does not need to clone all of that to stay lightweight, but the 
 7. Align README, CHANGELOG, version, and architecture status with actual support.
 8. Decide whether IIFE output, separate axis widgets, and full price-scale modes are required for this release or explicitly deferred.
 
+## Resolutions (post-audit, commits `ee72e96`, `92512bc`)
+
+The audit ran at `1200454`. Findings were triaged and addressed as follows. Test
+count rose 154 → 185; full package 22.15 → 25.4 KB Brotli (still under the 50 KB budget).
+
+| # | Status | Resolution |
+|---|---|---|
+| C1 history dates | **Fixed** | REST sends `start_date`/`end_date` as IST `YYYY-MM-DD`; `getBars` requires a `from`/`to` range; payload unit test added. |
+| C2 live WS | **Fixed (verify schema)** | `OpenAlgoWsFeed` adapter (injectable socket) maps LTP/Quote/Depth → callbacks; pure parse/format helpers + fake-socket tests. Exact wire schema must be verified against the running OpenAlgo build. |
+| C3 multi-pane layout/hit-test | **Fixed** | DOM box + canvas share one weighted height; pointer→pane uses cumulative weighted heights. |
+| C4 browser/pixel E2E | **Deferred (documented)** | No headless-browser harness yet; logic is covered by the recording-canvas harness + unit tests. Adding Playwright/Chromium is a separate infra task — tracked in README known limitations. |
+| H1 dirty worktree | **Fixed** | All sources committed; worktree clean; `verify` runs from committed files. |
+| H2 modify validation | **Fixed** | Invalid drag-modify prices are dropped + surfaced via `onValidationError`; never sent. |
+| H3 idempotency retry | **Fixed** | Token released on a failed `place`, allowing same-token retry after transport failure. |
+| H4 order-line repaint | **Fixed** | `WorkingOrderLine.setLtp` calls `requestUpdate()`. |
+| H5 transform-tier types | **Fixed** | `getChartType` throws a clear "import the transform tier" error for `point-figure`/`kagi`. |
+| H6 registry key type | **Fixed** | `registerChartType`/`getChartType` accept custom string keys. |
+| H7 update misclassification | **Fixed** | `DataLayer.update` returns `'append'|'replace'|'insert'`; chart auto-scrolls only on `append`. |
+| H8 trade adapter | **Fixed (verify schema)** | `OpenAlgoTradeFeed` implements `OrderFeed` over REST + orderbook/positionbook mappers; offline tests. Field names to verify against OpenAlgo. |
+| H9 price-scale modes | **Partial** | `logarithmic` + `inverted` implemented + tested. `percentage`, `indexed-to-100`, and overlay scales remain **deferred** (need a baseline/rebase + multi-scale-per-pane model) — documented. |
+| H10 touch/pinch | **Deferred (documented)** | Mouse pan/wheel/kinetic + axis-drag exist; dedicated multi-touch pinch is future work. |
+| M1 visible-range perf | **Deferred** | Current scan is adequate for the demo sizes; binary-search/caching is a future optimization for 50k+ multi-series. |
+| M2 IIFE build | **Fixed** | `dist/openalgo-charts.standalone.js` (`window.OpenAlgoCharts`). |
+| M3 version/status | **Fixed** | Version `0.1.0`; README marked pre-release with explicit known limitations. |
+| M4 example option | **Fixed** | Example uses `{ style }`. |
+| M5 primitive axis views | **Deferred (documented)** | Pane-draw + hit-test + autoscale + lifecycle exist; dedicated price/time-axis primitive views are future work. `destroy()` detaches via `removePrimitive`. |
+| M6 separate axis widgets | **Accepted simplification (documented)** | Axes draw within the pane canvas by design for the small-engine goal; not split into separate widgets. |
+| M7 bracket drag IDs | **Documented** | Bracket emits `bracket-sl/tp:{symbol}`; mapping those handles to child order ids is the integrating app's responsibility (shown in the demo). |
+| M8 example contract tests | **Deferred** | Tied to the C4 browser harness. |
+
+### Axis-drag rescale (added after the audit, on user request)
+
+Drag the price (Y) axis to expand/compress vertically and the time (X) axis to
+compress/expand horizontally; double-click resets and re-enables autoscale.
+Themes (light/dark + custom), gradient area/baseline fills, and streaming tick
+aggregation (`TickBarAggregator`, `FootprintAggregator`) were also added.
+
 ## Release Readiness Verdict
 
-Not release-ready as a production OpenAlgo charting package yet.
+**Updated after resolutions:** the correctness, safety, layout, and integration-adapter
+gaps are fixed (C1–C3, H1–H9, M2–M4 done; OpenAlgo REST history + WS + trade adapters
+now exist with injectable transports and offline tests). The remaining blockers for a
+true *production* claim are validation/breadth, not correctness:
 
-It is ready as a compact pre-release/prototype package for local demos and unit-tested library development. The build is healthy, but the integration and browser validation gaps are too large for a production claim, especially around real OpenAlgo live data and chart trading.
+1. **Browser/pixel E2E** (C4/M8) — no headless-browser harness yet.
+2. **Adapter wire-schema verification** (C2/H8) — the WS message format and order
+   endpoint field names must be confirmed against a running OpenAlgo build with credentials.
+3. **Deferred breadth** (H9 pct/indexed/overlay scales, H10 pinch/touch, M1 perf,
+   M5 axis-view primitives) — explicitly documented, not silently missing.
+
+It is solid as a **0.1.0 pre-release**: healthy build, 185 unit tests, full package
+~25 KB Brotli, real OpenAlgo adapters present. Promote to production after a browser
+test suite and a live OpenAlgo smoke test confirm the adapter schemas end-to-end.

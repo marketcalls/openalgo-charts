@@ -885,6 +885,27 @@ Two principles: **(1) the API reference is generated, never hand-maintained** (i
 
 ---
 
+## 13a. Deferred / not-yet-implemented (honest status)
+
+These are designed-for but **not implemented** in the current 0.1.0 build (see
+`END_TO_END_AUDIT.md` for the full triage). They are documented here so the
+architecture doesn't over-promise:
+
+- **Browser/pixel E2E tests** — rendering is validated via a recording-canvas
+  harness + unit tests; no headless-browser/pixel-diff suite yet.
+- **Price-scale `percentage`, `indexed-to-100`, and overlay scales** — only
+  `linear` + `logarithmic` + `inverted` are implemented.
+- **Multi-touch pinch** — mouse pan/wheel/kinetic + axis-drag exist; dedicated
+  pinch is future work.
+- **Separate price/time axis-widget canvases** — axes draw within the pane
+  canvas by design (small-engine simplification).
+- **Primitive price/time axis *views*** — primitives draw in the pane + hit-test
+  + autoscale + lifecycle; dedicated fixed axis-label views are future work.
+- **Binary-search visible-range caching** — current scan is fine at demo scale.
+- **OpenAlgo adapter wire schemas** (REST order fields, WS message shape) — the
+  adapters exist with injectable transports + offline tests, but the exact field
+  names must be verified against a running OpenAlgo build before production.
+
 ## 14. Revision log — v2 (implementation-review responses)
 
 Point-by-point mapping of the implementation review to where each is now addressed:
