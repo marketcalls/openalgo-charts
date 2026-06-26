@@ -12,6 +12,14 @@
     button { cursor: pointer; }
     #chart { position: absolute; top: 46px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
     #status { margin-left: auto; opacity: .75; }
+    /* OHLC legend overlay — sits on top of the plot, never intercepts the crosshair */
+    #legend {
+      position: absolute; top: 54px; left: 16px; z-index: 10; pointer-events: none;
+      font: 12px/1.4 system-ui, sans-serif; white-space: nowrap; text-shadow: 0 0 3px #0d0e12;
+    }
+    #legend .name { color: #e8eaf0; font-weight: 600; }
+    #legend .meta { opacity: .5; }
+    #legend .lbl { opacity: .55; margin-left: 8px; }
   </style>
 </head>
 <body>
@@ -24,10 +32,24 @@
     <select id="period" title="history range">
       <option>1mo</option><option selected>1y</option><option>6mo</option><option>5y</option><option>max</option>
     </select>
+    <select id="ctype" title="chart type">
+      <option value="candlestick">Candles</option>
+      <option value="hollow-candle">Hollow Candles</option>
+      <option value="bar">Bars (OHLC)</option>
+      <option value="high-low">High-Low</option>
+      <option value="volume-candle">Volume Candles</option>
+      <option value="line">Line</option>
+      <option value="line-markers">Line + Markers</option>
+      <option value="step">Step Line</option>
+      <option value="area">Area</option>
+      <option value="hlc-area">HLC Area</option>
+      <option value="baseline">Baseline</option>
+    </select>
     <button id="load">Load</button>
     <span id="status"></span>
   </div>
   <div id="chart"></div>
+  <div id="legend"></div>
 
   <script type="module">
     import { createChart } from '/dist/openalgo-charts.mjs';
@@ -45,39 +67,97 @@
     }
 
     const feed = new YFinanceDataFeed();
+    const UP = '#26a69a', DOWN = '#ef5350';
     let chart, price, volume;
+    let currentBars = [];          // cached so a chart-type switch needs no refetch
+    const idxByTime = new Map();   // bar time -> array index (for previous-close lookup)
+    let req = {};                  // last-loaded request (symbol/interval/period)
 
-    function build() {
+    const el = (id) => document.getElementById(id);
+    const fmt = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    function fmtVol(v) {
+      if (v == null) return '';
+      const a = Math.abs(v);
+      if (a >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+      if (a >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+      if (a >= 1e3) return (v / 1e3).toFixed(2) + 'K';
+      return String(v);
+    }
+    function exchangeOf(sym) {
+      const s = sym.toUpperCase();
+      if (s.endsWith('.NS')) return 'NSE';
+      if (s.endsWith('.BO')) return 'BSE';
+      if (s.startsWith('^')) return 'INDEX';
+      if (s.endsWith('-USD')) return 'CRYPTO';
+      return 'yfinance';
+    }
+    const nameOf = (sym) => sym.toUpperCase().replace(/\.(NS|BO)$/, '');
+
+    // Title + O H L C V + change(%), TradingView-style. Driven by the crosshair;
+    // falls back to the last bar when the pointer is off the plot.
+    function setLegend(bar) {
+      const legend = el('legend');
+      const head = `<span class="name">${nameOf(req.symbol || '')}</span>`
+        + `<span class="meta"> &middot; ${(req.interval || '').toUpperCase()} &middot; ${exchangeOf(req.symbol || '')}</span>`;
+      if (!bar) { legend.innerHTML = head; return; }
+      const i = idxByTime.get(bar.time);
+      const prevClose = (i != null && i > 0) ? currentBars[i - 1].close : bar.open;
+      const chg = bar.close - prevClose;
+      const pct = prevClose ? (chg / prevClose) * 100 : 0;
+      const col = bar.close >= bar.open ? UP : DOWN;
+      const chgCol = chg >= 0 ? UP : DOWN;
+      const v = (label, val) => `<span class="lbl">${label}</span><span style="color:${col}">${fmt(val)}</span>`;
+      const vol = bar.volume != null ? `<span class="lbl">V</span><span style="color:${col}">${fmtVol(bar.volume)}</span>` : '';
+      const sign = chg >= 0 ? '+' : '';
+      const change = `<span style="color:${chgCol};margin-left:10px">${sign}${fmt(chg)} (${sign}${pct.toFixed(2)}%)</span>`;
+      legend.innerHTML = head + v('O', bar.open) + v('H', bar.high) + v('L', bar.low) + v('C', bar.close) + ' ' + vol + change;
+    }
+
+    // (Re)build the chart for the currently selected type using cached bars.
+    function render() {
       if (chart) chart.destroy();
-      document.getElementById('chart').innerHTML = '';
-      chart = createChart(document.getElementById('chart'), { priceAxisWidth: 72, crosshairMode: 'magnet' });
-      price = chart.addSeries('candlestick');
+      el('chart').innerHTML = '';
+      chart = createChart(el('chart'), { priceAxisWidth: 72, crosshairMode: 'magnet' });
+
+      const type = el('ctype').value;
+      const style = {};
+      if (type === 'baseline') {
+        // anchor the baseline at the average close so up/down shading is meaningful
+        const avg = currentBars.reduce((s, b) => s + b.close, 0) / (currentBars.length || 1);
+        style.baseValue = avg;
+      }
+      price = chart.addSeries(type, { style });
       volume = chart.addSeries('histogram', { paneIndex: 1, style: { color: '#33415e' } });
+      price.setData(currentBars);
+      volume.setData(currentBars.map((b) => ({ time: b.time, open: 0, high: b.volume, low: 0, close: b.volume })));
+
+      // OHLC legend tracks the crosshair; default to the latest bar.
+      chart.subscribeCrosshairMove((e) => setLegend(e.bar ?? currentBars[currentBars.length - 1]));
+      setLegend(currentBars[currentBars.length - 1]);
+      window.__chart = () => chart;
     }
 
     async function load() {
-      const status = document.getElementById('status');
-      const req = {
-        symbol: document.getElementById('symbol').value.trim(),
-        interval: document.getElementById('interval').value,
-        period: document.getElementById('period').value,
-      };
-      status.textContent = `loading ${req.symbol} ${req.interval}…`;
+      const status = el('status');
+      req = { symbol: el('symbol').value.trim(), interval: el('interval').value, period: el('period').value };
+      status.textContent = `loading ${req.symbol} ${req.interval}...`;
       try {
         const bars = await feed.getBars(req);
-        build();
-        price.setData(bars);
-        volume.setData(bars.map((b) => ({ time: b.time, open: 0, high: b.volume, low: 0, close: b.volume })));
+        currentBars = bars;
+        idxByTime.clear();
+        bars.forEach((b, i) => idxByTime.set(b.time, i));
+        render();
         status.textContent = `${req.symbol} · ${bars.length} bars · ${req.interval}/${req.period}`;
       } catch (e) {
         status.textContent = 'error: ' + e.message;
       }
     }
 
-    document.getElementById('load').addEventListener('click', load);
-    document.getElementById('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+    el('load').addEventListener('click', load);
+    el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+    // switching chart type re-renders cached bars instantly (no network round-trip)
+    el('ctype').addEventListener('change', () => { if (currentBars.length) render(); });
     load();
-    window.__chart = () => chart;
   </script>
 </body>
 </html>

@@ -46,6 +46,25 @@ export interface AddSeriesOptions {
   style?: SeriesStyle;
 }
 
+/**
+ * Emitted on every crosshair move (and `null` fields on pointer-leave) so a host
+ * can render an OHLC legend / tooltip. `bar` is the hovered bar of the primary
+ * price series; `point` is container-relative media px for positioning a
+ * floating tooltip. See `subscribeCrosshairMove`.
+ */
+export interface CrosshairMoveEvent {
+  /** UTC seconds of the hovered bar, or null when off the data / pointer left. */
+  time: number | null;
+  /** Logical index under the cursor, or null. */
+  index: number | null;
+  /** Price under the cursor on the hovered pane, or null. */
+  price: number | null;
+  /** Hovered bar of the primary (first) price series, or null. */
+  bar: Bar | null;
+  /** Cursor position in container media px, or null on leave. */
+  point: { x: number; y: number } | null;
+}
+
 function defaultPixelRatio(): number {
   return typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
 }
@@ -85,6 +104,7 @@ export class Chart {
   private _historyLoader: (() => void) | null = null;
   private _loadingHistory = false;
   private _clickCb: ((externalId: string) => void) | null = null;
+  private _crosshairCb: ((e: CrosshairMoveEvent) => void) | null = null;
   private _pointerMoved = false;
   private _downPane = 0;
   private _downX = 0;
@@ -190,6 +210,15 @@ export class Chart {
   /** Subscribe to clicks on hit-testable primitives (markers, events, lines). */
   public subscribeClick(cb: (externalId: string) => void): void {
     this._clickCb = cb;
+  }
+
+  /**
+   * Subscribe to crosshair movement for an OHLC legend / tooltip. The callback
+   * fires with the hovered bar of the primary price series on every move, and
+   * with all-null fields when the pointer leaves the plot.
+   */
+  public subscribeCrosshairMove(cb: (e: CrosshairMoveEvent) => void): void {
+    this._crosshairCb = cb;
   }
 
   /** Subscribe to drags of draggable lines (order/SL/TP). Fires per move and on release. */
@@ -492,7 +521,7 @@ export class Chart {
       this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
       return;
     }
-    this._updateCursor(p.pane, p.x, p.localY);
+    this._updateCursor(p.pane, p.x, p.localY, p.y);
   };
 
   private readonly _onPointerUp = (e: PointerEvent): void => {
@@ -524,6 +553,7 @@ export class Chart {
       this._cursorPane = null;
       // clear the crosshair from every pane (global vertical line)
       this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
+      this._crosshairCb?.({ time: null, index: null, price: null, bar: null, point: null });
     }
   };
 
@@ -542,7 +572,7 @@ export class Chart {
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   };
 
-  private _updateCursor(paneIndex: number, x: number, localY: number): void {
+  private _updateCursor(paneIndex: number, x: number, localY: number, containerY = localY): void {
     const plotWidth = Math.max(0, this._width - this._priceAxisWidth);
     if (x > plotWidth) {
       this._onPointerLeave();
@@ -550,18 +580,32 @@ export class Chart {
     }
     const pane = this._panes[paneIndex];
     let y = localY;
-    if (this._crosshairMode === 'magnet' && this._firstDataId.value !== null) {
-      const index = Math.round(this._timeScale.xToIndex(x));
+    const index = Math.round(this._timeScale.xToIndex(x));
+    let hoveredBar: Bar | null = null;
+    if (this._firstDataId.value !== null) {
       const bars = this._dataLayer.visibleBars(this._firstDataId.value, index, index);
       if (bars.length > 0) {
-        const snapped = magnetSnapPrice(pane.yToPrice(localY), bars[0].bar);
-        y = pane.priceScale.priceToY(snapped);
+        hoveredBar = bars[0].bar;
+        if (this._crosshairMode === 'magnet') {
+          const snapped = magnetSnapPrice(pane.yToPrice(localY), hoveredBar);
+          y = pane.priceScale.priceToY(snapped);
+        }
       }
     }
     this._cursorPane = paneIndex;
     this._cursor = { x, y };
     // global crosshair → repaint every pane's overlay (cheap; base untouched)
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
+    if (this._crosshairCb !== null) {
+      const time = this._dataLayer.indexToTime(index);
+      this._crosshairCb({
+        time: time ?? null,
+        index,
+        price: pane.yToPrice(localY),
+        bar: hoveredBar,
+        point: { x, y: containerY },
+      });
+    }
   }
 
   private _maybeLoadHistory(): void {

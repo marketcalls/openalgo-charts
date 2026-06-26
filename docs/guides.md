@@ -47,6 +47,22 @@ import { emaSeries } from 'openalgo-charts';
 chart.addSeries('line', { style: { color: '#f0a020' } }).setData(emaSeries(bars, 21));
 ```
 
+## OHLC legend / tooltip
+
+`subscribeCrosshairMove` fires the hovered bar of the primary price series on
+every cursor move (and all-null fields on pointer-leave), so the host renders the
+legend or floating tooltip in its own DOM:
+
+```ts
+chart.subscribeCrosshairMove((e) => {
+  const bar = e.bar ?? bars[bars.length - 1]; // fall back to the latest bar
+  legend.textContent = bar
+    ? `O ${bar.open} H ${bar.high} L ${bar.low} C ${bar.close}`
+    : '';
+  // e.point gives container-relative px to position a floating tooltip
+});
+```
+
 ## Chart trading
 
 ```ts
