@@ -1,0 +1,99 @@
+import { describe, it, expect } from 'vitest';
+import { OpenAlgoTradeFeed, mapOrder, mapPosition } from '../src/feed/openalgo-trade';
+import { OpenAlgoWsFeed, formatSubscribe, type SocketLike } from '../src/feed/openalgo-ws';
+import { intervalToSeconds } from '../src/feed/openalgo-live';
+import { Pane } from '../src/core/pane';
+import { PriceLine } from '../src/primitives/price-line';
+import { fakeDocument } from './helpers/fake-dom';
+
+function captureFeed() {
+  const calls: { url: string; body: Record<string, unknown> }[] = [];
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, body: JSON.parse(String(init?.body)) });
+    return { ok: true, status: 200, json: async () => ({ orderid: 'OA1' }) } as Response;
+  }) as unknown as typeof fetch;
+  return { calls, feed: new OpenAlgoTradeFeed({ baseUrl: 'http://x', apiKey: 'k', fetchImpl }) };
+}
+
+describe('V2-H1 — trade adapter matches OpenAlgo order contract', () => {
+  it('place sends the mandatory product + strategy fields', async () => {
+    const { calls, feed } = captureFeed();
+    await feed.place({ symbol: 'SBIN', exchange: 'NSE', side: 'BUY', type: 'LIMIT', qty: 10, price: 16, product: 'CNC', mode: 'live' });
+    expect(calls[0].body).toMatchObject({ strategy: 'openalgo-charts', symbol: 'SBIN', action: 'BUY', exchange: 'NSE', pricetype: 'LIMIT', product: 'CNC', quantity: 10 });
+  });
+
+  it('place defaults product to MIS when unspecified', async () => {
+    const { calls, feed } = captureFeed();
+    await feed.place({ symbol: 'SBIN', side: 'BUY', type: 'MARKET', qty: 1, mode: 'live' });
+    expect(calls[0].body.product).toBe('MIS');
+  });
+
+  it('modify sends the full documented payload from cached order context', async () => {
+    const { calls, feed } = captureFeed();
+    await feed.place({ symbol: 'SBIN', exchange: 'NSE', side: 'BUY', type: 'LIMIT', qty: 10, price: 16, product: 'CNC', mode: 'live' });
+    await feed.modify('OA1', { price: 16.5 });
+    const m = calls[1].body;
+    expect(calls[1].url).toBe('http://x/api/v1/modifyorder');
+    expect(m).toMatchObject({ orderid: 'OA1', strategy: 'openalgo-charts', symbol: 'SBIN', action: 'BUY', exchange: 'NSE', pricetype: 'LIMIT', product: 'CNC', quantity: 10, price: 16.5 });
+  });
+
+  it('modify of an unknown order throws (no silent partial payload)', async () => {
+    const { feed } = captureFeed();
+    await expect(feed.modify('ghost', { price: 1 })).rejects.toThrow();
+  });
+
+  it('coerces string quantities/prices from the books', () => {
+    const o = mapOrder({ orderid: 'X', symbol: 'SBIN', action: 'SELL', pricetype: 'SL', quantity: '5', price: 99, trigger_price: '98.5', order_status: 'open' });
+    expect(o.qty).toBe(5);
+    expect(o.triggerPrice).toBe(98.5);
+    const p = mapPosition({ symbol: 'YESBANK', quantity: '-104', average_price: '17.2' });
+    expect(p.netQty).toBe(-104);
+    expect(p.avgPrice).toBeCloseTo(17.2);
+  });
+});
+
+describe('V2-H2 — WS schema + send-before-open queueing', () => {
+  it('uses the documented symbols array schema', () => {
+    const msg = JSON.parse(formatSubscribe('k', 'LTP', 'SBIN', 'NSE'));
+    expect(msg.symbols).toEqual(['NSE:SBIN']);
+    expect(msg.action).toBe('subscribe');
+  });
+
+  it('queues subscribes until the socket opens, then flushes', () => {
+    const sent: string[] = [];
+    let sock!: SocketLike;
+    const feed = new OpenAlgoWsFeed({
+      url: 'ws://x', apiKey: 'k',
+      socketFactory: () => { sock = { send: (d) => sent.push(d), close: () => {}, onopen: null, onclose: null, onmessage: null, readyState: 0 }; return sock; },
+    });
+    feed.connect();
+    feed.subscribe('LTP', 'SBIN', 'NSE'); // before open → queued, not sent
+    expect(sent).toHaveLength(0);
+    sock.onopen?.(); // socket opens → queue flushes
+    expect(sent).toHaveLength(1);
+    feed.subscribe('LTP', 'RELIANCE', 'NSE'); // after open → immediate
+    expect(sent).toHaveLength(2);
+  });
+});
+
+describe('V2-M1 — interval parsing for the live feed', () => {
+  it('maps interval tokens to seconds', () => {
+    expect(intervalToSeconds('1m')).toBe(60);
+    expect(intervalToSeconds('5m')).toBe(300);
+    expect(intervalToSeconds('1h')).toBe(3600);
+    expect(intervalToSeconds('D')).toBe(60); // unknown → safe default
+  });
+});
+
+describe('V2-M3 — destroy detaches primitives', () => {
+  it('Pane.destroy calls detached() on every attached primitive', () => {
+    const pane = new Pane(fakeDocument());
+    let detached = 0;
+    const line = new PriceLine({ price: 100, color: '#fff', lineWidth: 1, dashed: false, id: 'x' });
+    const origDetached = line.detached.bind(line);
+    line.detached = () => { detached++; origDetached(); };
+    pane.addPrimitive(line, { requestUpdate: () => {} });
+    pane.destroy();
+    expect(detached).toBe(1);
+  });
+});

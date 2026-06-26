@@ -78,6 +78,13 @@ export class Pane {
     return true;
   }
 
+  /** Detach every primitive (lifecycle cleanup) and remove the pane element. */
+  public destroy(): void {
+    for (const p of this._primitives) p.detached?.();
+    this._primitives.length = 0;
+    this.element.remove();
+  }
+
   private _primitiveContext(ctx: PaneRenderContext): PrimitiveRenderContext {
     const layout = this._layout(ctx);
     return {

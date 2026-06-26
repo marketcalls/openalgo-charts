@@ -4,9 +4,9 @@ import { OpenAlgoTradeFeed, mapOrder } from '../src/feed/openalgo-trade';
 import { PriceScale } from '../src/scale/price-scale';
 
 describe('OpenAlgo WS — pure helpers', () => {
-  it('formats a subscribe message', () => {
+  it('formats a subscribe message (symbols array schema)', () => {
     const msg = JSON.parse(formatSubscribe('k', 'LTP', 'SBIN', 'NSE'));
-    expect(msg).toMatchObject({ action: 'subscribe', apikey: 'k', mode: 'LTP', symbol: 'SBIN', exchange: 'NSE' });
+    expect(msg).toMatchObject({ action: 'subscribe', apikey: 'k', mode: 'LTP', symbols: ['NSE:SBIN'] });
   });
   it('parses an LTP message', () => {
     const r = parseMessage({ symbol: 'SBIN', exchange: 'NSE', ltp: 772.5, ltq: 10, timestamp: 1_700_000_000 });
@@ -29,7 +29,8 @@ describe('OpenAlgo WS — pure helpers', () => {
 describe('OpenAlgo WS — feed with injected socket', () => {
   function fakeSocket(): { sock: SocketLike; sent: string[]; emit: (data: string) => void } {
     const sent: string[] = [];
-    const sock: SocketLike = { send: (d) => sent.push(d), close: () => {}, onopen: null, onclose: null, onmessage: null };
+    // readyState OPEN so connect() flushes immediately (queueing is covered elsewhere)
+    const sock: SocketLike = { send: (d) => sent.push(d), close: () => {}, onopen: null, onclose: null, onmessage: null, readyState: 1 };
     return { sock, sent, emit: (data) => sock.onmessage?.({ data }) };
   }
 
@@ -69,12 +70,13 @@ describe('OpenAlgoTradeFeed (offline, injected fetch)', () => {
     expect(r.orderId).toBe('OA123');
   });
 
-  it('modify and cancel hit their endpoints', async () => {
+  it('modify and cancel hit their endpoints (after the order context is known)', async () => {
     const cap: { url?: string; body?: Record<string, unknown> } = {};
-    const feed = feedFor(cap, {});
+    const feed = feedFor(cap, { orderid: 'OA123' });
+    await feed.place({ symbol: 'SBIN', exchange: 'NSE', side: 'BUY', type: 'LIMIT', qty: 10, price: 100, product: 'MIS', mode: 'live' });
     await feed.modify('OA123', { price: 101 });
     expect(cap.url).toBe('http://x/api/v1/modifyorder');
-    expect(cap.body).toMatchObject({ orderid: 'OA123', price: 101 });
+    expect(cap.body).toMatchObject({ orderid: 'OA123', price: 101, product: 'MIS', symbol: 'SBIN' });
     await feed.cancel('OA123');
     expect(cap.url).toBe('http://x/api/v1/cancelorder');
     expect(cap.body).toMatchObject({ orderid: 'OA123' });

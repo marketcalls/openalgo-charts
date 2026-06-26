@@ -9,20 +9,33 @@ import { drawKagi } from '../render/kagi';
 
 export const TRANSFORM_TIER = 'transform' as const;
 
-// Register the Family-B custom renderers as a side effect of loading this tier.
-// (Heikin Ashi / Renko / Range / Line Break render as a 'candlestick' series and
-// need no new type.) Plotting P&F/Kagi requires their transform anyway, which
-// lives here — so the renderer ships exactly when it is needed.
-registerChartType('point-figure', {
-  defaultStyle: {}, isPriceSeries: true,
-  draw: (g, items, toY, bs, dpr, s) => drawPointFigure(g, items, toY, bs, dpr, s),
-  extents: (bar) => ({ min: bar.low, max: bar.high }),
-});
-registerChartType('kagi', {
-  defaultStyle: { thickColor: '#26a69a', thinColor: '#ef5350' }, isPriceSeries: true,
-  draw: (g, items, toY, _bs, dpr, s) => drawKagi(g, items, toY, dpr, s),
-  extents: (bar) => ({ min: bar.close, max: bar.close }),
-});
+let _registered = false;
+
+/**
+ * Register the Family-B custom renderers (point-figure, kagi). Called as a side
+ * effect when this tier is imported, and also exported so consumers whose
+ * bundler aggressively tree-shakes a bare `import 'openalgo-charts/transform'`
+ * can call it explicitly. Idempotent.
+ *
+ * (Heikin Ashi / Renko / Range / Line Break render as a 'candlestick' series and
+ * need no new type — only P&F and Kagi have custom renderers.)
+ */
+export function registerTransformChartTypes(): void {
+  if (_registered) return;
+  _registered = true;
+  registerChartType('point-figure', {
+    defaultStyle: {}, isPriceSeries: true,
+    draw: (g, items, toY, bs, dpr, s) => drawPointFigure(g, items, toY, bs, dpr, s),
+    extents: (bar) => ({ min: bar.low, max: bar.high }),
+  });
+  registerChartType('kagi', {
+    defaultStyle: { thickColor: '#26a69a', thinColor: '#ef5350' }, isPriceSeries: true,
+    draw: (g, items, toY, _bs, dpr, s) => drawKagi(g, items, toY, dpr, s),
+    extents: (bar) => ({ min: bar.close, max: bar.close }),
+  });
+}
+
+registerTransformChartTypes(); // side effect on tier import
 
 export type { ISeriesTransform } from './transform';
 export { runTransform, ensureIncreasingTimes } from './transform';

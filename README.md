@@ -6,7 +6,7 @@ trading and trade management. Target: **< 50 KB Brotli** for the full package.
 
 > Status: **pre-release (0.1.0)** — all 12 build phases of the engine are
 > implemented (standard chart types, transforms, trade terminal, depth ladder,
-> profiles) with 170+ unit tests, full package **~24 KB Brotli**. See
+> profiles) with 190+ unit tests, full package **~26 KB Brotli**. See
 > [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`docs/getting-started.md`](./docs/getting-started.md),
 > and [`examples/index.html`](./examples/index.html).
 >

@@ -17,6 +17,8 @@ export interface PlaceRequest {
   qty: number;
   price?: number;
   triggerPrice?: number;
+  /** Product: CNC (delivery), NRML (F&O carry), MIS (intraday). Required by OpenAlgo. */
+  product?: 'CNC' | 'NRML' | 'MIS';
   /** Idempotency token; a retry with the same token is never double-sent. */
   clientToken?: string;
 }

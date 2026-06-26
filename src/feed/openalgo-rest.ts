@@ -8,7 +8,7 @@
  * epoch-seconds, epoch-ms, and IST date/time string timestamps.
  */
 import type { Bar } from '../model/bar';
-import type { BarsRequest, DataFeed, UnsubscribeFn } from './types';
+import type { BarsRequest, DataFeed } from './types';
 import { epochMsToUtcSeconds, istStringToUtcSeconds, utcSecondsToIstDateString } from './time';
 
 export interface OpenAlgoConfig {
@@ -99,10 +99,8 @@ export class OpenAlgoDataFeed implements DataFeed {
     return mapHistoryResponse((await res.json()) as HistoryResponse);
   }
 
-  public subscribeBars(_req: BarsRequest, _onBar: (bar: Bar) => void): UnsubscribeFn {
-    // Live bars come from the WS adapter, not REST: wire `OpenAlgoWsFeed` LTP
-    // events through a `CandleBuilder` and call `series.update()`. This REST
-    // adapter intentionally does not open a socket. See docs/guides.md.
-    return () => {};
-  }
+  // Note: this is a history-only feed — `subscribeBars` is intentionally NOT
+  // implemented (the optional DataFeed method is omitted, so callers can feature-
+  // detect it). For live bars use `OpenAlgoLiveDataFeed` (REST + WS + candle
+  // builder) or wire `OpenAlgoWsFeed` → `CandleBuilder` → `series.update()`.
 }

@@ -12,10 +12,14 @@ export interface BarsRequest {
   to?: UTCSeconds;
 }
 
-/** Broker-agnostic market-data source. The chart depends only on this. */
+/**
+ * Broker-agnostic market-data source. The chart depends only on this.
+ * `subscribeBars` is optional: a history-only feed (e.g. `OpenAlgoDataFeed`) omits
+ * it, while a live feed (`OpenAlgoLiveDataFeed`, or your own) implements it.
+ */
 export interface DataFeed {
   getBars(req: BarsRequest): Promise<Bar[]>;
-  subscribeBars(req: BarsRequest, onBar: (bar: Bar) => void): UnsubscribeFn;
+  subscribeBars?(req: BarsRequest, onBar: (bar: Bar) => void): UnsubscribeFn;
   subscribeDepth?(req: BarsRequest, onDepth: (depth: MarketDepth) => void): UnsubscribeFn;
 }
 

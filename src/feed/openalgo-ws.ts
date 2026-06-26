@@ -22,6 +22,8 @@ export interface SocketLike {
   onopen: (() => void) | null;
   onclose: (() => void) | null;
   onmessage: ((ev: { data: string }) => void) | null;
+  /** 1 === OPEN (browser WebSocket.OPEN). Used to gate sends. */
+  readyState?: number;
 }
 
 export type SocketFactory = (url: string) => SocketLike;
@@ -40,13 +42,17 @@ export interface LtpEvent {
   timeSec: number;
 }
 
-/** Pure: build the JSON subscribe message OpenAlgo expects. */
+/**
+ * Pure: build the JSON subscribe message. OpenAlgo's WS proxy takes a `symbols`
+ * array of `EXCHANGE:SYMBOL` strings (per the API-playground docs); `apikey` and
+ * `mode` are included for auth + feed selection. Verify against your build.
+ */
 export function formatSubscribe(apiKey: string, mode: WsMode, symbol: string, exchange: string): string {
-  return JSON.stringify({ action: 'subscribe', apikey: apiKey, mode, symbol, exchange });
+  return JSON.stringify({ action: 'subscribe', apikey: apiKey, mode, symbols: [`${exchange}:${symbol}`] });
 }
 
 export function formatUnsubscribe(apiKey: string, mode: WsMode, symbol: string, exchange: string): string {
-  return JSON.stringify({ action: 'unsubscribe', apikey: apiKey, mode, symbol, exchange });
+  return JSON.stringify({ action: 'unsubscribe', apikey: apiKey, mode, symbols: [`${exchange}:${symbol}`] });
 }
 
 type RawMsg = {
@@ -89,6 +95,8 @@ export class OpenAlgoWsFeed {
   private readonly _config: OpenAlgoWsConfig;
   private readonly _factory: SocketFactory;
   private _sock: SocketLike | null = null;
+  private _open = false;
+  private readonly _queue: string[] = [];
   private readonly _ltpCbs = new Set<(e: LtpEvent) => void>();
   private readonly _depthCbs = new Set<(symbol: string, exchange: string, depth: MarketDepth) => void>();
 
@@ -103,7 +111,24 @@ export class OpenAlgoWsFeed {
     if (this._sock !== null) return;
     const sock = this._factory(this._config.url);
     sock.onmessage = (ev): void => this._dispatch(ev.data);
+    sock.onopen = (): void => { this._open = true; this._flush(); };
+    sock.onclose = (): void => { this._open = false; };
+    // Some sockets connect synchronously (readyState OPEN) before onopen fires.
+    if (sock.readyState === 1) this._open = true;
     this._sock = sock;
+    if (this._open) this._flush();
+  }
+
+  /** Send now if open; otherwise queue until onopen (browsers throw on send-before-open). */
+  private _send(msg: string): void {
+    if (this._sock !== null && this._open) this._sock.send(msg);
+    else this._queue.push(msg);
+  }
+
+  private _flush(): void {
+    if (this._sock === null) return;
+    for (const msg of this._queue) this._sock.send(msg);
+    this._queue.length = 0;
   }
 
   public onLtp(cb: (e: LtpEvent) => void): () => void {
@@ -117,16 +142,18 @@ export class OpenAlgoWsFeed {
   }
 
   public subscribe(mode: WsMode, symbol: string, exchange: string): void {
-    this._sock?.send(formatSubscribe(this._config.apiKey, mode, symbol, exchange));
+    this._send(formatSubscribe(this._config.apiKey, mode, symbol, exchange));
   }
 
   public unsubscribe(mode: WsMode, symbol: string, exchange: string): void {
-    this._sock?.send(formatUnsubscribe(this._config.apiKey, mode, symbol, exchange));
+    this._send(formatUnsubscribe(this._config.apiKey, mode, symbol, exchange));
   }
 
   public close(): void {
     this._sock?.close();
     this._sock = null;
+    this._open = false;
+    this._queue.length = 0;
   }
 
   private _dispatch(data: string): void {

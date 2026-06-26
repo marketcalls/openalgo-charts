@@ -25,7 +25,7 @@
     }
   },
   "files": ["dist/**"],
-  "sideEffects": false,
+  "sideEffects": ["**/transform/**", "./dist/openalgo-charts.transform.mjs"],
   "scripts": {
     "clean": "rimraf dist",
     "build": "rollup -c",

@@ -790,7 +790,7 @@ The engine handles both modes through a **simple two-method contract**, so the m
 
 Standard live behaviors: **auto-scroll to realtime** only when the user is already at the right edge (don't yank the view if they've scrolled into history), a **last-price line + label**, and **lazy history paging** — when the user pans left past the loaded range, fire `getBars(olderRange)` and prepend. Family B transforms and Family C profiles consume the *same* `setData`/`update` stream; the transform/profile pipelines are incremental so live ticks extend Renko bricks / footprint cells correctly without recompute.
 
-A thin `DataFeed` interface decouples the chart from OpenAlgo so the engine itself stays broker-agnostic and independently testable:
+A thin `DataFeed` interface decouples the chart from OpenAlgo so the engine itself stays broker-agnostic and independently testable. **Note:** `subscribeBars` is *optional* — `OpenAlgoDataFeed` is history-only (REST), and live bars come from `OpenAlgoLiveDataFeed` (REST + WS + candle builder) or by wiring `OpenAlgoWsFeed` LTP ticks through a `CandleBuilder` yourself.
 
 ```ts
 interface DataFeed {

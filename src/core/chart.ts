@@ -603,7 +603,7 @@ export class Chart {
       el.removeEventListener('wheel', this._onWheel);
       el.removeEventListener('dblclick', this._onDblClick);
     }
-    for (const pane of this._panes) pane.element.remove();
+    for (const pane of this._panes) pane.destroy(); // detaches primitives + removes element
     this._panes.length = 0;
   }
 }

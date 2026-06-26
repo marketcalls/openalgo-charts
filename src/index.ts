@@ -63,6 +63,8 @@ export { OpenAlgoWsFeed, parseMessage, formatSubscribe, formatUnsubscribe } from
 export type { OpenAlgoWsConfig, SocketLike, SocketFactory, WsMode, LtpEvent } from './feed/openalgo-ws';
 export { OpenAlgoTradeFeed, mapOrder, mapPosition } from './feed/openalgo-trade';
 export type { OpenAlgoTradeConfig } from './feed/openalgo-trade';
+export { OpenAlgoLiveDataFeed, intervalToSeconds } from './feed/openalgo-live';
+export type { OpenAlgoLiveConfig } from './feed/openalgo-live';
 export { FakeDataFeed, generateBars } from './feed/fake-feed';
 export { TickBarAggregator } from './feed/tick-aggregator';
 export type { TickTimeframe, AggTick, BarUpdate } from './feed/tick-aggregator';
