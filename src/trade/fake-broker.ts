@@ -5,6 +5,7 @@
  * cancel state machine; Phase 8 uses it read-only (seed snapshots + emit LTP).
  */
 import type { Order, Position } from './types';
+import type { MarketDepth } from '../feed/types';
 import type { OrderFeed, PlaceRequest, TradeMode } from './order-engine';
 
 export class FakeBroker implements OrderFeed {
@@ -12,6 +13,7 @@ export class FakeBroker implements OrderFeed {
   private _positions: Position[] = [];
   private readonly _bookListeners: Array<(o: Order[], p: Position[]) => void> = [];
   private readonly _ltpListeners: Array<(symbol: string, ltp: number) => void> = [];
+  private readonly _depthListeners: Array<(symbol: string, depth: MarketDepth) => void> = [];
   private _idCounter = 0;
   /** Set to a reason to make the next place() reject (test hook). */
   public rejectNextPlace: string | null = null;
@@ -33,6 +35,25 @@ export class FakeBroker implements OrderFeed {
 
   public emitLtp(symbol: string, ltp: number): void {
     for (const cb of this._ltpListeners) cb(symbol, ltp);
+  }
+
+  public onDepth(cb: (symbol: string, depth: MarketDepth) => void): void {
+    this._depthListeners.push(cb);
+  }
+
+  public emitDepth(symbol: string, depth: MarketDepth): void {
+    for (const cb of this._depthListeners) cb(symbol, depth);
+  }
+
+  /** Build a deterministic N-level synthetic book around `ltp` (demo/test helper). */
+  public static makeDepth(ltp: number, levels: number, tickSize = 0.05): MarketDepth {
+    const bids = [];
+    const asks = [];
+    for (let i = 1; i <= levels; i++) {
+      bids.push({ price: ltp - i * tickSize, qty: 100 + ((i * 37) % 900) });
+      asks.push({ price: ltp + i * tickSize, qty: 100 + ((i * 53) % 900) });
+    }
+    return { bids, asks, ltp };
   }
 
   public orders(): readonly Order[] { return this._orders; }

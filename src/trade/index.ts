@@ -29,3 +29,13 @@ export {
   type OrderEvent,
 } from './order-state-machine';
 export { validateOrder, withinPriceBand, type OrderConstraints, type PriceBand, type ValidationResult } from './validation';
+export {
+  DomLadder,
+  ladderCapability,
+  buildRows,
+  visibleRows,
+  DEFAULT_DOM_LADDER_OPTIONS,
+  type LadderTier,
+  type LadderRow,
+  type DomLadderOptions,
+} from './dom-ladder';
