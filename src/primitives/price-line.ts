@@ -20,11 +20,16 @@ export interface PriceLineOptions {
    * NinjaTrader order line. The right-axis tag is always drawn.
    */
   extentFromRight?: number;
+  /** Draw a small cancel (cross) box at the right end; hit-tests as `${id}::close`. */
+  closeButton?: boolean;
   /** Stable id returned by hit-test (for click/drag routing). */
   id: string;
   /** Cursor hint when hovered (e.g. 'ns-resize' for draggable lines). */
   cursor?: string;
 }
+
+/** Width/height of the cancel (cross) box, in media px (shared by draw + hit-test). */
+const CLOSE_BOX = 14;
 
 export class PriceLine implements IPrimitive {
   private _opts: PriceLineOptions;
@@ -49,6 +54,12 @@ export class PriceLine implements IPrimitive {
   /** Move the line; schedules a repaint via the host. */
   public setPrice(price: number): void {
     this._opts.price = price;
+    this._host?.requestUpdate();
+  }
+
+  /** Update the left-end tag text (e.g. live position P&L); repaints. */
+  public setLeftLabel(text: string): void {
+    this._opts.leftLabel = text;
     this._host?.requestUpdate();
   }
 
@@ -103,6 +114,22 @@ export class PriceLine implements IPrimitive {
       ctx.fillStyle = '#0d0e12';
       ctx.fillText(this._opts.leftLabel, xStart + padX, y);
     }
+
+    // optional cancel box at the right end of the line (cross drawn geometrically)
+    if (this._opts.closeButton) {
+      const s = CLOSE_BOX * rc.dpr;
+      const bx = xEnd - s;
+      const by = y - s / 2;
+      ctx.fillStyle = this._opts.color;
+      ctx.fillRect(bx, by, s, s);
+      ctx.strokeStyle = '#0d0e12';
+      ctx.lineWidth = Math.max(1, Math.round(1.5 * rc.dpr));
+      const p = 4 * rc.dpr;
+      ctx.beginPath();
+      ctx.moveTo(bx + p, by + p); ctx.lineTo(bx + s - p, by + s - p);
+      ctx.moveTo(bx + s - p, by + p); ctx.lineTo(bx + p, by + s - p);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -110,6 +137,10 @@ export class PriceLine implements IPrimitive {
     if (x < 0 || x > rc.plotWidth) return null;
     const lineY = rc.priceScale.priceToY(this._opts.price);
     const distance = Math.abs(y - lineY);
+    // Cancel box at the right end takes priority and routes as a click (not a drag).
+    if (this._opts.closeButton && x >= rc.plotWidth - CLOSE_BOX && distance <= CLOSE_BOX / 2 + 1) {
+      return { externalId: `${this._opts.id}::close`, zOrder: 'normal', distance, cursor: 'pointer' };
+    }
     if (distance > 4) return null;
     return { externalId: this._opts.id, zOrder: 'normal', distance, cursor: this._opts.cursor };
   }

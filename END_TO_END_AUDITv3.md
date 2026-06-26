@@ -1,56 +1,75 @@
 # OpenAlgo Charts End-to-End Audit v3
 
-Date: 2026-06-26
+Date: 2026-06-27
 
 Scope:
 
 - Package audited: `D:\testing\openalgo-charts`
-- Fresh revision audited: `f13d317`
-- Baseline: `END_TO_END_AUDITv2.md` plus the post-v2 fixes committed in `f13d317`
+- Fresh revision audited: `8f2f9bc`
+- Previous v3 baseline: `f13d317`
+- Local OpenAlgo WS docs checked:
+  - `D:\testing\openalgo\docs\prompt\websockets-format.md`
+  - `D:\testing\openalgo\docs\websocket-quote-feed.md`
+  - `D:\testing\openalgo\docs\scanner-architecture.md`
 - Security perspective included: client-side secret exposure, transport, XSS/code-injection scan, supply-chain checks, and package metadata.
 
 Repo state before this file was added: clean (`git status --short` produced no changes).
 
 ## Executive Summary
 
-The actionable v2 findings are fixed in the current code. The key adapter fixes are present: `OpenAlgoTradeFeed` now sends `product`/`strategy`, preserves order context for full `modifyorder` payloads, coerces string book values, `OpenAlgoWsFeed` uses the `symbols: ["EXCHANGE:SYMBOL"]` schema, and WS sends are queued until socket open. The v2 API/lifecycle fixes are also present: `DataFeed.subscribeBars` is optional, transform tier registration is protected from tree-shaking, and pane/chart destroy paths detach primitives.
+The actionable v2 findings remain fixed at the current HEAD. Since the earlier v3 audit, the package added chart coordinate APIs, screenshot export, crosshair-move callbacks, grid toggles, RSI/ATR/Supertrend, a yfinance historical demo/server, and richer simulated chart-trading workflows.
+
+The WebSocket adapter is materially improved. It now implements the newer OpenAlgo protocol documented in `docs/prompt/websockets-format.md`: authenticate first with `api_key`, subscribe with single `symbol`/`exchange` plus numeric mode, parse nested `market_data`, support ISO timestamps, and respond to `ping`. Older OpenAlgo docs still show batched `symbols` arrays and string modes, so this still needs a live smoke test against the exact OpenAlgo build in use.
 
 The build and package are healthy:
 
 - `npm run verify` passed.
-- 24 test files, 194 tests passed.
+- 27 test files, 215 tests passed.
 - Typecheck, Rollup build, standalone IIFE build, and all size limits passed.
-- Full package measured 26.11 KB Brotli against a 50 KB budget.
+- Full package measured 27.69 KB Brotli against a 50 KB budget.
 - ESM import smoke, standalone IIFE VM smoke, `npm pack --dry-run`, `npm audit`, and `npm ls --omit=dev` all passed.
 
-Security verdict: no high-confidence XSS, code execution, dependency vulnerability, or runtime supply-chain issue was found in the package code. The main security risk is deployment architecture: the browser-facing OpenAlgo adapters accept and transmit an OpenAlgo API key. That is acceptable for a trusted local/operator UI, but not for a public or multi-user web app unless the key is kept server-side behind a backend proxy and HTTPS/WSS is enforced.
+Security verdict: no high-confidence XSS, code execution, dependency vulnerability, or runtime supply-chain issue was found in the packaged library code. A new demo-only XSS issue exists in `examples/yfinance/index.html`: free-text `symbol` is interpolated into `legend.innerHTML`. This is not in the npm tarball, but it should be fixed before sharing that demo beyond a trusted local environment.
 
-The current honest release state remains: strong 0.1.0 pre-release, not production-complete. The main remaining blockers are browser/pixel E2E, a live OpenAlgo smoke test with real credentials, and one new live-feed correctness gap in `OpenAlgoLiveDataFeed`.
+The biggest v3 finding remains open: `OpenAlgoLiveDataFeed` still creates an unseeded `CandleBuilder` and still does not pass through the WS socket factory, so the composed live feed can mishandle the history-to-live handoff and is hard to test offline.
+
+The current honest release state remains: strong 0.1.0 pre-release, not production-complete. The main remaining blockers are browser/pixel E2E, a live OpenAlgo smoke test with real credentials, the composed live-feed handoff, stale release docs, and demo/security hygiene.
 
 ## Verification Matrix
 
 | Check | Result | Evidence |
 |---|---:|---|
-| `git rev-parse --short HEAD` | Pass | `f13d317` |
+| `git rev-parse --short HEAD` | Pass | `8f2f9bc` |
 | `git status --short` before this file | Pass | Clean output. |
 | `npm run verify` | Pass | Typecheck, tests, build, and size all passed. |
-| Unit tests | Pass | 24 files, 194 tests. |
-| Size limits | Pass | Base 15.13 KB, base+trade 19.98 KB, transform 3.80 KB, profile 2.33 KB, everything 26.11 KB Brotli. |
-| ESM dist import smoke | Pass | Root/trade/transform/profile imported; `VERSION` was `0.1.0`; live/trade adapters exported. |
-| Standalone IIFE smoke | Pass | `OpenAlgoCharts.VERSION === "0.1.0"` and `createChart` exists in a VM context. |
-| `npm pack --dry-run` | Pass | `openalgo-charts-0.1.0.tgz`, 17 files, 152.8 KB package, 511.9 KB unpacked. |
+| Unit tests | Pass | 27 files, 215 tests. |
+| Size limits | Pass | Base 16.68/17 KB, base+trade 21.52/22 KB, transform 3.83/5 KB, profile 2.33/4 KB, everything 27.69/50 KB Brotli. |
+| ESM dist import smoke | Pass | Root/trade/transform/profile imported; `VERSION` was `0.1.0`; live/trade adapters and RSI/ATR/Supertrend exported. |
+| Standalone IIFE smoke | Pass | `OpenAlgoCharts.VERSION === "0.1.0"`, `createChart` exists, and `supertrend` exists in a VM context. |
+| `npm pack --dry-run` | Pass | `openalgo-charts-0.1.0.tgz`, 17 files, 165.2 KB package, 548.1 KB unpacked. |
 | `npm audit --audit-level=moderate` | Pass | `found 0 vulnerabilities`. |
 | `npm ls --omit=dev` | Pass | No runtime dependencies. |
-| Security grep | Pass with notes | No `eval`, `new Function`, executable timers, cookie access, or package-code DOM injection found. Example `innerHTML = ''` uses a constant clear only. |
+| Security grep | Pass with demo finding | No packaged-library DOM/code execution issue found; yfinance demo has `legend.innerHTML` fed by free-text symbol. |
 | Browser/pixel E2E | Not run | No Playwright/Puppeteer/browser pixel harness exists. |
 | Live OpenAlgo smoke | Not run | No running OpenAlgo session, broker login, or credentials were available. |
+
+## Delta Since Prior v3
+
+Notable commits after `f13d317`:
+
+- `4d7fe10` added the yfinance historical demo.
+- `6b6601f` fixed real-browser module loading/MIME behavior for that demo.
+- `bffd3fd`, `c4b37db`, and `c4189d5` improved crosshair behavior, labels, chart-type switching, screenshots, and grid toggles.
+- `7f916a9` added RSI, ATR, and Supertrend.
+- `37021c3`, `0940b66`, `17bdd94`, `bf536a1`, and `8f2f9bc` expanded demo chart trading: drag-to-modify, bracket panel, right-click order placement, short lines, OCO clarity, market fills, fill arrows, and position lines.
+- `6e736c2` aligned the WS adapter with the newer OpenAlgo protocol docs.
 
 ## Verified v2 Fixes
 
 | ID | v3 status | Verification notes |
 |---|---|---|
 | V2-H1 trade REST contract | Fixed | `OpenAlgoTradeFeed.place()` sends `strategy`, `product`, symbol/action/exchange/pricetype/quantity/price fields; `modify()` sends full cached order context; unknown modify throws; string numeric book fields are coerced. Covered by `tests/audit-v2-fixes.test.ts` and `tests/openalgo-adapters.test.ts`. |
-| V2-H2 WS schema and send timing | Fixed offline, live schema still needs smoke | `formatSubscribe()` uses `symbols: ["NSE:SBIN"]`; sends queue until `onopen`; readyState fake socket test covers the browser timing failure. Exact OpenAlgo proxy schema still requires live validation. |
+| V2-H2 WS schema and send timing | Improved/fixed offline, live schema still needs smoke | `formatSubscribe()` now uses the newer documented single-symbol/numeric-mode schema and `OpenAlgoWsFeed` authenticates first, queues until open, parses nested `market_data`, handles ISO timestamps, and responds to ping. Exact OpenAlgo proxy behavior still requires live validation. |
 | V2-M1 `subscribeBars` API trap | Fixed at interface level | `DataFeed.subscribeBars` is optional; `OpenAlgoDataFeed` is history-only; `OpenAlgoLiveDataFeed` exists. See new V3-H1 for live feed correctness/testability. |
 | V2-M2 transform tier tree-shaking | Fixed | `package.json` lists transform side effects and `registerTransformChartTypes()` is exported and idempotent. |
 | V2-M3 primitive lifecycle | Fixed | `Pane.destroy()` detaches primitives; `Chart.destroy()` calls it; lifecycle unit test added. |
@@ -87,6 +106,7 @@ Add a seed path to the composed live feed before it emits bars. Conservative opt
 Evidence:
 
 - The current test suite is strong for pure logic and fake DOM/canvas behavior, but no Playwright/Puppeteer browser harness exists.
+- The new yfinance demo is a useful manual browser proof point, but it is not run by CI or an automated browser harness.
 - `END_TO_END_AUDITv2.md`, README, and `ARCHITECTURE.md` all document this as deferred.
 - The IIFE VM smoke verifies global exports, but it does not prove real DOM layout, canvas pixels, pointer events, device pixel ratio behavior, or example pages in a browser engine.
 
@@ -100,7 +120,7 @@ Add a minimal Playwright suite before calling the package production-ready:
 
 - Render the example chart at desktop and mobile viewports.
 - Assert nonblank canvas pixels and stable dimensions.
-- Exercise pan, wheel zoom, crosshair, pane hit-testing, order-line drag, and destroy/remount.
+- Exercise pan, wheel zoom, crosshair, pane hit-testing, right-click order menu, order-line drag, grid toggles, screenshot export, and destroy/remount.
 - Add a small golden-pixel set for candles, lines, histograms, axes, crosshair, and a trade line at DPR 1 and 2.
 
 ### V3-H3. Live OpenAlgo adapter schemas still need a real smoke test

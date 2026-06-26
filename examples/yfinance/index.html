@@ -313,8 +313,15 @@
       return chart.addPriceLine({
         price: o.price, color: o.side === 'BUY' ? UP : DOWN, lineWidth: 1, dashed: true,
         id: `order:${o.id}`, cursor: 'ns-resize', extentFromRight: TRADE_EXTENT,
-        leftLabel: `${o.side} ${o.qty} ${o.type}`,
+        leftLabel: `${o.side} ${o.qty} ${o.type}`, closeButton: true, // click the box to cancel
       }, 0);
+    }
+    function cancelOrder(id) { // id = "order:<n>"
+      const o = orders.find((x) => `order:${x.id}` === id);
+      if (!o) return;
+      if (o.line && chart) chart.removePrimitive(o.line);
+      orders = orders.filter((x) => x !== o);
+      el('status').textContent = `cancelled ${o.side} ${o.type} @ ${fmt(o.price)}`;
     }
     function placeOrder(side, type, price) {
       const qty = Math.max(1, Number(el('qty').value) || 1);
@@ -361,13 +368,20 @@
         ? `${side} MARKET ${qty} filled @ ${fmt(price)} → ${p.netQty > 0 ? 'LONG' : 'SHORT'} ${Math.abs(p.netQty)} @ ${fmt(p.avgPrice)}`
         : `${side} MARKET ${qty} filled @ ${fmt(price)} → flat`;
     }
+    // P&L of the open position marked at `mp` (defaults to the latest close).
+    function markPrice() { return currentBars.length ? currentBars[currentBars.length - 1].close : 0; }
+    function positionLabel(mp) {
+      const long = position.netQty > 0;
+      const pnl = (mp - position.avgPrice) * position.netQty;
+      return `${long ? 'LONG' : 'SHORT'} ${Math.abs(position.netQty)} @ ${fmt(position.avgPrice)}  ${rupee(pnl)}`;
+    }
     function updatePositionLine() {
       if (posLine && chart) { chart.removePrimitive(posLine); posLine = null; }
       if (!position || position.netQty === 0 || !chart) return;
       const long = position.netQty > 0;
       posLine = chart.addPriceLine({
         price: round2(position.avgPrice), color: long ? '#2e7d6b' : '#a14a52', lineWidth: 2, dashed: false,
-        id: 'position', extentFromRight: TRADE_EXTENT, leftLabel: `${long ? 'LONG' : 'SHORT'} ${Math.abs(position.netQty)}`,
+        id: 'position', extentFromRight: TRADE_EXTENT, leftLabel: positionLabel(markPrice()), closeButton: true,
       }, 0);
     }
     function clearPosition() {
@@ -457,12 +471,21 @@
           if (o && o.line) { o.price = round2(p); o.line.setPrice(o.price); el('status').textContent = `${o.side} ${o.type} order -> ${fmt(o.price)}`; }
         }
       });
+      // Click the cancel box on a line: cancel that order, or close the position.
+      chart.subscribeClick((id) => {
+        if (id === 'position::close') { clearPosition(); el('status').textContent = 'position closed'; return; }
+        if (id.endsWith('::close')) cancelOrder(id.slice(0, -'::close'.length));
+      });
       attachOrderLines();
       updatePositionLine(); // redraw the position line on the rebuilt chart
       if (bracket) { attachBracketLines(); updateBracket(); }
 
-      // OHLC legend tracks the crosshair; default to the latest bar.
-      chart.subscribeCrosshairMove((e) => setLegend(e.bar ?? currentBars[currentBars.length - 1]));
+      // OHLC legend tracks the crosshair; default to the latest bar. The open
+      // position's P&L marks to the hovered bar's close (else the latest close).
+      chart.subscribeCrosshairMove((e) => {
+        setLegend(e.bar ?? currentBars[currentBars.length - 1]);
+        if (position && posLine) posLine.setLeftLabel(positionLabel(e.bar ? e.bar.close : markPrice()));
+      });
       setLegend(currentBars[currentBars.length - 1]);
       window.__chart = () => chart;
     }

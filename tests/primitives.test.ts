@@ -77,6 +77,27 @@ describe('PriceLine primitive', () => {
     expect(partial.rec.ops.find((o) => o.type === 'moveTo')!.args[0]).toBe(420); // 600 * (1 - 0.3)
     expect(partial.rec.count('fillRect')).toBe(2); // right price tag + left order tag
   });
+
+  it('closeButton hit-tests as a click at the right end; the rest of the line drags', () => {
+    const { rc } = makeRc(); // plotWidth 600
+    const pl = new PriceLine({ price: 50, color: '#fff', lineWidth: 1, dashed: false, id: 'order:7', cursor: 'ns-resize', closeButton: true });
+    const yAt50 = rc.priceScale.priceToY(50);
+    const close = pl.hitTest(596, yAt50, rc); // within the right-end cancel box
+    expect(close!.externalId).toBe('order:7::close');
+    expect(close!.cursor).toBe('pointer'); // click, not drag
+    const drag = pl.hitTest(120, yAt50, rc); // elsewhere on the line
+    expect(drag!.externalId).toBe('order:7');
+    expect(drag!.cursor).toBe('ns-resize');
+  });
+
+  it('setLeftLabel updates the tag + repaints', () => {
+    let updates = 0;
+    const pl = new PriceLine({ price: 50, color: '#fff', lineWidth: 1, dashed: false, id: 'position' });
+    pl.attached({ requestUpdate: () => { updates++; } });
+    pl.setLeftLabel('LONG 100  +1,250');
+    expect(pl.options().leftLabel).toBe('LONG 100  +1,250');
+    expect(updates).toBe(1);
+  });
 });
 
 describe('SeriesMarkers', () => {
