@@ -162,6 +162,11 @@
     // Resting orders placed by right-click: each is one draggable price line.
     let orders = [];   // { id, side, type, price, qty, product, line }
     let nextOrderId = 1;
+    // Market fills build a net position (avg price) shown as a solid line + arrow markers.
+    let position = null;   // { netQty, avgPrice }
+    let posLine = null;    // PriceLine for the position
+    let fills = [];        // marker list for executed market orders
+    let markersApi = null; // SeriesMarkers handle on the price series
     let currentBars = [];          // cached so a chart-type switch needs no refetch
     const idxByTime = new Map();   // bar time -> array index (for previous-close lookup)
     let req = {};                  // last-loaded request (symbol/interval/period)
@@ -313,10 +318,7 @@
     }
     function placeOrder(side, type, price) {
       const qty = Math.max(1, Number(el('qty').value) || 1);
-      if (type === 'MARKET') { // fills now — no resting line
-        el('status').textContent = `${side} MARKET ${qty} ${req.symbol} (filled ~${fmt(price)})`;
-        return;
-      }
+      if (type === 'MARKET') { fillMarket(side, qty); return; } // executes into a position
       const o = { id: nextOrderId++, side, type, price: round2(price), qty, product: el('product').value };
       o.line = chart ? orderLine(o) : null;
       orders.push(o);
@@ -326,6 +328,52 @@
     function removeAllOrders() {
       if (chart) for (const o of orders) if (o.line) chart.removePrimitive(o.line);
       orders = [];
+    }
+
+    // Execute a market order at the last price → update the net position, drop an
+    // arrow marker on the bar, and (re)draw the position line.
+    function fillMarket(side, qty) {
+      if (!currentBars.length) return;
+      const last = currentBars[currentBars.length - 1];
+      const price = round2(last.close);
+      const signed = side === 'BUY' ? qty : -qty;
+      if (!position || position.netQty === 0) {
+        position = { netQty: signed, avgPrice: price };
+      } else if (Math.sign(position.netQty) === Math.sign(signed)) {
+        const net = position.netQty + signed; // adding → volume-weighted average
+        position.avgPrice = (position.avgPrice * position.netQty + price * signed) / net;
+        position.netQty = net;
+      } else {
+        const net = position.netQty + signed; // reducing / flipping
+        position = net === 0 ? null
+          : Math.sign(net) === Math.sign(position.netQty) ? { netQty: net, avgPrice: position.avgPrice }
+          : { netQty: net, avgPrice: price };
+      }
+      fills.push({
+        time: last.time, position: side === 'BUY' ? 'belowBar' : 'aboveBar',
+        shape: side === 'BUY' ? 'arrowUp' : 'arrowDown', size: 'small',
+        color: side === 'BUY' ? UP : DOWN, text: `${side[0]} ${qty}`,
+      });
+      if (markersApi) markersApi.setMarkers(fills);
+      updatePositionLine();
+      const p = position;
+      el('status').textContent = p
+        ? `${side} MARKET ${qty} filled @ ${fmt(price)} → ${p.netQty > 0 ? 'LONG' : 'SHORT'} ${Math.abs(p.netQty)} @ ${fmt(p.avgPrice)}`
+        : `${side} MARKET ${qty} filled @ ${fmt(price)} → flat`;
+    }
+    function updatePositionLine() {
+      if (posLine && chart) { chart.removePrimitive(posLine); posLine = null; }
+      if (!position || position.netQty === 0 || !chart) return;
+      const long = position.netQty > 0;
+      posLine = chart.addPriceLine({
+        price: round2(position.avgPrice), color: long ? '#2e7d6b' : '#a14a52', lineWidth: 2, dashed: false,
+        id: 'position', extentFromRight: TRADE_EXTENT, leftLabel: `${long ? 'LONG' : 'SHORT'} ${Math.abs(position.netQty)}`,
+      }, 0);
+    }
+    function clearPosition() {
+      if (posLine && chart) chart.removePrimitive(posLine);
+      posLine = null; position = null; fills = [];
+      if (markersApi) markersApi.setMarkers([]);
     }
     // Keep pills locked to price across pan / zoom / rescale / kinetic.
     (function frame() { positionPills(); requestAnimationFrame(frame); })();
@@ -379,6 +427,8 @@
       volume = chart.addSeries('histogram', { paneIndex: 1, style: { color: '#33415e' } });
       price.setData(currentBars);
       volume.setData(currentBars.map((b) => ({ time: b.time, open: 0, high: b.volume, low: 0, close: b.volume })));
+      markersApi = price.createMarkers(); // executed-fill arrows
+      markersApi.setMarkers(fills);
 
       // Supertrend(10, 3) overlay — green uptrend / red downtrend (openalgo.ta.supertrend).
       if (el('st').checked) {
@@ -408,6 +458,7 @@
         }
       });
       attachOrderLines();
+      updatePositionLine(); // redraw the position line on the rebuilt chart
       if (bracket) { attachBracketLines(); updateBracket(); }
 
       // OHLC legend tracks the crosshair; default to the latest bar.
@@ -425,7 +476,7 @@
         currentBars = bars;
         idxByTime.clear();
         bars.forEach((b, i) => idxByTime.set(b.time, i));
-        removeBracket(); removeAllOrders(); // new symbol → drop bracket + orders
+        removeBracket(); removeAllOrders(); clearPosition(); // new symbol → flat slate
         render();
         status.textContent = `${req.symbol} · ${bars.length} bars · ${req.interval}/${req.period}`;
       } catch (e) {
@@ -435,7 +486,7 @@
 
     el('buy').addEventListener('click', () => makeBracket('BUY'));
     el('sell').addEventListener('click', () => makeBracket('SELL'));
-    el('cancel').addEventListener('click', () => { removeBracket(); removeAllOrders(); el('status').textContent = 'cancelled'; });
+    el('cancel').addEventListener('click', () => { removeBracket(); removeAllOrders(); clearPosition(); el('status').textContent = 'cancelled / flat'; });
     el('qty').addEventListener('change', () => { if (bracket) { bracket.qty = Math.max(1, Number(el('qty').value) || 1); updateBracket(); } });
 
     // ── NinjaTrader-style right-click order entry ───────────────────────────
@@ -469,7 +520,7 @@
       e.stopPropagation();
       hideCtx();
       if (btn.getAttribute('data-act') === 'cancelall') {
-        removeAllOrders(); removeBracket(); el('status').textContent = 'all orders cancelled'; return;
+        removeAllOrders(); removeBracket(); clearPosition(); el('status').textContent = 'all orders cancelled / flat'; return;
       }
       placeOrder(btn.getAttribute('data-side'), btn.getAttribute('data-type'), ctxPrice);
     });
