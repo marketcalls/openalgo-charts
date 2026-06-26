@@ -13,6 +13,10 @@ export interface CandleStyle {
   wickDownColor: string;
   borderVisible: boolean;
   wickVisible: boolean;
+  /** Draw up-candle bodies as outlines only (hollow candles). */
+  hollow?: boolean;
+  /** Per-bar body-width scale 0..1 (volume candles); 1 = full width. */
+  widthScale?: (bar: Bar) => number;
 }
 
 export const DEFAULT_CANDLE_STYLE: CandleStyle = {
@@ -60,7 +64,6 @@ export function drawCandles(
   style: CandleStyle = DEFAULT_CANDLE_STYLE,
 ): void {
   const bodyW = optimalBarWidth(barSpacing, dpr);
-  const half = Math.floor(bodyW / 2);
   const wickW = Math.max(1, Math.floor(dpr));
 
   for (const { x, bar } of items) {
@@ -71,6 +74,11 @@ export function drawCandles(
     const yHigh = Math.round(priceToY(bar.high) * dpr);
     const yLow = Math.round(priceToY(bar.low) * dpr);
 
+    // Per-bar width (volume candles scale the body by relative volume).
+    const scale = style.widthScale ? Math.max(0.05, Math.min(1, style.widthScale(bar))) : 1;
+    const w = scale === 1 ? bodyW : Math.max(1, Math.round(bodyW * scale));
+    const halfW = Math.floor(w / 2);
+
     if (style.wickVisible) {
       ctx.fillStyle = up ? style.wickUpColor : style.wickDownColor;
       ctx.fillRect(cx - Math.floor(wickW / 2), yHigh, wickW, Math.max(1, yLow - yHigh));
@@ -78,13 +86,21 @@ export function drawCandles(
 
     const top = Math.min(yOpen, yClose);
     const bodyH = Math.max(1, Math.abs(yClose - yOpen));
-    ctx.fillStyle = up ? style.upColor : style.downColor;
-    ctx.fillRect(cx - half, top, bodyW, bodyH);
+    const color = up ? style.upColor : style.downColor;
 
-    if (style.borderVisible && bodyW >= 3) {
-      ctx.strokeStyle = up ? style.borderUpColor : style.borderDownColor;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(cx - half + 0.5, top + 0.5, bodyW - 1, bodyH - 1);
+    if (style.hollow && up) {
+      // hollow up candle: outline only
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1, wickW);
+      ctx.strokeRect(cx - halfW + 0.5, top + 0.5, w - 1, bodyH - 1);
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - halfW, top, w, bodyH);
+      if (style.borderVisible && w >= 3 && !style.hollow) {
+        ctx.strokeStyle = up ? style.borderUpColor : style.borderDownColor;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(cx - halfW + 0.5, top + 0.5, w - 1, bodyH - 1);
+      }
     }
   }
 }

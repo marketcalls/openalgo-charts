@@ -22,11 +22,15 @@ export { DEFAULT_CANDLE_STYLE, optimalBarWidth } from './render/candles';
 export type { CandleStyle } from './render/candles';
 export { DEFAULT_HISTOGRAM_STYLE } from './render/histogram';
 export type { HistogramStyle } from './render/histogram';
+export type { SeriesStyle } from './render/series-style';
+
+export { registerChartType, getChartType, registeredChartTypes } from './model/chart-type-registry';
+export type { SeriesType, RendererEntry, DrawItem, SeriesRenderContext } from './model/chart-type-registry';
 
 export { CandleBuilder, DEFAULT_CANDLE_BUILDER_OPTIONS } from './feed/candle-builder';
 export type { CandleBuilderOptions, Tick, CandleUpdate, VolumeMode, LateTickPolicy } from './feed/candle-builder';
 
-export type { SeriesApi, SeriesType } from './model/series';
+export type { SeriesApi } from './model/series';
 export type { Bar, LinePoint, Whitespace, UTCSeconds, OriginalTime } from './model/bar';
 export { isWhitespace } from './model/bar';
 

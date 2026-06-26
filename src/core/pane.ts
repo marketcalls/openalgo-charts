@@ -9,8 +9,7 @@ import { TimeScale } from '../scale/time-scale';
 import { DataLayer } from '../model/data-layer';
 import type { SeriesRecord } from '../model/series';
 import { computeGridLines, drawGrid, type GridStyle } from '../render/grid';
-import { drawCandles, type CandleDrawItem } from '../render/candles';
-import { drawHistogram, type HistogramDrawItem } from '../render/histogram';
+import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
 import { drawPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, DEFAULT_AXIS_STYLE, type PlotLayout } from '../render/axis';
 import { drawCrosshair } from '../render/crosshair';
 
@@ -93,9 +92,11 @@ export class Pane {
     let low = Infinity;
     let high = -Infinity;
     for (const s of this._series) {
+      const entry = getChartType(s.type);
       for (const ib of ctx.dataLayer.visibleBars(s.dataId, range.from, range.to)) {
-        if (ib.bar.low < low) low = ib.bar.low;
-        if (ib.bar.high > high) high = ib.bar.high;
+        const ext = entry.extents(ib.bar, s.style);
+        if (ext.min < low) low = ext.min;
+        if (ext.max > high) high = ext.max;
       }
     }
     if (low <= high) this.priceScale.autoscale(low, high);
@@ -116,25 +117,26 @@ export class Pane {
     const lines = computeGridLines(layout.plotWidth, layout.plotHeight, { spacing: 60 });
     drawGrid(g, lines, layout.plotWidth, layout.plotHeight, dpr, this._theme.grid);
 
-    // series
+    // series (registry-driven — the core never switches on type)
     const range = ctx.timeScale.visibleRange();
     const priceToY = (p: number): number => this.priceScale.priceToY(p);
     let lastClose: number | null = null;
     let lastUp = true;
     for (const s of this._series) {
+      const entry = getChartType(s.type);
       const visible = ctx.dataLayer.visibleBars(s.dataId, range.from, range.to);
-      if (s.type === 'candlestick') {
-        const items: CandleDrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));
-        drawCandles(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style);
+      const items: DrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));
+      let maxVolume = 0;
+      for (const it of items) if ((it.bar.volume ?? 0) > maxVolume) maxVolume = it.bar.volume ?? 0;
+      const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume };
+      entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
+      if (entry.isPriceSeries) {
         const all = ctx.dataLayer.indexedBars(s.dataId);
         const last = all[all.length - 1];
         if (last !== undefined) {
           lastClose = last.bar.close;
           lastUp = last.bar.close >= last.bar.open;
         }
-      } else {
-        const items: HistogramDrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));
-        drawHistogram(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style);
       }
     }
 

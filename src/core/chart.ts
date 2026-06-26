@@ -9,9 +9,9 @@ import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop'
 import { Pane, type PaneTheme, DEFAULT_PANE_THEME, type PaneRenderContext } from './pane';
 import { TimeScale } from '../scale/time-scale';
 import { DataLayer } from '../model/data-layer';
-import { createCandlestickRecord, createHistogramRecord, type SeriesApi, type SeriesType } from '../model/series';
-import type { CandleStyle } from '../render/candles';
-import type { HistogramStyle } from '../render/histogram';
+import { createSeriesRecord, type SeriesApi } from '../model/series';
+import { getChartType, type SeriesType } from '../model/chart-type-registry';
+import type { SeriesStyle } from '../render/series-style';
 import type { Bar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
@@ -32,8 +32,8 @@ export interface ChartOptions {
 export interface AddSeriesOptions {
   /** Target pane index (0 = price). Higher panes are created on demand. */
   paneIndex?: number;
-  candleStyle?: Partial<CandleStyle>;
-  histogramStyle?: Partial<HistogramStyle>;
+  /** Style overrides merged onto the chart type's defaults. */
+  style?: SeriesStyle;
 }
 
 function defaultPixelRatio(): number {
@@ -120,12 +120,11 @@ export class Chart {
     const dataId = this._dataLayer.createSeries();
     const paneIndex = options.paneIndex ?? 0;
     this._ensurePane(paneIndex);
-    if (type === 'candlestick') {
-      if (this._firstDataId.value === null) this._firstDataId.value = dataId;
-      this._panes[paneIndex].addSeries(createCandlestickRecord(dataId, options.candleStyle));
-    } else {
-      this._panes[paneIndex].addSeries(createHistogramRecord(dataId, options.histogramStyle));
+    // The first price-type series on pane 0 drives the magnet crosshair.
+    if (this._firstDataId.value === null && getChartType(type).isPriceSeries) {
+      this._firstDataId.value = dataId;
     }
+    this._panes[paneIndex].addSeries(createSeriesRecord(dataId, type, options.style));
     return {
       setData: (bars: readonly Bar[]): void => this._setData(dataId, bars),
       prependData: (bars: readonly Bar[]): void => this._prependData(dataId, bars),
