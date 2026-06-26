@@ -81,6 +81,9 @@ export class Chart {
   private _downPane = 0;
   private _downX = 0;
   private _downLocalY = 0;
+  private _dragId: string | null = null; // externalId of the primitive being dragged
+  private _dragCb: ((externalId: string, price: number) => void) | null = null;
+  private _dragEndCb: ((externalId: string, price: number) => void) | null = null;
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._container = container;
@@ -163,6 +166,12 @@ export class Chart {
   /** Subscribe to clicks on hit-testable primitives (markers, events, lines). */
   public subscribeClick(cb: (externalId: string) => void): void {
     this._clickCb = cb;
+  }
+
+  /** Subscribe to drags of draggable lines (order/SL/TP). Fires per move and on release. */
+  public subscribeDrag(onDrag: (externalId: string, price: number) => void, onDragEnd?: (externalId: string, price: number) => void): void {
+    this._dragCb = onDrag;
+    this._dragEndCb = onDragEnd ?? null;
   }
 
   private _addPrimitive(paneIndex: number, primitive: IPrimitive): void {
@@ -338,22 +347,37 @@ export class Chart {
 
   private readonly _onPointerDown = (e: PointerEvent): void => {
     this._stopKinetic();
+    const p = this._localPoint(e);
+    this._downPane = p.pane;
+    this._downX = p.x;
+    this._downLocalY = p.localY;
+    this._container.setPointerCapture?.(e.pointerId);
+
+    // If the press lands on a draggable line (order/SL/TP), drag it — don't pan.
+    const hit = this._panes[p.pane]?.hitTestPrimitives(p.x, p.localY, this._renderContext(p.pane === this._panes.length - 1));
+    if (hit && hit.cursor === 'ns-resize' && this._dragCb !== null) {
+      this._dragId = hit.externalId;
+      this._dragging = false;
+      this._pointerMoved = false;
+      return;
+    }
+
     this._dragging = true;
     this._pointerMoved = false;
-    const p = this._localPoint(e);
     this._dragStartX = p.x;
     this._dragStartOffset = this._timeScale.rightOffset;
     this._lastDragX = p.x;
     this._lastDragT = this._now();
     this._dragVelocity = 0;
-    this._downPane = p.pane;
-    this._downX = p.x;
-    this._downLocalY = p.localY;
-    this._container.setPointerCapture?.(e.pointerId);
   };
 
   private readonly _onPointerMove = (e: PointerEvent): void => {
     const p = this._localPoint(e);
+    if (this._dragId !== null) {
+      const price = this._panes[this._downPane].priceScale.yToPrice(p.localY);
+      this._dragCb?.(this._dragId, price);
+      return;
+    }
     if (this._dragging) {
       const dx = p.x - this._dragStartX;
       if (Math.abs(dx) > 3) this._pointerMoved = true;
@@ -371,8 +395,15 @@ export class Chart {
   };
 
   private readonly _onPointerUp = (e: PointerEvent): void => {
-    this._dragging = false;
     this._container.releasePointerCapture?.(e.pointerId);
+    if (this._dragId !== null) {
+      const p = this._localPoint(e);
+      const price = this._panes[this._downPane].priceScale.yToPrice(p.localY);
+      this._dragEndCb?.(this._dragId, price);
+      this._dragId = null;
+      return;
+    }
+    this._dragging = false;
     if (!this._pointerMoved && this._clickCb !== null) {
       const isBottom = this._downPane === this._panes.length - 1;
       const hit = this._panes[this._downPane]?.hitTestPrimitives(this._downX, this._downLocalY, this._renderContext(isBottom));

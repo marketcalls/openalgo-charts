@@ -5,12 +5,16 @@
  * cancel state machine; Phase 8 uses it read-only (seed snapshots + emit LTP).
  */
 import type { Order, Position } from './types';
+import type { OrderFeed, PlaceRequest, TradeMode } from './order-engine';
 
-export class FakeBroker {
+export class FakeBroker implements OrderFeed {
   private _orders: Order[] = [];
   private _positions: Position[] = [];
   private readonly _bookListeners: Array<(o: Order[], p: Position[]) => void> = [];
   private readonly _ltpListeners: Array<(symbol: string, ltp: number) => void> = [];
+  private _idCounter = 0;
+  /** Set to a reason to make the next place() reject (test hook). */
+  public rejectNextPlace: string | null = null;
 
   public onBook(cb: (orders: Order[], positions: Position[]) => void): void {
     this._bookListeners.push(cb);
@@ -33,4 +37,57 @@ export class FakeBroker {
 
   public orders(): readonly Order[] { return this._orders; }
   public positions(): readonly Position[] { return this._positions; }
+
+  // ── OrderFeed (write path simulation) ──────────────────────────────────
+
+  public async place(req: PlaceRequest & { mode: TradeMode }): Promise<{ orderId: string }> {
+    if (this.rejectNextPlace !== null) {
+      const reason = this.rejectNextPlace;
+      this.rejectNextPlace = null;
+      throw new Error(reason);
+    }
+    const orderId = `B${++this._idCounter}`;
+    this._orders.push({
+      id: orderId,
+      symbol: req.symbol,
+      side: req.side,
+      type: req.type,
+      qty: req.qty,
+      filledQty: 0,
+      price: req.price ?? 0,
+      triggerPrice: req.triggerPrice,
+      status: req.type === 'MARKET' ? 'filled' : 'working',
+      role: undefined,
+    });
+    this._notify();
+    return { orderId };
+  }
+
+  public async modify(orderId: string, patch: { price?: number; triggerPrice?: number; qty?: number }): Promise<void> {
+    const o = this._orders.find((x) => x.id === orderId);
+    if (o === undefined) throw new Error('unknown order');
+    if (patch.price !== undefined) o.price = patch.price;
+    if (patch.triggerPrice !== undefined) o.triggerPrice = patch.triggerPrice;
+    if (patch.qty !== undefined) o.qty = patch.qty;
+    this._notify();
+  }
+
+  public async cancel(orderId: string): Promise<void> {
+    this._orders = this._orders.filter((x) => x.id !== orderId);
+    this._notify();
+  }
+
+  /** Simulate a fill for an order (test hook). */
+  public fill(orderId: string): void {
+    const o = this._orders.find((x) => x.id === orderId);
+    if (o === undefined) return;
+    o.filledQty = o.qty;
+    o.status = 'filled';
+    this._orders = this._orders.filter((x) => x.id !== orderId);
+    this._notify();
+  }
+
+  private _notify(): void {
+    for (const cb of this._bookListeners) cb(this._orders, this._positions);
+  }
 }

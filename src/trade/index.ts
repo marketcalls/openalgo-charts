@@ -12,3 +12,20 @@ export { PositionMarker } from './position';
 export { BracketGroup, type BracketState } from './bracket';
 export { TradeController, type TradeHost } from './trade-controller';
 export { FakeBroker } from './fake-broker';
+export {
+  OrderEngine,
+  type OrderEngineOptions,
+  type OrderFeed,
+  type PlaceRequest,
+  type PlaceResult,
+  type TradeMode,
+  type GateFn,
+} from './order-engine';
+export {
+  transition,
+  canTransition,
+  isTerminal,
+  type ClientOrderState,
+  type OrderEvent,
+} from './order-state-machine';
+export { validateOrder, withinPriceBand, type OrderConstraints, type PriceBand, type ValidationResult } from './validation';
