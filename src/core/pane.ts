@@ -12,6 +12,7 @@ import { computeGridLines, drawGrid, type GridStyle } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
 import { drawPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, DEFAULT_AXIS_STYLE, type PlotLayout } from '../render/axis';
 import { drawCrosshair } from '../render/crosshair';
+import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
 
 export interface PaneTheme {
   background: string;
@@ -43,6 +44,7 @@ export class Pane {
   /** Relative height weight within the chart (price=1, volume≈0.3). */
   public weight = 1;
   private readonly _series: SeriesRecord[] = [];
+  private readonly _primitives: IPrimitive[] = [];
   private _width = 0;
   private _height = 0;
   private readonly _theme: PaneTheme;
@@ -66,6 +68,30 @@ export class Pane {
 
   public series(): readonly SeriesRecord[] {
     return this._series;
+  }
+
+  public addPrimitive(primitive: IPrimitive, host: PrimitiveHost): void {
+    this._primitives.push(primitive);
+    primitive.attached?.(host);
+  }
+
+  private _primitiveContext(ctx: PaneRenderContext): PrimitiveRenderContext {
+    const layout = this._layout(ctx);
+    return {
+      timeScale: ctx.timeScale,
+      priceScale: this.priceScale,
+      dataLayer: ctx.dataLayer,
+      plotWidth: layout.plotWidth,
+      plotHeight: layout.plotHeight,
+      priceAxisWidth: ctx.priceAxisWidth,
+      dpr: ctx.dpr,
+    };
+  }
+
+  /** Topmost primitive hit at media-px (x,y) relative to this pane's plot. */
+  public hitTestPrimitives(x: number, y: number, ctx: PaneRenderContext): PrimitiveHit | null {
+    const prc = this._primitiveContext(ctx);
+    return bestHit(this._primitives.map((p) => (p.hitTest ? p.hitTest(x, y, prc) : null)));
   }
 
   public resize(width: number, height: number, dpr: number): void {
@@ -99,6 +125,13 @@ export class Pane {
         if (ext.max > high) high = ext.max;
       }
     }
+    for (const p of this._primitives) {
+      const ext = p.autoscaleInfo?.();
+      if (ext) {
+        if (ext.min < low) low = ext.min;
+        if (ext.max > high) high = ext.max;
+      }
+    }
     if (low <= high) this.priceScale.autoscale(low, high);
   }
 
@@ -116,6 +149,10 @@ export class Pane {
     // grid within the plot area
     const lines = computeGridLines(layout.plotWidth, layout.plotHeight, { spacing: 60 });
     drawGrid(g, lines, layout.plotWidth, layout.plotHeight, dpr, this._theme.grid);
+
+    // bottom-layer primitives (background zones) draw behind series
+    const prc = this._primitiveContext(ctx);
+    for (const p of this._primitives) if (p.zOrder() === 'bottom') p.draw(g, prc);
 
     // series (registry-driven — the core never switches on type)
     const range = ctx.timeScale.visibleRange();
@@ -140,6 +177,9 @@ export class Pane {
       }
     }
 
+    // normal-layer primitives (price lines, markers, events) draw over series
+    for (const p of this._primitives) if (p.zOrder() === 'normal') p.draw(g, prc);
+
     // axes
     drawPriceAxis(g, this.priceScale, layout, dpr, this._theme.axis);
     if (lastClose !== null) {
@@ -150,9 +190,11 @@ export class Pane {
     }
   }
 
-  /** Top (overlay) canvas: crosshair/hover. Cheap — only this repaints on cursor moves. */
+  /** Top (overlay) canvas: top-layer primitives + crosshair. Cheap repaint on cursor moves. */
   public paintTop(crosshair: { x: number; y: number } | null, ctx: PaneRenderContext): void {
     this.top.clearBitmap();
+    const prc = this._primitiveContext(ctx);
+    for (const p of this._primitives) if (p.zOrder() === 'top') p.draw(this.top.ctx, prc);
     if (crosshair === null) return;
     const layout = this._layout(ctx);
     drawCrosshair(this.top.ctx, crosshair.x, crosshair.y, layout.plotWidth, layout.plotHeight, ctx.dpr);

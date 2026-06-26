@@ -9,6 +9,7 @@ import type { SeriesType } from './chart-type-registry';
 import { getChartType } from './chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
 import type { Bar } from './bar';
+import type { SeriesMarkers } from '../primitives/markers';
 
 export type { SeriesType };
 
@@ -23,6 +24,8 @@ export interface SeriesApi {
   setData(bars: readonly Bar[]): void;
   prependData(bars: readonly Bar[]): void;
   update(bar: Bar): void;
+  /** Create a markers layer (buy/sell signals, shapes) bound to this series. */
+  createMarkers(): SeriesMarkers;
 }
 
 export function createSeriesRecord(dataId: SeriesId, type: SeriesType, style?: SeriesStyle): SeriesRecord {

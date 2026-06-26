@@ -31,6 +31,19 @@ export { CandleBuilder, DEFAULT_CANDLE_BUILDER_OPTIONS } from './feed/candle-bui
 export type { CandleBuilderOptions, Tick, CandleUpdate, VolumeMode, LateTickPolicy } from './feed/candle-builder';
 
 export type { SeriesApi } from './model/series';
+
+// primitives / plugin API
+export { bestHit } from './primitives/primitive';
+export type { IPrimitive, PrimitiveHit, PrimitiveHost, PrimitiveRenderContext, ZOrder } from './primitives/primitive';
+export { PriceLine } from './primitives/price-line';
+export type { PriceLineOptions } from './primitives/price-line';
+export { SeriesMarkers, markerSizePx, effectiveMarkerPx, drawShape } from './primitives/markers';
+export type { SeriesMarker, MarkerShape, MarkerPosition, MarkerSize } from './primitives/markers';
+export { EventMarkers } from './primitives/event-markers';
+export type { ChartEvent } from './primitives/event-markers';
+
+// indicators
+export { ema, emaSeries } from './indicators/ema';
 export type { Bar, LinePoint, Whitespace, UTCSeconds, OriginalTime } from './model/bar';
 export { isWhitespace } from './model/bar';
 

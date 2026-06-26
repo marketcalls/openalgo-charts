@@ -15,6 +15,10 @@ import type { SeriesStyle } from '../render/series-style';
 import type { Bar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
+import type { IPrimitive, PrimitiveHost } from '../primitives/primitive';
+import { PriceLine, type PriceLineOptions } from '../primitives/price-line';
+import { SeriesMarkers } from '../primitives/markers';
+import { EventMarkers } from '../primitives/event-markers';
 
 export interface ChartOptions {
   document?: Document;
@@ -72,6 +76,11 @@ export class Chart {
   private readonly _firstDataId: { value: number | null } = { value: null };
   private _historyLoader: (() => void) | null = null;
   private _loadingHistory = false;
+  private _clickCb: ((externalId: string) => void) | null = null;
+  private _pointerMoved = false;
+  private _downPane = 0;
+  private _downX = 0;
+  private _downLocalY = 0;
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._container = container;
@@ -129,7 +138,41 @@ export class Chart {
       setData: (bars: readonly Bar[]): void => this._setData(dataId, bars),
       prependData: (bars: readonly Bar[]): void => this._prependData(dataId, bars),
       update: (bar: Bar): void => this._updateBar(dataId, bar),
+      createMarkers: (): SeriesMarkers => {
+        const m = new SeriesMarkers(dataId);
+        this._addPrimitive(paneIndex, m);
+        return m;
+      },
     };
+  }
+
+  /** Add a horizontal price line (order/SL/TP/alert/level) to a pane. */
+  public addPriceLine(opts: PriceLineOptions, paneIndex = 0): PriceLine {
+    const line = new PriceLine(opts);
+    this._addPrimitive(paneIndex, line);
+    return line;
+  }
+
+  /** Add an earnings/dividend/split event-marker strip to a pane. */
+  public addEventMarkers(paneIndex = 0): EventMarkers {
+    const em = new EventMarkers();
+    this._addPrimitive(paneIndex, em);
+    return em;
+  }
+
+  /** Subscribe to clicks on hit-testable primitives (markers, events, lines). */
+  public subscribeClick(cb: (externalId: string) => void): void {
+    this._clickCb = cb;
+  }
+
+  private _addPrimitive(paneIndex: number, primitive: IPrimitive): void {
+    this._ensurePane(paneIndex);
+    const host: PrimitiveHost = {
+      requestUpdate: (): void =>
+        this.invalidate((m) => m.invalidatePane(paneIndex, { level: InvalidationLevel.Light, autoScale: false })),
+    };
+    this._panes[paneIndex].addPrimitive(primitive, host);
+    this.invalidate((m) => m.invalidatePane(paneIndex, { level: InvalidationLevel.Light, autoScale: false }));
   }
 
   /** Apply one live bar; auto-scroll only when the latest bar is at the right edge. */
@@ -278,12 +321,16 @@ export class Chart {
   private readonly _onPointerDown = (e: PointerEvent): void => {
     this._stopKinetic();
     this._dragging = true;
+    this._pointerMoved = false;
     const p = this._localPoint(e);
     this._dragStartX = p.x;
     this._dragStartOffset = this._timeScale.rightOffset;
     this._lastDragX = p.x;
     this._lastDragT = this._now();
     this._dragVelocity = 0;
+    this._downPane = p.pane;
+    this._downX = p.x;
+    this._downLocalY = p.localY;
     this._container.setPointerCapture?.(e.pointerId);
   };
 
@@ -291,6 +338,7 @@ export class Chart {
     const p = this._localPoint(e);
     if (this._dragging) {
       const dx = p.x - this._dragStartX;
+      if (Math.abs(dx) > 3) this._pointerMoved = true;
       this._timeScale.setRightOffset(this._dragStartOffset - dx / this._timeScale.barSpacing);
       const t = this._now();
       const dt = t - this._lastDragT;
@@ -307,6 +355,12 @@ export class Chart {
   private readonly _onPointerUp = (e: PointerEvent): void => {
     this._dragging = false;
     this._container.releasePointerCapture?.(e.pointerId);
+    if (!this._pointerMoved && this._clickCb !== null) {
+      const isBottom = this._downPane === this._panes.length - 1;
+      const hit = this._panes[this._downPane]?.hitTestPrimitives(this._downX, this._downLocalY, this._renderContext(isBottom));
+      if (hit) this._clickCb(hit.externalId);
+      return;
+    }
     if (KineticAnimation.shouldAnimate(this._dragVelocity)) this._startKinetic(this._dragVelocity);
   };
 
