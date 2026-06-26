@@ -56,6 +56,14 @@ def _isnan(v) -> bool:
 
 
 class Handler(SimpleHTTPRequestHandler):
+    # Serve ES modules with a JS MIME type — browsers reject `text/plain` modules
+    # under strict MIME checking, which would block `import ... from '.mjs'`.
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".mjs": "application/javascript",
+        ".js": "application/javascript",
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
 
@@ -85,10 +93,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
-
-    def log_message(self, fmt, *args):  # quieter console
-        if "/api/history" in (args[0] if args else ""):
-            super().log_message(fmt, *args)
 
 
 def main():

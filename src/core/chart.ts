@@ -111,7 +111,14 @@ export class Chart {
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
 
-    container.style.position = container.style.position || 'relative';
+    // Respect a position set via CSS (absolute/relative/fixed); only force
+    // 'relative' when the container is statically positioned. Reading
+    // container.style.position alone misses stylesheet rules and would wrongly
+    // override an `position: absolute` set in CSS, collapsing the container.
+    const computedPos = typeof getComputedStyle === 'function'
+      ? getComputedStyle(container).position
+      : container.style.position;
+    if (!computedPos || computedPos === 'static') container.style.position = 'relative';
     container.style.display = 'flex';
     container.style.flexDirection = 'column';
     container.style.background = this._theme.background;
