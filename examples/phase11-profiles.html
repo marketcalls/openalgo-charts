@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenAlgo Charts — Phase 11: profiles & order flow</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0e12; color: #c7ccd8;
+      font: 13px/1.4 system-ui, sans-serif; }
+    .bar { padding: 8px 12px; display: flex; gap: 10px; align-items: center; }
+    select { background: #1c2030; color: #c7ccd8; border: 1px solid #2a3046; border-radius: 6px; padding: 4px 8px; }
+    #chart { position: absolute; top: 44px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <strong>Phase 11</strong>
+    <label>Overlay
+      <select id="kind"><option>Volume Profile</option><option>Market Profile (TPO)</option><option>Footprint</option></select>
+    </label>
+    <span style="opacity:.6">orange = POC · gray = value-area edges · footprint needs classified trades (synthesised here)</span>
+  </div>
+  <div id="chart"></div>
+
+  <script type="module">
+    import { createChart, generateBars } from '../dist/openalgo-charts.mjs';
+    import { computeVolumeProfile, computeTpo, computeFootprint, HorizontalProfile, Footprint } from '../dist/openalgo-charts.profile.mjs';
+
+    const bars = generateBars(1_705_286_700, 300, 60);
+    const TICK = 0.1;
+    let chart, overlay;
+
+    function build(kind) {
+      if (chart) chart.destroy();
+      document.getElementById('chart').innerHTML = '';
+      chart = createChart(document.getElementById('chart'), { priceAxisWidth: 60 });
+      chart.addSeries('candlestick').setData(bars);
+
+      if (kind === 'Volume Profile') {
+        const vp = computeVolumeProfile(bars, TICK, 0.7);
+        overlay = new HorizontalProfile({ buckets: vp.buckets, poc: vp.poc, vah: vp.vah, val: vp.val, width: 140, side: 'right', barColor: 'rgba(90,110,150,0.5)', vaColor: 'rgba(120,150,200,0.6)' });
+        chart.addPrimitive(overlay, 0);
+      } else if (kind === 'Market Profile (TPO)') {
+        const tpo = computeTpo(bars, 30, TICK, 0.7, 2);
+        overlay = new HorizontalProfile({ buckets: tpo.buckets.map((b) => ({ price: b.price, value: b.count })), poc: tpo.poc, vah: tpo.vah, val: tpo.val, width: 140, side: 'left', barColor: 'rgba(150,120,90,0.5)', vaColor: 'rgba(200,160,110,0.6)' });
+        chart.addPrimitive(overlay, 0);
+      } else {
+        // synthesise classified trades from each bar (demo only — real footprint needs tick data)
+        const fpBars = bars.slice(-40).map((b) => {
+          const trades = [];
+          const steps = Math.max(1, Math.round((b.high - b.low) / TICK));
+          for (let i = 0; i <= steps; i++) {
+            const p = b.low + i * TICK;
+            trades.push({ price: p, qty: 10 + ((i * 7) % 40), side: p >= b.close ? 'ask' : 'bid' });
+          }
+          return computeFootprint(b.time, trades, TICK);
+        });
+        overlay = new Footprint({ cellWidth: 44 });
+        overlay.setBars(fpBars);
+        chart.addPrimitive(overlay, 0);
+      }
+      window.__chart = chart;
+    }
+    document.getElementById('kind').addEventListener('change', (e) => build(e.target.value));
+    build('Volume Profile');
+  </script>
+</body>
+</html>

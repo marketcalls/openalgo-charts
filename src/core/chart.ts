@@ -174,6 +174,11 @@ export class Chart {
     this._dragEndCb = onDragEnd ?? null;
   }
 
+  /** Public: attach any primitive (indicators, profiles, custom overlays) to a pane. */
+  public addPrimitive(primitive: IPrimitive, paneIndex = 0): void {
+    this._addPrimitive(paneIndex, primitive);
+  }
+
   private _addPrimitive(paneIndex: number, primitive: IPrimitive): void {
     this._ensurePane(paneIndex);
     const host: PrimitiveHost = {
