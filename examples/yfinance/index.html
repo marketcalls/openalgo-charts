@@ -46,6 +46,21 @@
     #bracket .bk .bk-buy { background: #1f9e88; }
     #bracket .bk .bk-sell { background: #d6485a; }
     #bracket .bk .bk-mod { background: #2c3349; color: #c7ccd8; }
+    .hint { opacity: .4; font-size: 11px; }
+
+    /* NinjaTrader-style right-click order menu */
+    #ctxmenu {
+      position: fixed; z-index: 30; min-width: 168px; background: #11151f; border: 1px solid #2a3046;
+      border-radius: 8px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.5); font: 12px system-ui, sans-serif;
+    }
+    #ctxmenu button {
+      display: block; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 5px;
+      color: #c7ccd8; padding: 6px 10px; cursor: pointer;
+    }
+    #ctxmenu button:hover { background: #1d2333; }
+    #ctxmenu button.buy:hover { background: #163e38; color: #7fd8cd; }
+    #ctxmenu button.sell:hover { background: #3e1f22; color: #f3a3a1; }
+    #ctxmenu hr { border: 0; border-top: 1px solid #232a3d; margin: 4px 6px; }
   </style>
 </head>
 <body>
@@ -79,9 +94,13 @@
     <button id="save" title="Save the full chart as a PNG (right-click only captures the overlay)">Save PNG</button>
     <span class="sep"></span>
     <input type="number" id="qty" value="100" min="1" title="order quantity" />
+    <select id="product" title="product (OpenAlgo order constant)">
+      <option value="MIS">MIS</option><option value="CNC">CNC</option><option value="NRML">NRML</option>
+    </select>
     <button id="buy" title="Place a Buy bracket (entry / target / stop) — drag the pills to modify">Buy</button>
     <button id="sell" title="Place a Sell bracket (entry / target / stop) — drag the pills to modify">Sell</button>
-    <button id="cancel" title="Cancel the bracket">Cancel</button>
+    <button id="cancel" title="Cancel the bracket + all orders">Cancel</button>
+    <span class="hint">right-click the chart to place an order at that price</span>
     <span id="status"></span>
   </div>
   <div id="chart"></div>
@@ -106,8 +125,23 @@
     </div>
   </div>
 
+  <!-- NinjaTrader-style right-click order menu (price under the cursor) -->
+  <div id="ctxmenu" hidden>
+    <button class="buy" data-side="BUY" data-type="MARKET">Buy Market</button>
+    <button class="sell" data-side="SELL" data-type="MARKET">Sell Market</button>
+    <hr>
+    <button class="buy" data-side="BUY" data-type="LIMIT">Buy Limit</button>
+    <button class="sell" data-side="SELL" data-type="LIMIT">Sell Limit</button>
+    <hr>
+    <button class="buy" data-side="BUY" data-type="SL">Buy Stop (SL)</button>
+    <button class="sell" data-side="SELL" data-type="SL">Sell Stop (SL)</button>
+    <hr>
+    <button data-act="cancelall">Cancel All Orders</button>
+  </div>
+
   <script type="module">
     import { createChart, rsiSeries, supertrendSeries } from '/dist/openalgo-charts.mjs';
+    import { FakeBroker, TradeController } from '/dist/openalgo-charts.trade.mjs';
 
     // A broker-agnostic DataFeed for yfinance: getBars hits this demo's /api/history,
     // which already returns the chart's Bar shape (time in UTC seconds).
@@ -124,6 +158,13 @@
     const feed = new YFinanceDataFeed();
     const UP = '#26a69a', DOWN = '#ef5350';
     let chart, price, volume;
+
+    // Simulated broker for right-click orders → draggable working-order lines, with
+    // no real broker/network. `tc` is rebound to each rebuilt chart; the book persists.
+    const broker = new FakeBroker();
+    let tc = null;
+    broker.onBook((orders, positions) => tc && tc.reconcile(orders, positions));
+    broker.onLtp((sym, ltp) => tc && tc.onLtp(sym, ltp));
     let currentBars = [];          // cached so a chart-type switch needs no refetch
     const idxByTime = new Map();   // bar time -> array index (for previous-close lookup)
     let req = {};                  // last-loaded request (symbol/interval/period)
@@ -329,12 +370,21 @@
         chart.addPriceLine({ price: 50, color: '#5a6072', lineWidth: 1, dashed: true, id: 'rsi-50', label: '50' }, rsiPane);
       }
 
-      // Chart trading: the bracket lines are draggable directly (in addition to the
-      // pills) — drag a dashed line and the matching leg follows.
+      // Chart trading: working-order lines (right-click orders) reconcile from the
+      // broker book; the bracket lines are draggable too. One drag handler routes
+      // both — drag an order line → broker.modify; drag a bracket leg → setBracketPrice.
+      tc = new TradeController({
+        addPrimitive: (prim) => chart.addPrimitive(prim, 0),
+        removePrimitive: (prim) => chart.removePrimitive(prim),
+      });
       chart.subscribeDrag((externalId, p) => {
         if (externalId.startsWith('bk-')) setBracketPrice(externalId.slice(3), p);
+        else if (externalId.startsWith('order:')) broker.modify(externalId.slice('order:'.length), { price: round2(p) });
       });
+      tc.reconcile(broker.orders(), broker.positions()); // redraw existing orders
       if (bracket) { attachBracketLines(); updateBracket(); } // re-draw bracket on the rebuilt chart
+      const lastClose = currentBars.length ? currentBars[currentBars.length - 1].close : null;
+      if (lastClose !== null) broker.emitLtp(req.symbol, lastClose);
 
       // OHLC legend tracks the crosshair; default to the latest bar.
       chart.subscribeCrosshairMove((e) => setLegend(e.bar ?? currentBars[currentBars.length - 1]));
@@ -351,7 +401,7 @@
         currentBars = bars;
         idxByTime.clear();
         bars.forEach((b, i) => idxByTime.set(b.time, i));
-        removeBracket(); // new symbol → drop the bracket from the prior one
+        removeBracket(); broker.setBook([], []); // new symbol → drop bracket + orders
         render();
         status.textContent = `${req.symbol} · ${bars.length} bars · ${req.interval}/${req.period}`;
       } catch (e) {
@@ -361,8 +411,55 @@
 
     el('buy').addEventListener('click', () => makeBracket('BUY'));
     el('sell').addEventListener('click', () => makeBracket('SELL'));
-    el('cancel').addEventListener('click', () => { removeBracket(); el('status').textContent = 'bracket cancelled'; });
+    el('cancel').addEventListener('click', () => { removeBracket(); broker.setBook([], []); el('status').textContent = 'cancelled'; });
     el('qty').addEventListener('change', () => { if (bracket) { bracket.qty = Math.max(1, Number(el('qty').value) || 1); updateBracket(); } });
+
+    // ── NinjaTrader-style right-click order entry ───────────────────────────
+    // Right-click the chart to open a menu and place an order at the cursor price.
+    // LIMIT/SL orders appear as draggable working-order lines; MARKET fills now.
+    const ctxMenu = el('ctxmenu');
+    let ctxPrice = 0;
+    const hideCtx = () => { ctxMenu.hidden = true; };
+    el('chart').addEventListener('contextmenu', (e) => {
+      const p = chart && currentBars.length ? chart.coordinateToPrice(e.clientY - chartTop(), 0) : null;
+      if (p == null) return;
+      e.preventDefault();
+      ctxPrice = round2(p);
+      ctxMenu.querySelectorAll('button[data-type]').forEach((b) => {
+        const verb = b.getAttribute('data-side') === 'BUY' ? 'Buy' : 'Sell';
+        const type = b.getAttribute('data-type');
+        b.textContent = type === 'MARKET' ? `${verb} Market`
+          : type === 'LIMIT' ? `${verb} Limit @ ${fmt(ctxPrice)}`
+          : `${verb} Stop (SL) @ ${fmt(ctxPrice)}`;
+      });
+      ctxMenu.style.left = Math.min(e.clientX, window.innerWidth - 180) + 'px';
+      ctxMenu.style.top = Math.min(e.clientY, window.innerHeight - 230) + 'px';
+      ctxMenu.hidden = false;
+    });
+    window.addEventListener('click', hideCtx);
+    window.addEventListener('blur', hideCtx);
+    el('chart').addEventListener('wheel', hideCtx, { passive: true });
+    ctxMenu.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      e.stopPropagation();
+      hideCtx();
+      if (btn.getAttribute('data-act') === 'cancelall') {
+        broker.setBook([], []); el('status').textContent = 'all orders cancelled'; return;
+      }
+      const side = btn.getAttribute('data-side');
+      const type = btn.getAttribute('data-type');
+      const qty = Math.max(1, Number(el('qty').value) || 1);
+      const product = el('product').value;
+      broker.place({
+        symbol: req.symbol, side, type, product, qty, mode: 'live',
+        price: type === 'MARKET' ? 0 : ctxPrice,
+        triggerPrice: type === 'SL' ? ctxPrice : 0,
+      });
+      broker.emitLtp(req.symbol, currentBars[currentBars.length - 1].close);
+      el('status').textContent = `${side} ${type} ${qty} ${req.symbol}`
+        + (type === 'MARKET' ? ' (market)' : ` @ ${fmt(ctxPrice)}`) + ` (${product})`;
+    });
 
     el('load').addEventListener('click', load);
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
