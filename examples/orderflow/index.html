@@ -23,6 +23,11 @@
       <option value="180">3-min bars</option>
       <option value="600">10-min bars</option>
     </select>
+    <select id="ratio" title="diagonal imbalance ratio">
+      <option value="2">imbalance 2x</option>
+      <option value="3" selected>imbalance 3x</option>
+      <option value="4">imbalance 4x</option>
+    </select>
     <button id="regen">Regenerate ticks</button>
     <span id="status"></span>
   </div>
@@ -37,7 +42,7 @@
     import { FootprintAggregator, Footprint, cumulativeDelta } from '/dist/openalgo-charts.profile.mjs';
 
     const TICK = 0.5;          // price tick size
-    const BARS = 14;           // how many footprint bars to generate
+    const BARS = 10;           // how many footprint bars to generate (fewer → wider cells)
     let chart, price, footprint, delta;
 
     // Generate classified trade ticks (price, qty, bid/ask) as a bounded random
@@ -74,8 +79,11 @@
       if (chart) chart.destroy();
       document.getElementById('chart').innerHTML = '';
       chart = createChart(document.getElementById('chart'), { priceAxisWidth: 64 });
-      price = chart.addSeries('candlestick', { style: { upColor: '#2b4d57', downColor: '#5a2f34', wickUpColor: '#3a6b78', wickDownColor: '#7a3f46' } });
-      footprint = new Footprint({ cellWidth: 46, imbalanceRatio: 3 });
+      // transparent candles drive autoscale + the time axis but stay invisible — the
+      // footprint cells are the chart (the primitive draws its own high/low range line).
+      const clear = 'rgba(0,0,0,0)';
+      price = chart.addSeries('candlestick', { style: { upColor: clear, downColor: clear, wickUpColor: clear, wickDownColor: clear, borderUpColor: clear, borderDownColor: clear } });
+      footprint = new Footprint({ cellWidth: 64, imbalanceRatio: Number(document.getElementById('ratio').value), tickSize: TICK, font: 10, footer: true });
       chart.addPrimitive(footprint, 0);
       delta = chart.addSeries('baseline', { paneIndex: 1, style: { baseValue: 0 } });
     }
@@ -97,6 +105,7 @@
     const go = () => render(Number(document.getElementById('tf').value));
     document.getElementById('regen').addEventListener('click', go);
     document.getElementById('tf').addEventListener('change', go);
+    document.getElementById('ratio').addEventListener('change', go);
     go();
   </script>
 </body>

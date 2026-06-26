@@ -144,4 +144,18 @@ describe('profile primitives render', () => {
     fp.draw(ctx, r);
     expect(rec.count('fillText')).toBeGreaterThan(0);
   });
+
+  it('Footprint shades cells (fillRect) and outlines diagonal imbalances (strokeRect)', () => {
+    const r = rc();
+    const fp = new Footprint({ tickSize: 0.05, imbalanceRatio: 3 });
+    // ask 30 at 100.05 dominates bid 2 one tick below → a green diagonal-imbalance box
+    fp.setBars([computeFootprint(1, [
+      { price: 100.05, qty: 30, side: 'ask' },
+      { price: 100.0, qty: 2, side: 'bid' },
+    ], 0.05)]);
+    const { ctx, rec } = makeCtx();
+    fp.draw(ctx, r);
+    expect(rec.count('fillRect')).toBeGreaterThan(0);  // graded bid/ask cells + footer
+    expect(rec.count('strokeRect')).toBeGreaterThan(0); // imbalance outline box
+  });
 });
