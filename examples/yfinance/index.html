@@ -9,9 +9,13 @@
     .bar { padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     input, select, button { background: #1c2030; color: #c7ccd8; border: 1px solid #2a3046; border-radius: 6px; padding: 4px 8px; }
     input[type="text"] { width: 90px; }
+    input[type="number"] { width: 50px; }
     input[type="checkbox"] { width: auto; }
     label.chk { display: inline-flex; gap: 4px; align-items: center; user-select: none; opacity: .85; }
     button { cursor: pointer; }
+    .sep { width: 1px; align-self: stretch; background: #2a3046; margin: 0 2px; }
+    #buy { border-color: #2c6e64; color: #7fd8cd; }
+    #sell { border-color: #7a3633; color: #f3a3a1; }
     #chart { position: absolute; top: 46px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
     #status { margin-left: auto; opacity: .75; }
     /* OHLC legend overlay — sits on top of the plot, never intercepts the crosshair */
@@ -53,6 +57,11 @@
     <label class="chk"><input type="checkbox" id="hgrid" checked /> H Grid</label>
     <button id="load">Load</button>
     <button id="save" title="Save the full chart as a PNG (right-click only captures the overlay)">Save PNG</button>
+    <span class="sep"></span>
+    <input type="number" id="qty" value="1" min="1" title="order quantity" />
+    <button id="buy" title="Place a simulated BUY LIMIT line, then drag it to modify">Buy Limit</button>
+    <button id="sell" title="Place a simulated SELL LIMIT line, then drag it to modify">Sell Limit</button>
+    <button id="cancel" title="Cancel all simulated orders">Cancel All</button>
     <span id="status"></span>
   </div>
   <div id="chart"></div>
@@ -60,6 +69,7 @@
 
   <script type="module">
     import { createChart, rsiSeries, supertrendSeries } from '/dist/openalgo-charts.mjs';
+    import { FakeBroker, TradeController } from '/dist/openalgo-charts.trade.mjs';
 
     // A broker-agnostic DataFeed for yfinance: getBars hits this demo's /api/history,
     // which already returns the chart's Bar shape (time in UTC seconds).
@@ -76,6 +86,15 @@
     const feed = new YFinanceDataFeed();
     const UP = '#26a69a', DOWN = '#ef5350';
     let chart, price, volume;
+
+    // Simulated chart trading: an in-memory broker drives draggable order lines
+    // through a TradeController, with no real broker/network. `tc` is rebound to
+    // each freshly-built chart; the broker (and its order book) persists.
+    const broker = new FakeBroker();
+    let tc = null;
+    broker.onBook((orders, positions) => tc && tc.reconcile(orders, positions));
+    broker.onLtp((sym, ltp) => tc && tc.onLtp(sym, ltp));
+    const round2 = (n) => Math.round(n * 100) / 100;
     let currentBars = [];          // cached so a chart-type switch needs no refetch
     const idxByTime = new Map();   // bar time -> array index (for previous-close lookup)
     let req = {};                  // last-loaded request (symbol/interval/period)
@@ -160,6 +179,24 @@
         chart.addPriceLine({ price: 50, color: '#5a6072', lineWidth: 1, dashed: true, id: 'rsi-50', label: '50' }, rsiPane);
       }
 
+      // Chart trading: bind a TradeController to the rebuilt chart and let working
+      // order lines be dragged to modify (drag → broker.modify → book re-reconciles
+      // → the line follows the cursor live).
+      tc = new TradeController({
+        addPrimitive: (prim) => chart.addPrimitive(prim, 0),
+        removePrimitive: (prim) => chart.removePrimitive(prim),
+      });
+      chart.subscribeDrag(
+        (externalId, p) => {
+          if (!externalId.startsWith('order:')) return;
+          broker.modify(externalId.slice('order:'.length), { price: round2(p) });
+        },
+        (externalId, p) => { el('status').textContent = `order ${externalId.replace('order:', '#')} modified -> ${fmt(p)}`; },
+      );
+      tc.reconcile(broker.orders(), broker.positions()); // redraw any existing orders
+      const last = currentBars.length ? currentBars[currentBars.length - 1].close : null;
+      if (last !== null) broker.emitLtp(req.symbol, last);
+
       // OHLC legend tracks the crosshair; default to the latest bar.
       chart.subscribeCrosshairMove((e) => setLegend(e.bar ?? currentBars[currentBars.length - 1]));
       setLegend(currentBars[currentBars.length - 1]);
@@ -175,12 +212,27 @@
         currentBars = bars;
         idxByTime.clear();
         bars.forEach((b, i) => idxByTime.set(b.time, i));
+        broker.setBook([], []); // new symbol → drop simulated orders from the prior one
         render();
         status.textContent = `${req.symbol} · ${bars.length} bars · ${req.interval}/${req.period}`;
       } catch (e) {
         status.textContent = 'error: ' + e.message;
       }
     }
+
+    // Place a simulated LIMIT order ~2% away from the last price → a draggable line.
+    function place(side) {
+      if (!currentBars.length) return;
+      const last = currentBars[currentBars.length - 1].close;
+      const price = round2(side === 'BUY' ? last * 0.98 : last * 1.02);
+      const qty = Math.max(1, Number(el('qty').value) || 1);
+      broker.place({ symbol: req.symbol, side, type: 'LIMIT', qty, price, mode: 'live' });
+      broker.emitLtp(req.symbol, last);
+      el('status').textContent = `${side} LIMIT ${qty} ${req.symbol} @ ${fmt(price)} — drag the line to modify`;
+    }
+    el('buy').addEventListener('click', () => place('BUY'));
+    el('sell').addEventListener('click', () => place('SELL'));
+    el('cancel').addEventListener('click', () => { broker.setBook([], []); el('status').textContent = 'all orders cancelled'; });
 
     el('load').addEventListener('click', load);
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
