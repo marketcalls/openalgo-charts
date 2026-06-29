@@ -28,6 +28,7 @@
     #ctxmenu button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 5px;
       color: #c7ccd8; padding: 6px 10px; cursor: pointer; }
     #ctxmenu button:hover { background: #1d2333; }
+    #ctxmenu button:disabled { cursor: not-allowed; background: transparent; }
     #ctxmenu button.buy:hover { background: #163e38; color: #7fd8cd; }
     #ctxmenu button.sell:hover { background: #3e1f22; color: #f3a3a1; }
     #ctxmenu hr { border: 0; border-top: 1px solid #232a3d; margin: 4px 6px; }
@@ -138,6 +139,15 @@
       else { e.textContent = 'mode —'; e.className = 'pill'; }
     }
     const isLiveMode = () => el('mode').classList.contains('live');
+    // Reference market price for stop/limit direction checks: live LTP, else last close.
+    const marketPrice = () => (lastLtp != null ? lastLtp : (currentBars.length ? currentBars[currentBars.length - 1].close : null));
+    // A stop's trigger must be on the correct side of the market: BUY stop above, SELL stop below.
+    function stopSideOk(side, type, price) {
+      if (type !== 'SL' && type !== 'SL-M') return true;
+      const m = marketPrice();
+      if (m == null) return true;
+      return side === 'BUY' ? price > m : price < m;
+    }
     function makeOrderLine(o) {
       return chart.addPriceLine({
         price: o.triggerPrice ?? o.price, color: o.side === 'BUY' ? '#26a69a' : '#ef5350',
@@ -205,6 +215,11 @@
       if (!el('arm').checked) { el('status').textContent = '⚠ tick "Arm trading" in the toolbar to place orders'; el('arm').focus(); return; }
       const qty = Math.max(1, Number(el('qty').value) || 1), product = el('product').value;
       const price = type === 'MARKET' ? 0 : round2v(ctxPrice);
+      if (!stopSideOk(side, type, price)) {
+        const m = marketPrice();
+        el('status').textContent = `${side} Stop must be ${side === 'BUY' ? 'ABOVE' : 'BELOW'} the price (LTP ${fmt(m)})`;
+        return;
+      }
       const summary = `${side} ${type} ${qty} ${lastReq.symbol}` + (type === 'MARKET' ? '' : ` @ ${fmt(price)}`) + ` (${product})`;
       if (isLiveMode() && !window.confirm(`LIVE ORDER — real money:\n\n${summary}\n\nPlace this order?`)) return;
       el('status').textContent = 'placing: ' + summary + ' …';
@@ -337,9 +352,17 @@
       const p = chart.coordinateToPrice(e.clientY - el('chart').getBoundingClientRect().top, 0);
       if (p == null) return;
       ctxPrice = round2v(p);
+      const m = marketPrice(); // grey out wrong-side stops/limits relative to the market
       ctxMenu.querySelectorAll('button[data-type]').forEach((b) => {
-        const v = b.getAttribute('data-side') === 'BUY' ? 'Buy' : 'Sell', t = b.getAttribute('data-type');
+        const side = b.getAttribute('data-side'), v = side === 'BUY' ? 'Buy' : 'Sell', t = b.getAttribute('data-type');
         b.textContent = t === 'MARKET' ? `${v} Market` : t === 'LIMIT' ? `${v} Limit @ ${fmt(ctxPrice)}` : `${v} Stop (SL) @ ${fmt(ctxPrice)}`;
+        let ok = true;
+        if (m != null) {
+          if (t === 'SL') ok = side === 'BUY' ? ctxPrice > m : ctxPrice < m;          // buy stop above, sell stop below
+          else if (t === 'LIMIT') ok = side === 'BUY' ? ctxPrice < m : ctxPrice > m;  // buy limit below, sell limit above
+        }
+        b.disabled = !ok;
+        b.style.opacity = ok ? '' : '0.35';
       });
       ctxMenu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
       ctxMenu.style.top = Math.min(e.clientY, window.innerHeight - 220) + 'px';
