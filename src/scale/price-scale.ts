@@ -106,6 +106,24 @@ export class PriceScale {
     this._autoScale = false;
   }
 
+  /**
+   * Pan the visible range vertically by `dy` media px (dragging the plot up/down).
+   * Works in transformed space so it's correct for log scales, and respects
+   * `inverted`. Switches to manual mode so autoscale stops overriding it.
+   */
+  public panByPixels(dy: number): void {
+    if (this._height <= 0 || dy === 0) return;
+    const lo = this._t(this._min);
+    const hi = this._t(this._max);
+    const span = hi - lo;
+    if (!(span > 0)) return;
+    // Drag down (dy>0) reveals higher prices → shift the range up; inverted flips it.
+    const delta = span * ((this._options.inverted ? -dy : dy) / this._height);
+    this._min = this._tInv(lo + delta);
+    this._max = this._tInv(hi + delta);
+    this._autoScale = false;
+  }
+
   /** Recompute the visible range from data extremes + configured margins. */
   public autoscale(low: number, high: number): void {
     this.setPriceRange(autoscaleRange(low, high, this._options.marginTop, this._options.marginBottom));

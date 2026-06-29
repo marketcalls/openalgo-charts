@@ -103,6 +103,8 @@ export class Chart {
   private _cursor: { x: number; y: number } | null = null;
   private _dragging = false;
   private _dragStartX = 0;
+  private _dragStartY = 0;
+  private _lastDragY = 0;
   private _dragStartOffset = 0;
   private _lastDragX = 0;
   private _lastDragT = 0;
@@ -550,6 +552,8 @@ export class Chart {
     this._dragging = true;
     this._pointerMoved = false;
     this._dragStartX = p.x;
+    this._dragStartY = p.y;
+    this._lastDragY = p.y;
     this._dragStartOffset = this._timeScale.rightOffset;
     this._lastDragX = p.x;
     this._lastDragT = this._now();
@@ -584,8 +588,12 @@ export class Chart {
     }
     if (this._dragging) {
       const dx = p.x - this._dragStartX;
-      if (Math.abs(dx) > 3) this._pointerMoved = true;
+      if (Math.abs(dx) > 3 || Math.abs(p.y - this._dragStartY) > 3) this._pointerMoved = true;
+      // horizontal: scroll time
       this._timeScale.setRightOffset(this._dragStartOffset - dx / this._timeScale.barSpacing);
+      // vertical: pan the dragged pane's price scale (incremental, switches to manual)
+      this._panes[this._downPane]?.priceScale.panByPixels(p.y - this._lastDragY);
+      this._lastDragY = p.y;
       const t = this._now();
       const dt = t - this._lastDragT;
       if (dt > 0) this._dragVelocity = (p.x - this._lastDragX) / dt;

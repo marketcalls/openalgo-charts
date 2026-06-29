@@ -2,7 +2,7 @@
   {
     "name": "Base engine (ESM, all standard chart types + EMA/RSI/ATR/Supertrend)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "17 KB",
+    "limit": "18 KB",
     "brotli": true
   },
   {

@@ -57,6 +57,18 @@ describe('PriceScale', () => {
     expect(ps.snapToTick(100.07)).toBeCloseTo(100.05);
     expect(ps.format(100.05)).toBe('100.05');
   });
+
+  it('panByPixels pans vertically — content tracks 1:1, span preserved, manual mode', () => {
+    const ps = new PriceScale();
+    ps.setHeight(400);
+    ps.setPriceRange({ min: 100, max: 200 });
+    const y0 = ps.priceToY(150);
+    ps.panByPixels(40); // drag the plot down 40px
+    expect(ps.priceToY(150)).toBeCloseTo(y0 + 40, 6); // that price moved down 40px with the cursor
+    expect(ps.priceRange().max - ps.priceRange().min).toBeCloseTo(100, 6); // span unchanged
+    expect(ps.priceRange().min).toBeGreaterThan(100); // window shifted up to higher prices
+    expect(ps.autoScale).toBe(false);
+  });
 });
 
 describe('TimeScale', () => {
