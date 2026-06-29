@@ -66,6 +66,18 @@ describe('price <-> coordinate conversion', () => {
     expect(chart.coordinateToPrice(y as number)).toBeCloseTo(100, 6);
     expect(chart.priceToCoordinate(100, 5)).toBeNull(); // no such pane
   });
+
+  it('resetScale re-fits and keeps prices mappable', () => {
+    const doc = recordingDoc();
+    const container = doc.createElement('div') as unknown as Record<string, unknown>;
+    container.clientWidth = 800; container.clientHeight = 600;
+    const chart = new Chart(container as unknown as HTMLElement, {
+      document: doc, pixelRatio: () => 1, raf: { schedule: (cb) => { cb(); return 1; }, cancel: () => {} },
+    });
+    chart.addSeries('candlestick').setData([bar(1000, 90), bar(1060, 100), bar(1120, 110)]);
+    expect(() => chart.resetScale()).not.toThrow();
+    expect(Number.isFinite(chart.priceToCoordinate(100) as number)).toBe(true);
+  });
 });
 
 describe('grid line toggle', () => {

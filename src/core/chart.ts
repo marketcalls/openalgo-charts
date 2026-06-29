@@ -640,11 +640,18 @@ export class Chart {
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   };
 
-  private readonly _onDblClick = (): void => {
+  /**
+   * Restore the default view: fit all bars on the time axis and re-enable
+   * auto-scaling on every price axis (undoing any pan/zoom or manual axis drag).
+   * Same as double-clicking the chart.
+   */
+  public resetScale(): void {
     if (this._dataLayer.length > 0) this._timeScale.fitContent(this._dataLayer.length);
-    for (const pane of this._panes) pane.priceScale.setAutoScale(true); // undo manual Y rescale
+    for (const pane of this._panes) pane.priceScale.setAutoScale(true);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
-  };
+  }
+
+  private readonly _onDblClick = (): void => this.resetScale();
 
   private _updateCursor(paneIndex: number, x: number, localY: number, containerY = localY): void {
     const plotWidth = Math.max(0, this._width - this._priceAxisWidth);

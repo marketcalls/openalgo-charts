@@ -92,6 +92,7 @@
     <label class="chk"><input type="checkbox" id="hgrid" checked /> H Grid</label>
     <button id="load">Load</button>
     <button id="save" title="Save the full chart as a PNG (right-click only captures the overlay)">Save PNG</button>
+    <button id="fit" title="restore the default view (fit bars + auto price scale) — same as double-click">Fit</button>
     <span class="sep"></span>
     <input type="number" id="qty" value="100" min="1" title="order quantity" />
     <select id="product" title="product (OpenAlgo order constant)">
@@ -577,6 +578,7 @@
     });
 
     el('load').addEventListener('click', load);
+    el('fit').addEventListener('click', () => { if (chart) chart.resetScale(); });
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
     // Export the full chart (all layers composited) — native right-click "Save image"
     // only grabs the canvas under the pointer (the transparent crosshair overlay).

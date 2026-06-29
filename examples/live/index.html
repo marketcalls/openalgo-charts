@@ -32,6 +32,7 @@
     </select>
     <button id="connect">Connect</button>
     <button id="disconnect">Disconnect</button>
+    <button id="fit" title="restore the default view (fit bars + auto price scale) — same as double-click">Fit</button>
     <span id="status">enter your API key and Connect</span>
   </div>
   <div class="row2">
@@ -161,6 +162,7 @@
 
     el('connect').addEventListener('click', connect);
     el('disconnect').addEventListener('click', () => { disconnect(); el('status').textContent = 'disconnected'; });
+    el('fit').addEventListener('click', () => { if (chart) chart.resetScale(); });
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
   </script>
 </body>
