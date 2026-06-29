@@ -45,6 +45,23 @@
     <select id="interval" title="bar interval">
       <option value="1m">1m</option><option value="5m" selected>5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="D">D</option>
     </select>
+    <select id="ctype" title="chart type">
+      <option value="candlestick">Candles</option>
+      <option value="hollow-candle">Hollow Candles</option>
+      <option value="bar">Bars (OHLC)</option>
+      <option value="high-low">High-Low</option>
+      <option value="volume-candle">Volume Candles</option>
+      <option value="line">Line</option>
+      <option value="line-markers">Line + Markers</option>
+      <option value="step">Step</option>
+      <option value="area">Area</option>
+      <option value="hlc-area">HLC Area</option>
+      <option value="baseline">Baseline</option>
+      <option value="heikin-ashi">Heikin Ashi</option>
+      <option value="renko">Renko</option>
+      <option value="range">Range</option>
+      <option value="line-break">Line Break</option>
+    </select>
     <button id="connect">Connect</button>
     <button id="disconnect">Disconnect</button>
     <button id="fit" title="restore the default view (fit bars + auto price scale) — same as double-click">Fit</button>
@@ -80,6 +97,7 @@
 
   <script type="module">
     import { createChart, OpenAlgoDataFeed, OpenAlgoWsFeed, OpenAlgoTradeFeed, CandleBuilder, intervalToSeconds } from '/dist/openalgo-charts.mjs';
+    import { runTransform, HeikinAshiTransform, RenkoTransform, RangeBarsTransform, LineBreakTransform, PointFigureTransform, KagiTransform } from '/dist/openalgo-charts.transform.mjs';
 
     const el = (id) => document.getElementById(id);
     const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -87,10 +105,34 @@
     el('apikey').value = localStorage.getItem('oa-apikey') || '';
 
     // Lookback per interval (seconds) for the history request.
-    const LOOKBACK = { '1m': 5 * 86400, '5m': 20 * 86400, '15m': 40 * 86400, '1h': 120 * 86400, 'D': 400 * 86400 };
+    const LOOKBACK = { '1m': 10 * 86400, '5m': 45 * 86400, '15m': 90 * 86400, '1h': 250 * 86400, 'D': 800 * 86400 };
 
     let chart, price, volume, ws, rest, ltpLine, offLtp = null, tickN = 0;
     let reconcileTimer = null, liveBucket = null, lastReq = null;
+    let rawBars = [], builder = null, liveAgg = false; // raw OHLC (history + forming bar)
+
+    // Chart types: base types render directly; Family-B run a transform first.
+    const boxOf = () => { const c = rawBars.length ? rawBars[rawBars.length - 1].close : 100; return Math.max(0.05, Math.round(c * 0.0015 / 0.05) * 0.05); };
+    const CHART_TYPES = {
+      candlestick: { series: 'candlestick' }, 'hollow-candle': { series: 'hollow-candle' }, bar: { series: 'bar' },
+      'high-low': { series: 'high-low' }, 'volume-candle': { series: 'volume-candle' }, line: { series: 'line' },
+      'line-markers': { series: 'line-markers' }, step: { series: 'step' }, area: { series: 'area' }, 'hlc-area': { series: 'hlc-area' },
+      baseline: { series: 'baseline', style: () => ({ baseValue: rawBars.reduce((s, b) => s + b.close, 0) / (rawBars.length || 1) }) },
+      'heikin-ashi': { series: 'candlestick', tf: () => new HeikinAshiTransform() },
+      renko: { series: 'candlestick', tf: () => new RenkoTransform({ boxSize: boxOf() }) },
+      range: { series: 'candlestick', tf: () => new RangeBarsTransform({ range: boxOf() }) },
+      'line-break': { series: 'candlestick', tf: () => new LineBreakTransform({ lines: 3 }) },
+      'point-figure': { series: 'point-figure', style: () => ({ boxSize: boxOf() }), tf: () => new PointFigureTransform({ boxSize: boxOf(), reversal: 3 }) },
+      kagi: { series: 'kagi', tf: () => new KagiTransform({ reversal: boxOf() * 2 }) },
+    };
+    const chartType = () => CHART_TYPES[el('ctype').value] || CHART_TYPES.candlestick;
+    // Push price + volume from the raw bars, applying the selected transform.
+    function setPriceData() {
+      if (!price || !rawBars.length) return;
+      const cfg = chartType();
+      price.setData(cfg.tf ? runTransform(cfg.tf(), rawBars) : rawBars);
+      volume.setData(rawBars.map((b) => ({ time: b.time, open: 0, high: b.volume || 0, low: 0, close: b.volume || 0 })));
+    }
     // chart trading (real OpenAlgo orders via the proxy)
     let trade = null, bookTimer = null, lastLtp = null;
     const orderLines = new Map(); // orderid -> PriceLine
@@ -120,11 +162,13 @@
       reconcileTimer = setTimeout(async () => {
         try {
           const fresh = await rest.getBars({ ...lastReq, to: nowSec() });
-          for (const b of fresh) {
-            if (liveBucket != null && b.time >= liveBucket) continue; // keep the live bar
-            price.update(b);
-            volume.update({ time: b.time, open: 0, high: b.volume || 0, low: 0, close: b.volume || 0 });
+          const byTime = new Map(fresh.map((b) => [b.time, b]));
+          let changed = false;
+          for (let i = 0; i < rawBars.length; i++) {
+            const f = byTime.get(rawBars[i].time);
+            if (f && (liveBucket == null || f.time < liveBucket)) { rawBars[i] = f; changed = true; } // keep the live bar
           }
+          if (changed) setPriceData(); // re-applies the active transform too
         } catch (_) { /* transient — next cycle retries */ }
         if (ws) scheduleReconcile();
       }, 20000 + Math.random() * 10000);
@@ -242,88 +286,33 @@
       trade = null;
     }
 
-    async function connect() {
-      disconnect();
-      const apiKey = el('apikey').value.trim();
-      const symbol = el('symbol').value.trim().toUpperCase();
-      const exchange = el('exchange').value;
-      const interval = el('interval').value;
-      if (!apiKey) { el('status').textContent = 'please enter your OpenAlgo API key'; return; }
-      localStorage.setItem('oa-apikey', apiKey);
-
-      // ── build the chart ──
+    // (Re)build the chart for the current type from rawBars; WS/trade feeds persist.
+    function buildChart() {
       if (chart) chart.destroy();
       el('chart').innerHTML = '';
       chart = createChart(el('chart'), { priceAxisWidth: 72 });
-      price = chart.addSeries('candlestick');
+      const cfg = chartType();
+      price = chart.addSeries(cfg.series, { style: cfg.style ? cfg.style() : {} });
       volume = chart.addSeries('histogram', { paneIndex: 1, style: { color: '#33415e' } });
+      setPriceData();
+      // Denser x-axis: fitContent stretches few bars to fill the width — cap the bar
+      // width so candles stay a comfortable size (only tightens, never widens).
+      if (chart.timeScale.barSpacing > 6) chart.timeScale.setBarSpacing(6);
+      const lp = lastLtp != null ? lastLtp : (rawBars.length ? rawBars[rawBars.length - 1].close : null);
+      ltpLine = lp != null ? chart.addPriceLine({ price: lp, color: '#e0b020', lineWidth: 1, dashed: true, id: 'ltp' }, 0) : null;
+      wireChart();
+      orderLines.clear(); posLine = null; // primitives belonged to the destroyed chart
+      if (trade) pollBook();              // redraw order/position lines on the rebuilt chart
+      window.__chart = () => chart;
+    }
 
-      // ── history (REST via the same-origin proxy → OpenAlgo /api/v1/history) ──
-      rest = new OpenAlgoDataFeed({ baseUrl: '', apiKey }); // baseUrl '' → relative → proxy
-      const to = nowSec(), from = to - (LOOKBACK[interval] || 30 * 86400);
-      lastReq = { symbol, exchange, interval, from };
-      el('status').textContent = `loading ${symbol} ${interval} history…`;
-      let bars;
-      try {
-        bars = await rest.getBars({ symbol, exchange, interval, from, to });
-      } catch (e) { el('status').textContent = 'history error: ' + e.message; return; }
-      if (!bars.length) { el('status').textContent = `no history for ${symbol} ${exchange} ${interval}`; return; }
-      price.setData(bars);
-      volume.setData(bars.map((b) => ({ time: b.time, open: 0, high: b.volume || 0, low: 0, close: b.volume || 0 })));
-      const lastBar = bars[bars.length - 1];
-      setLegend(symbol, exchange, interval, lastBar, lastBar.close);
-      el('status').textContent = `${symbol} · ${bars.length} bars loaded · subscribing live…`;
-
-      // ── live (WebSocket LTP → CandleBuilder → series.update + live LTP line) ──
-      ws = new OpenAlgoWsFeed({ url: el('wsurl').value.trim(), apiKey });
-      // Surface the real socket + protocol state so we can see exactly where it stops.
-      ws.onState((s) => { el('wsstate').textContent = 'WS ' + s; });
-      ws.onControl((m) => {
-        if (m.type === 'auth') el('wsstate').textContent = m.status === 'success' ? 'WS authenticated' : `auth ${m.status}`;
-        else if (m.type === 'subscribe') el('wsstate').textContent = `subscribe ${m.status}` + (tickN ? '' : ' (waiting for ticks)');
-        else if (m.type === 'error') el('wsstate').textContent = 'WS error: ' + (m.message || 'unknown');
-      });
-      ws.connect();
-      ltpLine = chart.addPriceLine({ price: lastBar.close, color: '#e0b020', lineWidth: 1, dashed: true, id: 'ltp' }, 0);
-      const liveAgg = /^\d+(m|h)$/i.test(interval); // aggregate ticks into candles for intraday only
-      // LTP mode streams reliably across brokers; the forming bar's OHLC builds from
-      // ticks. Accurate per-bar VOLUME comes from the reconcile loop (broker history),
-      // since LTP carries no size and Quote-mode volume is broker-dependent.
-      const builder = new CandleBuilder({ intervalSec: intervalToSeconds(interval), volumeMode: 'ltq-sum' });
-      tickN = 0;
-      offLtp = ws.onLtp((e) => {
-        if (e.symbol && e.symbol !== symbol) return;
-        tickN += 1;
-        el('wsstate').textContent = 'WS live';
-        el('ticks').textContent = `${tickN} ticks`;
-        el('ltp').textContent = `LTP ${fmt(e.ltp)}`;
-        lastLtp = e.ltp;
-        ltpLine.setPrice(e.ltp);
-        if (position && posLine) posLine.setLeftLabel(posLabel()); // live mark-to-LTP P&L
-        if (liveAgg) {
-          const u = builder.onTick({ time: e.timeSec || nowSec(), price: e.ltp, ltq: e.ltq });
-          if (u) { liveBucket = u.bar.time; price.update(u.bar); setLegend(symbol, exchange, interval, u.bar, e.ltp); }
-        } else {
-          setLegend(symbol, exchange, interval, lastBar, e.ltp);
-        }
-      });
-      ws.subscribe('LTP', symbol, exchange);
-      scheduleReconcile();                     // snap completed bars to broker OHLC + volume every 20-30s
-
-      // chart trading: real OpenAlgo orders (place via right-click; drag to modify; ✕ to cancel)
-      trade = new OpenAlgoTradeFeed({ baseUrl: '', apiKey, strategy: 'openalgo-charts', defaultProduct: el('product').value });
+    // Per-chart interaction wiring (drag-to-modify on release, cancel/exit clicks).
+    function wireChart() {
       chart.subscribeDrag(
-        // while dragging: move the line locally only (no API call)
+        (id, p) => { if (!id.startsWith('order:') || id.endsWith('::close')) return; const rec = orderLines.get(id.slice(6)); if (rec) rec.line.setPrice(round2v(p)); },
         (id, p) => {
           if (!id.startsWith('order:') || id.endsWith('::close')) return;
-          const rec = orderLines.get(id.slice('order:'.length));
-          if (rec) rec.line.setPrice(round2v(p));
-        },
-        // on release: commit the modify once
-        (id, p) => {
-          if (!id.startsWith('order:') || id.endsWith('::close')) return;
-          const oid = id.slice('order:'.length), rec = orderLines.get(oid);
-          if (!rec) return;
+          const oid = id.slice(6), rec = orderLines.get(oid); if (!rec) return;
           const px = round2v(p), stop = rec.order.type === 'SL' || rec.order.type === 'SL-M';
           el('status').textContent = `modifying ${rec.order.side} ${rec.order.type} → ${fmt(px)} …`;
           trade.modify(oid, stop ? { triggerPrice: px } : { price: px })
@@ -335,9 +324,72 @@
         if (id === 'position::close') { exitPosition(); return; }
         if (id.startsWith('order:') && id.endsWith('::close')) trade.cancel(id.slice(6, -7)).then(pollBook).catch(() => {});
       });
+    }
+
+    async function connect() {
+      disconnect();
+      const apiKey = el('apikey').value.trim();
+      const symbol = el('symbol').value.trim().toUpperCase();
+      const exchange = el('exchange').value;
+      const interval = el('interval').value;
+      if (!apiKey) { el('status').textContent = 'please enter your OpenAlgo API key'; return; }
+      localStorage.setItem('oa-apikey', apiKey);
+
+      // ── history (REST via the same-origin proxy → OpenAlgo /api/v1/history) ──
+      rest = new OpenAlgoDataFeed({ baseUrl: '', apiKey }); // baseUrl '' → relative → proxy
+      const to = nowSec(), from = to - (LOOKBACK[interval] || 30 * 86400);
+      lastReq = { symbol, exchange, interval, from };
+      liveBucket = null; lastLtp = null;
+      el('status').textContent = `loading ${symbol} ${interval} history…`;
+      try {
+        rawBars = await rest.getBars({ symbol, exchange, interval, from, to });
+      } catch (e) { el('status').textContent = 'history error: ' + e.message; return; }
+      if (!rawBars.length) { el('status').textContent = `no history for ${symbol} ${exchange} ${interval}`; return; }
+      buildChart();
+      const lastBar = rawBars[rawBars.length - 1];
+      setLegend(symbol, exchange, interval, lastBar, lastBar.close);
+      el('status').textContent = `${symbol} · ${rawBars.length} bars loaded · subscribing live…`;
+
+      // ── live (WebSocket LTP → CandleBuilder → rawBars → setPriceData) ──
+      ws = new OpenAlgoWsFeed({ url: el('wsurl').value.trim(), apiKey });
+      ws.onState((s) => { el('wsstate').textContent = 'WS ' + s; });
+      ws.onControl((m) => {
+        if (m.type === 'auth') el('wsstate').textContent = m.status === 'success' ? 'WS authenticated' : `auth ${m.status}`;
+        else if (m.type === 'subscribe') el('wsstate').textContent = `subscribe ${m.status}` + (tickN ? '' : ' (waiting for ticks)');
+        else if (m.type === 'error') el('wsstate').textContent = 'WS error: ' + (m.message || 'unknown');
+      });
+      ws.connect();
+      liveAgg = /^\d+(m|h)$/i.test(interval); // aggregate ticks into candles for intraday only
+      builder = new CandleBuilder({ intervalSec: intervalToSeconds(interval), volumeMode: 'ltq-sum' });
+      tickN = 0;
+      offLtp = ws.onLtp((e) => {
+        if (e.symbol && e.symbol !== symbol) return;
+        tickN += 1;
+        el('wsstate').textContent = 'WS live';
+        el('ticks').textContent = `${tickN} ticks`;
+        el('ltp').textContent = `LTP ${fmt(e.ltp)}`;
+        lastLtp = e.ltp;
+        if (ltpLine) ltpLine.setPrice(e.ltp);
+        if (position && posLine) posLine.setLeftLabel(posLabel()); // live mark-to-LTP P&L
+        if (liveAgg) {
+          const u = builder.onTick({ time: e.timeSec || nowSec(), price: e.ltp, ltq: e.ltq });
+          if (u) {
+            liveBucket = u.bar.time;
+            if (u.isNew) rawBars.push(u.bar); else rawBars[rawBars.length - 1] = u.bar;
+            setPriceData(); // redraws candles/transform + volume
+            setLegend(symbol, exchange, interval, u.bar, e.ltp);
+          }
+        } else {
+          setLegend(symbol, exchange, interval, rawBars[rawBars.length - 1], e.ltp);
+        }
+      });
+      ws.subscribe('LTP', symbol, exchange);
+      scheduleReconcile();                     // snap completed bars to broker OHLC + volume every 20-30s
+
+      // ── chart trading: real OpenAlgo orders ──
+      trade = new OpenAlgoTradeFeed({ baseUrl: '', apiKey, strategy: 'openalgo-charts', defaultProduct: el('product').value });
       bookTimer = setInterval(pollBook, 3000);
       pollBook();
-      window.__chart = () => chart;
     }
 
     el('connect').addEventListener('click', connect);
@@ -375,6 +427,13 @@
       placeFromMenu(b.getAttribute('data-side'), b.getAttribute('data-type'));
     });
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
+    // switching chart type rebuilds the price series from cached raw bars (no refetch)
+    el('ctype').addEventListener('change', () => {
+      if (!rawBars.length) return;
+      buildChart();
+      const lb = rawBars[rawBars.length - 1];
+      setLegend(lastReq.symbol, lastReq.exchange, lastReq.interval, lb, lastLtp != null ? lastLtp : lb.close);
+    });
   </script>
 </body>
 </html>
