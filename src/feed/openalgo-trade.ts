@@ -44,7 +44,9 @@ export class OpenAlgoTradeFeed implements OrderFeed {
     this._config = config;
     this._strategy = config.strategy ?? 'openalgo-charts';
     this._defaultProduct = config.defaultProduct ?? 'MIS';
-    const f = config.fetchImpl ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+    // Bind to the global object — a stored `this._fetch(...)` of window.fetch
+    // throws "Illegal invocation" in browsers.
+    const f = config.fetchImpl ?? (typeof fetch !== 'undefined' ? fetch.bind(globalThis) : undefined);
     if (f === undefined) throw new Error('openalgo-charts: no fetch available; pass config.fetchImpl');
     this._fetch = f;
   }

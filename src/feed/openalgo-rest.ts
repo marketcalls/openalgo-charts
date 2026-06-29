@@ -72,7 +72,9 @@ export class OpenAlgoDataFeed implements DataFeed {
 
   public constructor(config: OpenAlgoConfig) {
     this._config = config;
-    const f = config.fetchImpl ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+    // Bind the global fetch to the global object — calling `window.fetch` as a
+    // stored method (`this._fetch(...)`) throws "Illegal invocation" in browsers.
+    const f = config.fetchImpl ?? (typeof fetch !== 'undefined' ? fetch.bind(globalThis) : undefined);
     if (f === undefined) throw new Error('openalgo-charts: no fetch available; pass config.fetchImpl');
     this._fetch = f;
   }

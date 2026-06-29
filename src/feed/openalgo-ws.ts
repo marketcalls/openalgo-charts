@@ -44,6 +44,8 @@ export interface LtpEvent {
   exchange: string;
   ltp: number;
   ltq?: number;
+  /** Cumulative day volume (Quote mode) — feeds the candle builder's day-delta mode. */
+  volume?: number;
   timeSec: number;
 }
 
@@ -75,6 +77,7 @@ interface RawData {
   last_price?: number;
   last_trade_quantity?: number;
   ltq?: number;
+  volume?: number; // cumulative day volume (Quote mode)
   timestamp?: number | string;
   depth?: { buy?: DepthLevel[]; sell?: DepthLevel[] };
 }
@@ -120,7 +123,7 @@ export function parseMessage(raw: unknown): { kind: 'ltp'; event: LtpEvent } | {
   }
   const price = d.ltp ?? d.last_price;
   if (typeof price === 'number') {
-    return { kind: 'ltp', event: { symbol, exchange, ltp: price, ltq: d.last_trade_quantity ?? d.ltq, timeSec: toSec(d.timestamp) } };
+    return { kind: 'ltp', event: { symbol, exchange, ltp: price, ltq: d.last_trade_quantity ?? d.ltq, volume: d.volume, timeSec: toSec(d.timestamp) } };
   }
   return null;
 }

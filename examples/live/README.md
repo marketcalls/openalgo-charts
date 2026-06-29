@@ -24,8 +24,15 @@ It uses the library's real adapters unchanged: `OpenAlgoDataFeed` (history),
    pick symbol / exchange / interval, and click **Connect**.
 
 The toolbar shows `WS live`, a running tick count, and the live LTP; intraday
-intervals (1m/5m/15m/1h) aggregate ticks into the forming candle, while `D` shows
-the daily history with a moving LTP line.
+intervals (1m/5m/15m/1h) aggregate LTP ticks into the forming candle, while `D`
+shows the daily history with a moving LTP line.
+
+Like OpenAlgo's `/scalping` chart, a staggered **reconcile loop** re-fetches
+history every 20–30s and snaps **completed** bars to the broker's official
+OHLC + volume (it never touches the live forming bar). Live OHLC uses **LTP**
+mode (reliable across brokers); the forming bar's volume fills in when it
+completes and the reconcile corrects it. (Quote-mode live volume exists in the
+adapter but is broker-dependent — some brokers return `subscribe partial`.)
 
 ## Notes
 

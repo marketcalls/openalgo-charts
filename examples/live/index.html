@@ -56,6 +56,7 @@
     const LOOKBACK = { '1m': 5 * 86400, '5m': 20 * 86400, '15m': 40 * 86400, '1h': 120 * 86400, 'D': 400 * 86400 };
 
     let chart, price, volume, ws, rest, ltpLine, offLtp = null, tickN = 0;
+    let reconcileTimer = null, liveBucket = null, lastReq = null;
 
     function setLegend(sym, ex, intv, bar, ltp) {
       const col = bar && bar.close >= bar.open ? 'up' : 'dn';
@@ -68,7 +69,26 @@
     function disconnect() {
       if (offLtp) { offLtp(); offLtp = null; }
       if (ws) { ws.close(); ws = null; }
+      if (reconcileTimer) { clearTimeout(reconcileTimer); reconcileTimer = null; }
+      liveBucket = null;
       el('wsstate').textContent = 'WS idle';
+    }
+
+    // Periodically re-fetch history and snap COMPLETED bars to the broker's official
+    // OHLC/volume (live-built bars drift since we only see ticks from connect-time).
+    // Mirrors ScalpChart's 20–30s staggered reconcile; never touches the forming bar.
+    function scheduleReconcile() {
+      reconcileTimer = setTimeout(async () => {
+        try {
+          const fresh = await rest.getBars({ ...lastReq, to: nowSec() });
+          for (const b of fresh) {
+            if (liveBucket != null && b.time >= liveBucket) continue; // keep the live bar
+            price.update(b);
+            volume.update({ time: b.time, open: 0, high: b.volume || 0, low: 0, close: b.volume || 0 });
+          }
+        } catch (_) { /* transient — next cycle retries */ }
+        if (ws) scheduleReconcile();
+      }, 20000 + Math.random() * 10000);
     }
 
     async function connect() {
@@ -90,6 +110,7 @@
       // ── history (REST via the same-origin proxy → OpenAlgo /api/v1/history) ──
       rest = new OpenAlgoDataFeed({ baseUrl: '', apiKey }); // baseUrl '' → relative → proxy
       const to = nowSec(), from = to - (LOOKBACK[interval] || 30 * 86400);
+      lastReq = { symbol, exchange, interval, from };
       el('status').textContent = `loading ${symbol} ${interval} history…`;
       let bars;
       try {
@@ -108,6 +129,9 @@
       el('wsstate').textContent = 'WS connecting…';
       ltpLine = chart.addPriceLine({ price: lastBar.close, color: '#e0b020', lineWidth: 1, dashed: true, id: 'ltp' }, 0);
       const liveAgg = /^\d+(m|h)$/i.test(interval); // aggregate ticks into candles for intraday only
+      // LTP mode streams reliably across brokers; the forming bar's OHLC builds from
+      // ticks. Accurate per-bar VOLUME comes from the reconcile loop (broker history),
+      // since LTP carries no size and Quote-mode volume is broker-dependent.
       const builder = new CandleBuilder({ intervalSec: intervalToSeconds(interval), volumeMode: 'ltq-sum' });
       tickN = 0;
       offLtp = ws.onLtp((e) => {
@@ -119,12 +143,13 @@
         ltpLine.setPrice(e.ltp);
         if (liveAgg) {
           const u = builder.onTick({ time: e.timeSec || nowSec(), price: e.ltp, ltq: e.ltq });
-          if (u) { price.update(u.bar); setLegend(symbol, exchange, interval, u.bar, e.ltp); }
+          if (u) { liveBucket = u.bar.time; price.update(u.bar); setLegend(symbol, exchange, interval, u.bar, e.ltp); }
         } else {
           setLegend(symbol, exchange, interval, lastBar, e.ltp);
         }
       });
       ws.subscribe('LTP', symbol, exchange);
+      scheduleReconcile();                     // snap completed bars to broker OHLC + volume every 20-30s
       window.__chart = () => chart;
     }
 
