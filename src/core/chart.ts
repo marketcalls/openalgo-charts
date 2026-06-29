@@ -16,6 +16,7 @@ import type { SeriesStyle } from '../render/series-style';
 import type { Bar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
+import { pinchState, pinchDelta, type PinchState } from '../input/touch';
 import type { IPrimitive, PrimitiveHost } from '../primitives/primitive';
 import { PriceLine, type PriceLineOptions } from '../primitives/price-line';
 import { SeriesMarkers } from '../primitives/markers';
@@ -43,6 +44,8 @@ export interface ChartOptions {
   conflationFactor?: number;
   /** Grid line visibility. Both default to true. */
   grid?: { vertLines?: boolean; horzLines?: boolean };
+  /** Accessible label for the chart container (screen readers). */
+  ariaLabel?: string;
 }
 
 export interface AddSeriesOptions {
@@ -105,6 +108,11 @@ export class Chart {
   private _dragStartX = 0;
   private _dragStartY = 0;
   private _lastDragY = 0;
+  // multi-touch: active pointers + current pinch gesture
+  private readonly _pointers = new Map<number, { x: number; y: number; pane: number }>();
+  private _pinch: PinchState | null = null;
+  private _pinchPane = 0;
+  private _liveRegion: HTMLElement | null = null;
   private _dragStartOffset = 0;
   private _lastDragX = 0;
   private _lastDragT = 0;
@@ -156,6 +164,21 @@ export class Chart {
     container.style.display = 'flex';
     container.style.flexDirection = 'column';
     container.style.background = this._theme.background;
+    // Touch: let the chart own pan/pinch gestures instead of the browser scrolling/zooming.
+    container.style.touchAction = 'none';
+
+    // Accessibility: a focusable, labelled region with a polite live summary so the
+    // canvas (which screen readers can't introspect) is at least navigable + announced.
+    if (!container.getAttribute('role')) container.setAttribute('role', 'application');
+    container.setAttribute('aria-label', options.ariaLabel ?? 'Interactive financial chart');
+    if (!container.hasAttribute('tabindex')) container.tabIndex = 0;
+    const live = this._doc.createElement('div');
+    live.setAttribute('aria-live', 'polite');
+    const s = live.style;
+    s.position = 'absolute'; s.width = '1px'; s.height = '1px'; s.overflow = 'hidden';
+    s.clip = 'rect(0 0 0 0)'; s.whiteSpace = 'nowrap'; s.border = '0'; s.padding = '0'; s.margin = '-1px';
+    container.appendChild(live);
+    this._liveRegion = live;
 
     this._loop = options.raf
       ? new RenderLoop(() => this._onFrame(), options.raf.schedule, options.raf.cancel)
@@ -366,6 +389,7 @@ export class Chart {
       this._hasFitContent = true;
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._updateAccessibleSummary();
   }
 
   /** History paging: merge older bars, preserving the viewport (§4.2). */
@@ -493,9 +517,11 @@ export class Chart {
     el.addEventListener('pointerdown', this._onPointerDown);
     el.addEventListener('pointermove', this._onPointerMove);
     el.addEventListener('pointerup', this._onPointerUp);
+    el.addEventListener('pointercancel', this._onPointerUp);
     el.addEventListener('pointerleave', this._onPointerLeave);
     el.addEventListener('wheel', this._onWheel, { passive: false });
     el.addEventListener('dblclick', this._onDblClick);
+    el.addEventListener('keydown', this._onKeyDown);
   }
 
   private _localPoint(e: { clientX: number; clientY: number }): { x: number; y: number; pane: number; localY: number; paneHeight: number } {
@@ -513,10 +539,12 @@ export class Chart {
   private readonly _onPointerDown = (e: PointerEvent): void => {
     this._stopKinetic();
     const p = this._localPoint(e);
+    this._pointers.set(e.pointerId, { x: p.x, y: p.y, pane: p.pane });
+    this._container.setPointerCapture?.(e.pointerId);
+    if (this._pointers.size >= 2) { this._beginPinch(); return; } // second finger → pinch, skip single-drag
     this._downPane = p.pane;
     this._downX = p.x;
     this._downLocalY = p.localY;
-    this._container.setPointerCapture?.(e.pointerId);
 
     // Axis-drag rescale: dragging the price axis (right strip) rescales Y;
     // dragging the time axis (bottom strip of the last pane) rescales X.
@@ -562,6 +590,8 @@ export class Chart {
 
   private readonly _onPointerMove = (e: PointerEvent): void => {
     const p = this._localPoint(e);
+    if (this._pointers.has(e.pointerId)) this._pointers.set(e.pointerId, { x: p.x, y: p.y, pane: p.pane });
+    if (this._pinch !== null) { this._updatePinch(); return; }
     if (this._axisDrag === 'price') {
       // drag up (dy<0) → expand (zoom in); drag down → compress (zoom out)
       const dy = p.localY - this._axisStartCoord;
@@ -608,6 +638,12 @@ export class Chart {
 
   private readonly _onPointerUp = (e: PointerEvent): void => {
     this._container.releasePointerCapture?.(e.pointerId);
+    this._pointers.delete(e.pointerId);
+    if (this._pinch !== null) {
+      // a finger lifted mid-pinch: end the gesture; don't start a drag with the remnant
+      if (this._pointers.size < 2) { this._pinch = null; this._dragging = false; }
+      return;
+    }
     if (this._axisDrag !== null) {
       this._axisDrag = null;
       return;
@@ -660,6 +696,62 @@ export class Chart {
   }
 
   private readonly _onDblClick = (): void => this.resetScale();
+
+  // ── multi-touch pinch (zoom + two-finger pan) ─────────────────────────────
+  private _beginPinch(): void {
+    const pts = [...this._pointers.values()];
+    this._pinch = pinchState(pts[0], pts[1]);
+    this._pinchPane = pts[0].pane;
+    // abort any single-pointer interaction so it doesn't fight the pinch
+    this._dragging = false; this._axisDrag = null; this._dragId = null; this._pointerMoved = true;
+  }
+
+  private _updatePinch(): void {
+    const pts = [...this._pointers.values()];
+    if (pts.length < 2 || this._pinch === null) return;
+    const cur = pinchState(pts[0], pts[1]);
+    const d = pinchDelta(this._pinch, cur);
+    if (d.factor !== 1) this._timeScale.zoomAtX(cur.cx, d.factor);                       // pinch → zoom time
+    this._timeScale.setRightOffset(this._timeScale.rightOffset - d.dx / this._timeScale.barSpacing); // two-finger pan X
+    this._panes[this._pinchPane]?.priceScale.panByPixels(d.dy);                          // two-finger pan Y
+    this._pinch = cur;
+    this._maybeLoadHistory();
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
+  // ── keyboard navigation (focus the chart, then arrows / +- / Home) ────────
+  private readonly _onKeyDown = (e: KeyboardEvent): void => {
+    const ts = this._timeScale;
+    let handled = true;
+    switch (e.key) {
+      case 'ArrowLeft': ts.setRightOffset(ts.rightOffset - 2); break;       // pan to older bars
+      case 'ArrowRight': ts.setRightOffset(ts.rightOffset + 2); break;      // pan to newer
+      case 'ArrowUp': this._panes[0]?.priceScale.panByPixels(20); break;    // pan price up
+      case 'ArrowDown': this._panes[0]?.priceScale.panByPixels(-20); break; // pan price down
+      case '+': case '=': ts.zoomAtX(this._width / 2, 1.1); break;          // zoom in
+      case '-': case '_': ts.zoomAtX(this._width / 2, 1 / 1.1); break;      // zoom out
+      case 'Home': case '0': this.resetScale(); break;                      // reset view
+      default: handled = false;
+    }
+    if (!handled) return;
+    e.preventDefault();
+    this._maybeLoadHistory();
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._updateAccessibleSummary();
+  };
+
+  /** Refresh the polite live-region summary screen readers announce. */
+  private _updateAccessibleSummary(): void {
+    if (this._liveRegion === null) return;
+    const n = this._dataLayer.length;
+    let txt = `${n} bar${n === 1 ? '' : 's'}`;
+    if (this._firstDataId.value !== null && this._panes[0] !== undefined) {
+      const all = this._dataLayer.indexedBars(this._firstDataId.value);
+      const last = all[all.length - 1];
+      if (last !== undefined) txt += `, latest price ${this._panes[0].priceScale.format(last.bar.close)}`;
+    }
+    this._liveRegion.textContent = `Financial chart, ${txt}`;
+  }
 
   private _updateCursor(paneIndex: number, x: number, localY: number, containerY = localY): void {
     const plotWidth = Math.max(0, this._width - this._priceAxisWidth);
@@ -747,10 +839,15 @@ export class Chart {
       el.removeEventListener('pointerdown', this._onPointerDown);
       el.removeEventListener('pointermove', this._onPointerMove);
       el.removeEventListener('pointerup', this._onPointerUp);
+      el.removeEventListener('pointercancel', this._onPointerUp);
       el.removeEventListener('pointerleave', this._onPointerLeave);
       el.removeEventListener('wheel', this._onWheel);
       el.removeEventListener('dblclick', this._onDblClick);
+      el.removeEventListener('keydown', this._onKeyDown);
     }
+    this._liveRegion?.remove();
+    this._liveRegion = null;
+    this._pointers.clear();
     for (const pane of this._panes) pane.destroy(); // detaches primitives + removes element
     this._panes.length = 0;
   }

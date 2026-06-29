@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { TimeScale } from '../src/scale/time-scale';
 import { KineticAnimation } from '../src/input/kinetic';
 import { magnetSnapPrice } from '../src/input/crosshair';
+import { pinchState, pinchDelta } from '../src/input/touch';
 import { DataLayer } from '../src/model/data-layer';
 import type { Bar } from '../src/model/bar';
 
@@ -59,6 +60,23 @@ describe('KineticAnimation', () => {
   it('ignores slow flicks below the trigger speed', () => {
     expect(KineticAnimation.shouldAnimate(0.01)).toBe(false);
     expect(KineticAnimation.shouldAnimate(0.5)).toBe(true);
+  });
+});
+
+describe('pinch gesture math', () => {
+  it('summarizes distance + midpoint of two pointers', () => {
+    const s = pinchState({ x: 0, y: 0 }, { x: 100, y: 0 });
+    expect(s.dist).toBe(100);
+    expect(s.cx).toBe(50);
+    expect(s.cy).toBe(0);
+  });
+  it('delta yields zoom factor (apart > 1) + midpoint pan', () => {
+    const a = pinchState({ x: 0, y: 0 }, { x: 100, y: 0 });   // dist 100, cx 50
+    const b = pinchState({ x: -10, y: 20 }, { x: 130, y: 20 }); // dist 140, cx 60, cy 20
+    const d = pinchDelta(a, b);
+    expect(d.factor).toBeCloseTo(1.4); // fingers spread → zoom in
+    expect(d.dx).toBe(10);
+    expect(d.dy).toBe(20);
   });
 });
 

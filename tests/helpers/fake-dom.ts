@@ -12,6 +12,9 @@ export function fakeDocument(): Document {
       getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
       addEventListener() {},
       removeEventListener() {},
+      setAttribute() {},
+      getAttribute: () => null,
+      hasAttribute: () => false,
     };
     if (tag === 'canvas') {
       el.width = 0;

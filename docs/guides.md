@@ -191,3 +191,15 @@ createChart(el, { conflate: true, conflationFactor: 1 });
 
 Bars below ~0.5px are merged OHLC-preserving (open=first, close=last, high=max,
 low=min, volume=sum) — never a lossy average.
+
+## Touch & accessibility
+
+Touch gestures work out of the box (`touch-action: none` on the container):
+single-finger drag pans, **two-finger pinch zooms**, and a two-finger drag pans
+both axes.
+
+The chart container is focusable (`role="application"`, `tabindex=0`, an
+`aria-label` — override via `createChart(el, { ariaLabel })`) with a polite
+`aria-live` summary (bar count + latest price) that updates on data changes.
+Keyboard when focused: **←/→** pan time, **↑/↓** pan price, **+/−** zoom,
+**Home/0** reset (`chart.resetScale()`).

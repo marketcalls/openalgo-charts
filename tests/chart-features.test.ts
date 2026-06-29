@@ -21,6 +21,7 @@ function recordingDoc(): Document {
       remove() {},
       getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
       addEventListener() {}, removeEventListener() {},
+      setAttribute() {}, getAttribute: () => null, hasAttribute: () => false,
     };
     if (tag === 'canvas') {
       el.width = 0; el.height = 0;
