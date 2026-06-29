@@ -179,7 +179,9 @@ export function mapOrder(r: RawOrder): Order {
     qty: num(r.quantity),
     filledQty: num(r.filled_quantity),
     price: num(r.price),
-    triggerPrice: r.trigger_price !== undefined ? num(r.trigger_price) : undefined,
+    // trigger_price 0 means "no trigger" (a plain LIMIT/MARKET) — keep it undefined
+    // so `triggerPrice ?? price` doesn't render the line at 0 (?? ignores undefined, not 0).
+    triggerPrice: r.trigger_price !== undefined && num(r.trigger_price) > 0 ? num(r.trigger_price) : undefined,
     status: STATUS_MAP[(r.order_status ?? '').toLowerCase()] ?? 'working',
   };
 }

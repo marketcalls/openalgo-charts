@@ -93,7 +93,7 @@
     // chart trading (real OpenAlgo orders via the proxy)
     let trade = null, bookTimer = null, lastLtp = null;
     const orderLines = new Map(); // orderid -> PriceLine
-    let posLine = null, ctxPrice = 0;
+    let posLine = null, ctxPrice = 0, position = null;
 
     function setLegend(sym, ex, intv, bar, ltp) {
       const col = bar && bar.close >= bar.open ? 'up' : 'dn';
@@ -167,13 +167,20 @@
         renderPosition((j.data || []).find((p) => p.symbol === lastReq.symbol && Number(p.quantity) !== 0));
       } catch (_) {}
     }
+    // Position P&L marks to the live LTP (the sandbox/broker pnl field can read 0).
+    function posLabel() {
+      if (!position) return '';
+      const mark = lastLtp != null ? lastLtp : position.avg;
+      const pnl = (mark - position.avg) * position.net; // net is signed → correct for long/short
+      return `${position.net > 0 ? 'LONG' : 'SHORT'} ${Math.abs(position.net)} @ ${fmt(position.avg)}  ${pnl >= 0 ? '+' : '-'}₹${Math.round(Math.abs(pnl)).toLocaleString('en-IN')}`;
+    }
     function renderPosition(pos) {
       if (posLine && chart) { chart.removePrimitive(posLine); posLine = null; }
-      if (!pos || !chart) return;
-      const net = Number(pos.quantity), avg = Number(pos.average_price), pnl = Number(pos.pnl);
+      position = pos ? { net: Number(pos.quantity), avg: Number(pos.average_price) } : null;
+      if (!position || !chart) return;
       posLine = chart.addPriceLine({
-        price: avg, color: net > 0 ? '#2e7d6b' : '#a14a52', lineWidth: 2, dashed: false, id: 'position', extentFromRight: 0.30,
-        leftLabel: `${net > 0 ? 'LONG' : 'SHORT'} ${Math.abs(net)} @ ${fmt(avg)}  ${pnl >= 0 ? '+' : '-'}₹${Math.round(Math.abs(pnl)).toLocaleString('en-IN')}`,
+        price: position.avg, color: position.net > 0 ? '#2e7d6b' : '#a14a52', lineWidth: 2, dashed: false,
+        id: 'position', extentFromRight: 0.30, leftLabel: posLabel(),
       }, 0);
     }
     async function placeFromMenu(side, type) {
@@ -199,6 +206,7 @@
       for (const [, rec] of orderLines) if (chart) chart.removePrimitive(rec.line);
       orderLines.clear();
       if (posLine && chart) { chart.removePrimitive(posLine); posLine = null; }
+      position = null;
       trade = null;
     }
 
@@ -257,7 +265,9 @@
         el('wsstate').textContent = 'WS live';
         el('ticks').textContent = `${tickN} ticks`;
         el('ltp').textContent = `LTP ${fmt(e.ltp)}`;
+        lastLtp = e.ltp;
         ltpLine.setPrice(e.ltp);
+        if (position && posLine) posLine.setLeftLabel(posLabel()); // live mark-to-LTP P&L
         if (liveAgg) {
           const u = builder.onTick({ time: e.timeSec || nowSec(), price: e.ltp, ltq: e.ltq });
           if (u) { liveBucket = u.bar.time; price.update(u.bar); setLegend(symbol, exchange, interval, u.bar, e.ltp); }

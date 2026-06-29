@@ -100,6 +100,17 @@ describe('OpenAlgoTradeFeed (offline, injected fetch)', () => {
     const o = mapOrder({ orderid: 'X', symbol: 'SBIN', action: 'SELL', pricetype: 'SL', quantity: 5, filled_quantity: 2, price: 99, order_status: 'open' });
     expect(o).toMatchObject({ id: 'X', side: 'SELL', type: 'SL', qty: 5, filledQty: 2, status: 'working' });
   });
+
+  it('treats trigger_price 0 as no trigger (so the order line renders at price, not 0)', () => {
+    // a plain LIMIT: orderbook returns trigger_price 0 → triggerPrice must be undefined,
+    // otherwise `triggerPrice ?? price` would draw the line at 0 (?? ignores 0).
+    const limit = mapOrder({ orderid: 'L', symbol: 'SBIN', action: 'BUY', pricetype: 'LIMIT', quantity: 1, price: 1200, trigger_price: 0, order_status: 'open' });
+    expect(limit.triggerPrice).toBeUndefined();
+    expect(limit.triggerPrice ?? limit.price).toBe(1200);
+    // a real stop keeps its trigger
+    const sl = mapOrder({ orderid: 'S', symbol: 'SBIN', action: 'SELL', pricetype: 'SL', quantity: 1, price: 95, trigger_price: 95.5, order_status: 'open' });
+    expect(sl.triggerPrice).toBe(95.5);
+  });
 });
 
 describe('PriceScale modes (H9)', () => {
