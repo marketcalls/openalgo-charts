@@ -177,18 +177,22 @@
       }, 0);
     }
     async function placeFromMenu(side, type) {
-      if (!trade) { el('status').textContent = 'connect first'; return; }
-      if (!el('arm').checked) { el('status').textContent = 'arm trading first (toolbar checkbox)'; return; }
+      if (!trade) { el('status').textContent = 'connect first (click Connect)'; return; }
+      if (!el('arm').checked) { el('status').textContent = '⚠ tick "Arm trading" in the toolbar to place orders'; el('arm').focus(); return; }
       const qty = Math.max(1, Number(el('qty').value) || 1), product = el('product').value;
       const price = type === 'MARKET' ? 0 : round2v(ctxPrice);
       const summary = `${side} ${type} ${qty} ${lastReq.symbol}` + (type === 'MARKET' ? '' : ` @ ${fmt(price)}`) + ` (${product})`;
       if (isLiveMode() && !window.confirm(`LIVE ORDER — real money:\n\n${summary}\n\nPlace this order?`)) return;
+      el('status').textContent = 'placing: ' + summary + ' …';
+      const reqBody = { symbol: lastReq.symbol, exchange: lastReq.exchange, side, type, qty, product,
+        price: type === 'MARKET' ? undefined : price, triggerPrice: type === 'SL' ? price : undefined, mode: isLiveMode() ? 'live' : 'analyzer' };
+      console.log('[order] place', reqBody);
       try {
-        await trade.place({ symbol: lastReq.symbol, exchange: lastReq.exchange, side, type, qty, product,
-          price: type === 'MARKET' ? undefined : price, triggerPrice: type === 'SL' ? price : undefined, mode: isLiveMode() ? 'live' : 'analyzer' });
-        el('status').textContent = 'placed: ' + summary;
+        const r = await trade.place(reqBody);
+        console.log('[order] placed', r);
+        el('status').textContent = `placed ${summary} (id ${r.orderId})`;
         pollBook();
-      } catch (e) { el('status').textContent = 'order error: ' + e.message; }
+      } catch (e) { console.error('[order] error', e); el('status').textContent = 'order error: ' + e.message; }
     }
     function clearTrading() {
       if (bookTimer) { clearInterval(bookTimer); bookTimer = null; }
@@ -289,10 +293,10 @@
     // right-click the chart → order menu at the cursor price (place via OpenAlgoTradeFeed)
     const ctxMenu = el('ctxmenu');
     el('chart').addEventListener('contextmenu', (e) => {
-      if (!chart || !trade) return;
+      if (!chart) return;
+      e.preventDefault(); // always show our menu over the chart (not the browser's)
       const p = chart.coordinateToPrice(e.clientY - el('chart').getBoundingClientRect().top, 0);
       if (p == null) return;
-      e.preventDefault();
       ctxPrice = round2v(p);
       ctxMenu.querySelectorAll('button[data-type]').forEach((b) => {
         const v = b.getAttribute('data-side') === 'BUY' ? 'Buy' : 'Sell', t = b.getAttribute('data-type');
