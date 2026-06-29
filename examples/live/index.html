@@ -176,12 +176,29 @@
     }
     function renderPosition(pos) {
       if (posLine && chart) { chart.removePrimitive(posLine); posLine = null; }
-      position = pos ? { net: Number(pos.quantity), avg: Number(pos.average_price) } : null;
+      position = pos ? { net: Number(pos.quantity), avg: Number(pos.average_price), product: pos.product } : null;
       if (!position || !chart) return;
       posLine = chart.addPriceLine({
         price: position.avg, color: position.net > 0 ? '#2e7d6b' : '#a14a52', lineWidth: 2, dashed: false,
-        id: 'position', extentFromRight: 0.30, leftLabel: posLabel(),
+        id: 'position', extentFromRight: 0.30, leftLabel: posLabel(), closeButton: true, // ✕ = exit position
       }, 0);
+    }
+    // Exit the open position at market (square off to flat via placesmartorder position_size 0).
+    async function exitPosition() {
+      if (!trade || !position) return;
+      if (!el('arm').checked) { el('status').textContent = '⚠ tick "Arm trading" to exit the position'; el('arm').focus(); return; }
+      const qty = Math.abs(position.net), side = position.net > 0 ? 'SELL' : 'BUY';
+      const summary = `close ${position.net > 0 ? 'LONG' : 'SHORT'} ${qty} ${lastReq.symbol} @ market`;
+      if (isLiveMode() && !window.confirm(`LIVE — ${summary}\n\nProceed?`)) return;
+      el('status').textContent = summary + ' …';
+      try {
+        const res = await fetch('/api/v1/placesmartorder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apikey: el('apikey').value.trim(), strategy: 'openalgo-charts', exchange: lastReq.exchange, symbol: lastReq.symbol,
+            action: side, product: position.product || el('product').value, pricetype: 'MARKET', quantity: String(qty), position_size: '0', price: '0', trigger_price: '0', disclosed_quantity: '0' }) });
+        const j = await res.json();
+        el('status').textContent = j.status === 'success' ? 'position closed' : ('exit error: ' + (j.message || 'failed'));
+        pollBook();
+      } catch (e) { el('status').textContent = 'exit error: ' + e.message; }
     }
     async function placeFromMenu(side, type) {
       if (!trade) { el('status').textContent = 'connect first (click Connect)'; return; }
@@ -300,6 +317,7 @@
         },
       );
       chart.subscribeClick((id) => {
+        if (id === 'position::close') { exitPosition(); return; }
         if (id.startsWith('order:') && id.endsWith('::close')) trade.cancel(id.slice(6, -7)).then(pollBook).catch(() => {});
       });
       bookTimer = setInterval(pollBook, 3000);

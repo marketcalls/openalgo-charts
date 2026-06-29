@@ -38,9 +38,10 @@ adapter but is broker-dependent — some brokers return `subscribe partial`.)
 
 Right-click the chart to place an order **at the cursor price** — Buy/Sell
 **Market / Limit / Stop (SL)** — via OpenAlgo's `placeorder` API. Working orders
-appear as draggable lines (drag to **modify**, click the ✕ to **cancel**); the net
-position shows as a line with live P&L from the position book. Orders/positions
-are polled from `/orderbook` + `/positionbook` every 3s.
+appear as draggable lines (drag and release to **modify**, click the ✕ to
+**cancel**); the net position shows as a line with **live P&L marked to the LTP**
+and its own ✕ to **exit** (square off to flat via `placesmartorder position_size 0`).
+Orders/positions are polled from `/orderbook` + `/positionbook` every 3s.
 
 Safety:
 - **Arm trading** is OFF by default — nothing places until you tick it.
