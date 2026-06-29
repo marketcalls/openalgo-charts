@@ -63,7 +63,7 @@ export type { DataFeed, TradeFeed, BarsRequest, MarketDepth, DepthLevel, OrderSi
 export { OpenAlgoDataFeed, mapHistoryResponse, rowTimeToUtcSeconds } from './feed/openalgo-rest';
 export type { OpenAlgoConfig } from './feed/openalgo-rest';
 export { OpenAlgoWsFeed, parseMessage, formatSubscribe, formatUnsubscribe } from './feed/openalgo-ws';
-export type { OpenAlgoWsConfig, SocketLike, SocketFactory, WsMode, LtpEvent } from './feed/openalgo-ws';
+export type { OpenAlgoWsConfig, SocketLike, SocketFactory, WsMode, LtpEvent, WsState, WsControlMessage } from './feed/openalgo-ws';
 export { OpenAlgoTradeFeed, mapOrder, mapPosition } from './feed/openalgo-trade';
 export type { OpenAlgoTradeConfig } from './feed/openalgo-trade';
 export { OpenAlgoLiveDataFeed, intervalToSeconds } from './feed/openalgo-live';

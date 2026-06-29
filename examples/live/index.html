@@ -125,8 +125,14 @@
 
       // ── live (WebSocket LTP → CandleBuilder → series.update + live LTP line) ──
       ws = new OpenAlgoWsFeed({ url: el('wsurl').value.trim(), apiKey });
+      // Surface the real socket + protocol state so we can see exactly where it stops.
+      ws.onState((s) => { el('wsstate').textContent = 'WS ' + s; });
+      ws.onControl((m) => {
+        if (m.type === 'auth') el('wsstate').textContent = m.status === 'success' ? 'WS authenticated' : `auth ${m.status}`;
+        else if (m.type === 'subscribe') el('wsstate').textContent = `subscribe ${m.status}` + (tickN ? '' : ' (waiting for ticks)');
+        else if (m.type === 'error') el('wsstate').textContent = 'WS error: ' + (m.message || 'unknown');
+      });
       ws.connect();
-      el('wsstate').textContent = 'WS connecting…';
       ltpLine = chart.addPriceLine({ price: lastBar.close, color: '#e0b020', lineWidth: 1, dashed: true, id: 'ltp' }, 0);
       const liveAgg = /^\d+(m|h)$/i.test(interval); // aggregate ticks into candles for intraday only
       // LTP mode streams reliably across brokers; the forming bar's OHLC builds from

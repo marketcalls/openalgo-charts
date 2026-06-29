@@ -17,6 +17,17 @@ import { epochMsToUtcSeconds } from './time';
 
 export type WsMode = 'LTP' | 'Quote' | 'Depth';
 
+/** Socket lifecycle reported by `onState`. */
+export type WsState = 'connecting' | 'open' | 'closed' | 'error';
+
+/** A non-market-data control frame (auth / subscribe ack, or a server error). */
+export interface WsControlMessage {
+  type?: string;
+  status?: string;
+  message?: string;
+  [k: string]: unknown;
+}
+
 /** OpenAlgo numeric data modes (websockets-format.md §Data Modes). */
 const MODE_NUMBER: Record<WsMode, number> = { LTP: 1, Quote: 2, Depth: 3 };
 
@@ -26,6 +37,7 @@ export interface SocketLike {
   close(): void;
   onopen: (() => void) | null;
   onclose: (() => void) | null;
+  onerror?: (() => void) | null;
   onmessage: ((ev: { data: string }) => void) | null;
   /** 1 === OPEN (browser WebSocket.OPEN). Used to gate sends. */
   readyState?: number;
@@ -136,6 +148,8 @@ export class OpenAlgoWsFeed {
   private readonly _queue: string[] = [];
   private readonly _ltpCbs = new Set<(e: LtpEvent) => void>();
   private readonly _depthCbs = new Set<(symbol: string, exchange: string, depth: MarketDepth) => void>();
+  private readonly _stateCbs = new Set<(state: WsState) => void>();
+  private readonly _controlCbs = new Set<(msg: WsControlMessage) => void>();
 
   public constructor(config: OpenAlgoWsConfig) {
     this._config = config;
@@ -146,19 +160,38 @@ export class OpenAlgoWsFeed {
 
   public connect(): void {
     if (this._sock !== null) return;
+    this._emitState('connecting');
     const sock = this._factory(this._config.url);
     sock.onmessage = (ev): void => this._dispatch(ev.data);
     sock.onopen = (): void => this._onOpen();
-    sock.onclose = (): void => { this._open = false; };
+    sock.onclose = (): void => { this._open = false; this._emitState('closed'); };
+    sock.onerror = (): void => this._emitState('error');
     this._sock = sock;
     // Some sockets connect synchronously (readyState OPEN) before onopen fires.
     if (sock.readyState === 1) this._onOpen();
+  }
+
+  /** Subscribe to socket lifecycle (connecting / open / closed / error). */
+  public onState(cb: (state: WsState) => void): () => void {
+    this._stateCbs.add(cb);
+    return () => this._stateCbs.delete(cb);
+  }
+
+  /** Subscribe to control frames — auth / subscribe acks and server errors. */
+  public onControl(cb: (msg: WsControlMessage) => void): () => void {
+    this._controlCbs.add(cb);
+    return () => this._controlCbs.delete(cb);
+  }
+
+  private _emitState(s: WsState): void {
+    for (const cb of this._stateCbs) cb(s);
   }
 
   /** Authenticate first, then flush any queued subscriptions (protocol order). */
   private _onOpen(): void {
     if (this._open) return;
     this._open = true;
+    this._emitState('open');
     this._sock?.send(formatAuthenticate(this._config.apiKey));
     this._flush();
   }
@@ -205,7 +238,11 @@ export class OpenAlgoWsFeed {
     try { raw = JSON.parse(data); } catch { raw = data; } // heartbeats may be plain text
     if (isPing(raw)) { this._sock?.send(JSON.stringify({ action: 'pong' })); return; }
     const parsed = parseMessage(raw);
-    if (parsed === null) return;
+    if (parsed === null) {
+      // Non-market-data frame (auth / subscribe ack, or a server error) → surface it.
+      if (typeof raw === 'object' && raw !== null) for (const cb of this._controlCbs) cb(raw as WsControlMessage);
+      return;
+    }
     if (parsed.kind === 'ltp') for (const cb of this._ltpCbs) cb(parsed.event);
     else for (const cb of this._depthCbs) cb(parsed.symbol, parsed.exchange, parsed.depth);
   }
