@@ -80,6 +80,7 @@ export class OpenAlgoTradeFeed implements OrderFeed {
       quantity: req.qty,
       price: req.price ?? 0,
       trigger_price: req.triggerPrice ?? 0,
+      disclosed_quantity: 0,
     })) as { orderid?: string; order_id?: string };
     const orderId = json.orderid ?? json.order_id;
     if (orderId === undefined) throw new Error('openalgo-charts: placeorder returned no orderid');
@@ -105,6 +106,7 @@ export class OpenAlgoTradeFeed implements OrderFeed {
       quantity: ctx.quantity,
       price: patch.price ?? 0,
       trigger_price: patch.triggerPrice ?? 0,
+      disclosed_quantity: 0, // required by the modifyorder API
     });
   }
 

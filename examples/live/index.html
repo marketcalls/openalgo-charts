@@ -17,6 +17,20 @@
     .legend { position: absolute; top: 92px; left: 16px; z-index: 10; pointer-events: none; font: 12px system-ui; text-shadow: 0 0 3px #0d0e12; }
     .legend b { color: #e8eaf0; } .up { color: #26a69a; } .dn { color: #ef5350; } .ltp { color: #e0b020; }
     .pill { padding: 1px 6px; border: 1px solid #2a3046; border-radius: 5px; opacity: .85; }
+    label.chk { display: inline-flex; gap: 4px; align-items: center; user-select: none; }
+    input[type="checkbox"] { width: auto; }
+    #mode { font-weight: 600; }
+    #mode.analyze { color: #7fd8cd; } #mode.live { color: #ff8a8a; }
+    #buy { border-color: #2c6e64; color: #7fd8cd; } #sell { border-color: #7a3633; color: #f3a3a1; }
+    /* NinjaTrader-style right-click order menu */
+    #ctxmenu { position: fixed; z-index: 30; min-width: 190px; background: #11151f; border: 1px solid #2a3046;
+      border-radius: 8px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.5); font: 12px system-ui; }
+    #ctxmenu button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 5px;
+      color: #c7ccd8; padding: 6px 10px; cursor: pointer; }
+    #ctxmenu button:hover { background: #1d2333; }
+    #ctxmenu button.buy:hover { background: #163e38; color: #7fd8cd; }
+    #ctxmenu button.sell:hover { background: #3e1f22; color: #f3a3a1; }
+    #ctxmenu hr { border: 0; border-top: 1px solid #232a3d; margin: 4px 6px; }
   </style>
 </head>
 <body>
@@ -41,12 +55,30 @@
     <span class="pill" id="wsstate">WS idle</span>
     <span class="pill" id="ticks">0 ticks</span>
     <span class="pill" id="ltp">LTP —</span>
+    <span class="sep" style="display:inline-block;width:12px"></span>
+    <input type="number" id="qty" value="1" min="1" style="width:54px" title="order quantity" />
+    <select id="product" title="product"><option>MIS</option><option>CNC</option><option>NRML</option></select>
+    <label class="chk"><input type="checkbox" id="arm" /> Arm trading</label>
+    <span class="pill" id="mode" title="OpenAlgo order routing mode">mode —</span>
+    <span class="pill" style="opacity:.5">right-click chart to order</span>
   </div>
   <div id="chart"></div>
   <div class="legend" id="legend"></div>
 
+  <!-- right-click order menu (price under the cursor) -->
+  <div id="ctxmenu" hidden>
+    <button class="buy" data-side="BUY" data-type="MARKET">Buy Market</button>
+    <button class="sell" data-side="SELL" data-type="MARKET">Sell Market</button>
+    <hr>
+    <button class="buy" data-side="BUY" data-type="LIMIT">Buy Limit</button>
+    <button class="sell" data-side="SELL" data-type="LIMIT">Sell Limit</button>
+    <hr>
+    <button class="buy" data-side="BUY" data-type="SL">Buy Stop (SL)</button>
+    <button class="sell" data-side="SELL" data-type="SL">Sell Stop (SL)</button>
+  </div>
+
   <script type="module">
-    import { createChart, OpenAlgoDataFeed, OpenAlgoWsFeed, CandleBuilder, intervalToSeconds } from '/dist/openalgo-charts.mjs';
+    import { createChart, OpenAlgoDataFeed, OpenAlgoWsFeed, OpenAlgoTradeFeed, CandleBuilder, intervalToSeconds } from '/dist/openalgo-charts.mjs';
 
     const el = (id) => document.getElementById(id);
     const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -58,6 +90,10 @@
 
     let chart, price, volume, ws, rest, ltpLine, offLtp = null, tickN = 0;
     let reconcileTimer = null, liveBucket = null, lastReq = null;
+    // chart trading (real OpenAlgo orders via the proxy)
+    let trade = null, bookTimer = null, lastLtp = null;
+    const orderLines = new Map(); // orderid -> PriceLine
+    let posLine = null, ctxPrice = 0;
 
     function setLegend(sym, ex, intv, bar, ltp) {
       const col = bar && bar.close >= bar.open ? 'up' : 'dn';
@@ -72,6 +108,7 @@
       if (ws) { ws.close(); ws = null; }
       if (reconcileTimer) { clearTimeout(reconcileTimer); reconcileTimer = null; }
       liveBucket = null;
+      clearTrading();
       el('wsstate').textContent = 'WS idle';
     }
 
@@ -90,6 +127,75 @@
         } catch (_) { /* transient — next cycle retries */ }
         if (ws) scheduleReconcile();
       }, 20000 + Math.random() * 10000);
+    }
+
+    // ── chart trading (real OpenAlgo orders via the proxy) ──────────────────
+    const round2v = (n) => Math.round(n * 100) / 100;
+    function setMode(m) {
+      const e = el('mode');
+      if (m === 'analyze') { e.textContent = 'ANALYZE (sandbox)'; e.className = 'pill analyze'; }
+      else if (m === 'live') { e.textContent = 'LIVE — real orders'; e.className = 'pill live'; }
+      else { e.textContent = 'mode —'; e.className = 'pill'; }
+    }
+    const isLiveMode = () => el('mode').classList.contains('live');
+    function makeOrderLine(o) {
+      return chart.addPriceLine({
+        price: o.triggerPrice ?? o.price, color: o.side === 'BUY' ? '#26a69a' : '#ef5350',
+        lineWidth: 1, dashed: true, id: `order:${o.id}`, cursor: 'ns-resize', extentFromRight: 0.30,
+        closeButton: true, leftLabel: `${o.side} ${o.qty} ${o.type}`,
+      }, 0);
+    }
+    async function pollBook() {
+      if (!trade) return;
+      try {
+        const orders = await trade.getOrders(); // also caches ctx so modify works
+        const seen = new Set();
+        for (const o of orders) {
+          if (o.status !== 'working' || o.symbol !== lastReq.symbol) continue;
+          seen.add(o.id);
+          const px = o.triggerPrice ?? o.price;
+          const rec = orderLines.get(o.id);
+          if (rec) { rec.order = o; rec.line.setPrice(px); }
+          else orderLines.set(o.id, { line: makeOrderLine(o), order: o });
+        }
+        for (const [id, rec] of orderLines) if (!seen.has(id)) { chart.removePrimitive(rec.line); orderLines.delete(id); }
+      } catch (_) { /* transient */ }
+      try {
+        const res = await fetch('/api/v1/positionbook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apikey: el('apikey').value.trim() }) });
+        const j = await res.json();
+        setMode(j.mode);
+        renderPosition((j.data || []).find((p) => p.symbol === lastReq.symbol && Number(p.quantity) !== 0));
+      } catch (_) {}
+    }
+    function renderPosition(pos) {
+      if (posLine && chart) { chart.removePrimitive(posLine); posLine = null; }
+      if (!pos || !chart) return;
+      const net = Number(pos.quantity), avg = Number(pos.average_price), pnl = Number(pos.pnl);
+      posLine = chart.addPriceLine({
+        price: avg, color: net > 0 ? '#2e7d6b' : '#a14a52', lineWidth: 2, dashed: false, id: 'position', extentFromRight: 0.30,
+        leftLabel: `${net > 0 ? 'LONG' : 'SHORT'} ${Math.abs(net)} @ ${fmt(avg)}  ${pnl >= 0 ? '+' : '-'}₹${Math.round(Math.abs(pnl)).toLocaleString('en-IN')}`,
+      }, 0);
+    }
+    async function placeFromMenu(side, type) {
+      if (!trade) { el('status').textContent = 'connect first'; return; }
+      if (!el('arm').checked) { el('status').textContent = 'arm trading first (toolbar checkbox)'; return; }
+      const qty = Math.max(1, Number(el('qty').value) || 1), product = el('product').value;
+      const price = type === 'MARKET' ? 0 : round2v(ctxPrice);
+      const summary = `${side} ${type} ${qty} ${lastReq.symbol}` + (type === 'MARKET' ? '' : ` @ ${fmt(price)}`) + ` (${product})`;
+      if (isLiveMode() && !window.confirm(`LIVE ORDER — real money:\n\n${summary}\n\nPlace this order?`)) return;
+      try {
+        await trade.place({ symbol: lastReq.symbol, exchange: lastReq.exchange, side, type, qty, product,
+          price: type === 'MARKET' ? undefined : price, triggerPrice: type === 'SL' ? price : undefined, mode: isLiveMode() ? 'live' : 'analyzer' });
+        el('status').textContent = 'placed: ' + summary;
+        pollBook();
+      } catch (e) { el('status').textContent = 'order error: ' + e.message; }
+    }
+    function clearTrading() {
+      if (bookTimer) { clearInterval(bookTimer); bookTimer = null; }
+      for (const [, rec] of orderLines) if (chart) chart.removePrimitive(rec.line);
+      orderLines.clear();
+      if (posLine && chart) { chart.removePrimitive(posLine); posLine = null; }
+      trade = null;
     }
 
     async function connect() {
@@ -157,12 +263,51 @@
       });
       ws.subscribe('LTP', symbol, exchange);
       scheduleReconcile();                     // snap completed bars to broker OHLC + volume every 20-30s
+
+      // chart trading: real OpenAlgo orders (place via right-click; drag to modify; ✕ to cancel)
+      trade = new OpenAlgoTradeFeed({ baseUrl: '', apiKey, strategy: 'openalgo-charts', defaultProduct: el('product').value });
+      chart.subscribeDrag((id, p) => {
+        if (!id.startsWith('order:') || id.endsWith('::close')) return;
+        const oid = id.slice('order:'.length), rec = orderLines.get(oid);
+        if (!rec) return;
+        const px = round2v(p); rec.line.setPrice(px);
+        const stop = rec.order.type === 'SL' || rec.order.type === 'SL-M';
+        trade.modify(oid, stop ? { triggerPrice: px } : { price: px }).catch(() => {});
+      });
+      chart.subscribeClick((id) => {
+        if (id.startsWith('order:') && id.endsWith('::close')) trade.cancel(id.slice(6, -7)).then(pollBook).catch(() => {});
+      });
+      bookTimer = setInterval(pollBook, 3000);
+      pollBook();
       window.__chart = () => chart;
     }
 
     el('connect').addEventListener('click', connect);
     el('disconnect').addEventListener('click', () => { disconnect(); el('status').textContent = 'disconnected'; });
     el('fit').addEventListener('click', () => { if (chart) chart.resetScale(); });
+
+    // right-click the chart → order menu at the cursor price (place via OpenAlgoTradeFeed)
+    const ctxMenu = el('ctxmenu');
+    el('chart').addEventListener('contextmenu', (e) => {
+      if (!chart || !trade) return;
+      const p = chart.coordinateToPrice(e.clientY - el('chart').getBoundingClientRect().top, 0);
+      if (p == null) return;
+      e.preventDefault();
+      ctxPrice = round2v(p);
+      ctxMenu.querySelectorAll('button[data-type]').forEach((b) => {
+        const v = b.getAttribute('data-side') === 'BUY' ? 'Buy' : 'Sell', t = b.getAttribute('data-type');
+        b.textContent = t === 'MARKET' ? `${v} Market` : t === 'LIMIT' ? `${v} Limit @ ${fmt(ctxPrice)}` : `${v} Stop (SL) @ ${fmt(ctxPrice)}`;
+      });
+      ctxMenu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+      ctxMenu.style.top = Math.min(e.clientY, window.innerHeight - 220) + 'px';
+      ctxMenu.hidden = false;
+    });
+    window.addEventListener('click', () => { ctxMenu.hidden = true; });
+    ctxMenu.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      e.stopPropagation(); ctxMenu.hidden = true;
+      placeFromMenu(b.getAttribute('data-side'), b.getAttribute('data-type'));
+    });
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
   </script>
 </body>

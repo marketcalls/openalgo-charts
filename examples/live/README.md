@@ -34,6 +34,23 @@ mode (reliable across brokers); the forming bar's volume fills in when it
 completes and the reconcile corrects it. (Quote-mode live volume exists in the
 adapter but is broker-dependent — some brokers return `subscribe partial`.)
 
+## Chart trading (real orders)
+
+Right-click the chart to place an order **at the cursor price** — Buy/Sell
+**Market / Limit / Stop (SL)** — via OpenAlgo's `placeorder` API. Working orders
+appear as draggable lines (drag to **modify**, click the ✕ to **cancel**); the net
+position shows as a line with live P&L from the position book. Orders/positions
+are polled from `/orderbook` + `/positionbook` every 3s.
+
+Safety:
+- **Arm trading** is OFF by default — nothing places until you tick it.
+- The **mode** pill reflects OpenAlgo's routing, read from the book response:
+  `ANALYZE (sandbox)` or `LIVE — real orders`. In **LIVE** mode every order asks
+  for an explicit confirm first.
+- Set OpenAlgo to **Analyzer** mode (`/analyzer`) to test against the ₹1 Cr
+  sandbox with no real fills. Validated end-to-end in sandbox: place → modify →
+  cancel through the proxy.
+
 ## Notes
 
 - **Your API key is never stored in this repo.** It is entered in the page, saved

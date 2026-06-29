@@ -90,7 +90,7 @@ describe('OpenAlgoTradeFeed (offline, injected fetch)', () => {
     await feed.place({ symbol: 'SBIN', exchange: 'NSE', side: 'BUY', type: 'LIMIT', qty: 10, price: 100, product: 'MIS', mode: 'live' });
     await feed.modify('OA123', { price: 101 });
     expect(cap.url).toBe('http://x/api/v1/modifyorder');
-    expect(cap.body).toMatchObject({ orderid: 'OA123', price: 101, product: 'MIS', symbol: 'SBIN' });
+    expect(cap.body).toMatchObject({ orderid: 'OA123', price: 101, product: 'MIS', symbol: 'SBIN', disclosed_quantity: 0 });
     await feed.cancel('OA123');
     expect(cap.url).toBe('http://x/api/v1/cancelorder');
     expect(cap.body).toMatchObject({ orderid: 'OA123' });
