@@ -280,14 +280,25 @@
 
       // chart trading: real OpenAlgo orders (place via right-click; drag to modify; ✕ to cancel)
       trade = new OpenAlgoTradeFeed({ baseUrl: '', apiKey, strategy: 'openalgo-charts', defaultProduct: el('product').value });
-      chart.subscribeDrag((id, p) => {
-        if (!id.startsWith('order:') || id.endsWith('::close')) return;
-        const oid = id.slice('order:'.length), rec = orderLines.get(oid);
-        if (!rec) return;
-        const px = round2v(p); rec.line.setPrice(px);
-        const stop = rec.order.type === 'SL' || rec.order.type === 'SL-M';
-        trade.modify(oid, stop ? { triggerPrice: px } : { price: px }).catch(() => {});
-      });
+      chart.subscribeDrag(
+        // while dragging: move the line locally only (no API call)
+        (id, p) => {
+          if (!id.startsWith('order:') || id.endsWith('::close')) return;
+          const rec = orderLines.get(id.slice('order:'.length));
+          if (rec) rec.line.setPrice(round2v(p));
+        },
+        // on release: commit the modify once
+        (id, p) => {
+          if (!id.startsWith('order:') || id.endsWith('::close')) return;
+          const oid = id.slice('order:'.length), rec = orderLines.get(oid);
+          if (!rec) return;
+          const px = round2v(p), stop = rec.order.type === 'SL' || rec.order.type === 'SL-M';
+          el('status').textContent = `modifying ${rec.order.side} ${rec.order.type} → ${fmt(px)} …`;
+          trade.modify(oid, stop ? { triggerPrice: px } : { price: px })
+            .then(() => { el('status').textContent = `modified ${rec.order.side} ${rec.order.type} → ${fmt(px)}`; pollBook(); })
+            .catch((e) => { el('status').textContent = 'modify error: ' + e.message; pollBook(); });
+        },
+      );
       chart.subscribeClick((id) => {
         if (id.startsWith('order:') && id.endsWith('::close')) trade.cancel(id.slice(6, -7)).then(pollBook).catch(() => {});
       });
