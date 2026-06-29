@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenAlgo Charts — LIVE (history + WebSocket)</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0e12; color: #c7ccd8; font: 13px/1.4 system-ui, sans-serif; }
+    .bar { padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input, select, button { background: #1c2030; color: #c7ccd8; border: 1px solid #2a3046; border-radius: 6px; padding: 4px 8px; }
+    input[type="text"] { width: 110px; } #apikey { width: 230px; } #wsurl { width: 170px; }
+    button { cursor: pointer; }
+    #connect { border-color: #2c6e64; color: #7fd8cd; }
+    #chart { position: absolute; top: 84px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
+    #status { margin-left: auto; opacity: .8; }
+    .row2 { padding: 0 12px 8px; opacity: .85; }
+    .legend { position: absolute; top: 92px; left: 16px; z-index: 10; pointer-events: none; font: 12px system-ui; text-shadow: 0 0 3px #0d0e12; }
+    .legend b { color: #e8eaf0; } .up { color: #26a69a; } .dn { color: #ef5350; } .ltp { color: #e0b020; }
+    .pill { padding: 1px 6px; border: 1px solid #2a3046; border-radius: 5px; opacity: .85; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <strong>OpenAlgo LIVE</strong>
+    <input type="text" id="apikey" placeholder="OpenAlgo API key" title="saved to this browser only (localStorage); never committed" />
+    <input type="text" id="symbol" value="RELIANCE" />
+    <select id="exchange" title="exchange (OpenAlgo constant)">
+      <option>NSE</option><option>NFO</option><option>BSE</option><option>BFO</option><option>MCX</option><option>NSE_INDEX</option>
+    </select>
+    <select id="interval" title="bar interval">
+      <option value="1m">1m</option><option value="5m" selected>5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="D">D</option>
+    </select>
+    <button id="connect">Connect</button>
+    <button id="disconnect">Disconnect</button>
+    <span id="status">enter your API key and Connect</span>
+  </div>
+  <div class="row2">
+    <span class="pill">REST <code>/api/v1/history</code> via local proxy</span>
+    <input type="text" id="wsurl" value="ws://127.0.0.1:8765" title="OpenAlgo WebSocket proxy" />
+    <span class="pill" id="wsstate">WS idle</span>
+    <span class="pill" id="ticks">0 ticks</span>
+    <span class="pill" id="ltp">LTP —</span>
+  </div>
+  <div id="chart"></div>
+  <div class="legend" id="legend"></div>
+
+  <script type="module">
+    import { createChart, OpenAlgoDataFeed, OpenAlgoWsFeed, CandleBuilder, intervalToSeconds } from '/dist/openalgo-charts.mjs';
+
+    const el = (id) => document.getElementById(id);
+    const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const nowSec = () => Math.floor(Date.now() / 1000);
+    el('apikey').value = localStorage.getItem('oa-apikey') || '';
+
+    // Lookback per interval (seconds) for the history request.
+    const LOOKBACK = { '1m': 5 * 86400, '5m': 20 * 86400, '15m': 40 * 86400, '1h': 120 * 86400, 'D': 400 * 86400 };
+
+    let chart, price, volume, ws, rest, ltpLine, offLtp = null, tickN = 0;
+
+    function setLegend(sym, ex, intv, bar, ltp) {
+      const col = bar && bar.close >= bar.open ? 'up' : 'dn';
+      el('legend').innerHTML =
+        `<b>${sym}</b> <span style="opacity:.5">· ${intv} · ${ex}</span>` +
+        (bar ? ` <span class="${col}">O ${fmt(bar.open)} H ${fmt(bar.high)} L ${fmt(bar.low)} C ${fmt(bar.close)}</span>` : '') +
+        (ltp != null ? ` <span class="ltp">LTP ${fmt(ltp)}</span>` : '');
+    }
+
+    function disconnect() {
+      if (offLtp) { offLtp(); offLtp = null; }
+      if (ws) { ws.close(); ws = null; }
+      el('wsstate').textContent = 'WS idle';
+    }
+
+    async function connect() {
+      disconnect();
+      const apiKey = el('apikey').value.trim();
+      const symbol = el('symbol').value.trim().toUpperCase();
+      const exchange = el('exchange').value;
+      const interval = el('interval').value;
+      if (!apiKey) { el('status').textContent = 'please enter your OpenAlgo API key'; return; }
+      localStorage.setItem('oa-apikey', apiKey);
+
+      // ── build the chart ──
+      if (chart) chart.destroy();
+      el('chart').innerHTML = '';
+      chart = createChart(el('chart'), { priceAxisWidth: 72 });
+      price = chart.addSeries('candlestick');
+      volume = chart.addSeries('histogram', { paneIndex: 1, style: { color: '#33415e' } });
+
+      // ── history (REST via the same-origin proxy → OpenAlgo /api/v1/history) ──
+      rest = new OpenAlgoDataFeed({ baseUrl: '', apiKey }); // baseUrl '' → relative → proxy
+      const to = nowSec(), from = to - (LOOKBACK[interval] || 30 * 86400);
+      el('status').textContent = `loading ${symbol} ${interval} history…`;
+      let bars;
+      try {
+        bars = await rest.getBars({ symbol, exchange, interval, from, to });
+      } catch (e) { el('status').textContent = 'history error: ' + e.message; return; }
+      if (!bars.length) { el('status').textContent = `no history for ${symbol} ${exchange} ${interval}`; return; }
+      price.setData(bars);
+      volume.setData(bars.map((b) => ({ time: b.time, open: 0, high: b.volume || 0, low: 0, close: b.volume || 0 })));
+      const lastBar = bars[bars.length - 1];
+      setLegend(symbol, exchange, interval, lastBar, lastBar.close);
+      el('status').textContent = `${symbol} · ${bars.length} bars loaded · subscribing live…`;
+
+      // ── live (WebSocket LTP → CandleBuilder → series.update + live LTP line) ──
+      ws = new OpenAlgoWsFeed({ url: el('wsurl').value.trim(), apiKey });
+      ws.connect();
+      el('wsstate').textContent = 'WS connecting…';
+      ltpLine = chart.addPriceLine({ price: lastBar.close, color: '#e0b020', lineWidth: 1, dashed: true, id: 'ltp' }, 0);
+      const liveAgg = /^\d+(m|h)$/i.test(interval); // aggregate ticks into candles for intraday only
+      const builder = new CandleBuilder({ intervalSec: intervalToSeconds(interval), volumeMode: 'ltq-sum' });
+      tickN = 0;
+      offLtp = ws.onLtp((e) => {
+        if (e.symbol && e.symbol !== symbol) return;
+        tickN += 1;
+        el('wsstate').textContent = 'WS live';
+        el('ticks').textContent = `${tickN} ticks`;
+        el('ltp').textContent = `LTP ${fmt(e.ltp)}`;
+        ltpLine.setPrice(e.ltp);
+        if (liveAgg) {
+          const u = builder.onTick({ time: e.timeSec || nowSec(), price: e.ltp, ltq: e.ltq });
+          if (u) { price.update(u.bar); setLegend(symbol, exchange, interval, u.bar, e.ltp); }
+        } else {
+          setLegend(symbol, exchange, interval, lastBar, e.ltp);
+        }
+      });
+      ws.subscribe('LTP', symbol, exchange);
+      window.__chart = () => chart;
+    }
+
+    el('connect').addEventListener('click', connect);
+    el('disconnect').addEventListener('click', () => { disconnect(); el('status').textContent = 'disconnected'; });
+    el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
+  </script>
+</body>
+</html>
