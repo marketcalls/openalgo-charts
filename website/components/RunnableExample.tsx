@@ -20,17 +20,12 @@ interface Props {
   caption?: React.ReactNode;
 }
 
-// Merge so the BASE bundle always wins for shared symbols (createChart,
-// generateBars, ...). Tier bundles contribute their specialty exports
-// (runTransform, OrderEngine, computeVolumeProfile, ...).
-async function loadLib(tiers: Tier[]): Promise<Record<string, unknown>> {
-  const base = await import('../lib/oac/openalgo-charts.mjs');
-  const merged: Record<string, unknown> = {};
-  if (tiers.includes('transform')) Object.assign(merged, await import('../lib/oac/openalgo-charts.transform.mjs'));
-  if (tiers.includes('trade')) Object.assign(merged, await import('../lib/oac/openalgo-charts.trade.mjs'));
-  if (tiers.includes('profile')) Object.assign(merged, await import('../lib/oac/openalgo-charts.profile.mjs'));
-  Object.assign(merged, base);
-  return merged;
+// One combined module instance (base + transform + profile) so the transform
+// tier's custom renderers (point-figure, kagi) share the same chart-type
+// registry that createChart reads. See src/all.ts.
+async function loadLib(): Promise<Record<string, unknown>> {
+  const lib = await import('../lib/oac/openalgo-charts.all.mjs');
+  return lib as unknown as Record<string, unknown>;
 }
 
 export default function RunnableExample({ code, tiers = [], height = 360, hideCode = false, caption }: Props) {
@@ -43,7 +38,7 @@ export default function RunnableExample({ code, tiers = [], height = 360, hideCo
     let cancelled = false;
     (async () => {
       try {
-        const lib = await loadLib(tiers);
+        const lib = await loadLib();
         if (cancelled || !ref.current) return;
         ref.current.innerHTML = '';
         // eslint-disable-next-line @typescript-eslint/no-implied-eval

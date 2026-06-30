@@ -52,10 +52,26 @@ const iife = {
   ],
 };
 
+// Combined bundle (base + transform + profile in one module) — docs live demos
+// only, so transform-tier custom renderers share createChart's registry. No
+// .d.ts is generated (not a published entry point).
+const allBundle = {
+  input: 'src/all.ts',
+  output: {
+    file: 'dist/openalgo-charts.all.mjs',
+    format: 'es',
+    sourcemap: true,
+  },
+  plugins: [
+    typescript({ tsconfig: './tsconfig.build.json' }),
+    terser({ format: { comments: false } }),
+  ],
+};
+
 const types = Object.entries(entries).map(([key, input]) => ({
   input,
   output: { file: `dist/${typesFile[key]}.d.ts`, format: 'es' },
   plugins: [dts()],
 }));
 
-export default [...js, iife, ...types];
+export default [...js, iife, allBundle, ...types];

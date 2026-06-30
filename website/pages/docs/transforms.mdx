@@ -45,22 +45,43 @@ Each bar spans a fixed price range, regardless of time.
 
 <RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
 const bars = lib.generateBars(1700000000, 500, 3600);
-const rb = lib.runTransform(new lib.RangeBarsTransform({ rangeSize: 3 }), bars);
+const rb = lib.runTransform(new lib.RangeBarsTransform({ range: 2 }), bars);
 chart.addSeries('candlestick').setData(rb);
 chart.timeScale.fitContent(rb.length);
 return chart;`} />
 
-## Point & Figure and Kagi
+## Point & Figure
 
-These use custom renderers registered by the transform tier. Plot Point &amp; Figure as a
-`point-figure` series and Kagi as a `kagi` series:
+Columns of Xs (up) and Os (down); a new column starts only after a reversal of N boxes. Plot
+the result as a `point-figure` series.
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 600, 3600);
+const cols = lib.runTransform(new lib.PointFigureTransform({ boxSize: 1, reversal: 3 }), bars);
+chart.addSeries('point-figure', { style: { boxSize: 1 } }).setData(cols);
+chart.timeScale.fitContent(cols.length);
+return chart;`} />
 
 ```ts
-import { runTransform, PointFigureTransform, KagiTransform } from 'openalgo-charts/transform';
-
+import { runTransform, PointFigureTransform } from 'openalgo-charts/transform';
 const cols = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3 }), bars);
 chart.addSeries('point-figure', { style: { boxSize: 1 } }).setData(cols);
+```
 
+## Kagi
+
+A continuous line that reverses (and switches thick/thin) only after a move of at least the
+reversal amount. Plot it as a `kagi` series.
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 600, 3600);
+const kagi = lib.runTransform(new lib.KagiTransform({ reversal: 3 }), bars);
+chart.addSeries('kagi').setData(kagi);
+chart.timeScale.fitContent(kagi.length);
+return chart;`} />
+
+```ts
+import { runTransform, KagiTransform } from 'openalgo-charts/transform';
 const kagi = runTransform(new KagiTransform({ reversal: 4 }), bars);
 chart.addSeries('kagi').setData(kagi);
 ```

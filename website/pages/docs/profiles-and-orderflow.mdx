@@ -22,26 +22,70 @@ chart.addSeries('candlestick').setData(bars);
 
 const vp = lib.computeVolumeProfile(bars, 0.5, 0.7);
 chart.addPrimitive(new lib.HorizontalProfile({
-  buckets: vp.buckets, poc: vp.poc, vah: vp.vah, val: vp.val,
+  // HorizontalProfile draws { price, value } buckets; map volume -> value.
+  buckets: vp.buckets.map(function (b) { return { price: b.price, value: b.volume }; }),
+  poc: vp.poc, vah: vp.vah, val: vp.val,
   width: 150, side: 'right', barColor: '#3b5168', vaColor: '#4a6fa5',
 }));
 
 chart.timeScale.fitContent(bars.length);
-return chart;`} caption="Volume Profile with POC and value area on the right." />
+return chart;`} caption="Volume Profile with POC (gold) and value area on the right." />
 
 ## Market Profile (TPO)
 
-```ts
-import { computeTpo, TpoPrimitive } from 'openalgo-charts/profile';
-const tpo = computeTpo(bars, { tickSize: 0.05, period: 1800 }); // 30-min TPO periods
-chart.addPrimitive(new TpoPrimitive(tpo));
-```
+`computeTpo(bars, periodBars, tickSize, valueAreaPct)` counts how many periods traded at each
+price. The result has the same `{ poc, vah, val }` shape as a volume profile, so the same
+`HorizontalProfile` primitive renders it - feed `count` as the bar `value`:
+
+<RunnableExample height={360} tiers={['profile']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 1800); // ~30-min bars
+chart.addSeries('candlestick').setData(bars);
+
+const tpo = lib.computeTpo(bars, 4, 0.5, 0.7); // 4 bars/period, 0.5 tick, 70% value area
+chart.addPrimitive(new lib.HorizontalProfile({
+  buckets: tpo.buckets.map(function (b) { return { price: b.price, value: b.count }; }),
+  poc: tpo.poc, vah: tpo.vah, val: tpo.val,
+  width: 150, side: 'left', barColor: '#3a5d52', vaColor: '#4a8f7a',
+}));
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="TPO counts per price (left), with POC and value area." />
 
 ## Footprint & cumulative delta
 
-Footprint shows per-price bid vs ask volume with diagonal imbalance highlighting; order flow
-tracks cumulative delta. Both need **classified** trade ticks (bid vs ask), aggregated with
-the streaming `FootprintAggregator`:
+Footprint shows per-price bid vs ask volume with diagonal-imbalance highlighting. Build each
+bar with `computeFootprint(time, classifiedTrades, tickSize)` and render with the `Footprint`
+primitive. The demo below synthesizes random classified trades for a handful of bars:
+
+<RunnableExample height={420} tiers={['profile']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 8, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+const tick = 0.5;
+const fbars = bars.map(function (b, i) {
+  let seed = (i + 1) * 7919;
+  const rnd = function () { seed = (seed * 1103515245 + 12345) & 2147483647; return seed / 2147483647; };
+  const trades = [];
+  const steps = Math.max(1, Math.round((b.high - b.low) / tick));
+  const buyBias = b.close >= b.open ? 0.6 : 0.4;
+  for (let s = 0; s <= steps; s++) {
+    const price = b.low + s * tick;
+    const n = 2 + Math.floor(rnd() * 18);
+    for (let k = 0; k < n; k++) {
+      trades.push({ price: price, qty: 1 + Math.floor(rnd() * 9), side: rnd() < buyBias ? 'ask' : 'bid' });
+    }
+  }
+  return lib.computeFootprint(b.time, trades, tick);
+});
+
+const fp = new lib.Footprint({ cellWidth: 60, imbalanceRatio: 3, tickSize: tick });
+chart.addPrimitive(fp);
+fp.setBars(fbars);
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="Per-bar bid x ask cells (red = bid, green = ask), graded by volume, with delta footers." />
+
+For live data, aggregate the stream instead of building bars by hand:
 
 ```ts
 import { FootprintAggregator } from 'openalgo-charts/profile';
@@ -49,11 +93,12 @@ import { FootprintAggregator } from 'openalgo-charts/profile';
 const fa = new FootprintAggregator({ mode: 'interval', seconds: 60 }, 0.05);
 ws.onTrade((t) => {
   const u = fa.onTick({ time: t.timeSec, price: t.price, qty: t.qty, side: t.atBid ? 'bid' : 'ask' });
-  footprint.setBars(/* accumulated bars */);
+  if (u) footprint.setBars(/* accumulated bars */);
 });
 ```
 
 <Callout type="warning">
 Footprint and order flow require a feed that classifies each trade as hitting the bid or the
-ask. A plain OHLCV or LTP stream cannot produce them.
+ask. A plain OHLCV or LTP stream cannot produce them - the demo above fakes the
+classification for illustration.
 </Callout>
