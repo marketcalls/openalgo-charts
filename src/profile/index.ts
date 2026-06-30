@@ -9,6 +9,16 @@ export { bucketPrice, priceBuckets } from './profile-model';
 export { computeVolumeProfile, type VolumeProfileOptions } from './volume-profile';
 export { computeTpo } from './tpo';
 export {
+  computeMarketProfile,
+  tpoLetter,
+  DEFAULT_MARKET_PROFILE_OPTIONS,
+  type MarketProfileOptions,
+  type MarketProfileSession,
+  type MarketProfileLevel,
+  type MarketProfileSessionResult,
+  type MarketProfileResult,
+} from './market-profile';
+export {
   computeFootprint,
   diagonalImbalances,
   cumulativeDelta,
