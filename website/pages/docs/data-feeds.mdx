@@ -1,0 +1,72 @@
+---
+title: Custom Data Feeds
+description: The DataFeed and TradeFeed interfaces, and writing an adapter for any broker.
+---
+
+# Custom data feeds
+
+The engine never imports a broker SDK. It depends on two small interfaces, so wiring a new
+source is a focused adapter - not a fork.
+
+## DataFeed
+
+```ts
+interface DataFeed {
+  getBars(req: BarsRequest): Promise<Bar[]>;
+  // optional: live emission for sources that push interval bars directly
+  subscribeBars?(req: BarsRequest, onBar: (bar: Bar) => void): () => void;
+}
+
+interface BarsRequest {
+  symbol: string;
+  exchange: string;
+  interval: string;       // '5s' | '1m' | '1h' | 'D' | ...
+  from?: number;          // UTC seconds
+  to?: number;            // UTC seconds
+}
+```
+
+A minimal adapter just maps your API's rows to `Bar` (UTC seconds + OHLCV):
+
+```ts
+class MyFeed implements DataFeed {
+  async getBars(req: BarsRequest): Promise<Bar[]> {
+    const rows = await fetchFromMyApi(req);
+    return rows.map((r) => ({
+      time: Math.floor(r.epochMs / 1000),
+      open: r.o, high: r.h, low: r.l, close: r.c, volume: r.v,
+    })).sort((a, b) => a.time - b.time);
+  }
+}
+```
+
+## TradeFeed
+
+The trade tier targets a `TradeFeed` for order management - place / modify / cancel plus
+order, position, and depth snapshots:
+
+```ts
+interface TradeFeed {
+  placeOrder(o: PlaceOrder): Promise<{ orderId: string }>;
+  modifyOrder(id: string, changes: Partial<PlaceOrder>): Promise<void>;
+  cancelOrder(id: string): Promise<void>;
+  orderBook(): Promise<Order[]>;
+  positionBook(): Promise<Position[]>;
+  marketDepth?(symbol: string, exchange: string): Promise<MarketDepth>;
+}
+```
+
+Implement these against your broker, hand the feed to `OrderEngine`, and the entire on-chart
+trading layer works unchanged. The bundled `OpenAlgoTradeFeed` is a reference implementation;
+`FakeBroker` is an in-memory feed for tests and demos.
+
+## Time conversion helpers
+
+The library exports the conversions it uses internally, so your adapter can reuse them:
+
+```ts
+import {
+  epochMsToUtcSeconds, istStringToUtcSeconds, utcSecondsToIstDateString,
+  formatIstTime, formatIstTimeSeconds, IST_OFFSET_SECONDS,
+} from 'openalgo-charts';
+```

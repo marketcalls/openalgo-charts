@@ -1,0 +1,89 @@
+---
+title: Examples
+description: Live, in-page chart demos powered by the real OpenAlgo Charts library.
+---
+
+import RunnableExample from '../components/RunnableExample'
+
+# Live examples
+
+Every chart on this page is the real library running in your browser - the code shown
+is the code that ran. Try it, copy it, ship it.
+
+<div className="oac-gallery">
+
+<div>
+### Candlesticks + EMA
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addSeries('line', { style: { color: '#f5a623', lineWidth: 2 } }).setData(lib.emaSeries(bars, 21));
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### Area + baseline
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('area', { style: { areaTopColor: 'rgba(47,109,246,0.5)', areaBottomColor: 'rgba(47,109,246,0)', color: '#2f6df6' } }).setData(bars);
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### Supertrend overlay
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+const st = lib.supertrendSeries(bars, 10, 3);
+chart.addSeries('line', { style: { color: '#26a69a', lineWidth: 2 } }).setData(st.up);
+chart.addSeries('line', { style: { color: '#ef5350', lineWidth: 2 } }).setData(st.down);
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### RSI in its own pane
+<RunnableExample hideCode height={300} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addSeries('line', { paneIndex: 1, style: { color: '#e0b020' } }).setData(lib.rsiSeries(bars, 14));
+chart.addPriceLine({ price: 70, color: '#ef5350', lineWidth: 1, dashed: true, id: 'r70' }, 1);
+chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id: 'r30' }, 1);
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### Renko (transform tier)
+<RunnableExample hideCode height={280} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 400, 3600);
+const bricks = lib.runTransform(new lib.RenkoTransform({ boxSize: 2 }), bars);
+chart.addSeries('candlestick').setData(bricks);
+chart.timeScale.fitContent(bricks.length);
+return chart;`} />
+</div>
+
+<div>
+### Tick chart (250-tick bars)
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const series = chart.addSeries('candlestick');
+const agg = new lib.TickBarAggregator({ mode: 'ticks', count: 250 });
+const bars = [];
+let t = 1700000000, p = 100, seed = 7;
+for (let i = 0; i < 12000; i++) {
+  seed = (seed * 1103515245 + 12345) & 2147483647;
+  p = Math.max(1, p + (seed / 2147483647 - 0.5) * 0.6);
+  t += 1;
+  const u = agg.onTick({ time: t, price: p, qty: 1 });
+  if (u.isNew) bars.push(u.bar); else bars[bars.length - 1] = u.bar;
+}
+series.setData(bars);
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+</div>
+
+Want the full walkthrough? Head to the [documentation](/docs/getting-started).

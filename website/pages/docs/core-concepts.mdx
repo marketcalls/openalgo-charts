@@ -1,0 +1,76 @@
+---
+title: Core Concepts
+description: The data model, gapless time axis, price scales, panes, and the render loop.
+---
+
+import { Callout } from 'nextra/components'
+
+# Core concepts
+
+A quick mental model of how the engine fits together. You can skip straight to
+[Chart Types](/docs/chart-types) if you just want to draw something.
+
+## The bar
+
+Every price series is a list of **bars**. Time is **UTC seconds** (an integer), never a
+`Date`:
+
+```ts
+interface Bar {
+  time: number;   // UTC seconds
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+```
+
+Line/area series use the same shape and read `close`. Gaps in a series are expressed with a
+**whitespace** item (`{ time }` with no OHLC) - the renderer breaks the line there instead
+of interpolating across it.
+
+## Gapless time axis
+
+The x position of a bar is `logicalIndex × barSpacing`, **not** a function of its timestamp.
+Each bar gets the next integer index regardless of the real-time gap before it, so
+weekends, holidays, and overnight session breaks **collapse automatically** - there is no
+empty space to draw. This is why panning and zooming feel continuous on intraday data.
+
+<Callout type="info">
+Because x is a logical index, all panes share one time scale and stay aligned bar-for-bar.
+</Callout>
+
+## Price scale
+
+Each pane has its own price scale: linear or logarithmic, auto-scaling to the visible range
+by default, with optional inversion and manual override. Dragging the price axis rescales
+that pane; double-click restores autoscale. See [Scales & Panes](/docs/scales-and-panes).
+
+## Panes
+
+A chart has one or more stacked **panes** sharing the time axis. The main pane holds price;
+add `paneIndex: 1`, `2`, ... to put volume or an oscillator (RSI) below. Panes are created on
+demand the first time you reference them.
+
+## Series, primitives, and the registry
+
+- **Series** are registry-driven. `addSeries('candlestick' | 'line' | 'area' | ...)` looks the
+  type up in the chart-type registry; you can [register your own](/docs/primitives-and-plugins).
+- **Primitives** are everything else drawn on the chart - markers, event badges, price
+  lines, profiles, and the entire trading layer. They implement a small `IPrimitive`
+  interface (`draw`, optional `hitTest` / `autoscaleInfo` / lifecycle) and attach with
+  `chart.addPrimitive(primitive, paneIndex)`.
+
+## The render loop
+
+Drawing is centralized in a single `requestAnimationFrame` loop driven by an **invalidation
+mask**. Cursor moves only repaint the crosshair layer; data changes repaint the series; a
+resize repaints everything. This keeps interaction at 60 fps without redrawing the world on
+every event.
+
+## Time at the edge
+
+Internally everything is UTC seconds. The OpenAlgo adapters convert at the boundary - IST
+date/time strings and epoch milliseconds become UTC seconds on the way in, and axis labels
+are formatted back to IST on the way out. Your application code never juggles timezones.

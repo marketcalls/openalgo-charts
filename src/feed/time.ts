@@ -69,6 +69,12 @@ export function formatIstTime(utcSeconds: number): string {
   return `${pad2(p.hour)}:${pad2(p.minute)}`;
 }
 
+/** Format UTC seconds as an IST `HH:MM:SS` clock label (sub-minute / tick timeframes). */
+export function formatIstTimeSeconds(utcSeconds: number): string {
+  const p = utcSecondsToIstParts(utcSeconds);
+  return `${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)}`;
+}
+
 /** Format UTC seconds as an IST `YYYY-MM-DD` date (for OpenAlgo history requests). */
 export function utcSecondsToIstDateString(utcSeconds: number): string {
   const p = utcSecondsToIstParts(utcSeconds);
@@ -92,7 +98,12 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export function formatIstCrosshairLabel(utcSeconds: number): string {
   const p = utcSecondsToIstParts(utcSeconds);
   let s = `${WEEKDAYS[p.weekday]} ${pad2(p.day)} ${MONTHS[p.month - 1]} '${String(p.year).slice(-2)}`;
-  if (p.hour !== 0 || p.minute !== 0) s += ` ${pad2(p.hour)}:${pad2(p.minute)}`;
+  if (p.hour !== 0 || p.minute !== 0 || p.second !== 0) {
+    s += ` ${pad2(p.hour)}:${pad2(p.minute)}`;
+    // Sub-minute (seconds / tick) timeframes: append :SS so bars within the
+    // same minute are distinguishable.
+    if (p.second !== 0) s += `:${pad2(p.second)}`;
+  }
   return s;
 }
 

@@ -1,0 +1,78 @@
+---
+title: Live Data (OpenAlgo)
+description: REST history plus WebSocket realtime, wired through the OpenAlgo adapters.
+---
+
+import { Callout } from 'nextra/components'
+
+# Live data (OpenAlgo)
+
+The chart depends only on the `DataFeed` / `TradeFeed` interfaces, so any source fits behind
+a small adapter. OpenAlgo adapters are included.
+
+## Historical bars (REST)
+
+```ts
+import { OpenAlgoDataFeed } from 'openalgo-charts';
+
+const feed = new OpenAlgoDataFeed({ baseUrl: 'http://127.0.0.1:5000', apiKey: 'YOUR_KEY' });
+
+const day = 86400;
+const bars = await feed.getBars({
+  symbol: 'RELIANCE', exchange: 'NSE', interval: '1m',
+  from: Math.floor(Date.now() / 1000) - 7 * day,
+  to: Math.floor(Date.now() / 1000),
+});
+series.setData(bars);
+```
+
+`from` / `to` are **UTC seconds**; the adapter converts them to the IST date range OpenAlgo's
+`/api/v1/history` expects, and normalizes returned timestamps (epoch seconds, epoch ms, or
+IST strings) back to UTC seconds.
+
+## Realtime (WebSocket)
+
+LTP / Quote / Depth come from the WS adapter. Feed its LTP ticks through a `CandleBuilder`
+and call `series.update()`:
+
+```ts
+import { OpenAlgoWsFeed, CandleBuilder } from 'openalgo-charts';
+
+const ws = new OpenAlgoWsFeed({ url: 'ws://127.0.0.1:8765', apiKey: 'YOUR_KEY' });
+const builder = new CandleBuilder({ intervalSec: 60, volumeMode: 'ltq-sum' });
+
+ws.connect();
+ws.onLtp((e) => {
+  const u = builder.onTick({ time: e.timeSec, price: e.ltp, ltq: e.ltq });
+  if (u) series.update(u.bar);
+});
+ws.subscribe('LTP', 'RELIANCE', 'NSE');
+```
+
+The WS adapter speaks the documented OpenAlgo protocol (authenticate → numeric-mode subscribe
+→ `market_data`), with connection and control callbacks (`onState` / `onControl`).
+
+## All-in-one live feed
+
+`OpenAlgoLiveDataFeed` composes REST history + WebSocket + the candle builder so you get a
+seamless history → live seam from a single object:
+
+```ts
+import { OpenAlgoLiveDataFeed } from 'openalgo-charts';
+
+const live = new OpenAlgoLiveDataFeed({
+  baseUrl: 'http://127.0.0.1:5000', wsUrl: 'ws://127.0.0.1:8765', apiKey: 'YOUR_KEY',
+});
+const bars = await live.getBars({ symbol: 'RELIANCE', exchange: 'NSE', interval: '1m', from, to });
+series.setData(bars);
+live.subscribe('RELIANCE', 'NSE', '1m', (u) => series.update(u.bar));
+```
+
+<Callout type="warning">
+Your API key lives only in your app/browser - never commit it. Verify the exact REST paths
+and WS message schema against your running OpenAlgo build before production use, and prefer
+analyzer mode while testing the [trade path](/docs/trading).
+</Callout>
+
+A complete, runnable example (history + WebSocket + chart trading) lives in the repository
+under `examples/live`.

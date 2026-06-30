@@ -1,0 +1,59 @@
+---
+title: Scales & Panes
+description: Time scale, price scale, axis-drag rescale, and multi-pane layouts.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+
+# Scales & panes
+
+## Time scale
+
+The time scale is shared by all panes. Useful methods:
+
+```ts
+chart.timeScale.fitContent(barCount);      // fit all bars to the width
+chart.timeScale.setBarSpacing(8);          // pixels per bar (zoom)
+chart.timeScale.scrollToRealtime?.();      // jump to the latest bar
+```
+
+## Price scale & axis-drag rescale
+
+Each pane has an independent price scale (linear by default, autoscaling to the visible
+range). Direct manipulation:
+
+- **Wheel** - zoom both axes around the cursor.
+- **Drag the price (Y) axis** up/down - expand / compress the price scale (switches that
+  pane to manual scale).
+- **Drag the time (X) axis** left/right - compress / expand bar spacing.
+- **Double-click** - reset: fit content and re-enable autoscale (`chart.resetScale()`).
+
+Programmatic conversion between price and pixels (for DOM overlays):
+
+```ts
+const y = chart.priceToCoordinate(101.5);   // price → container px
+const p = chart.coordinateToPrice(y);        // px → price
+```
+
+## Multi-pane layouts
+
+Reference a new `paneIndex` and the pane is created on demand. Panes share the time axis, so
+they stay aligned bar-for-bar. A classic price + volume + RSI stack:
+
+<RunnableExample height={420} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 180, 3600);
+
+// pane 0: price
+chart.addSeries('candlestick').setData(bars);
+
+// pane 1: volume
+chart.addSeries('histogram', { paneIndex: 1 })
+     .setData(bars.map(b => ({ time: b.time, value: b.volume, close: b.volume })));
+
+// pane 2: RSI(14) with guides
+chart.addSeries('line', { paneIndex: 2, style: { color: '#e0b020' } }).setData(lib.rsiSeries(bars, 14));
+chart.addPriceLine({ price: 70, color: '#ef5350', lineWidth: 1, dashed: true, id: 'r70' }, 2);
+chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id: 'r30' }, 2);
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} />

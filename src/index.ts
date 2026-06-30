@@ -77,6 +77,7 @@ export {
   utcSecondsToIstParts,
   utcSecondsToIstDateString,
   formatIstTime,
+  formatIstTimeSeconds,
   formatIstDate,
   isNewIstDay,
   IST_OFFSET_SECONDS,

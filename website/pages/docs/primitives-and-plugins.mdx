@@ -1,0 +1,84 @@
+---
+title: Primitives & Plugins
+description: Markers, event badges, price lines, custom chart types, and the IPrimitive plugin API.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Primitives & plugins
+
+Everything drawn on the chart that is not a series is a **primitive**: markers, event badges,
+price lines, profiles, and the whole trading layer. They all use one small interface, and so
+can you.
+
+## Markers & event badges
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 120, 3600);
+const series = chart.addSeries('candlestick');
+series.setData(bars);
+
+const markers = series.createMarkers();
+markers.setMarkers([
+  { time: bars[30].time, position: 'belowBar', shape: 'arrowUp',   size: 'medium', color: '#26a69a', text: 'BUY' },
+  { time: bars[82].time, position: 'aboveBar', shape: 'arrowDown', size: 'medium', color: '#ef5350', text: 'SELL' },
+]);
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
+Corporate-action badges (earnings / dividend / split) attach at the chart level:
+
+```ts
+chart.addEventMarkers().setEvents([{ time, type: 'earnings', label: 'E' }]);
+```
+
+## Price lines
+
+```ts
+chart.addPriceLine({ price: 101.5, color: '#3b82f6', lineWidth: 2, dashed: false, id: 'vwap' });
+```
+
+## A custom chart type
+
+Register a renderer once and use it like any built-in type:
+
+```ts
+import { registerChartType } from 'openalgo-charts';
+
+registerChartType('my-style', {
+  defaultStyle: { color: '#fff' },
+  isPriceSeries: true,
+  draw: (ctx, items, toY, barSpacing, dpr, style) => { /* paint to the canvas */ },
+  extents: (bar) => ({ min: bar.low, max: bar.high }),
+});
+
+chart.addSeries('my-style').setData(bars);
+```
+
+## A custom primitive
+
+Implement `IPrimitive` and attach it - the same contract markers, profiles, and the trade
+layer are built on:
+
+```ts
+import type { IPrimitive } from 'openalgo-charts';
+
+const watermark: IPrimitive = {
+  zOrder: 'bottom',
+  draw(ctx, host) {
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.font = '700 48px system-ui';
+    ctx.fillText('OPENALGO', 24, host.plotHeight - 24);
+  },
+  // optional: hitTest(point), autoscaleInfo(), attached(host), detached()
+};
+
+chart.addPrimitive(watermark, 0);
+```
+
+<Callout type="info">
+Primitives receive a host with pixel/price/time conversions and the plot rectangle, so they
+can draw anything and participate in hit-testing and autoscale.
+</Callout>

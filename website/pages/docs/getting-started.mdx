@@ -1,0 +1,96 @@
+---
+title: Getting Started
+description: Install OpenAlgo Charts and render your first interactive chart in a few lines.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Getting started
+
+**OpenAlgo Charts** is a dependency-free, canvas-based financial charting engine. The full
+package (every tier) is about **30 KB Brotli** and has **zero runtime dependencies** - what
+you import is what ships.
+
+## Install
+
+```bash
+npm install openalgo-charts
+```
+
+No peer dependencies, no CSS to import, no web component registration. It runs in any modern
+browser (ES2020+).
+
+## Your first chart
+
+`createChart` takes a container element; `addSeries` adds a drawable; `setData` feeds it
+bars. Time is **UTC seconds**.
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el);
+
+const series = chart.addSeries('candlestick');
+series.setData(lib.generateBars(1700000000, 120, 3600));
+
+chart.timeScale.fitContent(120);
+return chart;`} />
+
+In a real app you would pass your own bars instead of `generateBars` (a seeded synthetic
+walk used here so the demo is reproducible):
+
+```ts
+import { createChart } from 'openalgo-charts';
+
+const chart = createChart(document.getElementById('chart'));
+const series = chart.addSeries('candlestick');
+series.setData([
+  { time: 1705286700, open: 100, high: 101, low: 99.5, close: 100.6, volume: 1200 },
+  { time: 1705286760, open: 100.6, high: 101.4, low: 100.2, close: 101.1, volume: 900 },
+  // ...
+]);
+```
+
+<Callout type="info">
+Internal time is always **UTC seconds**. Feed adapters convert broker formats (IST date
+strings, epoch milliseconds) at the edge - see [Live Data](/docs/live-data).
+</Callout>
+
+## Live updates
+
+Push new ticks into the last bar (or append a new one) with `series.update()`. A
+`CandleBuilder` turns a raw tick stream into interval OHLC for you:
+
+```ts
+import { CandleBuilder } from 'openalgo-charts';
+
+const builder = new CandleBuilder({ intervalSec: 60, volumeMode: 'ltq-sum' });
+builder.seed(lastHistoricalBar);
+
+ws.onTick(({ price, ltq, timeSec }) => {
+  const u = builder.onTick({ time: timeSec, price, ltq });
+  if (u) series.update(u.bar); // mutates the last candle, or appends a new one
+});
+```
+
+## Loadable tiers
+
+Pay only for what you use - each tier is a separate entry point:
+
+| Import | Contents |
+|---|---|
+| `openalgo-charts` | base engine + all standard chart types + markers / events / EMA / RSI / ATR / Supertrend |
+| `openalgo-charts/trade` | order / position / bracket lines, DOM ladder, order engine |
+| `openalgo-charts/transform` | Renko, Range, Point &amp; Figure, Kagi, Line Break, Heikin Ashi |
+| `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow |
+
+```ts
+import { createChart } from 'openalgo-charts';
+import { OrderEngine } from 'openalgo-charts/trade';
+import { runTransform, RenkoTransform } from 'openalgo-charts/transform';
+```
+
+## Next steps
+
+- [Core Concepts](/docs/core-concepts) - the data model, time/price scales, and panes.
+- [Chart Types](/docs/chart-types) - a live gallery of every built-in style.
+- [On-Chart Trading](/docs/trading) - order lines, drag-to-modify, OCO, and the DOM ladder.
+- [Live Data (OpenAlgo)](/docs/live-data) - REST history + WebSocket realtime.

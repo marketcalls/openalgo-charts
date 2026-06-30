@@ -7,7 +7,7 @@ import type { PriceScale } from '../scale/price-scale';
 import type { TimeScale } from '../scale/time-scale';
 import type { DataLayer } from '../model/data-layer';
 import { niceTicks } from '../scale/ticks';
-import { formatIstTime, formatIstDate, isNewIstDay } from '../feed/time';
+import { formatIstTime, formatIstTimeSeconds, formatIstDate, isNewIstDay } from '../feed/time';
 
 export interface AxisStyle {
   textColor: string;
@@ -80,6 +80,25 @@ export function drawTimeAxis(
   const stride = Math.max(1, Math.round(80 / Math.max(1, timeScale.barSpacing)));
   const yBase = Math.round(layout.plotHeight * dpr);
 
+  // Detect sub-minute (seconds / tick) timeframes from the visible data so the
+  // axis shows HH:MM:SS instead of collapsing same-minute bars to one label.
+  // Use the smallest positive gap between adjacent bars as the bar interval.
+  let barIntervalSec = Number.POSITIVE_INFINITY;
+  {
+    let prev = dataLayer.indexToTime(from);
+    for (let i = from + 1; i <= to; i++) {
+      const t = dataLayer.indexToTime(i);
+      if (t !== undefined && prev !== undefined) {
+        const d = t - prev;
+        if (d > 0 && d < barIntervalSec) barIntervalSec = d;
+      }
+      if (t !== undefined) prev = t;
+    }
+  }
+  // Seconds resolution only helps when the labelled step itself is sub-minute.
+  const labelStepSec = barIntervalSec * stride;
+  const subMinute = Number.isFinite(labelStepSec) && labelStepSec < 60;
+
   ctx.save();
   ctx.fillStyle = style.textColor;
   ctx.strokeStyle = style.lineColor;
@@ -103,7 +122,9 @@ export function drawTimeAxis(
     }
     const label = prevTime === undefined || isNewIstDay(prevTime, time)
       ? formatIstDate(time)
-      : formatIstTime(time);
+      : subMinute
+        ? formatIstTimeSeconds(time)
+        : formatIstTime(time);
     ctx.fillText(label, x, yBase + 4 * dpr);
     prevTime = time;
   }

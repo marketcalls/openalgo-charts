@@ -1,0 +1,67 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'website/**'
+      - 'src/**'
+      - 'typedoc.json'
+      - '.github/workflows/deploy-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress production deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build the charting library (dist/)
+        run: |
+          npm ci
+          npm run build
+
+      - name: Generate the API reference (TypeDoc) into the site
+        run: npx typedoc --out website/public/api
+
+      - name: Build the docs site (Nextra static export)
+        working-directory: website
+        run: |
+          npm install
+          npm run build
+
+      - name: Disable Jekyll (serve _next assets as-is)
+        run: touch website/out/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/out
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

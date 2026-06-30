@@ -4,7 +4,9 @@ import {
   istStringToUtcSeconds,
   utcSecondsToIstParts,
   formatIstTime,
+  formatIstTimeSeconds,
   formatIstDate,
+  formatIstCrosshairLabel,
   isNewIstDay,
   IST_OFFSET_SECONDS,
 } from '../src/feed/time';
@@ -40,6 +42,20 @@ describe('time conversions (IST ↔ UTC seconds)', () => {
     const sec = istStringToUtcSeconds('2024-01-15 09:05:00');
     expect(formatIstTime(sec)).toBe('09:05');
     expect(formatIstDate(sec)).toBe('15 Jan');
+  });
+
+  it('formats sub-minute (seconds / tick) clock labels', () => {
+    const sec = istStringToUtcSeconds('2024-01-15 09:15:35');
+    expect(formatIstTimeSeconds(sec)).toBe('09:15:35');
+    // formatIstTime stays minute-resolution.
+    expect(formatIstTime(sec)).toBe('09:15');
+  });
+
+  it('crosshair label shows :SS only on sub-minute bars', () => {
+    const onMinute = istStringToUtcSeconds('2026-05-21 14:30:00');
+    const subMinute = istStringToUtcSeconds('2026-05-21 14:30:05');
+    expect(formatIstCrosshairLabel(onMinute)).toBe("Thu 21 May '26 14:30");
+    expect(formatIstCrosshairLabel(subMinute)).toBe("Thu 21 May '26 14:30:05");
   });
 
   it('detects IST day boundaries', () => {

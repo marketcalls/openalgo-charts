@@ -4,6 +4,23 @@ A from-scratch, dependency-free HTML5-canvas charting engine for OpenAlgo:
 professional-grade interactive financial-chart rendering plus advanced on-chart
 trading and trade management. Target: **< 50 KB Brotli** for the full package.
 
+## Documentation
+
+Full docs, an interactive example gallery, and the API reference live at:
+
+**https://marketcalls.github.io/openalgo-charts/**
+
+The site is built with Nextra (in [`website/`](./website)) and statically exported to
+GitHub Pages on every push. Every code sample on a docs page is a *live* chart running the
+real library, so what you read is what runs. Adding a page is intentionally one step: drop a
+`.mdx` file in `website/pages/docs` and add one line to `website/pages/docs/_meta.ts`. To
+run the site locally:
+
+```bash
+npm run build                 # build the library (dist/) the live demos import
+cd website && npm install && npm run dev   # http://localhost:3000/openalgo-charts
+```
+
 > Status: **pre-release (0.1.0)** — all 12 build phases of the engine are
 > implemented (standard chart types, transforms, trade terminal, depth ladder,
 > profiles) with 190+ unit tests, full package **~26 KB Brotli**. See

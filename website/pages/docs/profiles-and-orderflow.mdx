@@ -1,0 +1,59 @@
+---
+title: Profiles & Order Flow
+description: Volume Profile, Market Profile (TPO), Footprint and cumulative delta.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Profiles & order flow
+
+The **profile tier** (`openalgo-charts/profile`) adds market-structure studies: Volume
+Profile, Market Profile (TPO), Footprint, and cumulative delta.
+
+## Volume Profile
+
+`computeVolumeProfile(bars, tickSize, valueAreaPct)` returns buckets plus the point of
+control (POC) and value-area high/low. Render it with the `HorizontalProfile` primitive:
+
+<RunnableExample height={340} tiers={['profile']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 220, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+const vp = lib.computeVolumeProfile(bars, 0.5, 0.7);
+chart.addPrimitive(new lib.HorizontalProfile({
+  buckets: vp.buckets, poc: vp.poc, vah: vp.vah, val: vp.val,
+  width: 150, side: 'right', barColor: '#3b5168', vaColor: '#4a6fa5',
+}));
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="Volume Profile with POC and value area on the right." />
+
+## Market Profile (TPO)
+
+```ts
+import { computeTpo, TpoPrimitive } from 'openalgo-charts/profile';
+const tpo = computeTpo(bars, { tickSize: 0.05, period: 1800 }); // 30-min TPO periods
+chart.addPrimitive(new TpoPrimitive(tpo));
+```
+
+## Footprint & cumulative delta
+
+Footprint shows per-price bid vs ask volume with diagonal imbalance highlighting; order flow
+tracks cumulative delta. Both need **classified** trade ticks (bid vs ask), aggregated with
+the streaming `FootprintAggregator`:
+
+```ts
+import { FootprintAggregator } from 'openalgo-charts/profile';
+
+const fa = new FootprintAggregator({ mode: 'interval', seconds: 60 }, 0.05);
+ws.onTrade((t) => {
+  const u = fa.onTick({ time: t.timeSec, price: t.price, qty: t.qty, side: t.atBid ? 'bid' : 'ask' });
+  footprint.setBars(/* accumulated bars */);
+});
+```
+
+<Callout type="warning">
+Footprint and order flow require a feed that classifies each trade as hitting the bid or the
+ask. A plain OHLCV or LTP stream cannot produce them.
+</Callout>

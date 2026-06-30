@@ -1,0 +1,83 @@
+---
+title: On-Chart Trading
+description: Order, position and bracket lines with live P&L, drag-to-modify, OCO, validation, and a depth-of-market ladder.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# On-chart trading
+
+The **trade tier** (`openalgo-charts/trade`) adds a full trade-management layer: working
+order lines, a position marker with live P&amp;L, OCO brackets, an order state machine with
+validation, and a depth-of-market ladder. It talks to any broker through a small `TradeFeed`
+interface - the OpenAlgo adapter is included.
+
+## Order & target lines
+
+Order, stop, and target levels are drawn as labelled price lines you can drag. The visual
+layer is just price lines; here are entry / stop / target levels on a live chart:
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 140, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+const last = bars[bars.length - 1].close;
+chart.addPriceLine({ price: last,        color: '#3b82f6', lineWidth: 2, id: 'entry' });
+chart.addPriceLine({ price: last * 0.98, color: '#ef5350', lineWidth: 1, dashed: true, id: 'sl' });
+chart.addPriceLine({ price: last * 1.03, color: '#26a69a', lineWidth: 1, dashed: true, id: 'tp' });
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="Entry, stop-loss and target as draggable price lines." />
+
+## The order engine
+
+`OrderEngine` is the logic layer - it validates, routes, and tracks orders, with an
+arm/confirm gate and analyzer (sandbox) mode:
+
+```ts
+import { OrderEngine } from 'openalgo-charts/trade';
+
+const eng = new OrderEngine({
+  feed,
+  constraints: { tickSize: 0.05, priceBand, freezeQty },
+  armed: false,
+  gate: (req) => confirm(`Place ${req.side} ${req.qty}?`),
+  mode: 'analyzer',
+});
+
+await eng.placeMarket('RELIANCE', 'BUY', 10);   // one-click market order
+```
+
+The engine enforces tick-size snapping, price-band / freeze-quantity validation,
+client-token idempotency, **OCO** (one fill cancels the peer), and a reconnect → stale
+transition.
+
+## Drag-to-modify
+
+Wire chart drags to the engine. Modify on **release**, not on every pixel, so you do not spam
+the broker:
+
+```ts
+chart.subscribeDrag(
+  (id, price) => eng.requestModify(clientId(id), price),  // preview while dragging
+  (id, price) => eng.commitModify(clientId(id)),          // commit on release
+);
+```
+
+## Depth-of-market ladder
+
+`DomLadder` renders a virtualized price ladder (5 → 200 levels) with a size heatmap and
+click-to-place, degrading gracefully when only top-of-book is available.
+
+```ts
+import { DomLadder } from 'openalgo-charts/trade';
+const ladder = new DomLadder(domEl, { onPlace: (price, side) => eng.placeLimit(sym, side, qty, price) });
+ladder.update(marketDepth);
+```
+
+<Callout type="warning">
+The trade path is broker-live. Test against OpenAlgo **analyzer mode** first, and verify the
+exact endpoints/fields against your running OpenAlgo build before trading real money. See
+[Live Data](/docs/live-data).
+</Callout>

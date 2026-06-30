@@ -1,0 +1,49 @@
+---
+title: Theming
+description: Built-in dark and light themes, and fully custom palettes.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+
+# Theming
+
+Pass a palette at creation - `darkTheme` (default), `lightTheme`, or your own:
+
+```ts
+import { createChart, lightTheme } from 'openalgo-charts';
+const chart = createChart(el, { theme: lightTheme });
+```
+
+The theme drives the chrome (background, grid, axes, crosshair), series defaults (up/down,
+line, area gradient, last-price tag), and the trading layer (buy / sell / profit / loss).
+Per-series `style` always overrides the theme.
+
+## Light theme
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el, { theme: lib.lightTheme });
+chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 140, 3600));
+chart.timeScale.fitContent(140);
+return chart;`} />
+
+## Custom palette
+
+A theme is a plain object - spread a built-in and override what you need:
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el, {
+  theme: {
+    ...lib.darkTheme,
+    background: '#0b0f17',
+    upColor: '#00b386',
+    downColor: '#ff5d6c',
+    gridColor: '#161b27',
+  },
+});
+chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 140, 3600));
+chart.timeScale.fitContent(140);
+return chart;`} />
+
+## Dark / light at runtime
+
+Recreate the chart with a different theme, or build your own toggle that swaps the `theme`
+object and re-applies series styles. The docs site itself uses the engine's dark theme by
+default and the light theme when you flip the page to light mode.

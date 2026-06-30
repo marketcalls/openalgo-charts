@@ -1,0 +1,26 @@
+{
+  "name": "openalgo-charts-docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Documentation site for OpenAlgo Charts (Nextra + Next.js, static-exported to GitHub Pages).",
+  "scripts": {
+    "sync-lib": "node scripts/sync-lib.mjs",
+    "predev": "npm run sync-lib",
+    "prebuild": "npm run sync-lib",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^14.2.15",
+    "nextra": "^3.3.1",
+    "nextra-theme-docs": "^3.3.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "typescript": "^5.5.4"
+  }
+}

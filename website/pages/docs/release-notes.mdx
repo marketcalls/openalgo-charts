@@ -1,0 +1,46 @@
+---
+title: Release Notes
+description: Version history for OpenAlgo Charts.
+---
+
+# Release notes
+
+The full, authoritative changelog lives in
+[`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
+
+## 1.0.0
+
+First public release. Full package ~30 KB Brotli (all tiers), zero runtime dependencies,
+Apache-2.0.
+
+**Added**
+
+- Indicators: RSI, ATR, Supertrend (Wilder semantics, matching `openalgo.ta`), alongside EMA.
+- Sub-minute (second) and tick/volume timeframes are first-class: the time axis and crosshair
+  show **HH:MM:SS** automatically on sub-minute bars.
+- Interaction: vertical price pan, `resetScale()` + double-click/Fit, `priceToCoordinate` /
+  `coordinateToPrice`, and `subscribeCrosshairMove` for OHLC legends/tooltips.
+- Touch: pinch-to-zoom and two-finger pan. Accessibility: focusable container with
+  `role`/`aria-label`, a polite live summary, and keyboard navigation.
+- `takeScreenshot()` (composites all panes/layers) and runtime grid toggles.
+- Footprint primitive: volume-graded bid×ask cells, diagonal-imbalance boxes, POC marker,
+  per-bar delta/volume footer.
+- Live feed: composed REST + WebSocket + candle-builder data feed speaking the documented
+  OpenAlgo protocol, with connection/control callbacks.
+
+**Quality**
+
+- 225 unit tests + a Playwright real-browser smoke suite; GitHub Actions CI runs typecheck,
+  unit, build, size budgets, and the E2E smoke on every push/PR.
+
+## 0.1.0
+
+First end-to-end build of the engine - dependency-free, full package ~22 KB Brotli.
+
+- Single-canvas render loop with per-pane invalidation; shared gapless time scale; linear
+  price scale with autoscale and tick formatting.
+- All standard chart types; live candle builder; markers, event badges, price lines; EMA.
+- Transform tier (Heikin Ashi, Renko, Range, Line Break, Point &amp; Figure, Kagi).
+- Trade tier (order/position/bracket primitives, order state machine + validation, OCO,
+  depth-of-market ladder).
+- Profile tier (Volume Profile, Market Profile / TPO, Footprint, order flow).

@@ -1,0 +1,58 @@
+---
+title: Series & Styling
+description: Adding series, the series API, and per-series style overrides.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+
+# Series & styling
+
+## The series API
+
+`addSeries` returns a handle you keep for the life of the series:
+
+```ts
+const series = chart.addSeries('candlestick', { paneIndex: 0, style: { /* ... */ } });
+
+series.setData(bars);          // replace all data
+series.update(bar);            // mutate the last bar or append a new one
+series.setStyle({ upColor: '#26a69a' });  // restyle live
+series.remove();               // detach
+```
+
+## Per-series style
+
+Every chart type has a typed `style`. Per-series style always wins over the theme, so you
+can mix a themed chart with a custom-colored overlay:
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 140, 3600);
+
+chart.addSeries('candlestick', {
+  style: { upColor: '#16a34a', downColor: '#dc2626', wickUpColor: '#16a34a', wickDownColor: '#dc2626' }
+}).setData(bars);
+
+// a second overlay series in the same pane, custom-colored
+chart.addSeries('line', { style: { color: '#a855f7', lineWidth: 2 } })
+     .setData(lib.emaSeries(bars, 9));
+
+chart.timeScale.fitContent(140);
+return chart;`} />
+
+## Common style fields
+
+| Field | Applies to | Notes |
+|---|---|---|
+| `upColor` / `downColor` | candle, bar, volume-candle | bullish / bearish body |
+| `wickUpColor` / `wickDownColor` | candle | wick color |
+| `color` | line, area, baseline, column | primary stroke |
+| `lineWidth` | line, area, baseline | pixels |
+| `areaTopColor` / `areaBottomColor` | area | vertical gradient stops |
+| `baseValue` | baseline | the reference level |
+| `priceLineVisible` | all price series | the dashed last-price line |
+
+## Whitespace (gaps)
+
+To break a line without interpolating, emit a whitespace item - a point with a `time` but no
+value. The renderer leaves a gap and skips markers there. This is how indicator warmup
+periods render (they emit `NaN`, which is treated as whitespace).

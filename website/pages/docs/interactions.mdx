@@ -1,0 +1,54 @@
+---
+title: Interactions & Accessibility
+description: Mouse, touch, and keyboard interaction, plus screenshots, grid toggles, and a11y.
+---
+
+import { Callout } from 'nextra/components'
+
+# Interactions & accessibility
+
+Every live demo on this site is fully interactive — the points below apply to all of them.
+
+## Mouse
+
+- **Wheel** — zoom both axes around the cursor.
+- **Drag the plot** — pan left/right (time) and up/down (price).
+- **Drag the price axis** — rescale price; **drag the time axis** — rescale bar spacing.
+- **Double-click** — reset scale (fit content + autoscale).
+
+## Touch
+
+Touch works out of the box (`touch-action: none` on the container):
+
+- single-finger drag pans,
+- **two-finger pinch** zooms,
+- two-finger drag pans both axes.
+
+## Keyboard & accessibility
+
+The container is focusable (`role="application"`, `tabindex=0`, an `aria-label` you can
+override) with a polite `aria-live` summary (bar count + latest price) that updates on data
+changes. When focused:
+
+| Key | Action |
+|---|---|
+| ← / → | pan time |
+| ↑ / ↓ | pan price |
+| + / − | zoom |
+| Home / 0 | reset (`chart.resetScale()`) |
+
+```ts
+const chart = createChart(el, { ariaLabel: 'RELIANCE 5-minute candlestick chart' });
+```
+
+## Screenshots & grid
+
+```ts
+const url = chart.takeScreenshot();              // composites all panes + overlays → data URL
+chart.setGridOptions({ vertLines: false });      // toggle grid lines at runtime
+```
+
+<Callout type="info">
+`takeScreenshot()` composites every pane and overlay layer into a single image, so the
+result matches exactly what the user sees — useful for share/export buttons.
+</Callout>

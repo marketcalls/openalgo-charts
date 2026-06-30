@@ -1,0 +1,65 @@
+---
+title: Indicators
+description: EMA, RSI, ATR and Supertrend - matching openalgo.ta semantics.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Indicators
+
+The base tier ships **EMA, RSI, ATR, and Supertrend**, computed with Wilder semantics to
+match `openalgo.ta`. The `*Series` helpers return plottable `{ time, value }` points; warmup
+slots carry `NaN`, which the line renderer skips as whitespace.
+
+```ts
+import {
+  ema, emaSeries,            // EMA: raw values, and a plottable line series
+  rsi, rsiSeries,            // RSI
+  supertrend, supertrendSeries,
+  atr, trueRange,            // ATR (raw values) + true range
+} from 'openalgo-charts';
+```
+
+## Supertrend
+
+`supertrendSeries(bars, period, multiplier)` returns `{ up, down }` so you can color the
+uptrend and downtrend legs differently (direction `-1` = up, `+1` = down).
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 220, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+const st = lib.supertrendSeries(bars, 10, 3);
+chart.addSeries('line', { style: { color: '#26a69a', lineWidth: 2 } }).setData(st.up);
+chart.addSeries('line', { style: { color: '#ef5350', lineWidth: 2 } }).setData(st.down);
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
+## RSI
+
+Plot RSI in its own pane with 70/30 guide lines:
+
+<RunnableExample height={360} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 220, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+chart.addSeries('line', { paneIndex: 1, style: { color: '#e0b020', lineWidth: 2 } })
+     .setData(lib.rsiSeries(bars, 14));
+chart.addPriceLine({ price: 70, color: '#ef5350', lineWidth: 1, dashed: true, id: 'r70' }, 1);
+chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id: 'r30' }, 1);
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
+## EMA
+
+`emaSeries(bars, period)` returns a line you overlay on price (see
+[Series & Styling](/docs/series-and-styling)). Stack several periods for a ribbon.
+
+<Callout type="info">
+Need an indicator that is not built in? Compute it however you like - these helpers just
+return arrays of `{ time, value }`. Plot the result as a `line` series. For an entirely new
+on-chart drawing, write a [primitive](/docs/primitives-and-plugins).
+</Callout>

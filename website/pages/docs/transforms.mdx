@@ -1,0 +1,71 @@
+---
+title: Transforms
+description: Heikin Ashi, Renko, Range, Line Break, Point & Figure and Kagi - movement-driven series.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Transforms
+
+The **transform tier** (`openalgo-charts/transform`) turns time-based OHLC into
+movement-driven series. Run a transform, then plot the result. Heikin Ashi, Renko, Range,
+and Line Break render as a `candlestick` series; Point &amp; Figure and Kagi have dedicated
+renderers.
+
+```ts
+import { runTransform, RenkoTransform } from 'openalgo-charts/transform';
+const bricks = runTransform(new RenkoTransform({ boxSize: 5 }), bars);
+chart.addSeries('candlestick').setData(bricks); // Renko renders as candles
+```
+
+## Heikin Ashi
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+const ha = lib.runTransform(new lib.HeikinAshiTransform(), bars);
+chart.addSeries('candlestick').setData(ha);
+chart.timeScale.fitContent(ha.length);
+return chart;`} />
+
+## Renko
+
+Bricks form only when price moves a full box size, filtering out noise.
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 500, 3600);
+const bricks = lib.runTransform(new lib.RenkoTransform({ boxSize: 2 }), bars);
+chart.addSeries('candlestick').setData(bricks);
+chart.timeScale.fitContent(bricks.length);
+return chart;`} />
+
+## Range bars
+
+Each bar spans a fixed price range, regardless of time.
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 500, 3600);
+const rb = lib.runTransform(new lib.RangeBarsTransform({ rangeSize: 3 }), bars);
+chart.addSeries('candlestick').setData(rb);
+chart.timeScale.fitContent(rb.length);
+return chart;`} />
+
+## Point & Figure and Kagi
+
+These use custom renderers registered by the transform tier. Plot Point &amp; Figure as a
+`point-figure` series and Kagi as a `kagi` series:
+
+```ts
+import { runTransform, PointFigureTransform, KagiTransform } from 'openalgo-charts/transform';
+
+const cols = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3 }), bars);
+chart.addSeries('point-figure', { style: { boxSize: 1 } }).setData(cols);
+
+const kagi = runTransform(new KagiTransform({ reversal: 4 }), bars);
+chart.addSeries('kagi').setData(kagi);
+```
+
+<Callout type="info">
+All transforms are incremental, so they update efficiently on live data - feed each new bar
+through `runTransform` (or the transform's streaming API) and the series keeps building.
+</Callout>
