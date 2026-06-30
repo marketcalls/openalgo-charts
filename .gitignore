@@ -7,3 +7,6 @@ coverage/
 .vitest/
 tests/**/__screenshots__/*.actual.png
 tests/**/__screenshots__/*.diff.png
+test-results/
+playwright-report/
+.playwright/

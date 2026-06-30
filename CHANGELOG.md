@@ -2,6 +2,42 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 1.0.0
+
+First public release. Full package ~29 KB Brotli (all tiers), zero runtime
+dependencies, Apache-2.0.
+
+### Added since 0.1.0
+- Indicators: RSI, ATR, Supertrend (Wilder semantics, matching `openalgo.ta`),
+  alongside EMA.
+- Interaction: vertical price pan (drag the plot up/down), `chart.resetScale()`
+  + double-click/Fit, `priceToCoordinate` / `coordinateToPrice` for DOM overlays,
+  and `subscribeCrosshairMove` for OHLC legends/tooltips.
+- Touch: pinch-to-zoom and two-finger pan (`touch-action: none`).
+- Accessibility: focusable container with `role`/`aria-label`, a polite live
+  summary, and keyboard navigation (arrows pan, +/- zoom, Home/0 reset).
+- `chart.takeScreenshot()` (composites all panes/layers) and runtime grid toggles.
+- Footprint primitive upgraded: volume-graded bid×ask cells, diagonal-imbalance
+  boxes, POC marker, per-bar delta/volume footer.
+- Live feed: composed REST + WebSocket + candle-builder data feed; WS adapter
+  speaks the documented OpenAlgo protocol (authenticate → numeric-mode subscribe →
+  `market_data`), with connection/control callbacks.
+- Examples: yfinance, order-flow, market-profile (TPO), and a full LIVE OpenAlgo
+  demo (history + WebSocket + chart trading) — validated against a live instance.
+
+### Fixed
+- `OpenAlgoDataFeed`/`OpenAlgoTradeFeed`: bind the global `fetch` (browser
+  "Illegal invocation").
+- WebSocket subscribe schema corrected to the documented per-symbol numeric-mode
+  protocol.
+- `modifyorder` sends the required `disclosed_quantity`.
+- `mapOrder`: `trigger_price: 0` → `undefined` so LIMIT order lines render at the
+  price, not 0.
+
+### Quality
+- 223 unit tests + a Playwright real-browser smoke suite; GitHub Actions CI runs
+  typecheck, unit, build, size budgets, and the E2E smoke on every push/PR.
+
 ## 0.1.0 (initial development build)
 
 First end-to-end build of the engine. Dependency-free, ~22 KB Brotli for the
