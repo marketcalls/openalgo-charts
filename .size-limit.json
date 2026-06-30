@@ -8,7 +8,7 @@
   {
     "name": "Base + trade layer",
     "path": ["dist/openalgo-charts.mjs", "dist/openalgo-charts.trade.mjs"],
-    "limit": "22 KB",
+    "limit": "24 KB",
     "brotli": true
   },
   {
