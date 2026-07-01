@@ -9,6 +9,7 @@ import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop'
 import { Pane, type PaneRenderContext } from './pane';
 import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale } from '../scale/time-scale';
+import type { PriceScaleOptions } from '../scale/price-scale';
 import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi } from '../model/series';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
@@ -60,6 +61,12 @@ export interface ChartOptions {
    * a tick-size-aware `toFixed` is used. Change it later via `setPriceFormatter`.
    */
   priceFormatter?: (price: number) => string;
+  /**
+   * Default price-scale options applied to every pane (tick size `minMove`,
+   * `mode: 'linear' | 'logarithmic'`, `inverted`, and top/bottom margins).
+   * Tune a single pane later via `chart.panes()[n].priceScale.setOptions(...)`.
+   */
+  priceScale?: Partial<PriceScaleOptions>;
 }
 
 export interface AddSeriesOptions {
@@ -157,6 +164,7 @@ export class Chart {
   private _axisStartMax = 0;
   private _axisStartSpacing = 0;
   private _priceFormatter: ((price: number) => string) | null = null;
+  private _priceScaleOptions: Partial<PriceScaleOptions> | null = null;
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._container = container;
@@ -172,6 +180,7 @@ export class Chart {
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
     this._priceFormatter = options.priceFormatter ?? null;
+    this._priceScaleOptions = options.priceScale ?? null;
     this._gridVert = options.grid?.vertLines ?? true;
     this._gridHorz = options.grid?.horzLines ?? true;
 
@@ -510,6 +519,7 @@ export class Chart {
     const pane = new Pane(this._doc);
     pane.weight = weight;
     pane.priceScale.setPriceFormatter(this._priceFormatter);
+    if (this._priceScaleOptions) pane.priceScale.setOptions(this._priceScaleOptions);
     this._panes.push(pane);
     this._container.appendChild(pane.element);
     return pane;

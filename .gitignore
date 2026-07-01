@@ -1,6 +1,7 @@
 node_modules/
 dist/
 docs/api/
+website/public/api/
 *.log
 .DS_Store
 coverage/

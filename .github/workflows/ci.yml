@@ -20,6 +20,25 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run size
+      - name: Verify NOTICE ships in the package
+        run: npm pack --dry-run 2>&1 | grep -q "NOTICE" || (echo "NOTICE missing from the npm package (add it to package.json files)" && exit 1)
+
+  docs:
+    name: docs site build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Build the docs site (prebuild syncs the bundles)
+        working-directory: website
+        run: |
+          npm install
+          npm run build
 
   e2e:
     name: playwright smoke (real browser)

@@ -6,7 +6,7 @@
     "src/transform/index.ts",
     "src/profile/index.ts"
   ],
-  "out": "docs/api",
+  "out": "website/public/api",
   "tsconfig": "tsconfig.json",
   "excludeInternal": true,
   "readme": "none",

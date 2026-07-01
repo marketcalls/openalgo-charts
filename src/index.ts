@@ -71,6 +71,7 @@ export type { OpenAlgoTradeConfig } from './feed/openalgo-trade';
 export { OpenAlgoLiveDataFeed, intervalToSeconds } from './feed/openalgo-live';
 export type { OpenAlgoLiveConfig } from './feed/openalgo-live';
 export { FakeDataFeed, generateBars } from './feed/fake-feed';
+export type { FeedScheduler } from './feed/fake-feed';
 export { TickBarAggregator } from './feed/tick-aggregator';
 export type { TickTimeframe, AggTick, BarUpdate } from './feed/tick-aggregator';
 export {

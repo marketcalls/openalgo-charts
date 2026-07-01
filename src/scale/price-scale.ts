@@ -68,6 +68,11 @@ export class PriceScale {
     return this._options;
   }
 
+  /** Merge partial options (minMove, mode, inverted, margins) at runtime. */
+  public setOptions(opts: Partial<PriceScaleOptions>): void {
+    this._options = { ...this._options, ...opts };
+  }
+
   public setHeight(height: number): void {
     this._height = height;
   }
