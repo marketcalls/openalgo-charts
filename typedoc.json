@@ -10,5 +10,20 @@
   "tsconfig": "tsconfig.json",
   "excludeInternal": true,
   "readme": "none",
-  "name": "OpenAlgo Charts API"
+  "name": "OpenAlgo Charts API",
+  "intentionallyNotExported": [
+    "CanvasLayer",
+    "CrosshairMode",
+    "DataLayer",
+    "IstParts",
+    "SeriesRecord",
+    "KeyLike",
+    "HistoryResponse",
+    "RawOrder",
+    "RawPosition",
+    "PaneRenderContext",
+    "RafCanceller",
+    "RafScheduler",
+    "InvalidateMask"
+  ]
 }
