@@ -52,7 +52,13 @@ export interface PlaceOrder {
   clientToken?: string;
 }
 
-/** Broker-agnostic trading source. */
+/**
+ * High-level broker trading source: place / modify / cancel plus subscriptions
+ * to orders and positions. NOTE: the trade tier's `OrderEngine` uses the smaller
+ * `OrderFeed` (`place` / `modify` / `cancel`, from `openalgo-charts/trade`), which
+ * is what `OpenAlgoTradeFeed` implements. Implement `OrderFeed` for the engine's
+ * write path; use `TradeFeed` for a higher-level broker abstraction.
+ */
 export interface TradeFeed {
   placeOrder(o: PlaceOrder): Promise<{ orderId: string }>;
   modifyOrder(orderId: string, patch: Partial<PlaceOrder>): Promise<void>;

@@ -23,6 +23,12 @@ export interface PlaceRequest {
   clientToken?: string;
 }
 
+/**
+ * The minimal broker write interface the `OrderEngine` drives: place / modify /
+ * cancel. `OpenAlgoTradeFeed` implements this. Distinct from the base-tier
+ * `TradeFeed` (a higher-level place + subscribe shape in `openalgo-charts`):
+ * implement `OrderFeed` for the engine's write path.
+ */
 export interface OrderFeed {
   place(req: PlaceRequest & { mode: TradeMode }): Promise<{ orderId: string }>;
   modify(orderId: string, patch: { price?: number; triggerPrice?: number; qty?: number }): Promise<void>;

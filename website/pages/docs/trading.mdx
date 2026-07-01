@@ -10,8 +10,18 @@ import { Callout } from 'nextra/components'
 
 The **trade tier** (`openalgo-charts/trade`) adds a full trade-management layer: working
 order lines, a position marker with live P&amp;L, OCO brackets, an order state machine with
-validation, and a depth-of-market ladder. It talks to any broker through a small `TradeFeed`
-interface - the OpenAlgo adapter is included.
+validation, and a depth-of-market ladder. The `OrderEngine` write path talks to any broker
+through a small `OrderFeed` interface (`place` / `modify` / `cancel`) - the OpenAlgo adapter
+(`OpenAlgoTradeFeed`) implements it.
+
+<Callout type="info">
+Two trade interfaces exist and are easy to confuse. The trade tier's `OrderFeed`
+(`place` / `modify` / `cancel`, from `openalgo-charts/trade`) is the broker write
+path used by `OrderEngine`, and is what `OpenAlgoTradeFeed` implements. The base
+export `TradeFeed` (`placeOrder` / `modifyOrder` / `cancelOrder` +
+`subscribeOrders` / `subscribePositions`) is a higher-level shape - implement
+`OrderFeed` for the engine.
+</Callout>
 
 ## Order & target lines
 
