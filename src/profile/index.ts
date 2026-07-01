@@ -19,6 +19,12 @@ export {
   type MarketProfileResult,
 } from './market-profile';
 export {
+  MarketProfile,
+  DEFAULT_MARKET_PROFILE_PRIMITIVE_OPTIONS,
+  type MarketProfilePrimitiveOptions,
+  type MpColorMode,
+} from './market-profile-primitive';
+export {
   computeFootprint,
   diagonalImbalances,
   cumulativeDelta,
