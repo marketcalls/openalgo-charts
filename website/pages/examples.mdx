@@ -4,7 +4,7 @@ description: Live, in-page chart demos powered by the real OpenAlgo Charts libra
 ---
 
 import RunnableExample from '../components/RunnableExample'
-import { RangeSwitcherCard, LegendCard, SeriesCompareCard, IndicatorsCard } from '../components/gallery'
+import { RangeSwitcherCard, LegendCard, SeriesCompareCard, IndicatorsCard, PositionsCard, TradeMarkersCard } from '../components/gallery'
 
 # Live examples
 
@@ -20,6 +20,16 @@ Switch tabs to reconfigure each chart live.
 <LegendCard />
 <SeriesCompareCard />
 <IndicatorsCard />
+</div>
+
+## Trading
+
+Data-driven positions, orders, TP/SL brackets, and fill markers via
+[`chart.trading`](/docs/trading-api). Drag the order lines; the pill ✕ fires cancel/close.
+
+<div className="oac-cardgrid">
+<PositionsCard />
+<TradeMarkersCard />
 </div>
 
 ## Copy-paste snippets

@@ -163,3 +163,52 @@ export const IndicatorsCard = () => (
   <InteractiveChart title="Indicators & markers" build={buildIndicators}
     tabs={[{ label: 'Volume', key: 'volume' }, { label: 'Series markers', key: 'markers' }, { label: 'Moving average', key: 'ma' }]} />
 );
+
+/* -------------------------------------------------------------------------- */
+/* Positions & orders (chart.trading)                                         */
+const buildPositions: BuildFn = (el, lib, tab) => {
+  const chart = lib.createChart(el);
+  const bars = lib.generateBars(1700000000, 140, 3600);
+  chart.addSeries('candlestick').setData(bars);
+  const last = bars[bars.length - 1].close;
+  const long = tab !== 'short';
+  chart.trading.setPositions([
+    { id: 'p1', side: long ? 'long' : 'short', entryPrice: last * (long ? 0.985 : 1.015), size: 1.5, pnlText: long ? '+$1,240' : '-$320', pnlPercent: long ? '+2.4%' : '-0.6%' },
+  ]);
+  chart.trading.setOrders([
+    { id: 'o1', type: 'limit', side: long ? 'buy' : 'sell', price: last * (long ? 0.95 : 1.05), size: 1 },
+    { id: 'tp', type: 'limit', side: long ? 'sell' : 'buy', price: last * (long ? 1.04 : 0.96), size: 1.5, parentId: 'p1', bracketRole: 'tp' },
+    { id: 'sl', type: 'stop', side: long ? 'sell' : 'buy', price: last * (long ? 0.93 : 1.07), size: 1.5, parentId: 'p1', bracketRole: 'sl' },
+  ]);
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+export const PositionsCard = () => (
+  <InteractiveChart title="Positions & orders" build={buildPositions}
+    tabs={[{ label: 'Long', key: 'long' }, { label: 'Short', key: 'short' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
+/* Trade markers (chart.trading)                                              */
+const buildTradeMarkers: BuildFn = (el, lib, tab) => {
+  const chart = lib.createChart(el);
+  const bars = lib.generateBars(1700000000, 120, 3600);
+  chart.addSeries('candlestick').setData(bars);
+  const variant = tab; // chevron | bubble | count
+  const idxs = [15, 28, 42, 55, 70, 85, 100];
+  const trades = idxs.map((i, k) => ({
+    id: 'f' + k, side: k % 2 ? 'sell' : 'buy', price: bars[i].close, size: 1 + k, timestamp: bars[i].time * 1000, variant,
+  }));
+  if (variant === 'count') {
+    // extra fills on the same bar+side so the count aggregates
+    trades.push({ id: 'fx1', side: 'buy', price: bars[42].close * 1.005, size: 2, timestamp: bars[42].time * 1000, variant: 'count' });
+    trades.push({ id: 'fx2', side: 'buy', price: bars[42].close * 0.995, size: 3, timestamp: bars[42].time * 1000, variant: 'count' });
+  }
+  chart.trading.setTrades(trades);
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+export const TradeMarkersCard = () => (
+  <InteractiveChart title="Trade markers" build={buildTradeMarkers}
+    tabs={[{ label: 'Chevron', key: 'chevron' }, { label: 'Bubble', key: 'bubble' }, { label: 'Count', key: 'count' }]} />
+);
