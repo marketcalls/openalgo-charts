@@ -216,6 +216,137 @@ export const CustomTypesCard = () => (
 );
 
 /* -------------------------------------------------------------------------- */
+/* Scales formatting (custom price formatter)                                 */
+const PRICE_FORMATTERS: Record<string, ((p: number) => string) | undefined> = {
+  currency: (p: number) => '$' + p.toFixed(2),
+  rupee: (p: number) => 'Rs ' + p.toFixed(2),
+  plain: undefined,
+};
+const buildScalesFormat: BuildFn = (el, lib, tab) => {
+  const fmt = PRICE_FORMATTERS[tab];
+  const chart = lib.createChart(el, fmt ? { priceFormatter: fmt } : {});
+  const bars = walk(5, 160, 1700000000, 86400, 120, 1.3);
+  chart.addSeries('area', { style: { color: '#4f8cff', lineWidth: 2, areaTopColor: 'rgba(79,140,255,0.4)', areaBottomColor: 'rgba(79,140,255,0)' } }).setData(bars);
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+export const ScalesFormatCard = () => (
+  <InteractiveChart title="Scales formatting" build={buildScalesFormat}
+    tabs={[{ label: 'Currency ($)', key: 'currency' }, { label: 'Rupee (Rs)', key: 'rupee' }, { label: 'Plain', key: 'plain' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
+/* Scales config (grid line visibility)                                       */
+const GRID_MODES: Record<string, { vertLines: boolean; horzLines: boolean }> = {
+  both: { vertLines: true, horzLines: true },
+  horizontal: { vertLines: false, horzLines: true },
+  none: { vertLines: false, horzLines: false },
+};
+const buildScalesConfig: BuildFn = (el, lib, tab) => {
+  const chart = lib.createChart(el, { grid: GRID_MODES[tab] ?? GRID_MODES.both });
+  const bars = lib.generateBars(1700000000, 160, 86400);
+  chart.addSeries('candlestick').setData(bars);
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+export const ScalesConfigCard = () => (
+  <InteractiveChart title="Scales config" build={buildScalesConfig}
+    tabs={[{ label: 'Grid: both', key: 'both' }, { label: 'Horizontal', key: 'horizontal' }, { label: 'None', key: 'none' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
+/* Data (realtime updates / whitespaces)                                      */
+const buildData: BuildFn = (el, lib, tab) => {
+  const chart = lib.createChart(el);
+  if (tab === 'whitespace') {
+    const raw = walk(7, 170, 1700000000, 86400, 60, 1.2);
+    // Null out OHLC for two stretches -> whitespace items break the line at gaps.
+    const data = raw.map((b: any, i: number) => ((i >= 60 && i < 74) || (i >= 120 && i < 130) ? { time: b.time } : b));
+    chart.addSeries('area', { style: { color: '#4f8cff', lineWidth: 2, areaTopColor: 'rgba(79,140,255,0.4)', areaBottomColor: 'rgba(79,140,255,0)' } }).setData(data);
+    chart.timeScale.fitContent(raw.length);
+    return chart;
+  }
+  // Realtime: mutate the last candle a few times, then roll a new one.
+  const bars = lib.generateBars(1700000000, 120, 3600);
+  const s = chart.addSeries('candlestick');
+  s.setData(bars);
+  chart.timeScale.fitContent(bars.length);
+  let last: any = { ...bars[bars.length - 1] };
+  let t = last.time;
+  let seed = 99;
+  let ticks = 0;
+  const rnd = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const id = setInterval(() => {
+    const move = (rnd() - 0.5) * 1.6;
+    if (ticks >= 5) {
+      t += 3600;
+      last = { time: t, open: last.close, high: last.close, low: last.close, close: last.close + move };
+      ticks = 0;
+    } else {
+      const c = last.close + move;
+      last = { time: last.time, open: last.open, high: Math.max(last.high, c), low: Math.min(last.low, c), close: c };
+      ticks += 1;
+    }
+    s.update(last);
+  }, 650);
+  const origDestroy = chart.destroy.bind(chart);
+  chart.destroy = (): void => { clearInterval(id); origDestroy(); };
+  return chart;
+};
+export const DataCard = () => (
+  <InteractiveChart title="Data" build={buildData}
+    tabs={[{ label: 'Realtime updates', key: 'realtime' }, { label: 'Whitespaces', key: 'whitespace' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
+/* Custom plugins (envelope-band IPrimitive + partial price line)             */
+const buildPlugins: BuildFn = (el, lib, _tab) => {
+  const chart = lib.createChart(el);
+  const bars = lib.generateBars(1700000000, 140, 3600);
+  chart.addSeries('candlestick').setData(bars);
+  // EMA(21) as a numeric array aligned to bar order (fresh series -> logical index i).
+  const closes = bars.map((b: any) => b.close);
+  const k = 2 / (21 + 1);
+  let e = closes[0];
+  const ema = closes.map((c: number) => (e = c * k + e * (1 - k)));
+  const offset = (Math.max(...closes) - Math.min(...closes)) * 0.06;
+  // A minimal IPrimitive: a translucent envelope band around the EMA.
+  const band = {
+    zOrder: (): string => 'normal',
+    autoscaleInfo: (): { min: number; max: number } => ({ min: Math.min(...ema) - offset, max: Math.max(...ema) + offset }),
+    draw: (ctx: any, rc: any): void => {
+      const yy = (p: number): number => rc.priceScale.priceToY(p) * rc.dpr;
+      const xx = (i: number): number => rc.timeScale.indexToX(i) * rc.dpr;
+      ctx.save();
+      ctx.beginPath();
+      for (let i = 0; i < ema.length; i++) { const x = xx(i), y = yy(ema[i] + offset); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+      for (let i = ema.length - 1; i >= 0; i--) ctx.lineTo(xx(i), yy(ema[i] - offset));
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(79,140,255,0.14)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(79,140,255,0.6)';
+      ctx.lineWidth = rc.dpr;
+      for (const sign of [1, -1]) {
+        ctx.beginPath();
+        for (let i = 0; i < ema.length; i++) { const x = xx(i), y = yy(ema[i] + sign * offset); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        ctx.stroke();
+      }
+      ctx.restore();
+    },
+  };
+  chart.addPrimitive(band);
+  chart.addSeries('line', { style: { color: '#4f8cff', lineWidth: 2 } })
+    .setData(ema.map((v: number, i: number) => ({ time: bars[i].time, open: v, high: v, low: v, close: v })));
+  // Partial price line: spans only the rightmost 35% of the plot.
+  chart.addPriceLine({ price: closes[closes.length - 1], color: '#f5a623', lineWidth: 1, dashed: false, id: 'partial', extentFromRight: 0.35, leftLabel: 'partial line' });
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+export const CustomPluginsCard = () => (
+  <InteractiveChart title="Custom plugins" build={buildPlugins} />
+);
+
+/* -------------------------------------------------------------------------- */
 /* Positions & orders (chart.trading)                                         */
 const buildPositions: BuildFn = (el, lib, tab) => {
   const chart = lib.createChart(el);
