@@ -290,12 +290,24 @@ export class Chart {
       this._firstDataId.value = dataId;
       this._firstPaneIndex = paneIndex;
     }
-    this._panes[paneIndex].addSeries(createSeriesRecord(dataId, type, options.style));
+    const record = createSeriesRecord(dataId, type, options.style);
+    this._panes[paneIndex].addSeries(record);
     return {
       setData: (bars: readonly SeriesDataItem[]): void => this._setData(dataId, bars.map(toBar)),
       prependData: (bars: readonly SeriesDataItem[]): void => this._prependData(dataId, bars.map(toBar)),
       update: (bar: SeriesDataItem): void => this._updateBar(dataId, toBar(bar)),
       getData: (): Bar[] => this._dataLayer.indexedBars(dataId).map((ib) => ib.bar),
+      applyOptions: (patch: Partial<SeriesStyle>): void => {
+        Object.assign(record.style, patch);
+        this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      },
+      remove: (): void => {
+        this._panes[paneIndex].removeSeries(record);
+        this._dataLayer.removeSeries(dataId);
+        if (this._firstDataId.value === dataId) this._firstDataId.value = null;
+        this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
+        this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      },
       createMarkers: (): SeriesMarkers => {
         const m = new SeriesMarkers(dataId);
         this._addPrimitive(paneIndex, m);

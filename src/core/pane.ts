@@ -67,6 +67,14 @@ export class Pane {
     this._series.push(record);
   }
 
+  /** Remove a series record if present; returns true if it was found. */
+  public removeSeries(record: SeriesRecord): boolean {
+    const i = this._series.indexOf(record);
+    if (i < 0) return false;
+    this._series.splice(i, 1);
+    return true;
+  }
+
   public series(): readonly SeriesRecord[] {
     return this._series;
   }
@@ -137,6 +145,7 @@ export class Pane {
     let low = Infinity;
     let high = -Infinity;
     for (const s of this._series) {
+      if (s.style.visible === false) continue;
       const entry = getChartType(s.type);
       for (const ib of ctx.dataLayer.visibleBars(s.dataId, range.from, range.to)) {
         const ext = entry.extents(ib.bar, s.style);
@@ -193,6 +202,7 @@ export class Pane {
       ? conflationGroupSize(ctx.timeScale.barSpacing, dpr, 0.5, ctx.conflationFactor)
       : 1;
     for (const s of this._series) {
+      if (s.style.visible === false) continue;
       const entry = getChartType(s.type);
       const visible = ctx.dataLayer.visibleBars(s.dataId, range.from, range.to);
       let items: DrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));

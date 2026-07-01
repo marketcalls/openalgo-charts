@@ -18,6 +18,9 @@ export interface SeriesStyle {
   /** Scale candle body width by volume / maxVisibleVolume (volume candles). */
   volumeScaled?: boolean;
 
+  /** Whether the series is drawn and counted in autoscale. Default true. */
+  visible?: boolean;
+
   // line / area / baseline / hlc-area family
   color?: string;
   lineWidth?: number;

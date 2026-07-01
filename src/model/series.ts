@@ -29,6 +29,10 @@ export interface SeriesApi {
   update(bar: SeriesDataItem): void;
   /** Current bars for this series (sorted old -> new, normalized to OHLC). Handy for computing the next live update. */
   getData(): Bar[];
+  /** Merge a partial style into the series and repaint (recolor, `{ visible:false }` to hide, ...). */
+  applyOptions(style: Partial<SeriesStyle>): void;
+  /** Remove the series from its pane and free its data rows. */
+  remove(): void;
   /** Create a markers layer (buy/sell signals, shapes) bound to this series. */
   createMarkers(): SeriesMarkers;
 }
