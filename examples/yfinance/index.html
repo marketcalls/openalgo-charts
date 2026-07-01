@@ -3,109 +3,189 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OpenAlgo Charts — yfinance historical demo</title>
+  <title>OpenAlgo Charts - yfinance historical demo</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #0d0e12; color: #c7ccd8; font: 13px/1.4 system-ui, sans-serif; }
-    .bar { padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    input, select, button { background: #1c2030; color: #c7ccd8; border: 1px solid #2a3046; border-radius: 6px; padding: 4px 8px; }
-    input[type="text"] { width: 90px; }
-    input[type="number"] { width: 50px; }
-    input[type="checkbox"] { width: auto; }
-    label.chk { display: inline-flex; gap: 4px; align-items: center; user-select: none; opacity: .85; }
-    button { cursor: pointer; }
-    .sep { width: 1px; align-self: stretch; background: #2a3046; margin: 0 2px; }
-    #buy { border-color: #2c6e64; color: #7fd8cd; }
-    #sell { border-color: #7a3633; color: #f3a3a1; }
-    #chart { position: absolute; top: 46px; left: 0; right: 0; bottom: 0; cursor: crosshair; }
-    #status { margin-left: auto; opacity: .75; }
-    /* OHLC legend overlay — sits on top of the plot, never intercepts the crosshair */
-    #legend {
-      position: absolute; top: 54px; left: 16px; z-index: 10; pointer-events: none;
-      font: 12px/1.4 system-ui, sans-serif; white-space: nowrap; text-shadow: 0 0 3px #0d0e12;
+    :root {
+      --bg: #0a0c11; --panel: #0f121a; --elev: #151925; --elev-2: #1b2030;
+      --bd: #232a3a; --bd-soft: #1a1f2c; --tx: #d7dce8; --mut: #8b93a7; --faint: #5b6376;
+      --acc: #22c1a4; --acc-2: #2dd4bf; --buy: #26a69a; --sell: #ef5350;
+      --amber: #e6b53c; --r: 8px; --h: 30px;
     }
-    #legend .name { color: #e8eaf0; font-weight: 600; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: radial-gradient(1100px 500px at 78% -12%, rgba(34,193,164,0.06), transparent), var(--bg);
+      background-color: var(--bg);
+      color: var(--tx); font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+    }
+
+    /* ── toolbars ───────────────────────────────────────────────── */
+    .topbar, .subbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 14px; }
+    .topbar { background: linear-gradient(180deg, var(--panel), #0c0f16); border-bottom: 1px solid var(--bd-soft); }
+    .subbar { padding: 7px 14px; background: #0c0f16; border-bottom: 1px solid var(--bd-soft); color: var(--mut); }
+    .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .2px; }
+    .brand em { color: var(--acc-2); font-style: normal; font-weight: 700; font-size: 11px; letter-spacing: .8px;
+      border: 1px solid #17423a; background: #0e2420; padding: 1px 6px; border-radius: 5px; }
+    .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 8px var(--acc); }
+    .group { display: inline-flex; align-items: center; gap: 6px; }
+    .divider { width: 1px; height: 22px; background: var(--bd-soft); margin: 0 2px; }
+
+    .field {
+      height: var(--h); background: var(--elev); color: var(--tx); border: 1px solid var(--bd);
+      border-radius: 7px; padding: 0 9px; font: inherit; outline: none; transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .field::placeholder { color: var(--faint); }
+    .field:hover { border-color: #2c3446; }
+    .field:focus { border-color: var(--acc); box-shadow: 0 0 0 3px rgba(34,193,164,.15); background: var(--elev-2); }
+    select.field { cursor: pointer; }
+    .field--sym { width: 118px; font-weight: 600; letter-spacing: .3px; }
+    .field--qty { width: 64px; text-align: center; }
+
+    .btn {
+      height: var(--h); display: inline-flex; align-items: center; gap: 6px; padding: 0 13px;
+      background: var(--elev); color: var(--tx); border: 1px solid var(--bd); border-radius: 7px;
+      cursor: pointer; font: inherit; font-weight: 600; transition: all .15s;
+    }
+    .btn:hover { border-color: #33405a; background: var(--elev-2); }
+    .btn:active { transform: translateY(1px); }
+    .btn--primary { background: linear-gradient(180deg, var(--acc-2), var(--acc)); color: #04231d; border-color: transparent; }
+    .btn--primary:hover { filter: brightness(1.08); }
+    .btn--ghost { color: var(--mut); }
+    .btn--buy { background: linear-gradient(180deg, #2fbfa4, #1f9e88); color: #04231d; border-color: transparent; }
+    .btn--sell { background: linear-gradient(180deg, #f0616f, #d6485a); color: #2a0d10; border-color: transparent; }
+    .btn--buy:hover, .btn--sell:hover { filter: brightness(1.08); }
+
+    .status { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; color: var(--mut); max-width: 40vw; overflow: hidden; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; box-shadow: 0 0 0 3px rgba(139,147,167,.12); }
+    #status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 12px;
+      background: var(--elev); border: 1px solid var(--bd-soft); border-radius: 999px; color: var(--mut); }
+    .chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+      padding: 4px 10px; border-radius: 7px; border: 1px solid var(--bd-soft); background: var(--elev); color: var(--mut); font-size: 12px; }
+    .chk:hover { border-color: #33405a; color: var(--tx); }
+    .chk input { accent-color: var(--acc); width: 14px; height: 14px; }
+    .lbl { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+    .spacer { flex: 1 1 auto; }
+    .hint { color: var(--faint); font-size: 12px; font-style: italic; }
+
+    /* ── chart stage ────────────────────────────────────────────── */
+    .stage { position: relative; flex: 1 1 auto; min-height: 0; }
+    #chart { position: absolute; inset: 0; cursor: crosshair; }
+    /* OHLC legend overlay, sits on top of the plot, never intercepts the crosshair */
+    #legend {
+      position: absolute; top: 14px; left: 16px; z-index: 10; pointer-events: none; white-space: nowrap;
+      padding: 8px 12px; border-radius: 10px; font: 12px/1.5 system-ui, sans-serif;
+      background: rgba(15,18,26,.72); border: 1px solid var(--bd-soft); backdrop-filter: blur(8px); box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    #legend:empty { display: none; }
+    #legend .name { color: #eef1f7; font-weight: 700; font-size: 13px; }
     #legend .meta { opacity: .5; }
     #legend .lbl { opacity: .55; margin-left: 8px; }
 
-    /* Sahi-style bracket panel: pills glued to the entry/TP/SL prices, draggable */
+    /* Bracket panel: pills glued to the entry/TP/SL prices, draggable */
     #bracket { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
     #bracket .bk {
       position: absolute; left: 16px; transform: translateY(-50%); display: inline-flex; align-items: center;
-      gap: 10px; font: 11px/1 system-ui, sans-serif; padding: 5px 9px; border-radius: 7px; white-space: nowrap;
-      pointer-events: auto; box-shadow: 0 2px 8px rgba(0,0,0,.45); user-select: none;
+      gap: 12px; font: 11px/1 system-ui, sans-serif; padding: 7px 11px; border-radius: 9px; white-space: nowrap;
+      pointer-events: auto; box-shadow: 0 6px 18px rgba(0,0,0,.5); user-select: none; border: 1px solid transparent;
     }
-    #bracket .bk b { color: #fff; font-weight: 600; }
-    #bracket .bk.tp { background: #0e9c84; color: #d7f5ee; cursor: ns-resize; }
-    #bracket .bk.sl { background: #c0414c; color: #fadadd; cursor: ns-resize; }
-    #bracket .bk.entry { background: #161b2b; border: 1px solid #2c3349; color: #aeb6c8; cursor: move; }
-    #bracket .bk .pnl { font-weight: 700; color: #fff; }
-    #bracket .bk button {
-      font: 11px/1 system-ui; border-radius: 5px; padding: 4px 9px; cursor: pointer; border: 1px solid transparent; color: #fff;
-    }
-    #bracket .bk .bk-x { background: transparent; color: #9aa3b2; border-color: #2c3349; padding: 3px 8px; }
+    #bracket .bk b { color: #fff; font-weight: 700; }
+    #bracket .bk.tp { background: linear-gradient(180deg, #12a98f, #0e9c84); color: #d7f5ee; cursor: ns-resize; }
+    #bracket .bk.sl { background: linear-gradient(180deg, #cf4653, #c0414c); color: #fadadd; cursor: ns-resize; }
+    #bracket .bk.entry { background: rgba(20,24,36,.94); border-color: #2c3349; color: #b8c0d2; cursor: move; backdrop-filter: blur(6px); }
+    #bracket .bk .pnl { font-weight: 800; color: #fff; }
+    #bracket .bk button { font: 11px/1 system-ui; font-weight: 600; border-radius: 6px; padding: 5px 10px; cursor: pointer; border: 1px solid transparent; color: #fff; transition: filter .12s; }
+    #bracket .bk button:hover { filter: brightness(1.12); }
+    #bracket .bk .bk-x { background: transparent; color: #9aa3b2; border-color: #2c3349; padding: 4px 9px; }
+    #bracket .bk .bk-x:hover { color: #fff; border-color: #46506a; filter: none; }
     #bracket .bk .bk-buy { background: #1f9e88; }
     #bracket .bk .bk-sell { background: #d6485a; }
     #bracket .bk .bk-mod { background: #2c3349; color: #c7ccd8; }
-    .hint { opacity: .4; font-size: 11px; }
 
-    /* broker-style right-click order menu */
+    /* right-click order menu */
     #ctxmenu {
-      position: fixed; z-index: 30; min-width: 168px; background: #11151f; border: 1px solid #2a3046;
-      border-radius: 8px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.5); font: 12px system-ui, sans-serif;
+      position: fixed; z-index: 30; min-width: 210px; padding: 6px;
+      background: var(--elev); border: 1px solid var(--bd); border-radius: 11px;
+      box-shadow: 0 16px 40px rgba(0,0,0,.55); font: 13px system-ui, sans-serif;
     }
     #ctxmenu button {
-      display: block; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 5px;
-      color: #c7ccd8; padding: 6px 10px; cursor: pointer;
+      display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: transparent;
+      border: 0; border-radius: 7px; color: var(--tx); padding: 7px 10px; cursor: pointer; transition: background .12s, color .12s;
     }
-    #ctxmenu button:hover { background: #1d2333; }
-    #ctxmenu button.buy:hover { background: #163e38; color: #7fd8cd; }
-    #ctxmenu button.sell:hover { background: #3e1f22; color: #f3a3a1; }
-    #ctxmenu hr { border: 0; border-top: 1px solid #232a3d; margin: 4px 6px; }
+    #ctxmenu button:hover { background: var(--elev-2); }
+    #ctxmenu button.buy:hover { background: #12332e; color: #7fe6d2; }
+    #ctxmenu button.sell:hover { background: #331a1d; color: #f7a6a4; }
+    #ctxmenu button::before { content: ''; width: 7px; height: 7px; border-radius: 2px; flex: none; background: #3a4258; }
+    #ctxmenu button.buy::before { background: var(--buy); }
+    #ctxmenu button.sell::before { background: var(--sell); }
+    #ctxmenu button[data-act="cancelall"]::before { background: var(--faint); }
+    #ctxmenu hr { border: 0; border-top: 1px solid var(--bd-soft); margin: 5px 8px; }
   </style>
 </head>
 <body>
-  <div class="bar">
-    <strong>yfinance</strong>
-    <input type="text" id="symbol" value="AAPL" title="Yahoo Finance symbol (AAPL, MSFT, RELIANCE.NS, ^NSEI, BTC-USD)" />
-    <select id="interval" title="bar interval">
-      <option>1d</option><option>1h</option><option>30m</option><option>15m</option><option>5m</option><option>1wk</option>
-    </select>
-    <select id="period" title="history range">
-      <option>1mo</option><option selected>1y</option><option>6mo</option><option>5y</option><option>max</option>
-    </select>
-    <select id="ctype" title="chart type">
-      <option value="candlestick">Candles</option>
-      <option value="hollow-candle">Hollow Candles</option>
-      <option value="bar">Bars (OHLC)</option>
-      <option value="high-low">High-Low</option>
-      <option value="volume-candle">Volume Candles</option>
-      <option value="line">Line</option>
-      <option value="line-markers">Line + Markers</option>
-      <option value="step">Step Line</option>
-      <option value="area">Area</option>
-      <option value="hlc-area">HLC Area</option>
-      <option value="baseline">Baseline</option>
-    </select>
-    <label class="chk"><input type="checkbox" id="st" checked /> Supertrend</label>
-    <label class="chk"><input type="checkbox" id="rsi" checked /> RSI</label>
-    <label class="chk"><input type="checkbox" id="vgrid" checked /> V Grid</label>
-    <label class="chk"><input type="checkbox" id="hgrid" checked /> H Grid</label>
-    <button id="load">Load</button>
-    <button id="save" title="Save the full chart as a PNG (right-click only captures the overlay)">Save PNG</button>
-    <button id="fit" title="restore the default view (fit bars + auto price scale) — same as double-click">Fit</button>
-    <span class="sep"></span>
-    <input type="number" id="qty" value="100" min="1" title="order quantity" />
-    <select id="product" title="product (OpenAlgo order constant)">
-      <option value="MIS">MIS</option><option value="CNC">CNC</option><option value="NRML">NRML</option>
-    </select>
-    <button id="buy" title="Place a Buy OCO bracket: entry + target + stop (target and stop are OCO)">Buy Bracket</button>
-    <button id="sell" title="Place a Sell OCO bracket: entry + target + stop (target and stop are OCO)">Sell Bracket</button>
-    <button id="cancel" title="Cancel the bracket + all orders">Cancel</button>
+  <header class="topbar">
+    <div class="brand"><span class="brand-dot"></span> OpenAlgo <em>yfinance</em></div>
+    <div class="divider"></div>
+    <div class="group">
+      <input type="text" id="symbol" class="field field--sym" value="AAPL" title="Yahoo Finance symbol (AAPL, MSFT, RELIANCE.NS, ^NSEI, BTC-USD)" />
+      <select id="interval" class="field" title="bar interval">
+        <option>1d</option><option>1h</option><option>30m</option><option>15m</option><option>5m</option><option>1wk</option>
+      </select>
+      <select id="period" class="field" title="history range">
+        <option>1mo</option><option selected>1y</option><option>6mo</option><option>5y</option><option>max</option>
+      </select>
+      <select id="ctype" class="field" title="chart type">
+        <option value="candlestick">Candles</option>
+        <option value="hollow-candle">Hollow Candles</option>
+        <option value="bar">Bars (OHLC)</option>
+        <option value="high-low">High-Low</option>
+        <option value="volume-candle">Volume Candles</option>
+        <option value="line">Line</option>
+        <option value="line-markers">Line + Markers</option>
+        <option value="step">Step Line</option>
+        <option value="area">Area</option>
+        <option value="hlc-area">HLC Area</option>
+        <option value="baseline">Baseline</option>
+      </select>
+    </div>
+    <div class="divider"></div>
+    <div class="group">
+      <button id="load" class="btn btn--primary">Load</button>
+      <button id="save" class="btn" title="Save the full chart as a PNG (right-click only captures the overlay)">Save PNG</button>
+      <button id="fit" class="btn" title="restore the default view (fit bars + auto price scale), same as double-click">Fit</button>
+    </div>
+    <div class="status"><span class="status-dot"></span><span id="status"></span></div>
+  </header>
+
+  <div class="subbar">
+    <span class="lbl">Indicators</span>
+    <div class="group">
+      <label class="chk"><input type="checkbox" id="st" checked /> <span>Supertrend</span></label>
+      <label class="chk"><input type="checkbox" id="rsi" checked /> <span>RSI</span></label>
+      <label class="chk"><input type="checkbox" id="vgrid" checked /> <span>V Grid</span></label>
+      <label class="chk"><input type="checkbox" id="hgrid" checked /> <span>H Grid</span></label>
+    </div>
+    <div class="divider"></div>
+    <span class="lbl">Order</span>
+    <div class="group">
+      <input type="number" id="qty" class="field field--qty" value="100" min="1" title="order quantity" />
+      <select id="product" class="field" title="product (OpenAlgo order constant)">
+        <option value="MIS">MIS</option><option value="CNC">CNC</option><option value="NRML">NRML</option>
+      </select>
+      <button id="buy" class="btn btn--buy" title="Place a Buy OCO bracket: entry + target + stop (target and stop are OCO)">Buy Bracket</button>
+      <button id="sell" class="btn btn--sell" title="Place a Sell OCO bracket: entry + target + stop (target and stop are OCO)">Sell Bracket</button>
+      <button id="cancel" class="btn btn--ghost" title="Cancel the bracket + all orders">Cancel</button>
+    </div>
+    <span class="spacer"></span>
     <span class="hint">bracket = entry + OCO target/stop · right-click the chart for single orders</span>
-    <span id="status"></span>
   </div>
-  <div id="chart"></div>
-  <div id="legend"></div>
+
+  <main class="stage">
+    <div id="chart"></div>
+    <div id="legend"></div>
+  </main>
 
   <!-- Sahi-style bracket panel (positions tracked to price every frame) -->
   <div id="bracket" hidden>
@@ -332,7 +412,7 @@
       bracket = null; bLines = null; el('bracket').hidden = true;
     }
 
-    // ── Resting orders (right-click) — each a draggable broker-style line ──
+    // ── Resting orders (right-click) - each a draggable broker-style line ──
     function orderLine(o) {
       return chart.addPriceLine({
         price: o.price, color: o.side === 'BUY' ? UP : DOWN, lineWidth: 1, dashed: true,
@@ -354,7 +434,7 @@
       const o = { id: nextOrderId++, side, type, price: round2(price), qty, product: el('product').value };
       o.line = chart ? orderLine(o) : null;
       orders.push(o);
-      el('status').textContent = `${side} ${type} ${qty} ${req.symbol} @ ${fmt(o.price)} (${o.product}) — drag the line to modify`;
+      el('status').textContent = `${side} ${type} ${qty} ${req.symbol} @ ${fmt(o.price)} (${o.product}) - drag the line to modify`;
       saveState();
     }
     function attachOrderLines() { for (const o of orders) o.line = orderLine(o); } // on chart rebuild
@@ -363,7 +443,7 @@
       orders = [];
     }
 
-    // Execute a market order at the last price → update the net position, drop an
+    // Execute a market order at the last price -> update the net position, drop an
     // arrow marker on the bar, and (re)draw the position line.
     function fillMarket(side, qty) {
       if (!currentBars.length) return;
@@ -373,7 +453,7 @@
       if (!position || position.netQty === 0) {
         position = { netQty: signed, avgPrice: price };
       } else if (Math.sign(position.netQty) === Math.sign(signed)) {
-        const net = position.netQty + signed; // adding → volume-weighted average
+        const net = position.netQty + signed; // adding -> volume-weighted average
         position.avgPrice = (position.avgPrice * position.netQty + price * signed) / net;
         position.netQty = net;
       } else {
@@ -391,8 +471,8 @@
       updatePositionLine();
       const p = position;
       el('status').textContent = p
-        ? `${side} MARKET ${qty} filled @ ${fmt(price)} → ${p.netQty > 0 ? 'LONG' : 'SHORT'} ${Math.abs(p.netQty)} @ ${fmt(p.avgPrice)}`
-        : `${side} MARKET ${qty} filled @ ${fmt(price)} → flat`;
+        ? `${side} MARKET ${qty} filled @ ${fmt(price)} -> ${p.netQty > 0 ? 'LONG' : 'SHORT'} ${Math.abs(p.netQty)} @ ${fmt(p.avgPrice)}`
+        : `${side} MARKET ${qty} filled @ ${fmt(price)} -> flat`;
       saveState();
     }
     // P&L of the open position marked at `mp` (defaults to the latest close).
@@ -442,10 +522,10 @@
       if (!act || !bracket) return;
       if (act === 'cancel') { removeBracket(); saveState(); el('status').textContent = 'bracket cancelled'; }
       else if (act === 'place') {
-        el('status').textContent = `placed ${bracket.side} OCO bracket — ${bracket.qty} entry ${fmt(bracket.entry)} · TP ${fmt(bracket.target)} · SL ${fmt(bracket.stop)} (target/stop are OCO)`;
+        el('status').textContent = `placed ${bracket.side} OCO bracket - ${bracket.qty} entry ${fmt(bracket.entry)} · TP ${fmt(bracket.target)} · SL ${fmt(bracket.stop)} (target/stop are OCO)`;
       } else if (act === 'modify') {
         const rr = (Math.abs(bracket.target - bracket.entry) / Math.max(1e-9, Math.abs(bracket.entry - bracket.stop))).toFixed(2);
-        el('status').textContent = `bracket — entry ${fmt(bracket.entry)} · TP ${fmt(bracket.target)} · SL ${fmt(bracket.stop)} · R:R ${rr}`;
+        el('status').textContent = `bracket - entry ${fmt(bracket.entry)} · TP ${fmt(bracket.target)} · SL ${fmt(bracket.stop)} · R:R ${rr}`;
       }
     });
 
@@ -466,14 +546,14 @@
         const avg = currentBars.reduce((s, b) => s + b.close, 0) / (currentBars.length || 1);
         style.baseValue = avg;
       }
-      price = chart.addSeries(type, { style }); // first series → drives the OHLC legend
+      price = chart.addSeries(type, { style }); // first series -> drives the OHLC legend
       volume = chart.addSeries('histogram', { paneIndex: 1, style: { color: '#33415e' } });
       price.setData(currentBars);
       volume.setData(currentBars.map((b) => ({ time: b.time, open: 0, high: b.volume, low: 0, close: b.volume })));
       markersApi = price.createMarkers(); // executed-fill arrows
       markersApi.setMarkers(fills);
 
-      // Supertrend(10, 3) overlay — green uptrend / red downtrend (openalgo.ta.supertrend).
+      // Supertrend(10, 3) overlay - green uptrend / red downtrend (openalgo.ta.supertrend).
       if (el('st').checked) {
         const { up, down } = supertrendSeries(currentBars, 10, 3);
         chart.addSeries('line', { style: { color: UP, lineWidth: 2 } }).setData(up);
@@ -490,8 +570,8 @@
         chart.addPriceLine({ price: 50, color: '#5a6072', lineWidth: 1, dashed: true, id: 'rsi-50', label: '50' }, rsiPane);
       }
 
-      // Chart trading: one drag handler routes both — drag a bracket leg → move
-      // that leg; drag a resting order line → re-price that order. Both are redrawn
+      // Chart trading: one drag handler routes both - drag a bracket leg -> move
+      // that leg; drag a resting order line -> re-price that order. Both are redrawn
       // on the freshly-rebuilt chart.
       chart.subscribeDrag((externalId, p) => {
         if (externalId.startsWith('bk-')) { setBracketPrice(externalId.slice(3), p); return; }
@@ -513,7 +593,7 @@
         attachBracketLines(); updateBracket();
       }
 
-      // OHLC legend tracks the crosshair. The position P&L does NOT — it marks to
+      // OHLC legend tracks the crosshair. The position P&L does NOT - it marks to
       // the LTP (the latest close here; with a live feed, update it on each tick).
       chart.subscribeCrosshairMove((e) => setLegend(e.bar ?? currentBars[currentBars.length - 1]));
       setLegend(currentBars[currentBars.length - 1]);
@@ -582,7 +662,7 @@
     el('load').addEventListener('click', load);
     el('fit').addEventListener('click', () => { if (chart) chart.resetScale(); });
     el('symbol').addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
-    // Export the full chart (all layers composited) — native right-click "Save image"
+    // Export the full chart (all layers composited) - native right-click "Save image"
     // only grabs the canvas under the pointer (the transparent crosshair overlay).
     el('save').addEventListener('click', () => {
       if (!chart) return;
