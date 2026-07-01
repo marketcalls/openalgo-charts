@@ -88,6 +88,24 @@ export interface AddSeriesOptions {
    * for a volume histogram inside the price pane.
    */
   priceScaleId?: PriceScaleId;
+  /**
+   * Value formatting applied to this series' price scale (axis + crosshair tag):
+   * `price` (tick-size precision), `volume` (compact 1.2K / 3.4M / 5.6B), or a
+   * `custom` formatter (currency, percent, ...).
+   */
+  priceFormat?:
+    | { type: 'price'; precision?: number; minMove?: number }
+    | { type: 'volume' }
+    | { type: 'custom'; formatter: (value: number) => string };
+}
+
+/** Compact volume/number formatter (1.2K / 3.4M / 5.6B). */
+export function compactVolume(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+  if (a >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return (v / 1e3).toFixed(2) + 'K';
+  return String(Math.round(v));
 }
 
 /**
@@ -300,6 +318,16 @@ export class Chart {
     const record = createSeriesRecord(dataId, type, options.style, options.priceScaleId ?? 'right');
     this._panes[paneIndex].addSeries(record);
     this._recomputeLeftAxis(); // reserve/free the left-axis column
+    if (options.priceFormat) {
+      const scale = this._panes[paneIndex].scaleOf(record);
+      const pf = options.priceFormat;
+      if (pf.type === 'custom') scale.setPriceFormatter(pf.formatter);
+      else if (pf.type === 'volume') scale.setPriceFormatter(compactVolume);
+      else {
+        const minMove = pf.minMove ?? (pf.precision !== undefined ? Math.pow(10, -pf.precision) : undefined);
+        if (minMove !== undefined) scale.setOptions({ minMove });
+      }
+    }
 
     return {
       setData: (bars: readonly SeriesDataItem[]): void => this._setData(dataId, bars.map(toBar)),

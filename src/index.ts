@@ -3,7 +3,7 @@
 
 export { VERSION, version } from './version';
 
-export { createChart, Chart } from './core/chart';
+export { createChart, Chart, compactVolume } from './core/chart';
 export type { ChartOptions, AddSeriesOptions, CrosshairMoveEvent } from './core/chart';
 export { Pane } from './core/pane';
 export { darkTheme, lightTheme, DEFAULT_THEME } from './theme';

@@ -171,3 +171,24 @@ describe('Task 1b: reserved left-axis column', () => {
     expect(chart.timeScale.width).toBe(widthNoLeft); // column freed
   });
 });
+
+describe('Task 4: per-series priceFormat', () => {
+  const immediate = { raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} } };
+  it('a custom formatter formats the series axis (currency)', () => {
+    const chart = makeChart(immediate);
+    const s = chart.addSeries('line', { priceFormat: { type: 'custom', formatter: (v) => 'Rs ' + v.toFixed(2) } });
+    s.setData([bar(100, 10), bar(160, 20)]);
+    expect(s.priceScale().format(15)).toBe('Rs 15.00');
+  });
+  it('volume format is compact', () => {
+    const chart = makeChart(immediate);
+    const v = chart.addSeries('histogram', { priceScaleId: '', priceFormat: { type: 'volume' } });
+    expect(v.priceScale().format(1_500_000)).toBe('1.50M');
+    expect(v.priceScale().format(12_300)).toBe('12.30K');
+  });
+  it('price precision derives from minMove', () => {
+    const chart = makeChart(immediate);
+    const s = chart.addSeries('line', { priceFormat: { type: 'price', minMove: 0.05 } });
+    expect(s.priceScale().format(100.123)).toBe('100.12');
+  });
+});
