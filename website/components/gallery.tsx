@@ -165,6 +165,57 @@ export const IndicatorsCard = () => (
 );
 
 /* -------------------------------------------------------------------------- */
+/* Price scale (min / avg / max labelled price lines)                         */
+const buildPriceScale: BuildFn = (el, lib, _tab) => {
+  const chart = lib.createChart(el);
+  const bars = walk(9, 160, 1700000000, 86400, 60, 1.4);
+  chart.addSeries('area', { style: { color: '#4f8cff', lineWidth: 2, areaTopColor: 'rgba(79,140,255,0.4)', areaBottomColor: 'rgba(79,140,255,0)' } }).setData(bars);
+  const closes = bars.map((b: any) => b.close);
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const avg = closes.reduce((a: number, b: number) => a + b, 0) / closes.length;
+  chart.addPriceLine({ price: max, color: '#26a69a', lineWidth: 1, dashed: true, id: 'max', leftLabel: 'maximum price' });
+  chart.addPriceLine({ price: avg, color: '#8892a0', lineWidth: 1, dashed: true, id: 'avg', leftLabel: 'average price' });
+  chart.addPriceLine({ price: min, color: '#ef5350', lineWidth: 1, dashed: true, id: 'min', leftLabel: 'minimum price' });
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+export const PriceScaleCard = () => (
+  <InteractiveChart title="Price scale" build={buildPriceScale} />
+);
+
+/* -------------------------------------------------------------------------- */
+/* Custom chart types (stacked area / HLC area)                               */
+const buildCustomTypes: BuildFn = (el, lib, tab) => {
+  const chart = lib.createChart(el);
+  if (tab === 'hlc') {
+    const bars = lib.generateBars(1700000000, 160, 86400);
+    chart.addSeries('hlc-area', { style: { color: '#4f8cff', lineWidth: 2, areaTopColor: 'rgba(79,140,255,0.35)', areaBottomColor: 'rgba(79,140,255,0)' } }).setData(bars);
+    chart.timeScale.fitContent(bars.length);
+    return chart;
+  }
+  // Stacked area: three positive layers, cumulated so the bands stack.
+  const n = 120;
+  const a = walk(1, n, 1700000000, 86400, 20, 0.7).map((b: any) => b.close);
+  const b = walk(2, n, 1700000000, 86400, 15, 0.6).map((x: any) => x.close);
+  const c = walk(3, n, 1700000000, 86400, 10, 0.5).map((x: any) => x.close);
+  const stack = (top: number[]): any[] => top.map((v, i) => ({ time: 1700000000 + i * 86400, open: v, high: v, low: v, close: v }));
+  const cumC = a.map((v, i) => v + b[i] + c[i]);
+  const cumB = a.map((v, i) => v + b[i]);
+  const cumA = a.slice();
+  // draw largest first so each smaller band paints over the lower part
+  chart.addSeries('area', { style: { color: '#4f8cff', lineWidth: 1, areaTopColor: 'rgba(79,140,255,0.5)', areaBottomColor: 'rgba(79,140,255,0.5)' } }).setData(stack(cumC));
+  chart.addSeries('area', { style: { color: '#22c1a4', lineWidth: 1, areaTopColor: 'rgba(34,193,164,0.55)', areaBottomColor: 'rgba(34,193,164,0.55)' } }).setData(stack(cumB));
+  chart.addSeries('area', { style: { color: '#f5a623', lineWidth: 1, areaTopColor: 'rgba(245,166,35,0.6)', areaBottomColor: 'rgba(245,166,35,0.6)' } }).setData(stack(cumA));
+  chart.timeScale.fitContent(n);
+  return chart;
+};
+export const CustomTypesCard = () => (
+  <InteractiveChart title="Custom chart types" build={buildCustomTypes}
+    tabs={[{ label: 'Stacked area', key: 'stacked' }, { label: 'HLC area', key: 'hlc' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
 /* Positions & orders (chart.trading)                                         */
 const buildPositions: BuildFn = (el, lib, tab) => {
   const chart = lib.createChart(el);
