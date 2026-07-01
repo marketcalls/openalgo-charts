@@ -48,7 +48,7 @@
     #bracket .bk .bk-mod { background: #2c3349; color: #c7ccd8; }
     .hint { opacity: .4; font-size: 11px; }
 
-    /* NinjaTrader-style right-click order menu */
+    /* broker-style right-click order menu */
     #ctxmenu {
       position: fixed; z-index: 30; min-width: 168px; background: #11151f; border: 1px solid #2a3046;
       border-radius: 8px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.5); font: 12px system-ui, sans-serif;
@@ -126,7 +126,7 @@
     </div>
   </div>
 
-  <!-- NinjaTrader-style right-click order menu (price under the cursor) -->
+  <!-- broker-style right-click order menu (price under the cursor) -->
   <div id="ctxmenu" hidden>
     <button class="buy" data-side="BUY" data-type="MARKET">Buy Market</button>
     <button class="sell" data-side="SELL" data-type="MARKET">Sell Market</button>
@@ -157,7 +157,7 @@
 
     const feed = new YFinanceDataFeed();
     const UP = '#26a69a', DOWN = '#ef5350';
-    const TRADE_EXTENT = 0.30; // order/bracket lines span only the rightmost 30% (NinjaTrader-style)
+    const TRADE_EXTENT = 0.30; // order/bracket lines span only the rightmost 30% (broker-style)
     let chart, price, volume;
 
     // Resting orders placed by right-click: each is one draggable price line.
@@ -332,7 +332,7 @@
       bracket = null; bLines = null; el('bracket').hidden = true;
     }
 
-    // ── Resting orders (right-click) — each a draggable NinjaTrader-style line ──
+    // ── Resting orders (right-click) — each a draggable broker-style line ──
     function orderLine(o) {
       return chart.addPriceLine({
         price: o.price, color: o.side === 'BUY' ? UP : DOWN, lineWidth: 1, dashed: true,
@@ -543,7 +543,7 @@
     el('cancel').addEventListener('click', () => { removeBracket(); removeAllOrders(); clearPosition(); saveState(); el('status').textContent = 'cancelled / flat'; });
     el('qty').addEventListener('change', () => { if (bracket) { bracket.qty = Math.max(1, Number(el('qty').value) || 1); updateBracket(); saveState(); } });
 
-    // ── NinjaTrader-style right-click order entry ───────────────────────────
+    // ── broker-style right-click order entry ───────────────────────────
     // Right-click the chart to open a menu and place an order at the cursor price.
     // LIMIT/SL orders appear as draggable working-order lines; MARKET fills now.
     const ctxMenu = el('ctxmenu');

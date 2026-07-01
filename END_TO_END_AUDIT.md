@@ -5,7 +5,7 @@ Date: 2026-06-26
 Scope:
 
 - Package audited: `D:\testing\openalgo-charts`
-- Reference implementation reviewed: `D:\testing\lightweight-charts`
+- Reference implementation reviewed: an external open-source canvas charting library
 - Architecture reviewed: `ARCHITECTURE.md`
 - Local OpenAlgo API reference checked for `/api/v1/history`: `D:\testing\openalgo\docs\api\market-data\history.md`
 - Git revision during audit: `1200454`
@@ -98,7 +98,7 @@ Evidence:
 - `vitest.config.ts:6` uses `environment: 'node'`.
 - Tests use fake/recording contexts, not real browser canvases.
 - `ARCHITECTURE.md:843` calls for renderer pixel goldens.
-- The local `lightweight-charts` reference has extensive browser-facing structure: `src/gui/mouse-event-handler.ts`, `src/gui/pane-widget.ts`, `src/gui/price-axis-widget.ts`, `src/gui/time-axis-widget.ts`, and pane separators.
+- The reference implementation has extensive browser-facing structure: separate GUI widgets for the mouse-event handler, pane, price axis, and time axis, plus pane separators.
 
 Impact:
 
@@ -252,7 +252,7 @@ Evidence:
 
 - `src/core/chart.ts:346-350` attaches pointer, wheel, and dblclick handlers.
 - Mouse drag kinetic scrolling exists, but there is no dedicated multi-touch pinch path.
-- The lightweight reference has explicit touch handling in `src/gui/mouse-event-handler.ts`, `src/gui/pane-widget.ts`, and `src/gui/time-axis-widget.ts`.
+- The reference implementation has explicit touch handling in its GUI mouse-event, pane, and time-axis widgets.
 
 Impact:
 
@@ -327,12 +327,12 @@ Recommendation:
 
 Change the example to `{ style: { color: '#33415e' } }`, or add typed per-series option support.
 
-### M5. Primitive API is thinner than the architecture and lightweight-charts plugin model
+### M5. Primitive API is thinner than the architecture and a mature plugin model
 
 Evidence:
 
 - `src/primitives/primitive.ts:40-47` supports draw, autoscale, hitTest, attached, and detached.
-- The lightweight reference exposes pane views, price-axis views, time-axis views, axis-pane views, wrappers, and plugin templates in `src/model/iseries-primitive.ts` and `packages/create-lwc-plugin`.
+- The reference implementation exposes pane views, price-axis views, time-axis views, axis-pane views, wrappers, and plugin templates.
 - `src/core/chart.ts:513-526` destroys panes without calling `detached()` on attached primitives.
 
 Impact:
@@ -349,7 +349,7 @@ Evidence:
 
 - The architecture describes separate price/time axis widgets.
 - Current `Pane.paintBase()` draws axes inside the pane canvas path (`src/core/pane.ts:143-208`).
-- Lightweight-charts uses separate `price-axis-widget.ts` and `time-axis-widget.ts`.
+- The reference implementation uses separate price-axis and time-axis widgets.
 
 Impact:
 
@@ -408,15 +408,15 @@ Add a browser smoke test that serves `examples/`, loads each page, waits for can
 | Browser interactions | Mouse drag, wheel zoom, kinetic scroll exist. | Pinch/touch and browser E2E missing. |
 | Testing | 154 node/unit tests pass. | Pixel, real canvas, ResizeObserver, pointer, example, and OpenAlgo adapter tests missing. |
 
-## Lightweight-Charts Comparison Notes
+## Reference Implementation Comparison Notes
 
-The local `D:\testing\lightweight-charts` reference is much larger and more mature. The main lessons that still apply to OpenAlgo Charts are:
+The external reference implementation is much larger and more mature. The main lessons that still apply to OpenAlgo Charts are:
 
 - It separates chart, pane, price-axis, and time-axis widgets (`src/gui/chart-widget.ts`, `src/gui/pane-widget.ts`, `src/gui/price-axis-widget.ts`, `src/gui/time-axis-widget.ts`).
 - It has a dedicated mouse/touch event handler and explicit touch paths (`src/gui/mouse-event-handler.ts`, `src/gui/pane-widget.ts`).
 - It supports pane separators/resizing (`src/gui/pane-separator.ts`).
 - Its price scale supports log, percentage, indexed-to-100, and richer formatter/axis behavior (`src/model/price-scale.ts`).
-- Its primitive/plugin model has pane views, axis views, axis-pane views, wrappers, and plugin templates (`src/model/iseries-primitive.ts`, `packages/create-lwc-plugin`).
+- Its primitive/plugin model has pane views, axis views, axis-pane views, wrappers, and plugin templates.
 
 OpenAlgo Charts does not need to clone all of that to stay lightweight, but the architecture currently promises several of those behaviors. Either implement the subset that matters, or explicitly document the smaller scope.
 

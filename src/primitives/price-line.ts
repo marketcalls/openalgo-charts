@@ -12,12 +12,12 @@ export interface PriceLineOptions {
   dashed: boolean;
   /** Right-axis tag text. Defaults to the formatted price. */
   label?: string;
-  /** Optional tag drawn at the LEFT end of the line (NinjaTrader-style order tag). */
+  /** Optional tag drawn at the LEFT end of the line (broker-style order tag). */
   leftLabel?: string;
   /**
    * Fraction of the plot width the line spans, measured from the right (price)
-   * axis. 1 = full width (default); 0.3 = only the rightmost 30% — like a
-   * NinjaTrader order line. The right-axis tag is always drawn.
+   * axis. 1 = full width (default); 0.3 = only the rightmost 30%, like a
+   * partial-width order line. The right-axis tag is always drawn.
    */
   extentFromRight?: number;
   /** Draw a small cancel (cross) box at the right end; hit-tests as `${id}::close`. */
