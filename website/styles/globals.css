@@ -8,6 +8,36 @@
   background: var(--oac-card); padding: 14px 16px 10px; min-width: 0;
 }
 .oac-card h3 { margin: 0 0 10px; font-size: 1.15rem; font-weight: 750; }
+.oac-card__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.oac-card__head h3 { margin: 0; }
+.oac-code-btn {
+  font: 600 .8rem ui-sans-serif, system-ui, sans-serif; padding: 5px 11px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--oac-card-border); background: transparent; color: inherit; white-space: nowrap;
+  transition: border-color .12s, color .12s;
+}
+.oac-code-btn:hover { border-color: var(--oac-accent); color: var(--oac-accent); }
+.oac-card__code {
+  margin: 10px 0 4px; padding: 12px 14px; border-radius: 10px; background: var(--oac-code-bg);
+  border: 1px solid var(--oac-card-border); overflow: auto; max-height: 280px;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: #c9d1d9; white-space: pre;
+}
+.oac-card__code code { font: inherit; background: none; padding: 0; border: none; color: inherit; }
+/* Data-tooltip demo overlays */
+.oac-tip {
+  position: absolute; z-index: 12; pointer-events: none; transform: translateX(-50%);
+  background: #0d1117; border: 1px solid #ef5350; border-radius: 10px; padding: 8px 14px; text-align: center;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); white-space: nowrap;
+}
+.oac-tip__name { color: #ef5350; font-size: 12px; font-weight: 600; }
+.oac-tip__val { color: #eef1f7; font-size: 22px; font-weight: 700; line-height: 1.15; }
+.oac-tip__date { color: #8b93a7; font-size: 11px; }
+.oac-tip--track { transform: none; border-color: var(--oac-card-border); padding: 6px 11px; }
+.oac-tip--mag { transform: none; border-color: var(--oac-accent); padding: 5px 10px; color: #eef1f7; font-weight: 700; }
+.oac-tip-dot {
+  position: absolute; z-index: 11; width: 10px; height: 10px; border-radius: 50%;
+  background: #ef5350; border: 2px solid #0d1117; transform: translate(-50%, -50%);
+  pointer-events: none; box-shadow: 0 0 0 2px #ef5350;
+}
 .oac-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .oac-tab {
   font: 600 13px ui-sans-serif, system-ui, sans-serif; padding: 6px 12px; border-radius: 8px;

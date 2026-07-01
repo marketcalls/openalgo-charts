@@ -25,10 +25,11 @@ function walk(seed: number, n: number, startTime: number, intervalSec: number, s
 interface Tab { label: string; key: string; }
 type BuildFn = (el: HTMLElement, lib: any, tab: string) => any;
 
-function InteractiveChart({ title, tabs, build, height = 320 }: { title: string; tabs?: Tab[]; build: BuildFn; height?: number }) {
+function InteractiveChart({ title, tabs, build, height = 320, code }: { title: string; tabs?: Tab[]; build: BuildFn; height?: number; code?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState(tabs?.[0]?.key ?? '');
   const [err, setErr] = useState<string | null>(null);
+  const [showCode, setShowCode] = useState(false);
 
   useEffect(() => {
     let chart: any;
@@ -51,7 +52,14 @@ function InteractiveChart({ title, tabs, build, height = 320 }: { title: string;
 
   return (
     <div className="oac-card">
-      <h3>{title}</h3>
+      <div className="oac-card__head">
+        <h3>{title}</h3>
+        {code && (
+          <button className="oac-code-btn" onClick={() => setShowCode((v) => !v)}>
+            {showCode ? 'Hide code' : 'Get this chart'}
+          </button>
+        )}
+      </div>
       {tabs && (
         <div className="oac-tabs">
           {tabs.map((t) => (
@@ -60,6 +68,7 @@ function InteractiveChart({ title, tabs, build, height = 320 }: { title: string;
         </div>
       )}
       <div className="oac-card__chart" ref={ref} style={{ height }} />
+      {code && showCode && <pre className="oac-card__code"><code>{code}</code></pre>}
       {err && <div className="oac-example__err" style={{ position: 'static', padding: '8px 0' }}>Demo error: {err}</div>}
     </div>
   );
@@ -364,8 +373,14 @@ const buildChartType: BuildFn = (el, lib, tab) => {
   chart.timeScale.fitContent(bars.length);
   return chart;
 };
+const CHART_TYPE_CODE = `const chart = createChart(el);
+const bars = generateBars(1700000000, 160, 86400);
+
+// One call, any registered type: candlestick | line | bar | area | baseline | step
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(bars.length);`;
 export const ChartTypeCard = () => (
-  <InteractiveChart title="Chart type" build={buildChartType}
+  <InteractiveChart title="Chart type" build={buildChartType} code={CHART_TYPE_CODE}
     tabs={[{ label: 'Candles', key: 'candles' }, { label: 'Line', key: 'line' }, { label: 'Bars', key: 'bars' }, { label: 'Area', key: 'area' }, { label: 'Baseline', key: 'baseline' }, { label: 'Step', key: 'step' }]} />
 );
 
@@ -387,9 +402,113 @@ const buildTheme: BuildFn = (el, lib, tab) => {
   chart.timeScale.fitContent(bars.length);
   return chart;
 };
+const THEME_CODE = `import { createChart, darkTheme, lightTheme } from 'openalgo-charts';
+
+// A theme drives chrome + series defaults. Override any tokens you like.
+const colorful = { ...darkTheme, background: '#0b0710', lineColor: '#8b5cf6',
+  areaTopColor: 'rgba(139,92,246,0.5)', areaBottomColor: 'rgba(139,92,246,0)' };
+
+const chart = createChart(el, { theme: colorful }); // or darkTheme / lightTheme
+chart.addSeries('area').setData(bars); // style-less area inherits theme colors`;
 export const ThemeCard = () => (
-  <InteractiveChart title="Custom theme" build={buildTheme}
+  <InteractiveChart title="Custom theme" build={buildTheme} code={THEME_CODE}
     tabs={[{ label: 'Dark', key: 'dark' }, { label: 'Light', key: 'light' }, { label: 'Colorful', key: 'colorful' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
+/* Data tooltip (floating / tracking / magnifier)                             */
+const buildTooltip: BuildFn = (el, lib, tab) => {
+  const chart = lib.createChart(el);
+  const bars = walk(23, 160, 1551398400, 86400, 78, 0.7);
+  chart.addSeries('area', { style: { color: '#ef5350', lineWidth: 2, areaTopColor: 'rgba(239,83,80,0.35)', areaBottomColor: 'rgba(239,83,80,0)' } }).setData(bars);
+  el.style.position = 'relative';
+  const tip = document.createElement('div');
+  tip.style.display = 'none';
+  el.appendChild(tip);
+  const dot = document.createElement('div');
+  dot.className = 'oac-tip-dot';
+  dot.style.display = 'none';
+  el.appendChild(dot);
+  const fmtDate = (t: number): string => { const d = new Date(t * 1000); return d.getUTCFullYear() + '-' + (d.getUTCMonth() + 1) + '-' + d.getUTCDate(); };
+  chart.subscribeCrosshairMove((e: any) => {
+    if (!e.bar || !e.point) { tip.style.display = 'none'; dot.style.display = 'none'; return; }
+    tip.style.display = 'block';
+    const y = chart.priceToCoordinate(e.bar.close, 0);
+    if (tab === 'magnifier') {
+      tip.className = 'oac-tip oac-tip--mag';
+      tip.textContent = e.bar.close.toFixed(2);
+      tip.style.left = (e.point.x + 18) + 'px'; tip.style.top = (e.point.y - 12) + 'px';
+      dot.style.display = 'none';
+    } else if (tab === 'tracking') {
+      tip.className = 'oac-tip oac-tip--track';
+      tip.innerHTML = '<span class="oac-tip__name">Apple Inc.</span> &nbsp; <b style="color:#eef1f7">' + e.bar.close.toFixed(2) + '</b> &nbsp; <span class="oac-tip__date">' + fmtDate(e.bar.time) + '</span>';
+      tip.style.left = Math.min(Math.max(e.point.x, 90), el.clientWidth - 90) + 'px'; tip.style.top = '10px';
+      dot.style.display = 'none';
+    } else {
+      tip.className = 'oac-tip';
+      tip.innerHTML = '<div class="oac-tip__name">Apple Inc.</div><div class="oac-tip__val">' + e.bar.close.toFixed(2) + '</div><div class="oac-tip__date">' + fmtDate(e.bar.time) + '</div>';
+      tip.style.left = e.point.x + 'px'; tip.style.top = (y - tip.offsetHeight - 14) + 'px';
+      dot.style.left = e.point.x + 'px'; dot.style.top = y + 'px'; dot.style.display = 'block';
+    }
+  });
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+const TOOLTIP_CODE = `const chart = createChart(el);
+chart.addSeries('area', { style: { color: '#ef5350', lineWidth: 2 } }).setData(bars);
+
+// A floating tooltip anchored to the hovered bar, driven by the crosshair.
+const tip = document.createElement('div');
+el.style.position = 'relative';
+el.appendChild(tip);
+
+chart.subscribeCrosshairMove((e) => {
+  if (!e.bar || !e.point) { tip.style.display = 'none'; return; }
+  const y = chart.priceToCoordinate(e.bar.close, 0);   // price -> container px
+  tip.textContent = e.bar.close.toFixed(2);
+  tip.style.left = e.point.x + 'px';                    // e.point is the crosshair
+  tip.style.top = (y - tip.offsetHeight - 14) + 'px';
+  tip.style.display = 'block';
+});`;
+export const DataTooltipCard = () => (
+  <InteractiveChart title="Data tooltip" build={buildTooltip} code={TOOLTIP_CODE}
+    tabs={[{ label: 'Floating tooltip', key: 'floating' }, { label: 'Tracking tooltip', key: 'tracking' }, { label: 'Magnifier tooltip', key: 'magnifier' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
+/* Event markers (dividend / earnings / split / expiry)                       */
+const buildEventMarkers: BuildFn = (el, lib, _tab) => {
+  const chart = lib.createChart(el);
+  const bars = lib.generateBars(1700000000, 160, 86400);
+  chart.addSeries('candlestick').setData(bars);
+  const em = chart.addEventMarkers(0);
+  em.setEvents([
+    { time: bars[26].time, type: 'dividend', label: 'D', id: 'div' },
+    { time: bars[64].time, type: 'earnings', label: 'E', id: 'ern' },
+    { time: bars[104].time, type: 'split', label: 'S', id: 'spl' },
+    { time: bars[140].time, type: 'news', label: 'X', color: '#ef5350', id: 'exp' },
+  ]);
+  el.style.position = 'relative';
+  const legend = document.createElement('div');
+  legend.className = 'oac-legend oac-legend--multi';
+  legend.innerHTML = '<span class="oac-dot" style="background:#26a69a"></span>Dividend <span class="oac-dot" style="background:#f0a020"></span>Earnings <span class="oac-dot" style="background:#4f8cff"></span>Split <span class="oac-dot" style="background:#ef5350"></span>Expiry';
+  el.appendChild(legend);
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+const EVENTS_CODE = `const chart = createChart(el);
+chart.addSeries('candlestick').setData(bars);
+
+// Time-anchored badges near the axis (corporate actions, F&O expiry).
+const events = chart.addEventMarkers();
+events.setEvents([
+  { time: t1, type: 'dividend', label: 'D' },
+  { time: t2, type: 'earnings', label: 'E' },
+  { time: t3, type: 'split',    label: 'S' },
+  { time: t4, type: 'news',     label: 'X', color: '#ef5350' }, // expiry
+]);`;
+export const EventMarkersCard = () => (
+  <InteractiveChart title="Event markers" build={buildEventMarkers} code={EVENTS_CODE} />
 );
 
 /* -------------------------------------------------------------------------- */

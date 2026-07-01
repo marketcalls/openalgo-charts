@@ -93,6 +93,40 @@ const last = bars[bars.length - 1];
 series.update({ ...last, close: newPrice, high: Math.max(last.high, newPrice) });
 ```
 
+### Live streaming demo
+
+This chart streams: a timer ticks the forming candle a few times, then rolls a
+new one, all through `series.update`. Clean the timer up on teardown so it stops
+when the chart is destroyed.
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el);
+const series = chart.addSeries('candlestick');
+series.setData(lib.generateBars(1700000000, 90, 3600));
+chart.timeScale.fitContent(90);
+
+let last = series.getData().slice(-1)[0];
+let t = last.time, ticks = 0, seed = 7;
+const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+
+const id = setInterval(() => {
+  const move = (rnd() - 0.5) * 1.8;
+  if (ticks >= 6) {                          // roll a fresh candle
+    t += 3600;
+    last = { time: t, open: last.close, high: last.close, low: last.close, close: last.close + move };
+    ticks = 0;
+  } else {                                   // update the forming candle in place
+    const c = last.close + move;
+    last = { time: last.time, open: last.open, high: Math.max(last.high, c), low: Math.min(last.low, c), close: c };
+    ticks++;
+  }
+  series.update(last);
+}, 700);
+
+// Stop the stream when the chart is torn down.
+const destroy = chart.destroy.bind(chart);
+chart.destroy = () => { clearInterval(id); destroy(); };
+return chart;`} />
+
 ## Building bars from a tick stream
 
 When your WebSocket feed delivers raw trade ticks (price + quantity) rather
