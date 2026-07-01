@@ -10,6 +10,9 @@ chart.addSeries('candlestick').setData(bars);
 chart.addSeries('line', { style: { color: '#f5a623', lineWidth: 2 } })
      .setData(lib.emaSeries(bars, 21));
 
+// OpenAlgo brand watermark (drawn on the canvas, captured in screenshots).
+chart.addPrimitive(new lib.LogoWatermark({ src: '/openalgo-charts/openalgo-logo.svg', height: 30, opacity: 0.9 }));
+
 chart.timeScale.fitContent(bars.length);
 return chart;`;
 

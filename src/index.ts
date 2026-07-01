@@ -41,6 +41,8 @@ export { PriceLine } from './primitives/price-line';
 export type { PriceLineOptions } from './primitives/price-line';
 export { SeriesMarkers, markerSizePx, effectiveMarkerPx, drawShape } from './primitives/markers';
 export type { SeriesMarker, MarkerShape, MarkerPosition, MarkerSize } from './primitives/markers';
+export { LogoWatermark, watermarkRect } from './primitives/watermark';
+export type { LogoWatermarkOptions, WatermarkPosition } from './primitives/watermark';
 export { EventMarkers } from './primitives/event-markers';
 export type { ChartEvent } from './primitives/event-markers';
 

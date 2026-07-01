@@ -40,6 +40,42 @@ chart.addEventMarkers().setEvents([{ time, type: 'earnings', label: 'E' }]);
 chart.addPriceLine({ price: 101.5, color: '#3b82f6', lineWidth: 2, dashed: false, id: 'vwap' });
 ```
 
+## Logo / brand watermark
+
+`LogoWatermark` stamps a small image in a corner of the plot. It draws on the canvas (so it
+is captured by `takeScreenshot()`), is source-agnostic (pass a `src` URL/data-URI or a
+preloaded `image`), and an optional `tint` recolors the opaque pixels so a single-color logo
+reads on any theme.
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el);
+chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 140, 3600));
+
+// colored badge, bottom-right (the default corner)
+chart.addPrimitive(new lib.LogoWatermark({
+  src: '/openalgo-charts/openalgo-logo.svg', height: 34, opacity: 0.9,
+}));
+
+// same logo tinted to a faint gray, top-left
+chart.addPrimitive(new lib.LogoWatermark({
+  src: '/openalgo-charts/openalgo-logo.svg', position: 'top-left',
+  height: 26, opacity: 0.5, tint: '#8b91a7',
+}));
+
+chart.timeScale.fitContent(140);
+return chart;`} caption="LogoWatermark: a colored badge and a tinted monochrome mark." />
+
+| Option | Default | Description |
+|---|---|---|
+| `src` / `image` | - | image URL / data URI, or a preloaded image / bitmap |
+| `position` | `bottom-right` | `top-left` / `top-right` / `bottom-left` / `bottom-right` / `center` |
+| `height` | `28` | logo height in px (width follows the source aspect) |
+| `margin` | `12` | gap from the plot edges in px |
+| `opacity` | `0.7` | 0..1 |
+| `tint` | - | recolor opaque pixels (e.g. a faint theme gray) |
+| `zOrder` | `top` | `bottom` / `normal` / `top` |
+
+Swap or restyle it live with `watermark.setOptions({ ... })`.
+
 ## A custom chart type
 
 Register a renderer once and use it like any built-in type:

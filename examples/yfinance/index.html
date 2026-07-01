@@ -141,7 +141,7 @@
   </div>
 
   <script type="module">
-    import { createChart, rsiSeries, supertrendSeries } from '/dist/openalgo-charts.mjs';
+    import { createChart, rsiSeries, supertrendSeries, LogoWatermark } from '/dist/openalgo-charts.mjs';
 
     // A broker-agnostic DataFeed for yfinance: getBars hits this demo's /api/history,
     // which already returns the chart's Bar shape (time in UTC seconds).
@@ -457,6 +457,8 @@
         priceAxisWidth: 72, // free crosshair (follows pointer)
         grid: { vertLines: el('vgrid').checked, horzLines: el('hgrid').checked },
       });
+      // OpenAlgo brand watermark (on-canvas, captured by screenshots).
+      chart.addPrimitive(new LogoWatermark({ src: '/examples/openalgo-logo.svg', height: 30, opacity: 0.9 }));
 
       const type = el('ctype').value;
       const style = {};
