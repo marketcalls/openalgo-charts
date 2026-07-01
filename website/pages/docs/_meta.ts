@@ -17,6 +17,7 @@ export default {
   'volume-profile': 'Volume Profile',
   'crosshair-and-legend': 'Crosshair & Legend',
   interactions: 'Interactions & A11y',
+  'keyboard-shortcuts': 'Keyboard Shortcuts',
 
   '-- trading': { type: 'separator', title: 'Trading' },
   trading: 'On-Chart Trading',

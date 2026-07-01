@@ -1,0 +1,162 @@
+---
+title: Keyboard Shortcuts
+description: A rebindable keyboard shortcut system - default keymap, combo format, presets, scope, custom commands, persistence, and events.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Keyboard Shortcuts
+
+The chart ships a small, framework-free keyboard system: a default keymap wired to real chart
+actions, layout-independent combos, live rebinding, an alternate preset, hover-vs-global
+scope, custom commands, and optional persistence. It is **on by default** - pass
+`shortcuts: false` to `createChart` to turn it off.
+
+## Try it
+
+Hover (or click) this chart and use the keys:
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el);
+chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 160, 3600));
+chart.timeScale.fitContent(160);
+return chart;`} caption="Arrows pan · = / - zoom · Home or 0 reset · Alt+V / Alt+H toggle grids · Alt+M crosshair magnet · Alt+Shift+S screenshot." />
+
+## Default keymap
+
+`Mod` is the platform accelerator: **Ctrl** on Windows/Linux, **⌘** on macOS.
+
+| Command | Action | Default |
+|---|---|---|
+| `panLeft` / `panRight` | Pan one bar | `←` / `→` |
+| `panLeftFast` / `panRightFast` | Pan ten bars | `Mod + ←` / `Mod + →` |
+| `panUp` / `panDown` | Pan price | `↑` / `↓` |
+| `zoomIn` / `zoomOut` | Zoom | `=` / `-` |
+| `resetScale` | Fit + re-enable autoscale | `Home` / `0` |
+| `fitContent` | Fit all bars | `Alt + F` |
+| `screenshot` | Download a PNG | `Alt + Shift + S` |
+| `toggleGridVert` / `toggleGridHorz` | Toggle grid lines | `Alt + V` / `Alt + H` |
+| `toggleCrosshairMagnet` | Free vs magnet crosshair | `Alt + M` |
+
+## Combo format
+
+Combos are strings of zero or more modifiers then one key, joined with `+`, using
+**physical key codes** so bindings survive keyboard layouts.
+
+- **Modifiers**, in this order: `Mod`, `Ctrl`, `Meta`, `Alt`, `Shift`.
+- **Keys** are codes: `KeyA`-`KeyZ`, `Digit0`-`Digit9`, `ArrowLeft/Right/Up/Down`, `Home`,
+  `Equal`, `Minus`, `Space`, `Escape`, `F1`-`F12`, …
+
+Examples: `'Alt+KeyR'`, `'Mod+ArrowLeft'`, `'Shift+Digit0'`.
+
+## Configure at creation
+
+```ts
+import { createChart } from 'openalgo-charts';
+
+const chart = createChart(el, {
+  shortcuts: {
+    preset: 'default',          // or 'alt'
+    scope: 'hover',             // or 'global'
+    overrides: {
+      panLeftFast: 'Alt+ArrowLeft', // rebind
+      screenshot: null,             // unbind (still listed)
+    },
+    disabledCommands: ['toggleCrosshairMagnet'],
+    customShortcuts: [
+      { command: 'openOrders', label: 'Open orders', combos: 'Alt+KeyO', onTrigger: () => openOrders() },
+    ],
+    persist: true,              // save rebinds to localStorage
+  },
+});
+```
+
+## Rebind live
+
+`chart.shortcuts` is the manager (or `null` when disabled):
+
+```ts
+chart.shortcuts?.setBinding('zoomIn', 'Shift+Equal'); // returns false for reserved combos
+chart.shortcuts?.disable('panUp');
+chart.shortcuts?.resetBinding('panUp');
+chart.shortcuts?.setPreset('alt');
+chart.shortcuts?.resetAll();
+
+chart.shortcuts?.list();   // [{ command, label, combos, isCustom, isDisabled }]
+chart.shortcuts?.state();  // { preset, overrides, disabled } - serializable
+```
+
+<Callout type="info">
+Browser/OS-reserved combos (`Mod+KeyW`, `Mod+KeyT`, `Mod+KeyR`, …) can't be bound -
+`setBinding` returns `false` and leaves the command unchanged. Check with `isReservedCombo`.
+</Callout>
+
+## Alt preset
+
+`preset: 'alt'` (or `chart.shortcuts.setPreset('alt')`) is an overlay on the defaults - only
+the combos with a different convention change:
+
+| Command | Alt preset |
+|---|---|
+| `panLeftFast` / `panRightFast` | `Alt + ←` / `Alt + →` |
+| `screenshot` | `Mod + Shift + S` |
+
+User rebinds always win over the active preset.
+
+## Scope
+
+- **`hover`** (default) - shortcuts fire only while the pointer is over the chart, or while
+  it is focused. On a multi-chart page this routes each keystroke to one chart.
+- **`global`** - always active (for chart-centric, single-chart pages).
+
+Keys are always ignored while you type in an `input`, `textarea`, `select`, or any
+`contenteditable` element.
+
+## Custom shortcuts
+
+Add your own commands - they join the keymap and fire your handler:
+
+```ts
+createChart(el, {
+  shortcuts: {
+    customShortcuts: [
+      { command: 'toggleHeatmap', label: 'Toggle heatmap', combos: 'Alt+KeyG', onTrigger: () => toggleHeatmap() },
+    ],
+  },
+});
+```
+
+A matched custom command runs its `onTrigger`, consumes the key, and emits the same trigger
+event as a built-in.
+
+## Persistence
+
+With `persist: true`, rebinds / preset / disabled commands round-trip through `localStorage`
+(key `openalgo-charts:shortcuts`, override with `storageKey`). It is guarded for non-browser
+environments, so SSR and tests are safe.
+
+## Helpers
+
+Exported for building your own shortcut UI:
+
+```ts
+import {
+  parseCombo, normalizeCombo, formatCombo, isValidCombo, isReservedCombo, eventToCombo,
+} from 'openalgo-charts';
+
+formatCombo('Alt+KeyR');            // 'Alt + R'  (or '⌥ R' on macOS)
+normalizeCombo('Shift+Mod+KeyA');   // 'Mod+Shift+KeyA'
+eventToCombo(keyboardEvent);        // 'Mod+ArrowLeft'
+```
+
+## Events
+
+Subscribe to every trigger (built-in or custom):
+
+```ts
+const off = chart.shortcuts?.on((e) => {
+  // e = { command, combo, isCustom }
+  analytics.track('shortcut', e.command);
+});
+// off?.() to unsubscribe
+```
