@@ -458,7 +458,7 @@
         grid: { vertLines: el('vgrid').checked, horzLines: el('hgrid').checked },
       });
       // OpenAlgo brand watermark (on-canvas, captured by screenshots).
-      chart.addPrimitive(new LogoWatermark({ src: '/examples/openalgo-logo.svg', height: 30, opacity: 0.9 }));
+      chart.addPrimitive(new LogoWatermark({ src: '/examples/openalgo-logo.svg', height: 30, opacity: 0.9, position: 'bottom-left' }));
 
       const type = el('ctype').value;
       const style = {};

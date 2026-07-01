@@ -53,7 +53,7 @@ export default function RunnableExample({ code, tiers = [], height = 360, hideCo
           const withPrimitive = chart as { addPrimitive?: (p: unknown) => void };
           const Wm = (lib as { LogoWatermark?: new (o: unknown) => unknown }).LogoWatermark;
           if (typeof withPrimitive.addPrimitive === 'function' && Wm) {
-            withPrimitive.addPrimitive(new Wm({ src: LOGO_SRC, height: 24, opacity: 0.8 }));
+            withPrimitive.addPrimitive(new Wm({ src: LOGO_SRC, height: 24, opacity: 0.8, position: 'bottom-left' }));
           }
         }
         setReady(true);
