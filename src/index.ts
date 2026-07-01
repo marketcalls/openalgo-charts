@@ -86,3 +86,25 @@ export {
 } from './feed/time';
 
 export { clamp, lerp, roundToTick } from './helpers/math';
+
+export {
+  ShortcutManager,
+  DEFAULT_KEYMAP,
+  ALT_PRESET,
+  BUILTIN_COMMANDS,
+  parseCombo,
+  normalizeCombo,
+  formatCombo,
+  isValidCombo,
+  isReservedCombo,
+  eventToCombo,
+} from './input/shortcuts';
+export type {
+  ShortcutScope,
+  ShortcutPreset,
+  KeymapEntry,
+  CustomShortcut,
+  ShortcutManagerOptions,
+  ShortcutTriggerEvent,
+  ShortcutListItem,
+} from './input/shortcuts';

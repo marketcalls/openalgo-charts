@@ -16,6 +16,8 @@ import type { SeriesStyle } from '../render/series-style';
 import type { Bar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
+import { ShortcutManager } from '../input/shortcuts';
+import type { ShortcutManagerOptions } from '../input/shortcuts';
 import { pinchState, pinchDelta, type PinchState } from '../input/touch';
 import type { IPrimitive, PrimitiveHost } from '../primitives/primitive';
 import { PriceLine, type PriceLineOptions } from '../primitives/price-line';
@@ -46,6 +48,11 @@ export interface ChartOptions {
   grid?: { vertLines?: boolean; horzLines?: boolean };
   /** Accessible label for the chart container (screen readers). */
   ariaLabel?: string;
+  /**
+   * Keyboard shortcuts. Pass a configured `ShortcutManager`, options to build
+   * one, or `false` to disable keyboard control. Defaults to the built-in keymap.
+   */
+  shortcuts?: ShortcutManager | Partial<ShortcutManagerOptions> | false;
 }
 
 export interface AddSeriesOptions {
@@ -96,7 +103,10 @@ export class Chart {
   private _hasFitContent = false;
 
   // interaction state
-  private readonly _crosshairMode: CrosshairMode;
+  private _crosshairMode: CrosshairMode;
+  private _shortcuts: ShortcutManager | null = null;
+  private _pointerInside = false;
+  private _keyTarget: HTMLElement | Document | null = null;
   private readonly _now: () => number;
   private readonly _conflate: boolean;
   private readonly _conflationFactor: number;
@@ -147,6 +157,8 @@ export class Chart {
     this._priceAxisWidth = options.priceAxisWidth ?? 56;
     this._timeAxisHeight = options.timeAxisHeight ?? 22;
     this._crosshairMode = options.crosshairMode ?? 'normal';
+    const sc = options.shortcuts;
+    this._shortcuts = sc === false ? null : (sc instanceof ShortcutManager ? sc : new ShortcutManager(sc ?? {}));
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
@@ -206,6 +218,11 @@ export class Chart {
 
   public get timeScale(): TimeScale {
     return this._timeScale;
+  }
+
+  /** The keyboard shortcut manager (null when shortcuts are disabled). */
+  public get shortcuts(): ShortcutManager | null {
+    return this._shortcuts;
   }
 
   /** Add a series and return its data handle. */
@@ -521,8 +538,17 @@ export class Chart {
     el.addEventListener('pointerleave', this._onPointerLeave);
     el.addEventListener('wheel', this._onWheel, { passive: false });
     el.addEventListener('dblclick', this._onDblClick);
-    el.addEventListener('keydown', this._onKeyDown);
+    el.addEventListener('pointerenter', this._onPointerEnter);
+    // Keyboard: listen on the document when available (so shortcuts fire on hover
+    // without focusing the chart), else on the focusable container. The handler
+    // gates by scope / hover / focus.
+    const keyTarget: HTMLElement | Document =
+      typeof this._doc.addEventListener === 'function' ? this._doc : el;
+    keyTarget.addEventListener('keydown', this._onKeyDown as EventListener);
+    this._keyTarget = keyTarget;
   }
+
+  private readonly _onPointerEnter = (): void => { this._pointerInside = true; };
 
   private _localPoint(e: { clientX: number; clientY: number }): { x: number; y: number; pane: number; localY: number; paneHeight: number } {
     const rect = this._container.getBoundingClientRect();
@@ -666,6 +692,7 @@ export class Chart {
   };
 
   private readonly _onPointerLeave = (): void => {
+    this._pointerInside = false;
     if (this._cursor !== null) {
       this._cursor = null;
       this._cursorPane = null;
@@ -721,24 +748,59 @@ export class Chart {
 
   // ── keyboard navigation (focus the chart, then arrows / +- / Home) ────────
   private readonly _onKeyDown = (e: KeyboardEvent): void => {
-    const ts = this._timeScale;
-    let handled = true;
-    switch (e.key) {
-      case 'ArrowLeft': ts.setRightOffset(ts.rightOffset - 2); break;       // pan to older bars
-      case 'ArrowRight': ts.setRightOffset(ts.rightOffset + 2); break;      // pan to newer
-      case 'ArrowUp': this._panes[0]?.priceScale.panByPixels(20); break;    // pan price up
-      case 'ArrowDown': this._panes[0]?.priceScale.panByPixels(-20); break; // pan price down
-      case '+': case '=': ts.zoomAtX(this._width / 2, 1.1); break;          // zoom in
-      case '-': case '_': ts.zoomAtX(this._width / 2, 1 / 1.1); break;      // zoom out
-      case 'Home': case '0': this.resetScale(); break;                      // reset view
-      default: handled = false;
-    }
+    const sc = this._shortcuts;
+    if (sc === null || ShortcutManager.shouldIgnore(e.target) || !this._shortcutsActive()) return;
+    const cmd = sc.resolve(e);
+    if (cmd === null) return;
+    let handled = this._runShortcut(cmd);
+    if (!handled) handled = sc.runCustom(cmd);
     if (!handled) return;
     e.preventDefault();
+    sc.emitTrigger(cmd);
     this._maybeLoadHistory();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._updateAccessibleSummary();
   };
+
+  /** Scope gating: hover keeps keys chart-local; global always acts. */
+  private _shortcutsActive(): boolean {
+    if (this._shortcuts === null) return false;
+    if (this._shortcuts.scope === 'global' || this._pointerInside) return true;
+    const active = this._doc.activeElement as Node | null;
+    return active !== null && (active === this._container || this._container.contains?.(active) === true);
+  }
+
+  /** Execute a built-in command; returns false for unknown (custom) commands. */
+  private _runShortcut(command: string): boolean {
+    const ts = this._timeScale;
+    switch (command) {
+      case 'panLeft': ts.setRightOffset(ts.rightOffset - 2); return true;
+      case 'panRight': ts.setRightOffset(ts.rightOffset + 2); return true;
+      case 'panLeftFast': ts.setRightOffset(ts.rightOffset - 10); return true;
+      case 'panRightFast': ts.setRightOffset(ts.rightOffset + 10); return true;
+      case 'panUp': this._panes[0]?.priceScale.panByPixels(20); return true;
+      case 'panDown': this._panes[0]?.priceScale.panByPixels(-20); return true;
+      case 'zoomIn': ts.zoomAtX(this._width / 2, 1.1); return true;
+      case 'zoomOut': ts.zoomAtX(this._width / 2, 1 / 1.1); return true;
+      case 'resetScale': this.resetScale(); return true;
+      case 'fitContent': if (this._dataLayer.length > 0) ts.fitContent(this._dataLayer.length); return true;
+      case 'screenshot': this._downloadScreenshot(); return true;
+      case 'toggleGridVert': this.setGridOptions({ vertLines: !this._gridVert }); return true;
+      case 'toggleGridHorz': this.setGridOptions({ horzLines: !this._gridHorz }); return true;
+      case 'toggleCrosshairMagnet': this._crosshairMode = this._crosshairMode === 'magnet' ? 'normal' : 'magnet'; return true;
+      default: return false;
+    }
+  }
+
+  private _downloadScreenshot(): void {
+    try {
+      const canvas = this.takeScreenshot();
+      const a = this._doc.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = 'chart.png';
+      a.click();
+    } catch { /* ignore (tainted canvas / no DOM) */ }
+  }
 
   /** Refresh the polite live-region summary screen readers announce. */
   private _updateAccessibleSummary(): void {
@@ -843,7 +905,9 @@ export class Chart {
       el.removeEventListener('pointerleave', this._onPointerLeave);
       el.removeEventListener('wheel', this._onWheel);
       el.removeEventListener('dblclick', this._onDblClick);
-      el.removeEventListener('keydown', this._onKeyDown);
+      el.removeEventListener('pointerenter', this._onPointerEnter);
+      this._keyTarget?.removeEventListener('keydown', this._onKeyDown as EventListener);
+      this._keyTarget = null;
     }
     this._liveRegion?.remove();
     this._liveRegion = null;
