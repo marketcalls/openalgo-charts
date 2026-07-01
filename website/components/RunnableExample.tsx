@@ -18,7 +18,11 @@ interface Props {
   hideCode?: boolean;
   /** Optional caption under the demo. */
   caption?: React.ReactNode;
+  /** Stamp the OpenAlgo logo watermark on the demo (default true). */
+  watermark?: boolean;
 }
+
+const LOGO_SRC = '/openalgo-charts/openalgo-logo.svg';
 
 // One combined module instance (base + transform + profile) so the transform
 // tier's custom renderers (point-figure, kagi) share the same chart-type
@@ -28,7 +32,7 @@ async function loadLib(): Promise<Record<string, unknown>> {
   return lib as unknown as Record<string, unknown>;
 }
 
-export default function RunnableExample({ code, tiers = [], height = 360, hideCode = false, caption }: Props) {
+export default function RunnableExample({ code, tiers = [], height = 360, hideCode = false, caption, watermark = true }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -44,6 +48,14 @@ export default function RunnableExample({ code, tiers = [], height = 360, hideCo
         // eslint-disable-next-line @typescript-eslint/no-implied-eval
         const fn = new Function('el', 'lib', code) as (el: HTMLElement, lib: unknown) => { destroy?: () => void };
         chart = fn(ref.current, lib);
+        // Stamp the OpenAlgo logo on every demo (unless the demo manages its own).
+        if (watermark && chart) {
+          const withPrimitive = chart as { addPrimitive?: (p: unknown) => void };
+          const Wm = (lib as { LogoWatermark?: new (o: unknown) => unknown }).LogoWatermark;
+          if (typeof withPrimitive.addPrimitive === 'function' && Wm) {
+            withPrimitive.addPrimitive(new Wm({ src: LOGO_SRC, height: 24, opacity: 0.8 }));
+          }
+        }
         setReady(true);
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));

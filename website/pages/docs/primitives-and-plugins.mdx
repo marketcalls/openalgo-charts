@@ -47,7 +47,7 @@ is captured by `takeScreenshot()`), is source-agnostic (pass a `src` URL/data-UR
 preloaded `image`), and an optional `tint` recolors the opaque pixels so a single-color logo
 reads on any theme.
 
-<RunnableExample height={320} code={`const chart = lib.createChart(el);
+<RunnableExample height={320} watermark={false} code={`const chart = lib.createChart(el);
 chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 140, 3600));
 
 // colored badge, bottom-right (the default corner)
