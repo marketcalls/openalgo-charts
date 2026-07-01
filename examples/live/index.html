@@ -204,6 +204,7 @@
 
     const el = (id) => document.getElementById(id);
     const fmt = (n) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const nowSec = () => Math.floor(Date.now() / 1000);
     el('apikey').value = localStorage.getItem('oa-apikey') || '';
 
@@ -244,7 +245,7 @@
     function setLegend(sym, ex, intv, bar, ltp) {
       const col = bar && bar.close >= bar.open ? 'up' : 'dn';
       el('legend').innerHTML =
-        `<b>${sym}</b> <span style="opacity:.5">· ${intv} · ${ex}</span>` +
+        `<b>${esc(sym)}</b> <span style="opacity:.5">· ${intv} · ${ex}</span>` +
         (bar ? ` <span class="${col}">O ${fmt(bar.open)} H ${fmt(bar.high)} L ${fmt(bar.low)} C ${fmt(bar.close)}</span>` : '') +
         (ltp != null ? ` <span class="ltp">LTP ${fmt(ltp)}</span>` : '');
     }

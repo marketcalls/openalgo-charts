@@ -275,6 +275,7 @@
 
     const el = (id) => document.getElementById(id);
     const fmt = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const round2 = (n) => Math.round(n * 100) / 100;
     function fmtVol(v) {
       if (v == null) return '';
@@ -297,7 +298,7 @@
     // Title + O H L C V + change(%). Driven by the crosshair; falls back to the last bar.
     function setLegend(bar) {
       const legend = el('legend');
-      const head = `<span class="name">${nameOf(req.symbol || '')}</span>`
+      const head = `<span class="name">${esc(nameOf(req.symbol || ''))}</span>`
         + `<span class="meta"> &middot; ${(req.interval || '').toUpperCase()} &middot; ${exchangeOf(req.symbol || '')}</span>`;
       if (!bar) { legend.innerHTML = head; return; }
       const i = idxByTime.get(bar.time);
