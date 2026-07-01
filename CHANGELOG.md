@@ -4,8 +4,8 @@ All notable changes to OpenAlgo Charts.
 
 ## 1.0.0
 
-First public release. Full package ~29 KB Brotli (all tiers), zero runtime
-dependencies, Apache-2.0.
+First public release. Full package ~38 KB Brotli (all tiers), base engine
+~24 KB, zero runtime dependencies, Apache-2.0.
 
 ### Added since 0.1.0
 - Indicators: RSI, ATR, Supertrend (Wilder semantics, matching `openalgo.ta`),
@@ -23,9 +23,26 @@ dependencies, Apache-2.0.
   speaks the documented OpenAlgo protocol (authenticate → numeric-mode subscribe →
   `market_data`), with connection/control callbacks.
 - Examples: yfinance, order-flow, market-profile (TPO), and a full LIVE OpenAlgo
-  demo (history + WebSocket + chart trading) — validated against a live instance.
+  demo (history + WebSocket + chart trading) - validated against a live instance.
+- Unified event bus: `chart.on` / `off` / `once` (`crosshair:move`, `click`,
+  `pan`, `zoom`, `resize`, `lazy-load`, `ready`), with `trading:*` mirrored through it.
+- Data-driven trading visualization (`chart.trading`): position/order pills,
+  TP/SL brackets, and fill markers (chevron / bubble / count).
+- Custom formatting: `ChartOptions.priceFormatter` and `timeFormatter` (with
+  runtime setters); per-pane `priceScale` options; the time axis is no longer IST-only.
+- Flexible series input: `setData` accepts `Bar | LinePoint | Whitespace`
+  (normalized via `toBar`); `series.getData()` reads the current bars.
+- WebSocket auto-reconnect (backoff + re-auth + resubscribe); `OpenAlgoLiveDataFeed`
+  bare `D`/`W` intervals, day-delta volume, and symbol+exchange tick filtering.
+- Docs site: an interactive example gallery (chart type, themes, tooltips, event
+  markers, live streaming) plus framework-integration, mobile, data-loading,
+  events, types, constants, and glossary pages.
 
 ### Fixed
+- Multi-series `DataLayer.update`: a series-local append that is not the global
+  newest no longer corrupts the shared time-axis order.
+- Package ships `NOTICE` (Apache-2.0); the accessible summary refreshes on live
+  updates; `visibleBars` uses binary search for large datasets.
 - `OpenAlgoDataFeed`/`OpenAlgoTradeFeed`: bind the global `fetch` (browser
   "Illegal invocation").
 - WebSocket subscribe schema corrected to the documented per-symbol numeric-mode
@@ -35,8 +52,9 @@ dependencies, Apache-2.0.
   price, not 0.
 
 ### Quality
-- 223 unit tests + a Playwright real-browser smoke suite; GitHub Actions CI runs
-  typecheck, unit, build, size budgets, and the E2E smoke on every push/PR.
+- 297 unit tests (39 files) + a Playwright real-browser smoke suite; GitHub
+  Actions CI runs typecheck, unit, build, size budgets, a docs-site build, a
+  NOTICE pack check, and the E2E smoke on every push/PR.
 
 ## 0.1.0 (initial development build)
 

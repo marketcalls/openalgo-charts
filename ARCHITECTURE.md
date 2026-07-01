@@ -1,10 +1,14 @@
-# OpenAlgo Charts — Architecture & Design Document
+# OpenAlgo Charts - Architecture & Design Document
 
 > A from-scratch, canvas-based financial charting engine for OpenAlgo.
-> Target: **< 50 KB Brotli** for the full package (engine + trade overlay), no runtime dependencies. *(Brotli is the size metric we hold the budget against — see §11. Gzip runs ~10–15% larger.)*
+> Target: **< 50 KB Brotli** for the full package (engine + trade overlay), no runtime dependencies. *(Brotli is the size metric we hold the budget against - see §11. Gzip runs ~10-15% larger.)*
 > Goal: professional-grade interactive financial-chart rendering + advanced on-chart trading & trade management.
 
-> **Status: v2 — revised after a detailed implementation review.** See the *Revision log* at the end for the point-by-point mapping. Numbers in this doc are **estimates to be replaced with measured values from the Phase 1 prototype.**
+> **Status: shipped as 1.0.0.** The design below is implemented and published to npm. The pre-implementation size estimates have been superseded by measured `size-limit` (Brotli) budgets: **base engine ~24 KB, base+trade ~29 KB, transform ~4 KB, profile ~6 KB, everything ~38 KB** against a 50 KB budget. See the *Revision log* for the point-by-point mapping and §13a for the honest deferred list.
+
+<p align="center">
+  <img src="docs/architecture-diagram.png" alt="OpenAlgo Charts layered architecture" width="900" />
+</p>
 
 ---
 
@@ -887,24 +891,24 @@ Two principles: **(1) the API reference is generated, never hand-maintained** (i
 
 ## 13a. Deferred / not-yet-implemented (honest status)
 
-These are designed-for but **not implemented** in the current 0.1.0 build (see
-`END_TO_END_AUDIT.md` for the full triage). They are documented here so the
-architecture doesn't over-promise:
+These are designed-for but **not implemented** in the current 1.0.0 release.
+They are documented here so the architecture doesn't over-promise:
 
-- **Browser/pixel E2E tests** — rendering is validated via a recording-canvas
-  harness + unit tests; no headless-browser/pixel-diff suite yet.
-- **Price-scale `percentage`, `indexed-to-100`, and overlay scales** — only
+- **Price-scale `percentage`, `indexed-to-100`, and overlay scales** - only
   `linear` + `logarithmic` + `inverted` are implemented.
-- **Multi-touch pinch** — mouse pan/wheel/kinetic + axis-drag exist; dedicated
-  pinch is future work.
-- **Separate price/time axis-widget canvases** — axes draw within the pane
+- **Separate price/time axis-widget canvases** - axes draw within the pane
   canvas by design (small-engine simplification).
-- **Primitive price/time axis *views*** — primitives draw in the pane + hit-test
+- **Primitive price/time axis *views*** - primitives draw in the pane + hit-test
   + autoscale + lifecycle; dedicated fixed axis-label views are future work.
-- **Binary-search visible-range caching** — current scan is fine at demo scale.
-- **OpenAlgo adapter wire schemas** (REST order fields, WS message shape) — the
+- **OpenAlgo adapter wire schemas** (REST order fields, WS message shape) - the
   adapters exist with injectable transports + offline tests, but the exact field
-  names must be verified against a running OpenAlgo build before production.
+  names should be verified against a running OpenAlgo build before production.
+
+Shipped since the first draft (were previously deferred): a Playwright/Chromium
+E2E smoke suite (`npm run e2e`), multi-touch pinch (zoom + two-finger pan),
+binary-search visible-range lookup, WebSocket auto-reconnect with resubscribe, a
+unified `chart.on(...)` event bus, a data-driven trading overlay, custom price
+and time formatters, and per-pane price-scale options.
 
 ## 14. Revision log — v2 (implementation-review responses)
 

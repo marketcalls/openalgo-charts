@@ -14,7 +14,7 @@ export interface PriceRange {
 /**
  * Price-scale mode. `linear` and `logarithmic` are full coordinate transforms;
  * `percentage`/`indexed-to-100` (rebase to a baseline) and overlay scales are
- * not yet implemented — see END_TO_END_AUDIT.md / README known limitations.
+ * not yet implemented (see the README known limitations).
  */
 export type PriceScaleMode = 'linear' | 'logarithmic';
 
