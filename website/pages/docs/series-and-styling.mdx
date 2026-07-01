@@ -26,6 +26,19 @@ the series (the `style` option below); to change styling live, keep the value in
 your own state and re-create the series, or drive colors through the
 [theme](/docs/themes).
 
+`setData`, `prependData`, and `update` accept three item shapes (normalized to
+bars internally, so `getData` always returns `Bar[]`):
+
+```ts
+{ time, open, high, low, close, volume? }  // an OHLC bar
+{ time, value }                            // a value point (line / area / baseline)
+{ time }                                   // a whitespace gap: breaks the line, draws nothing
+```
+
+Use `isWhitespace(item)` to test for a gap, or `toBar(item)` to normalize one
+yourself. A value point sets open=high=low=close=value; a whitespace item becomes
+a NaN bar that the line renderer skips.
+
 ## Per-series style
 
 Every chart type has a typed `style`. Per-series style always wins over the theme, so you

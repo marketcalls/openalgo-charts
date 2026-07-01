@@ -58,8 +58,8 @@ export { conflationGroupSize, conflateBars, conflateItems, mergeBars } from './m
 // Family-B transforms live in the lazy 'openalgo-charts/transform' entry point
 // (importing it also registers the 'point-figure' and 'kagi' renderers), so they
 // are intentionally NOT re-exported from the base bundle.
-export type { Bar, LinePoint, Whitespace, UTCSeconds, OriginalTime } from './model/bar';
-export { isWhitespace } from './model/bar';
+export type { Bar, LinePoint, Whitespace, SeriesDataItem, UTCSeconds, OriginalTime } from './model/bar';
+export { isWhitespace, toBar } from './model/bar';
 
 export type { DataFeed, TradeFeed, BarsRequest, MarketDepth, DepthLevel, OrderSide, OrderType, PlaceOrder, UnsubscribeFn } from './feed/types';
 export { OpenAlgoDataFeed, mapHistoryResponse, rowTimeToUtcSeconds } from './feed/openalgo-rest';

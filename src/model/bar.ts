@@ -31,3 +31,22 @@ export interface Whitespace {
 export function isWhitespace(p: Bar | LinePoint | Whitespace): p is Whitespace {
   return !('open' in p) && !('value' in p);
 }
+
+/** Any item a series accepts: an OHLC bar, a value point, or a whitespace gap. */
+export type SeriesDataItem = Bar | LinePoint | Whitespace;
+
+/**
+ * Normalize any series data item into an internal OHLC bar:
+ * - a `Bar` passes through untouched;
+ * - a `LinePoint` `{ time, value }` becomes a flat OHLC bar (open=high=low=close=value);
+ * - a `Whitespace` `{ time }` becomes a NaN bar, which the line renderer draws as a
+ *   gap and autoscale skips.
+ */
+export function toBar(item: SeriesDataItem): Bar {
+  if ('open' in item) return item;
+  if ('value' in item) {
+    const v = item.value;
+    return { time: item.time, open: v, high: v, low: v, close: v };
+  }
+  return { time: item.time, open: NaN, high: NaN, low: NaN, close: NaN };
+}

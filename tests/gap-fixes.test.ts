@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { FakeDataFeed } from '../src/feed/fake-feed';
 import { Chart } from '../src/core/chart';
 import { DataLayer } from '../src/model/data-layer';
+import { toBar } from '../src/model/bar';
 import { RecordingContext } from './helpers/fake-ctx';
 import type { Bar } from '../src/model/bar';
 
@@ -79,6 +80,24 @@ describe('FakeDataFeed.subscribeBars streams (not a silent no-op)', () => {
     expect(bars.every((b) => b.high >= b.close && b.low <= b.close)).toBe(true);
     off();
     expect(cleared).toBe(true);
+  });
+});
+
+describe('SeriesDataItem normalization (Gap 4)', () => {
+  it('toBar normalizes value points and whitespace', () => {
+    expect(toBar({ time: 1, open: 1, high: 2, low: 0, close: 1.5 })).toMatchObject({ close: 1.5 });
+    expect(toBar({ time: 2, value: 42 })).toMatchObject({ time: 2, open: 42, high: 42, low: 42, close: 42 });
+    expect(Number.isNaN(toBar({ time: 3 }).close)).toBe(true);
+  });
+  it('a line series accepts { time, value } and { time } gap items', () => {
+    const chart = makeChart();
+    const s = chart.addSeries('line');
+    s.setData([{ time: 100, value: 10 }, { time: 160 }, { time: 220, value: 12 }]);
+    const bars = s.getData();
+    expect(bars).toHaveLength(3);
+    expect(bars[0].close).toBe(10);
+    expect(Number.isNaN(bars[1].close)).toBe(true); // whitespace gap
+    expect(bars[2].close).toBe(12);
   });
 });
 

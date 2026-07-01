@@ -8,7 +8,7 @@ import type { SeriesId } from './data-layer';
 import type { SeriesType } from './chart-type-registry';
 import { getChartType } from './chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
-import type { Bar } from './bar';
+import type { Bar, SeriesDataItem } from './bar';
 import type { SeriesMarkers } from '../primitives/markers';
 
 export type { SeriesType };
@@ -21,10 +21,13 @@ export interface SeriesRecord {
 
 /** Public handle returned by `chart.addSeries(...)`. */
 export interface SeriesApi {
-  setData(bars: readonly Bar[]): void;
-  prependData(bars: readonly Bar[]): void;
-  update(bar: Bar): void;
-  /** Current bars for this series (sorted old -> new). Handy for computing the next live update. */
+  /** Replace all data. Accepts OHLC bars, `{ time, value }` points, or `{ time }` gaps. */
+  setData(bars: readonly SeriesDataItem[]): void;
+  /** Merge older data (history paging); same item shapes as `setData`. */
+  prependData(bars: readonly SeriesDataItem[]): void;
+  /** Live update: update the last item or append. Same item shapes as `setData`. */
+  update(bar: SeriesDataItem): void;
+  /** Current bars for this series (sorted old -> new, normalized to OHLC). Handy for computing the next live update. */
   getData(): Bar[];
   /** Create a markers layer (buy/sell signals, shapes) bound to this series. */
   createMarkers(): SeriesMarkers;

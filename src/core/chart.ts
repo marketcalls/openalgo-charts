@@ -14,7 +14,8 @@ import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi } from '../model/series';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
-import type { Bar } from '../model/bar';
+import type { Bar, SeriesDataItem } from '../model/bar';
+import { toBar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
 import { ShortcutManager } from '../input/shortcuts';
@@ -269,9 +270,9 @@ export class Chart {
     }
     this._panes[paneIndex].addSeries(createSeriesRecord(dataId, type, options.style));
     return {
-      setData: (bars: readonly Bar[]): void => this._setData(dataId, bars),
-      prependData: (bars: readonly Bar[]): void => this._prependData(dataId, bars),
-      update: (bar: Bar): void => this._updateBar(dataId, bar),
+      setData: (bars: readonly SeriesDataItem[]): void => this._setData(dataId, bars.map(toBar)),
+      prependData: (bars: readonly SeriesDataItem[]): void => this._prependData(dataId, bars.map(toBar)),
+      update: (bar: SeriesDataItem): void => this._updateBar(dataId, toBar(bar)),
       getData: (): Bar[] => this._dataLayer.indexedBars(dataId).map((ib) => ib.bar),
       createMarkers: (): SeriesMarkers => {
         const m = new SeriesMarkers(dataId);
