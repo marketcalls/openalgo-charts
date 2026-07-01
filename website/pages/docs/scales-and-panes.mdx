@@ -57,3 +57,98 @@ chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id
 
 chart.timeScale.fitContent(bars.length);
 return chart;`} />
+
+## PriceScaleOptions
+
+Each pane has an independent `PriceScale`. The options that control it are typed as
+`PriceScaleOptions` and exported from the package. All fields are optional at
+construction; missing keys fall back to `DEFAULT_PRICE_SCALE_OPTIONS`:
+
+```ts
+import { DEFAULT_PRICE_SCALE_OPTIONS } from 'openalgo-charts';
+// { marginTop: 0.1, marginBottom: 0.1, minMove: 0, mode: 'linear', inverted: false }
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `marginTop` | `number` | `0.1` | Fraction of the pane height kept empty above the highest visible value. `0.1` keeps a 10 % gap at the top. |
+| `marginBottom` | `number` | `0.1` | Fraction of the pane height kept empty below the lowest visible value. |
+| `minMove` | `number` | `0` | Instrument tick size, for example `0.05` for a 5-paise step. `0` means precision is inferred from the visible range automatically. |
+| `mode` | `'linear' \| 'logarithmic'` | `'linear'` | Price-to-pixel coordinate transform. `logarithmic` uses a log10 map so equal percentage moves occupy equal screen space. |
+| `inverted` | `boolean` | `false` | Flips the Y axis so prices increase downward, useful for spread or inverted-chart views. |
+
+Only `linear` and `logarithmic` modes are implemented. `percentage` and `indexed-to-100`
+rebasing modes are planned but not yet available; see `END_TO_END_AUDIT.md` and the
+README known-limitations section.
+
+## TimeScaleOptions
+
+`TimeScaleOptions` configures the shared time axis. The library maps a logical bar index
+to pixel x-coordinates (not timestamps), so non-trading gaps such as weekends and
+holidays collapse automatically. Initial options fall back to `DEFAULT_TIME_SCALE_OPTIONS`:
+
+```ts
+import { DEFAULT_TIME_SCALE_OPTIONS } from 'openalgo-charts';
+// { barSpacing: 8, minBarSpacing: 1, maxBarSpacing: 80, rightOffset: 4 }
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `barSpacing` | `number` | `8` | Pixels per bar at initialisation. Clamped to `[minBarSpacing, maxBarSpacing]` at all times. |
+| `minBarSpacing` | `number` | `1` | Hard floor on bar spacing, reached at maximum zoom-in. |
+| `maxBarSpacing` | `number` | `80` | Hard ceiling on bar spacing, reached at maximum zoom-out. |
+| `rightOffset` | `number` | `4` | Empty bar slots kept to the right of the latest bar, leaving a small look-ahead margin. |
+
+`TimeScaleOptions` is an init-time snapshot. To change values at runtime use the
+setter methods on the live `TimeScale` instance:
+
+```ts
+chart.timeScale.setBarSpacing(12);   // change zoom level
+chart.timeScale.setRightOffset(8);   // widen the right margin
+```
+
+## Custom price formatting
+
+A `priceFormatter` function overrides the default tick-size-aware `toFixed` that the
+library uses for axis tick labels, the last-price tag, and price-line labels. Supply it
+at construction via `ChartOptions`:
+
+```ts
+const chart = createChart(el, {
+  priceFormatter: (p) -> '$' + p.toFixed(2),
+});
+```
+
+To swap the formatter at runtime, call `chart.setPriceFormatter`. Pass `null` to
+restore the default:
+
+```ts
+chart.setPriceFormatter((p) -> p.toFixed(4));  // switch to 4 decimal places
+chart.setPriceFormatter(null);                  // revert to default
+```
+
+The formatter is applied to every existing and future pane automatically.
+
+See [Types](/docs/types) for the `ChartOptions` type definition and
+[Scales and panes](/docs/scales-and-panes) for the per-pane access pattern below.
+
+## Exported scale classes
+
+`PriceScale` and `TimeScale` are exported classes with their own methods, including
+coordinate transforms, autoscale control, snap-to-tick, and formatter override. The
+supporting option types `PriceScaleOptions`, `PriceScaleMode`, `TimeScaleOptions`,
+and `LogicalRange` are also exported. See [Types](/docs/types) for the full list.
+
+Access the live instances at runtime:
+
+```ts
+// Time scale is shared across all panes
+const ts = chart.timeScale;              // TimeScale instance
+ts.setBarSpacing(12);
+ts.setRightOffset(8);
+
+// Price scale is per-pane; pane 0 is the main price pane
+const ps = chart.panes()[0].priceScale; // PriceScale instance
+ps.setPriceFormatter((p) -> p.toFixed(3));
+ps.setAutoScale(true);                   // re-enable autoscale after a manual axis drag
+```

@@ -37,6 +37,21 @@ chart.addSeries('line', { style: { color: '#ef5350', lineWidth: 2 } }).setData(s
 chart.timeScale.fitContent(bars.length);
 return chart;`} />
 
+### Return type: SupertrendPoint
+
+`supertrend(bars, period?, multiplier?)` returns `SupertrendPoint[]`. Each element carries:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `value` | `number` | The band price level. `NaN` during ATR warmup (first `period - 1` bars). |
+| `direction` | `-1` or `1` | `-1` = uptrend: band is support below price (bullish). `1` = downtrend: band is resistance above price (bearish). |
+
+`supertrendSeries` converts that array into `{ up: Bar[], down: Bar[] }`. The `up` series
+carries `value` only while `direction === -1`; the `down` series only while `direction === 1`.
+Non-active slots hold `NaN` so the renderer breaks the line at each trend flip, producing two
+separately colored segments. `SupertrendPoint` is a named export; see [Types](/docs/types)
+for the full type catalogue.
+
 ## RSI
 
 Plot RSI in its own pane with 70/30 guide lines:
@@ -62,4 +77,56 @@ return chart;`} />
 Need an indicator that is not built in? Compute it however you like - these helpers just
 return arrays of `{ time, value }`. Plot the result as a `line` series. For an entirely new
 on-chart drawing, write a [primitive](/docs/primitives-and-plugins).
+</Callout>
+
+## ATR
+
+The ATR family consists of two functions that build on each other. Both accept flat
+`readonly number[]` arrays rather than `Bar` objects, so they work on any OHLC source.
+
+### trueRange
+
+```ts
+trueRange(
+  high: readonly number[],
+  low: readonly number[],
+  close: readonly number[],
+): number[]
+```
+
+Returns the **raw true range per bar** with no smoothing. The first bar is `high[0] - low[0]`
+because there is no previous close. Every subsequent bar is the maximum of:
+
+- `high[i] - low[i]`
+- `Math.abs(high[i] - close[i - 1])`
+- `Math.abs(low[i] - close[i - 1])`
+
+Every output slot is finite; there is no warmup period.
+
+### atr
+
+```ts
+atr(
+  high: readonly number[],
+  low: readonly number[],
+  close: readonly number[],
+  period?: number,   // default 14
+): number[]
+```
+
+Smooths `trueRange` output using Wilder's formula. The first output lands at index
+`period - 1` (a plain average of the first `period` true ranges); from there each value is
+`(prev * (period - 1) + tr[i]) / period`. Slots before `period - 1` are `NaN`, which the
+line renderer skips as whitespace.
+
+```ts
+import { atr, trueRange } from 'openalgo-charts';
+
+const rawTR   = trueRange(highs, lows, closes);   // finite for every bar, no warmup
+const atrVals = atr(highs, lows, closes, 14);     // NaN for bars 0-12, then Wilder ATR
+```
+
+<Callout type="info">
+`atr` is consumed internally by `supertrend`. Call it directly when you need a volatility
+measure for position sizing or stop distances, without computing the full band.
 </Callout>

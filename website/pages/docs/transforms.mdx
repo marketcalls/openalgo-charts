@@ -90,3 +90,83 @@ chart.addSeries('kagi').setData(kagi);
 All transforms are incremental, so they update efficiently on live data - feed each new bar
 through `runTransform` (or the transform's streaming API) and the series keeps building.
 </Callout>
+
+---
+
+## API reference
+
+### `registerTransformChartTypes`
+
+```ts
+function registerTransformChartTypes(): void
+```
+
+Registers the custom renderers for `'point-figure'` and `'kagi'` into the chart-type registry.
+This happens automatically as a side effect when you import the tier:
+
+```ts
+import 'openalgo-charts/transform'; // side effect registers the renderers
+```
+
+Bundlers that aggressively tree-shake a bare side-effect import may skip the call. In that case,
+call `registerTransformChartTypes()` explicitly before adding either series type. The function is
+idempotent and safe to call more than once.
+
+```ts
+import { registerTransformChartTypes } from 'openalgo-charts/transform';
+
+registerTransformChartTypes(); // no-op if already registered
+chart.addSeries('point-figure').setData(cols);
+```
+
+(Heikin Ashi, Renko, Range, and Line Break plot as the built-in `'candlestick'` type and need no
+new renderer registration.)
+
+### `ISeriesTransform`
+
+```ts
+interface ISeriesTransform {
+  reset(): void;
+  push(bar: Bar): Bar[];
+  flush?(): Bar[];
+}
+```
+
+The contract every transform class implements. `reset` returns the transform to its initial state
+at the start of a fresh history batch. `push` feeds one source bar and returns zero or more newly
+completed derived elements as `Bar[]`. The optional `flush` emits any in-progress element at the
+end of the data stream (for example, the current partial Renko brick). `runTransform` calls all
+three in sequence.
+
+```ts
+import type { ISeriesTransform } from 'openalgo-charts/transform';
+import type { Bar } from 'openalgo-charts';
+
+class MyTransform implements ISeriesTransform {
+  reset(): void { /* ... */ }
+  push(bar: Bar): Bar[] { return []; }
+  flush(): Bar[] { return []; }
+}
+```
+
+### `ensureIncreasingTimes`
+
+```ts
+function ensureIncreasingTimes(bars: readonly Bar[]): Bar[]
+```
+
+Makes times strictly increasing across a `Bar[]` by bumping any collision by `+1` second.
+Multiple derived elements can form within the same source bar and therefore share a timestamp;
+this function gives each a distinct logical index in the DataLayer. Labels stay within a few
+seconds of the real formation time.
+
+`runTransform` calls `ensureIncreasingTimes` automatically on its output. You only need to call
+it directly when assembling batches without `runTransform`:
+
+```ts
+import { ensureIncreasingTimes } from 'openalgo-charts/transform';
+
+const raw: Bar[] = myTransform.flush();
+const adjusted = ensureIncreasingTimes(raw);
+series.setData(adjusted);
+```

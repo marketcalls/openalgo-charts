@@ -34,11 +34,91 @@ Corporate-action badges (earnings / dividend / split) attach at the chart level:
 chart.addEventMarkers().setEvents([{ time, type: 'earnings', label: 'E' }]);
 ```
 
+### `EventMarkers`
+
+`EventMarkers` renders circular badges near the bottom of the plot. Each element in the array
+passed to `setEvents` has this shape:
+
+```ts
+interface ChartEvent {
+  time:   number;  // UTCSeconds bar time
+  type:   'earnings' | 'dividend' | 'split' | 'news' | string;
+  label:  string;  // text inside the badge (first two characters are shown)
+  color?: string;  // overrides the built-in type color
+  id?:    string;  // returned as externalId by hitTest for click routing
+}
+```
+
+Built-in type colors: `earnings` -> `#f0a020`, `dividend` -> `#26a69a`, `split` -> `#4f8cff`,
+`news` -> `#9aa0b4`. An unknown `type` string falls back to `#9aa0b4`. Providing `color`
+overrides the default for that individual event.
+
+When `id` is set on an event, `hitTest` returns that value as `externalId`, letting a click
+listener identify the specific event without inspecting canvas coordinates:
+
+```ts
+const em = chart.addEventMarkers();
+em.setEvents([
+  { time: bars[20].time, type: 'earnings', label: 'E', id: 'q2-earnings' },
+  { time: bars[50].time, type: 'dividend', label: 'D', id: 'div-jun' },
+]);
+```
+
+### `SeriesMarkers`
+
+`series.createMarkers()` is the standard entry point; it wires the internal series identifier
+automatically. `SeriesMarkers` is also exported for direct import, which is useful for unit
+testing primitives in isolation or for subclassing:
+
+```ts
+import { SeriesMarkers } from 'openalgo-charts';
+```
+
+The key method on any `SeriesMarkers` instance is `setMarkers`, which replaces the full
+marker list and sorts it by time internally:
+
+```ts
+// signature
+setMarkers(markers: readonly SeriesMarker[]): void
+```
+
+Call it again with an updated array whenever signal state changes; it calls `requestUpdate()`
+on the host automatically.
+
 ## Price lines
 
 ```ts
 chart.addPriceLine({ price: 101.5, color: '#3b82f6', lineWidth: 2, dashed: false, id: 'vwap' });
 ```
+
+### `PriceLine` direct construction
+
+`chart.addPriceLine(opts)` is a convenience wrapper. For live updates (such as a moving
+stop-loss or a real-time VWAP level), construct `PriceLine` directly, keep a reference, and
+mutate it without going through the chart API:
+
+```ts
+import { PriceLine } from 'openalgo-charts';
+
+const sl = new PriceLine({
+  id: 'stop-loss', price: 19750, color: '#ef5350',
+  lineWidth: 1, dashed: true,
+  leftLabel: 'SL 100', cursor: 'ns-resize',
+});
+chart.addPrimitive(sl);
+
+// move the line and trigger a repaint
+sl.setPrice(19600);
+
+// update the left-end order tag, e.g. live P&L
+sl.setLeftLabel('SL  -150');
+```
+
+`setPrice(price: number)` moves the horizontal line and calls `requestUpdate()` on the host.
+`setLeftLabel(text: string)` updates the NinjaTrader-style left-end tag text and repaints.
+
+See [PriceLineOptions](/docs/types) for the full option set including `extentFromRight`,
+`closeButton`, and `label`.
 
 ## Logo / brand watermark
 
@@ -75,6 +155,42 @@ return chart;`} caption="LogoWatermark: a colored badge and a tinted monochrome 
 | `zOrder` | `top` | `bottom` / `normal` / `top` |
 
 Swap or restyle it live with `watermark.setOptions({ ... })`.
+
+### `watermarkRect` placement helper
+
+`watermarkRect` is the pure placement function that `LogoWatermark` uses internally to compute
+the logo's top-left pixel offset. Call it directly inside a custom primitive that needs
+corner-aligned or centered layout at the same snap grid:
+
+```ts
+import { watermarkRect } from 'openalgo-charts';
+
+// inside a primitive's draw():
+const { x, y, w, h } = watermarkRect(
+  'bottom-left', 12, logoW, logoH, rc.plotWidth, rc.plotHeight,
+);
+ctx.drawImage(
+  img,
+  Math.round(x * rc.dpr), Math.round(y * rc.dpr),
+  Math.round(w * rc.dpr), Math.round(h * rc.dpr),
+);
+```
+
+Signature (all values in media/CSS pixels):
+
+```ts
+function watermarkRect(
+  position: WatermarkPosition,
+  margin:   number,
+  w:        number,
+  h:        number,
+  plotW:    number,
+  plotH:    number,
+): { x: number; y: number; w: number; h: number }
+```
+
+The returned `x`/`y` are unscaled media pixels. Multiply by `rc.dpr` before drawing to a
+device-pixel canvas.
 
 ## A custom chart type
 
@@ -118,3 +234,77 @@ chart.addPrimitive(watermark, 0);
 Primitives receive a host with pixel/price/time conversions and the plot rectangle, so they
 can draw anything and participate in hit-testing and autoscale.
 </Callout>
+
+## `bestHit` helper
+
+When a pane contains several independent primitives that each implement `hitTest`, the chart
+collects all their results and calls `bestHit` to pick the winner. The rule is: smallest
+`distance` wins; among equal distances the highest `zOrder` wins (`top` > `normal` > `bottom`).
+
+Use it directly inside a composite primitive that delegates hit-testing to multiple sub-objects:
+
+```ts
+import { bestHit } from 'openalgo-charts';
+import type { PrimitiveHit, PrimitiveRenderContext } from 'openalgo-charts';
+
+const composite = {
+  zOrder: () => 'normal' as const,
+  draw(ctx: CanvasRenderingContext2D, rc: PrimitiveRenderContext) { /* ... */ },
+  hitTest(x: number, y: number, rc: PrimitiveRenderContext): PrimitiveHit | null {
+    return bestHit([
+      lineA.hitTest(x, y, rc),
+      lineB.hitTest(x, y, rc),
+      markerLayer.hitTest(x, y, rc),
+    ]);
+  },
+};
+```
+
+Signature:
+
+```ts
+function bestHit(hits: readonly (PrimitiveHit | null)[]): PrimitiveHit | null
+```
+
+`null` entries in the input array are skipped. Returns `null` if every entry is `null`.
+
+## `InvalidationLevel`
+
+`InvalidationLevel` is a `const` object (not a TypeScript `enum`) that describes how much of a
+pane needs repainting. The chart uses it inside `InvalidateMask` to coalesce multiple
+invalidation requests per animation frame into the minimum necessary work:
+
+```ts
+const InvalidationLevel = {
+  None:   0,  // nothing to do
+  Cursor: 1,  // repaint only the overlay canvas (crosshair, hover, dragging primitives)
+  Light:  2,  // repaint the base canvas at the current scales
+  Full:   3,  // recompute scales and ticks, then repaint everything
+} as const;
+```
+
+<Callout type="info">
+`host.requestUpdate()` takes no arguments. Calling it signals the chart to schedule the next
+animation frame; the chart decides the repaint scope internally via its `InvalidateMask`.
+`InvalidationLevel` values are exported for advanced use cases such as constructing a custom
+`InvalidateMask`, reading `PaneInvalidation.level` to inspect what a prior frame coalesced, or
+passing constants to internal helpers that accept a level directly.
+</Callout>
+
+A single named import gives you both the value object and the companion type:
+
+```ts
+import { InvalidationLevel } from 'openalgo-charts';
+import type { InvalidationLevel as Level } from 'openalgo-charts';
+
+// compare numeric levels returned by PaneInvalidation.level
+if (paneInval.level >= InvalidationLevel.Full) {
+  console.log('full repaint scheduled');
+}
+
+// type annotation for helpers that receive a level
+function logLevel(level: Level): void {
+  const names: Record<Level, string> = { 0: 'None', 1: 'Cursor', 2: 'Light', 3: 'Full' };
+  console.log(names[level]);
+}
+```

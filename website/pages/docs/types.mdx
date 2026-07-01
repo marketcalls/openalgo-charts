@@ -874,6 +874,29 @@ Config for `OpenAlgoTradeFeed`. `defaultProduct` defaults to `'MIS'`.
 
 ---
 
+## Indicators
+
+### `SupertrendPoint`
+
+```ts
+interface SupertrendPoint {
+  /** The Supertrend band value, or NaN during ATR warmup. */
+  value: number;
+  /** -1 = uptrend (bullish), +1 = downtrend (bearish). */
+  direction: -1 | 1;
+}
+```
+
+One element per bar in the array returned by `supertrend(bars, period, multiplier)`. `value` holds the Supertrend band level; it is `NaN` for warmup bars while ATR accumulates the required history. `direction` follows the OpenAlgo convention: `-1` means the band is below price and acting as support (uptrend, bullish); `+1` means it is above price and acting as resistance (downtrend, bearish).
+
+```ts
+import type { SupertrendPoint } from 'openalgo-charts';
+```
+
+See also `supertrendSeries`, which splits the same output into two `Bar[]` arrays -- one per direction -- so each renders as a separately-colored line that breaks at every trend flip.
+
+---
+
 ## Trading
 
 Types for the data-driven trading visualization layer. See [Trading API](/docs/trading-api).

@@ -283,6 +283,24 @@ conversion happens only at the feed boundary.
 
 ---
 
+### Tier name constants
+
+Each opt-in tier exports a string literal constant that identifies it. These constants are useful for logging, feature detection, and avoiding bare string literals when checking which bundles have loaded. They are exported from the tier's own entry point, not from the base bundle.
+
+| Constant | Value | Entry point |
+|---|---|---|
+| `PROFILE_TIER` | `'profile'` | `openalgo-charts/profile` |
+| `TRANSFORM_TIER` | `'transform'` | `openalgo-charts/transform` |
+| `TRADE_TIER` | `'trade'` | `openalgo-charts/trade` |
+
+```ts
+import { PROFILE_TIER   } from 'openalgo-charts/profile';
+import { TRANSFORM_TIER } from 'openalgo-charts/transform';
+import { TRADE_TIER     } from 'openalgo-charts/trade';
+```
+
+---
+
 ## Part 2 -- Helper Functions
 
 ### Math helpers

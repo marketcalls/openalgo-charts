@@ -102,3 +102,204 @@ Footprint and order flow require a feed that classifies each trade as hitting th
 ask. A plain OHLCV or LTP stream cannot produce them - the demo above fakes the
 classification for illustration.
 </Callout>
+
+## Footprint analytics
+
+Three pure functions operate on footprint data without any rendering side-effects. They are
+useful for custom overlays, alerts, or server-side analysis.
+
+```ts
+import {
+  computeFootprint,
+  diagonalImbalances,
+  cumulativeDelta,
+  stackedImbalances,
+} from 'openalgo-charts/profile';
+```
+
+### diagonalImbalances
+
+`diagonalImbalances(cells, ratio = 3)` scans the `FootprintCell[]` of one bar (sorted high
+to low, as returned by `computeFootprint`) and returns `Imbalance[]`. A buy imbalance fires
+when ask volume at price P is at least `ratio` times the bid volume at the cell one tick
+below; a sell imbalance fires when bid volume at P is at least `ratio` times the ask volume
+at the cell one tick above.
+
+```ts
+const bar = computeFootprint(time, trades, tickSize);
+const imb = diagonalImbalances(bar.cells);      // ratio defaults to 3
+const imb4 = diagonalImbalances(bar.cells, 4);  // stricter threshold
+// imb: Array<{ price: number; side: 'buy' | 'sell' }>
+```
+
+### cumulativeDelta
+
+`cumulativeDelta(bars)` takes a `FootprintBar[]` and returns a `number[]` of the same
+length. Each element is the running total of `bar.delta` through that index. Bar delta is
+computed by `computeFootprint` as `sum(askVol - bidVol)` across all cells in the bar.
+
+```ts
+const cd = cumulativeDelta(footprintBars);
+// cd[i] is the cumulative net delta through bar i
+```
+
+### stackedImbalances
+
+`stackedImbalances(cells, ratio = 3, minStack = 3)` builds on `diagonalImbalances` and
+finds runs of `minStack` or more consecutive same-side imbalances within one bar's cell
+stack. Returns `StackedImbalance[]`, each with `{ startPrice, endPrice, side, count }`.
+
+```ts
+const stacked = stackedImbalances(bar.cells, 3, 3);
+// Array<{ startPrice: number; endPrice: number; side: 'buy' | 'sell'; count: number }>
+```
+
+**Combined example**
+
+```ts
+// sessionTrades: Array<{ time: number; trades: ClassifiedTrade[] }>
+const bars = sessionTrades.map((g) => computeFootprint(g.time, g.trades, 0.5));
+
+const cd = cumulativeDelta(bars);
+
+bars.forEach((bar, i) => {
+  const stacked = stackedImbalances(bar.cells, 3, 3);
+  if (stacked.length > 0) {
+    console.log(`Bar ${i} cd=${cd[i].toFixed(0)}: ${stacked.length} stacked zone(s)`);
+  }
+});
+```
+
+## Price bucketing utilities
+
+`bucketPrice` and `priceBuckets` underpin every profile compute function. They are useful
+when building a custom renderer or aligning prices from two data sources to the same tick
+grid.
+
+### bucketPrice
+
+`bucketPrice(price, step)` snaps any raw price to the nearest multiple of `step` and rounds
+to 8 decimal places to avoid floating-point drift across repeated additions.
+
+```ts
+import { bucketPrice } from 'openalgo-charts/profile';
+
+bucketPrice(100.003, 0.05); // -> 100.0
+bucketPrice(99.978,  0.05); // -> 100.0
+bucketPrice(22349.7, 0.5);  // -> 22349.5
+```
+
+### priceBuckets
+
+`priceBuckets(low, high, step)` returns the inclusive list of all bucketed prices spanning
+`[low, high]`. The first and last elements are `bucketPrice(low, step)` and
+`bucketPrice(high, step)`.
+
+```ts
+import { priceBuckets } from 'openalgo-charts/profile';
+
+priceBuckets(99.9, 100.2, 0.1);
+// -> [99.9, 100.0, 100.1, 100.2]
+```
+
+This is handy when pre-allocating one row per price level in a custom canvas renderer, or
+when merging footprint data from two sources onto a shared price axis.
+
+## TPO: simple vs rich API
+
+The profile tier exports two functions for TPO computation. The runnable example above uses
+`computeTpo`, the simpler one. `computeMarketProfile` is the richer alternative for
+multi-session data.
+
+### computeTpo (simple, single session)
+
+`computeTpo(bars, periodBars, tickSize, valueAreaPercent = 0.7, ibPeriods = 2)` treats the
+entire input array as one profile. It groups consecutive bars into fixed-size buckets of
+`periodBars` bars each, counts how many buckets touched each price, then computes POC, value
+area, and initial balance. Return shape:
+
+```ts
+interface TpoResult {
+  buckets: { price: number; count: number }[]; // sorted high -> low
+  poc:     number;
+  vah:     number;
+  val:     number;
+  ib:      { high: number; low: number };      // initial balance price range
+}
+```
+
+Use `computeTpo` when you have already sliced your bars to a single session or composite
+window, or when you only need POC, value area, and initial balance with no per-period
+letters.
+
+### computeMarketProfile (rich, multi-session)
+
+`computeMarketProfile(bars, options?)` accepts a `Partial<MarketProfileOptions>` and splits
+the bar array into calendar sessions before building one profile per session. Options and
+their defaults:
+
+```ts
+import { computeMarketProfile } from 'openalgo-charts/profile';
+
+const result = computeMarketProfile(intradayBars, {
+  tickSize:              0.5,
+  session:               'day',  // 'day' | 'week' | 'month' | 'composite'
+  blockMinutes:          30,     // one TPO letter per block
+  valueAreaPercent:      0.7,
+  initialBalancePeriods: 2,
+});
+
+result.sessions.forEach((s) => {
+  console.log(`poc=${s.poc}  vah=${s.vah}  val=${s.val}`);
+  console.log(`IB ${s.initialBalance.low} - ${s.initialBalance.high}`);
+  console.log(`single prints: ${s.singlePrints.join(', ')}`);
+  console.log(`poor high: ${s.poorHigh}  poor low: ${s.poorLow}`);
+  s.levels.slice(0, 3).forEach((l) =>
+    console.log(`  ${l.price}  [${l.letters}]  vol=${l.volume.toFixed(0)}`),
+  );
+});
+```
+
+Each `MarketProfileLevel` in `levels` (sorted high to low) carries:
+
+| Field     | Type     | Description                                           |
+|-----------|----------|-------------------------------------------------------|
+| `price`   | `number` | Bucketed price.                                       |
+| `count`   | `number` | Distinct TPO periods at this price.                   |
+| `letters` | `string` | Period letters that touched this price, e.g. `"ABF"`. |
+| `volume`  | `number` | Bar volume distributed evenly across the price range. |
+
+Each `MarketProfileSessionResult` also exposes `poorHigh` / `poorLow` booleans (the session
+extreme printed in more than one period, indicating a weak rejection) and `singlePrints`
+(prices that printed in exactly one period away from the session extremes). Session
+boundaries are computed in IST (UTC+5:30), matching NSE/BSE intraday calendars.
+
+The `MarketProfile` canvas primitive exported from the profile tier consumes
+`MarketProfileResult` directly and handles the letter-based display.
+
+### tpoLetter
+
+`tpoLetter(period)` maps a zero-based period index to the letter used in the classic TPO
+display. Periods 0-25 map to `A`-`Z` and 26-51 map to `a`-`z`, then the cycle repeats.
+
+```ts
+import { tpoLetter } from 'openalgo-charts/profile';
+
+tpoLetter(0);  // -> 'A'
+tpoLetter(25); // -> 'Z'
+tpoLetter(26); // -> 'a'
+tpoLetter(51); // -> 'z'
+tpoLetter(52); // -> 'A'  (wraps back)
+```
+
+`computeMarketProfile` calls this internally. Use it directly only when building a custom
+renderer that needs to label individual cells by period.
+
+### When to use each
+
+| Scenario                                                     | Function               |
+|--------------------------------------------------------------|------------------------|
+| Single pre-sliced session or fixed composite window          | `computeTpo`           |
+| Multi-day intraday data, automatic session splitting         | `computeMarketProfile` |
+| Need TPO letters, single prints, or poor high/low flags      | `computeMarketProfile` |
+| Feeding the `MarketProfile` canvas primitive                 | `computeMarketProfile` |
