@@ -33,6 +33,8 @@ export function computeGridLines(width: number, height: number, opts: GridOption
 export interface GridStyle {
   color: string;
   lineWidth: number;
+  /** Optional dash pattern (device px already applied by the caller's dpr). */
+  dash?: number[];
 }
 
 /**
@@ -50,6 +52,7 @@ export function drawGrid(
   ctx.save();
   ctx.strokeStyle = style.color;
   ctx.lineWidth = Math.max(1, Math.round(style.lineWidth * dpr));
+  if (style.dash) ctx.setLineDash(style.dash);
   ctx.beginPath();
   const w = Math.round(mediaWidth * dpr);
   const h = Math.round(mediaHeight * dpr);

@@ -214,12 +214,14 @@ export class Pane {
     const axisStyle: AxisStyle = {
       textColor: ctx.theme.axisText,
       lineColor: ctx.theme.axisLine,
-      font: '11px system-ui, sans-serif',
+      font: `${ctx.theme.axisFontSize ?? 11}px system-ui, sans-serif`,
     };
 
-    // background (full pane)
-    g.fillStyle = ctx.theme.background;
-    g.fillRect(0, 0, Math.round(this._width * dpr), Math.round(this._height * dpr));
+    // background (full pane) — skip when transparent so the page shows through
+    if (ctx.theme.background !== 'transparent') {
+      g.fillStyle = ctx.theme.background;
+      g.fillRect(0, 0, Math.round(this._width * dpr), Math.round(this._height * dpr));
+    }
 
     // Left price axis strip (absolute coords), drawn before the plot is shifted.
     if (this._leftScale && layout.plotLeft > 0) {
@@ -233,10 +235,13 @@ export class Pane {
     // grid within the plot area (vertical/horizontal independently toggleable)
     if (ctx.showVertGrid || ctx.showHorzGrid) {
       const lines = computeGridLines(layout.plotWidth, layout.plotHeight, { spacing: 60 });
+      const gridDash = ctx.theme.gridStyle === 'dashed' ? [4 * dpr, 4 * dpr]
+        : ctx.theme.gridStyle === 'dotted' ? [1 * dpr, 3 * dpr]
+        : undefined;
       drawGrid(g, {
         verticals: ctx.showVertGrid ? lines.verticals : [],
         horizontals: ctx.showHorzGrid ? lines.horizontals : [],
-      }, layout.plotWidth, layout.plotHeight, dpr, { color: ctx.theme.grid, lineWidth: 1 });
+      }, layout.plotWidth, layout.plotHeight, dpr, { color: ctx.theme.grid, lineWidth: 1, dash: gridDash });
     }
 
     // bottom-layer primitives (background zones) draw behind series

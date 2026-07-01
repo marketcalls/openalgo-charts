@@ -206,3 +206,33 @@ describe('Task 6: chart.applyOptions (runtime theme / grid)', () => {
     expect(() => chart.setTheme(darkTheme)).not.toThrow();
   });
 });
+
+describe('Task 7: cosmetic parity', () => {
+  const immediate = { raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} } };
+  it('no-arg fitContent() fits all bars without throwing', () => {
+    const chart = makeChart(immediate);
+    const s = chart.addSeries('line');
+    s.setData(Array.from({ length: 50 }, (_, i) => bar(100 + i * 60, 10 + i)));
+    expect(() => chart.fitContent()).not.toThrow();
+    const r = chart.getVisibleLogicalRange();
+    expect(r.to - r.from).toBeGreaterThan(40); // ~50 bars visible
+  });
+  it('transparent theme skips the background fill', () => {
+    const chart = makeChart(immediate);
+    chart.addSeries('line').setData([bar(100, 1), bar(160, 2)]);
+    const rec = (chart.panes()[0].base as unknown as { ctx: RecordingContext }).ctx;
+    rec.ops.length = 0;
+    chart.setTheme({ ...darkTheme, background: 'transparent' });
+    // background fillRect covers the full pane; with transparent it must be absent
+    const full = rec.ops.filter((o) => o.type === 'fillRect' && o.args[0] === 0 && o.args[1] === 0);
+    expect(full.length).toBe(0);
+  });
+  it('dotted grid style sets a dash on the grid stroke', () => {
+    const chart = makeChart(immediate);
+    chart.addSeries('line').setData([bar(100, 1), bar(160, 2)]);
+    const rec = (chart.panes()[0].base as unknown as { ctx: RecordingContext }).ctx;
+    rec.ops.length = 0;
+    chart.setTheme({ ...darkTheme, gridStyle: 'dotted' });
+    expect(rec.ops.some((o) => o.type === 'setLineDash' && o.args.length > 0)).toBe(true);
+  });
+});

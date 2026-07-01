@@ -10,6 +10,10 @@ export interface ChartTheme {
   axisText: string;
   axisLine: string;
   crosshair: string;
+  /** Axis label font size in px (default 11). */
+  axisFontSize?: number;
+  /** Grid line dash style (default 'solid'). */
+  gridStyle?: 'solid' | 'dashed' | 'dotted';
   // candle / bar / column up & down
   upColor: string;
   downColor: string;

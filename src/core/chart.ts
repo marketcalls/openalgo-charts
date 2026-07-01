@@ -290,6 +290,13 @@ export class Chart {
     return this._timeScale.visibleRange();
   }
 
+  /** Fit all bars into view (no-arg convenience; bar count from the data). */
+  public fitContent(): void {
+    if (this._dataLayer.length <= 0) return;
+    this._timeScale.fitContent(this._dataLayer.length);
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
   /** The keyboard shortcut manager (null when shortcuts are disabled). */
   public get shortcuts(): ShortcutManager | null {
     return this._shortcuts;
