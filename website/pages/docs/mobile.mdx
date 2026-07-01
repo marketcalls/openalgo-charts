@@ -1,0 +1,115 @@
+---
+title: Mobile & Touch
+description: Touch gestures, responsive layout, and crisp rendering on mobile.
+---
+
+import { Callout } from 'nextra/components'
+
+# Mobile & Touch
+
+All input handling is built on the [Pointer Events API](https://www.w3.org/TR/pointerevents/), so the same code path serves mouse, touch, and stylus input. There is no separate touch code path; every gesture below works on any pointer type.
+
+## Built-in touch gestures
+
+### One-finger drag
+
+Dragging with a single finger pans both axes at once: horizontal movement scrolls the time axis left or right, and vertical movement shifts the price scale of the touched pane up or down. Releasing after a fast swipe launches a kinetic animation that decelerates the scroll naturally.
+
+### Two-finger pinch and pan
+
+Placing two fingers on the chart starts a pinch gesture. On every animation frame the engine compares the current two-pointer state with the previous one:
+
+- **Distance between fingers increases** -- zooms in on the time axis around the midpoint.
+- **Distance between fingers decreases** -- zooms out on the time axis.
+- **Midpoint translates horizontally** -- pans the time axis.
+- **Midpoint translates vertically** -- pans the price scale of the touched pane.
+
+All four effects are computed in a single frame, so spreading fingers while sliding sideways zooms and pans simultaneously.
+
+### Double-tap to reset
+
+A double-tap fires the browser's synthetic `dblclick` event, which calls `resetScale()` internally: all bars are fitted to the visible width and every price axis returns to auto-scaling. You can trigger the same action programmatically:
+
+```ts
+chart.resetScale();
+```
+
+## Tapping to interact
+
+A tap (pointer-down followed by pointer-up with less than 3 px of movement) is treated as a click. When the tap lands on a hit-testable primitive -- a series marker, an event marker, or a price line -- the chart calls any `subscribeClick` callback with the primitive's `externalId` and emits a `click` event. See [Events](/docs/events).
+
+```ts
+chart.subscribeClick((externalId) => {
+  console.log('tapped primitive:', externalId);
+});
+```
+
+A tap-and-drag on a draggable price line (used for order, stop-loss, and take-profit levels) moves the line in real time and fires the `subscribeDrag` callbacks. For the higher-level trading layer, which manages order/SL/TP visuals and emits `trading:*` events, see [Trading API](/docs/trading-api).
+
+```ts
+chart.subscribeDrag(
+  (externalId, price) => { /* called on every move */ },
+  (externalId, price) => { /* called on release   */ },
+);
+```
+
+## Responsive layout
+
+The chart installs a `ResizeObserver` on its container element at construction time. Whenever the container changes size -- viewport resize, device orientation change, or a flex/grid parent reflowing -- the chart recalculates pane layout and repaints automatically with no extra code required.
+
+Use a fluid container so the chart fills its available space:
+
+```html
+<div id="chart" style="width: 100%; height: 400px;"></div>
+```
+
+For a fixed aspect ratio at any screen width:
+
+```css
+#chart {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+```
+
+## Crisp rendering
+
+The chart reads `window.devicePixelRatio` automatically at startup and draws every canvas at the physical pixel density of the screen. On 2x Retina displays and 3x mobile screens the output is sharp with no CSS-scaling blur.
+
+To override the ratio -- for testing, fixed-density screenshots, or environments without `window` -- pass a `pixelRatio` function in `ChartOptions`. The value is re-read on every resize and repaint, so a function that reads `window.devicePixelRatio` dynamically is valid:
+
+```ts
+const chart = createChart(el, {
+  pixelRatio: () => 2,  // force 2x regardless of the device
+});
+```
+
+## Page-level setup
+
+### Viewport meta tag
+
+Add the standard viewport meta tag to your HTML so mobile browsers do not apply default page scaling:
+
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1">
+```
+
+### touch-action
+
+The chart sets `touch-action: none` on its container element automatically in the constructor, so browser-native pan and pinch-to-zoom do not intercept chart gestures.
+
+<Callout type="warning">
+If the chart container is nested inside a scrollable parent element (a modal, a page body with `overflow: scroll`, or any custom scroll container), the ancestor can still capture touch events before they reach the chart. In that case, add `touch-action: none` to the scrollable ancestor, or restructure the layout so the chart is not inside a native-scroll region.
+</Callout>
+
+## Accessibility
+
+The chart container carries `role="application"`, `tabindex="0"`, and an `aria-label` that screen readers announce when the element is focused. You can override the default label via `ChartOptions.ariaLabel`:
+
+```ts
+const chart = createChart(el, {
+  ariaLabel: 'NIFTY 5-minute candlestick chart',
+});
+```
+
+A visually-hidden `aria-live="polite"` region is appended to the container. It updates with the bar count and latest close price each time data is loaded, so screen readers announce changes without the user having to navigate to the element.

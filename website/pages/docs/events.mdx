@@ -1,0 +1,242 @@
+---
+title: Events
+description: React to interaction, viewport changes, data paging, and lifecycle with one unified chart.on(...) bus.
+---
+
+import { Callout } from 'nextra/components'
+import RunnableExample from '../../components/RunnableExample'
+
+# Events
+
+OpenAlgo Charts gives you one small, predictable event surface. A single
+`chart.on(name, cb)` bus covers interaction, viewport, data, and lifecycle
+events, and it returns an unsubscribe function so cleanup is one call. The
+trading layer routes its `trading:*` events through the same bus, so you never
+juggle two APIs.
+
+## Subscribing
+
+```ts
+// Subscribe. The return value unsubscribes.
+const off = chart.on('crosshair:move', (e) => {
+  // handle event
+});
+
+// Later: stop listening.
+off();
+
+// Or drop one listener / every listener for a name.
+chart.off('crosshair:move', handler);
+chart.off('crosshair:move');
+
+// Fire once, then auto-unsubscribe.
+chart.once('ready', () => console.log('chart is live'));
+```
+
+<Callout type="info">
+Every `on(...)` returns its own unsubscribe. Keep the returned function and call
+it on teardown (component unmount, route change) so listeners never leak.
+</Callout>
+
+## What the engine emits
+
+| Event | Payload | Fires when |
+|-------|---------|-----------|
+| `ready` | `{}` | Once, on the microtask after `createChart` returns. |
+| `crosshair:move` | `{ time, index, price, bar, point }` | The pointer moves over the plot (all-null when it leaves). |
+| `click` | `{ id }` | A hit-testable primitive (marker, event, price line) is clicked. `id` is its `externalId`. |
+| `pan` | `{ from, to, logicalFrom, logicalTo }` | The user pans (drag, two-finger, kinetic glide). |
+| `zoom` | `{ from, to, logicalFrom, logicalTo }` | The user zooms (wheel or pinch). |
+| `resize` | `{ width, height }` | The container size changes (CSS px). |
+| `lazy-load` | `{ from, to, direction }` | The viewport nears the oldest bar and history paging should run. |
+| `trading:*` | see [Trading events](#trading-events) | The user interacts with a position, order, or bracket. |
+
+`from` / `to` on the viewport and data events are **UTC seconds** (or `null`
+when the edge falls outside loaded data). `logicalFrom` / `logicalTo` are the raw
+logical bar indices, handy when you drive your own paging math.
+
+<Callout type="info">
+`crosshair:move` and `pan` / `zoom` fire at pointer/gesture rate. Do only light
+work in the handler (update a legend, a readout). Defer heavy work to
+`requestAnimationFrame` or a debounce.
+</Callout>
+
+## Live demo
+
+Move the crosshair, then drag and wheel-zoom. The readout is driven entirely by
+`chart.on('crosshair:move')` and `chart.on('zoom' | 'pan')`.
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(bars.length);
+
+el.style.position = 'relative';
+const out = document.createElement('div');
+out.style.cssText = 'position:absolute;left:8px;top:8px;font:12px ui-monospace,monospace;background:rgba(0,0,0,.55);color:#e6edf3;padding:6px 9px;border-radius:6px;pointer-events:none;line-height:1.5';
+el.appendChild(out);
+
+let hover = 'move the crosshair';
+let view = '';
+const render = () => { out.innerHTML = hover + (view ? '<br>' + view : ''); };
+
+chart.on('crosshair:move', (e) => {
+  hover = e.bar
+    ? 'O ' + e.bar.open.toFixed(2) + '  H ' + e.bar.high.toFixed(2) + '  L ' + e.bar.low.toFixed(2) + '  C ' + e.bar.close.toFixed(2)
+    : 'off chart';
+  render();
+});
+const fmt = (t) => t == null ? '-' : new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
+chart.on('zoom', (r) => { view = 'zoom  ' + fmt(r.from) + ' -> ' + fmt(r.to); render(); });
+chart.on('pan',  (r) => { view = 'pan   ' + fmt(r.from) + ' -> ' + fmt(r.to); render(); });
+render();
+return chart;`} />
+
+## Interaction events
+
+### crosshair:move
+
+Fires on every pointer move across the plot, and once with all-null fields when
+the pointer leaves. `bar` is the hovered bar of the primary price series (or
+`null` off the data); `point` is the crosshair position in container CSS px.
+
+```ts
+chart.on('crosshair:move', ({ time, price, bar, point }) => {
+  if (!bar) { legend.hidden = true; return; }
+  legend.hidden = false;
+  legend.textContent = `O ${bar.open} H ${bar.high} L ${bar.low} C ${bar.close}`;
+});
+```
+
+The typed helper `chart.subscribeCrosshairMove(cb)` delivers the same
+`CrosshairMoveEvent` if you prefer a single dedicated callback.
+
+### click
+
+Fires when a hit-testable primitive is clicked. The payload `id` is the
+`externalId` you set on the marker, event marker, or price line, so you can route
+the click without a lookup.
+
+```ts
+chart.on('click', ({ id }) => {
+  if (id === 'entry-line') openOrderPanel();
+});
+```
+
+`chart.subscribeClick(cb)` is the typed equivalent (`cb(externalId)`).
+
+## Viewport events
+
+`pan` and `zoom` report the new visible window after the gesture. `resize` fires
+whenever the container changes size (the built-in `ResizeObserver` drives it, and
+an explicit `chart.applySize(w, h)` also emits it).
+
+```ts
+chart.on('pan',  ({ from, to }) => syncOtherChart(from, to));
+chart.on('zoom', ({ from, to }) => syncOtherChart(from, to));
+chart.on('resize', ({ width, height }) => layoutOverlays(width, height));
+```
+
+<Callout type="info">
+Use `pan` / `zoom` to keep a second chart's time window in lockstep, or to save
+the user's camera. The window is not persisted for you by design.
+</Callout>
+
+## Data events
+
+### lazy-load
+
+Fires when the viewport nears the oldest loaded bar. Pair it with a history
+loader and `series.prependData(...)`, then call `chart.historyLoadComplete()` to
+re-arm the trigger. See [Data Loading](/docs/data-loading) for the full pattern.
+
+```ts
+chart.setHistoryLoader(() => {
+  chart.on('lazy-load', async ({ to }) => {
+    const older = await fetchOlderBars(before(to));
+    series.prependData(older);
+    chart.historyLoadComplete();
+  });
+});
+```
+
+<Callout type="info">
+`setHistoryLoader` is the direct hook — it fires the loader with no payload.
+`lazy-load` is the observable form of the same trigger, carrying the time window
+so a single handler can serve multiple series.
+</Callout>
+
+## Lifecycle events
+
+### ready
+
+Fires once, on the microtask after `createChart` returns. Because it is deferred,
+a subscription registered on the very next line still receives it.
+
+```ts
+const chart = createChart(el);
+chart.on('ready', () => console.log('ready'));  // still fires
+```
+
+## Trading events
+
+Every `chart.trading.on(name, cb)` event is mirrored onto the main bus, so
+`chart.on('trading:order_modify', cb)` and
+`chart.trading.on('order_modify', cb)` are equivalent. Use whichever reads better
+in your code.
+
+| Event | Payload |
+|-------|---------|
+| `trading:order_modify` | `{ orderId, newPrice, previousPrice }` |
+| `trading:order_cancel` | `{ orderId }` |
+| `trading:order_click` | `{ order }` |
+| `trading:position_close` | `{ positionId }` |
+| `trading:position_click` | `{ position }` |
+| `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` |
+
+```ts
+chart.on('trading:order_modify', async ({ orderId, newPrice }) => {
+  await broker.modifyOrder(orderId, { price: newPrice });
+});
+
+chart.on('trading:position_close', async ({ positionId }) => {
+  await broker.closePosition(positionId);
+});
+```
+
+See the [Trading API](/docs/trading-api) page for the full data model.
+
+## Keyboard shortcut events
+
+Shortcut triggers come off their own manager rather than the value bus, because
+the payload is a rich `ShortcutTriggerEvent`:
+
+```ts
+chart.shortcuts?.on(({ command, combo }) => {
+  analytics.track('shortcut', { command, combo });
+});
+```
+
+See [Keyboard Shortcuts](/docs/keyboard-shortcuts).
+
+## Design notes and scope
+
+OpenAlgo Charts is a lean rendering engine, not a full white-label shell, so the
+event surface stays deliberately small and stable. Concerns that belong to your
+application layer are composed from the primitives above rather than shipped as
+built-in events:
+
+- **Drawing tools, annotations, context menus.** Build them as
+  [primitives / plugins](/docs/primitives-and-plugins) and hit-test with `click`.
+- **Indicator lifecycle.** Indicators here are plain series and transforms you
+  add and remove yourself, so there is no separate add/remove/settings event
+  stream to subscribe to.
+- **Data-feed reconnection, gap-fill, timezone, theme families, undo/redo,
+  state persistence.** These live in your app or your feed. The engine exposes
+  the hooks (`setData`, `update`, `prependData`, `setHistoryLoader`,
+  `setTheme`-style options) so you own the policy. See
+  [Data Loading](/docs/data-loading) and [Live Data](/docs/live-data).
+
+This keeps the base bundle small and the API easy to reason about: a handful of
+events you will actually use, each with a plain payload and a one-call
+unsubscribe.

@@ -1,0 +1,269 @@
+---
+title: Data Loading
+description: Load, stream, page, and downsample data efficiently.
+---
+
+import { Callout } from 'nextra/components'
+import RunnableExample from '../../components/RunnableExample'
+
+# Data loading
+
+This page covers every way to get price data into a chart: bulk load, live
+updates, tick aggregation, infinite history paging, large-dataset downsampling,
+and gap recovery after a feed drop.
+
+## Initial load
+
+Create a series, then call `setData` with a sorted array of bars:
+
+```ts
+import { createChart } from 'openalgo-charts';
+
+const chart = createChart(el);
+const series = chart.addSeries('candlestick');
+series.setData(bars);
+chart.timeScale.fitContent(bars.length);
+```
+
+`setData` replaces the entire series in one pass. The first call also triggers
+an automatic fit so the chart shows all bars without you needing to call
+`fitContent` yourself, but it is good practice to call it explicitly whenever
+you replace data.
+
+<Callout type="warning">
+`time` is **UTC seconds** (a plain integer), not a `Date` and not milliseconds.
+Pass bars sorted ascending by `time`; the DataLayer re-sorts on its own, but
+supplying pre-sorted input is faster.
+</Callout>
+
+Bars use the same shape across all series types:
+
+```ts
+interface Bar {
+  time: number;   // UTC seconds
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+```
+
+Line and area series read only `close`; you can supply the same bar objects to
+every series. Each bar gets a **gapless logical index** on the shared time axis,
+so weekends, holidays, and overnight breaks collapse automatically. See
+[Core Concepts](/docs/core-concepts) for how the index space works.
+
+## Incremental live updates
+
+`series.update(bar)` is the hot path for live data. Pass the current
+in-progress bar on each tick; the chart decides what to do based on `time`:
+
+| Incoming `time` vs last bar | Result |
+|---|---|
+| Newer | Appends a new bar; auto-scrolls if the viewport is already at the right edge |
+| Same | Replaces the last bar in place (intra-bar tick update) |
+| Older | Inserts into history or replaces an existing bar at that time |
+
+```ts
+// Intra-bar update (same time -> replaces)
+series.update({ time: currentBarTime, open, high, low, close, volume });
+
+// New bar (newer time -> appends)
+series.update({ time: nextBarTime, open: close, high: close, low: close, close, volume: 0 });
+```
+
+<Callout type="info">
+Auto-scroll on append only fires when the user's viewport is **already at the
+right edge** (`rightOffset >= 0`). If the user has scrolled left into history,
+new bars accumulate off-screen without disturbing the view.
+</Callout>
+
+Contrast this with `setData`, which does a full replace and resets the time
+axis. Use `update` for ticks; use `setData` when you need to swap in a
+completely different dataset (timeframe change, symbol change).
+
+To compute the next update value from the current bar (for example, to
+accumulate volume), read the live bar with `getData`:
+
+```ts
+// getData() returns bars sorted oldest -> newest
+const bars = series.getData();
+const last = bars[bars.length - 1];
+series.update({ ...last, close: newPrice, high: Math.max(last.high, newPrice) });
+```
+
+## Building bars from a tick stream
+
+When your WebSocket feed delivers raw trade ticks (price + quantity) rather
+than completed candles, use `CandleBuilder` to bucket them into OHLC bars.
+
+```ts
+import { CandleBuilder } from 'openalgo-charts';
+
+const builder = new CandleBuilder({
+  intervalSec: 60,          // 1-minute bars
+  volumeMode: 'ltq-sum',    // accumulate last-traded qty per tick
+  lateTickPolicy: 'foldIntoBar',
+  sessionAnchorSec: 0,      // align buckets to epoch; set to session open for IST alignment
+});
+
+// Seed from the last historical bar so the first live tick continues it
+const bars = await feed.getHistory(...);
+series.setData(bars);
+builder.seed(bars[bars.length - 1]);
+
+// Feed each tick as it arrives
+ws.onTick((tick) => {
+  // tick: { time: UTCSeconds, price: number, ltq?: number, cumDayVolume?: number }
+  const update = builder.onTick(tick);
+  if (update !== null) {
+    series.update(update.bar); // update.isNew === true on a bar boundary
+  }
+});
+```
+
+`onTick` returns `null` only when the `lateTickPolicy` is
+`'dropOlderThanPrevBar'` and the tick predates the current bar's open. The
+`CandleUpdate.isNew` flag is `true` on the first tick of a new bucket (useful
+for logging or triggering signal evaluation).
+
+The `volumeMode` option controls volume accounting:
+- `'ltq-sum'` -- add each tick's `ltq` field (last-traded quantity).
+- `'day-delta'` -- diff a cumulative daily volume counter (`cumDayVolume`);
+  handles intraday resets automatically.
+
+## Lazy / infinite history
+
+When a user pans left past the oldest loaded bar, the chart fires a history
+loader so you can fetch and prepend older data without rebuilding the chart.
+
+Register the loader once after creating the chart:
+
+```ts
+chart.setHistoryLoader(async () => {
+  const older = await myApi.getBarsBefore(oldestLoadedTime, 500);
+  if (older.length > 0) {
+    series.prependData(older);
+    oldestLoadedTime = older[0].time;
+  }
+  // Always call this, even when there is nothing left to load.
+  // Without it the loader will never fire again.
+  chart.historyLoadComplete();
+});
+```
+
+`prependData` merges the incoming bars into the existing series by time: new
+timestamps are inserted and existing ones are replaced. The viewport is
+preserved -- the same bars stay on screen because the time-scale `baseIndex`
+shifts to compensate for the prepended count.
+
+<Callout type="warning">
+You **must** call `chart.historyLoadComplete()` after every loader invocation,
+whether or not new bars were returned. Omitting it latches the "loading" flag
+permanently and paging stalls.
+</Callout>
+
+You can also listen to the `'lazy-load'` event on the unified bus (for example,
+to log or debounce independently of the loader function):
+
+```ts
+chart.on('lazy-load', (e) => {
+  console.log('paging backward from', e.from, 'to', e.to);
+});
+```
+
+See [Events](/docs/events) for the full event reference.
+
+### Live demo: infinite history
+
+Seed the chart with 120 bars, then pan left -- the loader prepends 60 more
+bars each time you reach the oldest edge.
+
+<RunnableExample height={360} code={`const chart = lib.createChart(el);
+const intervalSec = 3600;
+const seedStart = 1700000000;
+const bars = lib.generateBars(seedStart, 120, intervalSec);
+const series = chart.addSeries('candlestick');
+series.setData(bars);
+chart.timeScale.fitContent(bars.length);
+
+let pageStart = seedStart;
+
+chart.setHistoryLoader(function () {
+  const olderStart = pageStart - 60 * intervalSec;
+  const olderBars = lib.generateBars(olderStart, 60, intervalSec);
+  series.prependData(olderBars);
+  pageStart = olderStart;
+  chart.historyLoadComplete();
+});
+
+return chart;`} caption="Pan left to trigger history paging. Each page prepends 60 more hourly bars while keeping the viewport stable." />
+
+## Large datasets: conflation
+
+When zoomed far out, many bars collapse to sub-pixel widths. Enable conflation
+to let the renderer merge groups of bars into a single OHLC-preserving drawn
+bar, which keeps rendering fast and keeps the candle shape meaningful:
+
+```ts
+const chart = createChart(el, {
+  conflate: true,
+  conflationFactor: 1,  // default; raise to 2-4 for more aggressive merging
+});
+```
+
+Conflation is **OHLC-preserving** -- open comes from the first bar in the
+group, close from the last, high and low from the extremes, and volume is
+summed. It kicks in automatically when `barSpacing * devicePixelRatio` falls
+below the pixel threshold and is transparent to your data layer; the underlying
+bars are unchanged.
+
+The same merge helpers are also available for manual use:
+
+```ts
+import { conflateBars, mergeBars } from 'openalgo-charts';
+
+const merged = conflateBars(bars, 5);   // merge every 5 bars into one
+const single = mergeBars(bars.slice(0, 5)); // merge a specific group
+```
+
+See [Core Concepts](/docs/core-concepts) for the gapless index model that makes
+conflation align correctly.
+
+## Reconnect and gap recovery
+
+When a WebSocket feed drops and reconnects, re-fetch the missed window and pass
+it to `setData` or `prependData`. The DataLayer merges by time and
+deduplicates: bars whose timestamps already exist in the series are replaced
+(not duplicated), and genuinely new bars are inserted in sorted order. You do
+not need to compute the exact gap -- overlapping re-fetched windows are safe.
+
+```ts
+ws.on('reconnect', async () => {
+  // Fetch everything since the last known bar, with some overlap for safety
+  const missed = await myApi.getBars({ from: lastKnownTime - 60, to: Date.now() / 1000 });
+  // DataLayer upserts by time -- no duplicates, no manual de-overlap needed
+  series.prependData(missed);
+});
+```
+
+If the gap is large enough that you want to reload the full visible range
+instead, use `setData` -- it is a full replace and runs the same O(n log n)
+sort that the initial load does.
+
+## Empty state
+
+`setData([])` is valid and renders an empty chart. You can add data later with
+another `setData` call or a sequence of `update` calls.
+
+```ts
+const series = chart.addSeries('candlestick');
+series.setData([]); // chart is blank; axes are visible
+
+// Later, once data arrives:
+series.setData(historicalBars);
+chart.timeScale.fitContent(historicalBars.length);
+```
+
+This is useful for showing a chart shell while an async fetch is in flight.

@@ -2,6 +2,7 @@ export default {
   '-- intro': { type: 'separator', title: 'Introduction' },
   'getting-started': 'Getting Started',
   'core-concepts': 'Core Concepts',
+  frameworks: 'Framework Integration',
 
   '-- guides': { type: 'separator', title: 'Guides' },
   'chart-types': 'Chart Types',
@@ -18,15 +19,21 @@ export default {
   'crosshair-and-legend': 'Crosshair & Legend',
   interactions: 'Interactions & A11y',
   'keyboard-shortcuts': 'Keyboard Shortcuts',
+  events: 'Events',
+  mobile: 'Mobile & Touch',
 
   '-- trading': { type: 'separator', title: 'Trading' },
   'trading-api': 'Trading API',
   trading: 'Order Engine & Ladder',
 
   '-- data': { type: 'separator', title: 'Data & Feeds' },
+  'data-loading': 'Data Loading',
   'live-data': 'Live Data (OpenAlgo)',
   'data-feeds': 'Custom Data Feeds',
 
   '-- reference': { type: 'separator', title: 'Reference' },
+  types: 'Types Reference',
+  constants: 'Constants & Helpers',
+  glossary: 'Glossary',
   'release-notes': 'Release Notes',
 };
