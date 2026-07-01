@@ -47,10 +47,15 @@ export class RenderLoop {
   /** Request a frame. Repeated calls before the frame runs are coalesced into one. */
   public requestFrame(): void {
     if (this._handle !== null) return;
-    this._handle = this._schedule(() => {
+    // Mark scheduled up front so a synchronous scheduler (tests, unusual hosts)
+    // that runs the callback before returning still leaves `_handle` null after
+    // the frame, instead of getting overwritten with the stale return value.
+    this._handle = -1;
+    const handle = this._schedule(() => {
       this._handle = null;
       this._onFrame();
     });
+    if (this._handle !== null) this._handle = handle; // async path: not yet run
   }
 
   /** Cancel a pending frame, if any. */

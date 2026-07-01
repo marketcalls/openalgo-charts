@@ -7,7 +7,7 @@ import { CanvasLayer } from './canvas';
 import { PriceScale } from '../scale/price-scale';
 import { TimeScale } from '../scale/time-scale';
 import { DataLayer } from '../model/data-layer';
-import type { SeriesRecord } from '../model/series';
+import type { SeriesRecord, PriceScaleId } from '../model/series';
 import { computeGridLines, drawGrid } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
 import { conflationGroupSize, conflateItems } from '../model/conflation';
@@ -43,7 +43,10 @@ export class Pane {
   public readonly element: HTMLElement;
   public readonly base: CanvasLayer;
   public readonly top: CanvasLayer;
-  public readonly priceScale = new PriceScale();
+  public readonly priceScale = new PriceScale(); // 'right' (primary) scale
+  /** Extra scales created on demand: left axis and a hidden overlay (volume). */
+  private _leftScale: PriceScale | null = null;
+  private _overlayScale: PriceScale | null = null;
   /** Relative height weight within the chart (price=1, volume≈0.3). */
   public weight = 1;
   private readonly _series: SeriesRecord[] = [];
@@ -64,7 +67,25 @@ export class Pane {
   }
 
   public addSeries(record: SeriesRecord): void {
+    this._scaleFor(record.scaleId); // create the target scale if needed
     this._series.push(record);
+  }
+
+  /** The PriceScale for a scale id, creating the left/overlay scale on first use. */
+  private _scaleFor(id: PriceScaleId): PriceScale {
+    if (id === 'left') return (this._leftScale ??= new PriceScale());
+    if (id === '') return (this._overlayScale ??= new PriceScale());
+    return this.priceScale;
+  }
+
+  /** The price scale a series maps to (for the series handle's `priceScale()`). */
+  public scaleOf(record: SeriesRecord): PriceScale {
+    return this._scaleFor(record.scaleId);
+  }
+
+  /** True when a left-axis scale is active (some series maps to it). */
+  public hasLeftScale(): boolean {
+    return this._leftScale !== null && this._series.some((s) => s.scaleId === 'left');
   }
 
   /** Remove a series record if present; returns true if it was found. */
@@ -136,16 +157,30 @@ export class Pane {
     };
   }
 
-  /** Recompute the price range from the visible bars of all series in this pane. */
+  /** Autoscale each active price scale from its own series (independent axes). */
   public autoscale(ctx: PaneRenderContext): void {
     const layout = this._layout(ctx);
-    this.priceScale.setHeight(layout.plotHeight);
-    if (!this.priceScale.autoScale) return; // manual (axis-dragged) range — leave it
     const range = ctx.timeScale.visibleRange();
+    // Right scale also expands for primitives (price lines etc.).
+    this._autoscaleScale(this.priceScale, (s) => s.scaleId === 'right', true, ctx, layout.plotHeight, range);
+    if (this._leftScale) this._autoscaleScale(this._leftScale, (s) => s.scaleId === 'left', false, ctx, layout.plotHeight, range);
+    if (this._overlayScale) this._autoscaleScale(this._overlayScale, (s) => s.scaleId === '', false, ctx, layout.plotHeight, range);
+  }
+
+  private _autoscaleScale(
+    scale: PriceScale,
+    match: (s: SeriesRecord) => boolean,
+    includePrimitives: boolean,
+    ctx: PaneRenderContext,
+    plotHeight: number,
+    range: { from: number; to: number },
+  ): void {
+    scale.setHeight(plotHeight);
+    if (!scale.autoScale) return; // manual (axis-dragged) range: leave it
     let low = Infinity;
     let high = -Infinity;
     for (const s of this._series) {
-      if (s.style.visible === false) continue;
+      if (s.style.visible === false || !match(s)) continue;
       const entry = getChartType(s.type);
       for (const ib of ctx.dataLayer.visibleBars(s.dataId, range.from, range.to)) {
         const ext = entry.extents(ib.bar, s.style);
@@ -153,14 +188,16 @@ export class Pane {
         if (ext.max > high) high = ext.max;
       }
     }
-    for (const p of this._primitives) {
-      const ext = p.autoscaleInfo?.();
-      if (ext) {
-        if (ext.min < low) low = ext.min;
-        if (ext.max > high) high = ext.max;
+    if (includePrimitives) {
+      for (const p of this._primitives) {
+        const ext = p.autoscaleInfo?.();
+        if (ext) {
+          if (ext.min < low) low = ext.min;
+          if (ext.max > high) high = ext.max;
+        }
       }
     }
-    if (low <= high) this.priceScale.autoscale(low, high);
+    if (low <= high) scale.autoscale(low, high);
   }
 
   /** Paint background + grid + series + axes on the base canvas. */
@@ -195,7 +232,6 @@ export class Pane {
 
     // series (registry-driven — the core never switches on type)
     const range = ctx.timeScale.visibleRange();
-    const priceToY = (p: number): number => this.priceScale.priceToY(p);
     let lastClose: number | null = null;
     let lastUp = true;
     const groupSize = ctx.conflate
@@ -203,6 +239,8 @@ export class Pane {
       : 1;
     for (const s of this._series) {
       if (s.style.visible === false) continue;
+      const scale = this._scaleFor(s.scaleId);
+      const priceToY = (p: number): number => scale.priceToY(p);
       const entry = getChartType(s.type);
       const visible = ctx.dataLayer.visibleBars(s.dataId, range.from, range.to);
       let items: DrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index), bar: ib.bar }));

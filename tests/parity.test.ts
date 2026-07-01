@@ -114,3 +114,44 @@ describe('Task 2: series.applyOptions / remove / visible', () => {
     expect(left[0].style.color).toBe('#0f0');
   });
 });
+
+describe('Task 1a: independent per-series price scales + overlay', () => {
+  const immediate = { raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} } };
+  it('a hidden overlay scale does not move the right price axis (volume overlay)', () => {
+    const chart = makeChart(immediate);
+    const price = chart.addSeries('candlestick');
+    price.setData([bar(100, 100), bar(160, 110)]);
+    const ps = price.priceScale();
+    const yTop = ps.priceToY(110);
+    const yBot = ps.priceToY(100);
+
+    const vol = chart.addSeries('histogram', { priceScaleId: '' });
+    vol.setData([{ time: 100, open: 0, high: 0, low: 0, close: 5000 }, { time: 160, open: 0, high: 0, low: 0, close: 9000 }]);
+
+    expect(ps.priceToY(110)).toBeCloseTo(yTop, 3); // unchanged by huge volume values
+    expect(ps.priceToY(100)).toBeCloseTo(yBot, 3);
+    expect(vol.priceScale()).not.toBe(ps); // a separate overlay scale
+  });
+  it('left and right scales autoscale independently', () => {
+    const chart = makeChart(immediate);
+    const r = chart.addSeries('line', { priceScaleId: 'right' });
+    r.setData([bar(100, 10), bar(160, 20)]);
+    const l = chart.addSeries('line', { priceScaleId: 'left' });
+    l.setData([bar(100, 1000), bar(160, 2000)]);
+    const rs = r.priceScale();
+    const ls = l.priceScale();
+    expect(rs).not.toBe(ls);
+    expect(rs.priceToY(20)).toBeLessThan(rs.priceToY(10)); // higher price -> smaller y
+    expect(ls.priceToY(2000)).toBeLessThan(ls.priceToY(1000));
+    // right scale is unaffected by the left series' huge magnitudes
+    expect(rs.priceToY(20)).toBeCloseTo(ls.priceToY(2000), 0);
+  });
+  it('series.priceScale().setOptions pins the overlay to the bottom via margins', () => {
+    const chart = makeChart(immediate);
+    chart.addSeries('candlestick').setData([bar(100, 100), bar(160, 110)]);
+    const vol = chart.addSeries('histogram', { priceScaleId: '' });
+    vol.priceScale().setOptions({ marginTop: 0.8, marginBottom: 0 });
+    expect(vol.priceScale().options.marginTop).toBe(0.8);
+    expect(vol.priceScale().options.marginBottom).toBe(0);
+  });
+});

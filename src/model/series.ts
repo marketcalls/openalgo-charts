@@ -10,13 +10,22 @@ import { getChartType } from './chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
 import type { Bar, SeriesDataItem } from './bar';
 import type { SeriesMarkers } from '../primitives/markers';
+import type { PriceScale } from '../scale/price-scale';
 
 export type { SeriesType };
+
+/**
+ * Which price axis a series maps to. 'right' (default) and 'left' each draw an
+ * axis and autoscale independently; '' is a hidden overlay scale (no axis, its
+ * own autoscale) used to pin a volume histogram inside the price pane.
+ */
+export type PriceScaleId = 'right' | 'left' | '';
 
 export interface SeriesRecord {
   dataId: SeriesId;
   type: SeriesType;
   style: SeriesStyle;
+  scaleId: PriceScaleId;
 }
 
 /** Public handle returned by `chart.addSeries(...)`. */
@@ -33,11 +42,13 @@ export interface SeriesApi {
   applyOptions(style: Partial<SeriesStyle>): void;
   /** Remove the series from its pane and free its data rows. */
   remove(): void;
+  /** The price scale this series maps to (call `.setOptions({ marginTop, marginBottom })` on it). */
+  priceScale(): PriceScale;
   /** Create a markers layer (buy/sell signals, shapes) bound to this series. */
   createMarkers(): SeriesMarkers;
 }
 
-export function createSeriesRecord(dataId: SeriesId, type: SeriesType, style?: SeriesStyle): SeriesRecord {
+export function createSeriesRecord(dataId: SeriesId, type: SeriesType, style?: SeriesStyle, scaleId: PriceScaleId = 'right'): SeriesRecord {
   const entry = getChartType(type);
-  return { dataId, type, style: { ...entry.defaultStyle, ...style } };
+  return { dataId, type, style: { ...entry.defaultStyle, ...style }, scaleId };
 }

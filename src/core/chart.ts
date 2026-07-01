@@ -10,9 +10,9 @@ import { Pane, type PaneRenderContext } from './pane';
 import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale } from '../scale/time-scale';
 import type { LogicalRange } from '../scale/time-scale';
-import type { PriceScaleOptions } from '../scale/price-scale';
+import type { PriceScaleOptions, PriceScale } from '../scale/price-scale';
 import { DataLayer } from '../model/data-layer';
-import { createSeriesRecord, type SeriesApi } from '../model/series';
+import { createSeriesRecord, type SeriesApi, type PriceScaleId } from '../model/series';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
 import type { Bar, SeriesDataItem } from '../model/bar';
@@ -82,6 +82,12 @@ export interface AddSeriesOptions {
   paneIndex?: number;
   /** Style overrides merged onto the chart type's defaults. */
   style?: SeriesStyle;
+  /**
+   * Which price axis this series maps to. 'right' (default) and 'left' each draw
+   * an axis and autoscale independently; '' is a hidden overlay scale (no axis)
+   * for a volume histogram inside the price pane.
+   */
+  priceScaleId?: PriceScaleId;
 }
 
 /**
@@ -290,7 +296,7 @@ export class Chart {
       this._firstDataId.value = dataId;
       this._firstPaneIndex = paneIndex;
     }
-    const record = createSeriesRecord(dataId, type, options.style);
+    const record = createSeriesRecord(dataId, type, options.style, options.priceScaleId ?? 'right');
     this._panes[paneIndex].addSeries(record);
     return {
       setData: (bars: readonly SeriesDataItem[]): void => this._setData(dataId, bars.map(toBar)),
@@ -308,6 +314,7 @@ export class Chart {
         this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
         this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
       },
+      priceScale: (): PriceScale => this._panes[paneIndex].scaleOf(record),
       createMarkers: (): SeriesMarkers => {
         const m = new SeriesMarkers(dataId);
         this._addPrimitive(paneIndex, m);

@@ -2,7 +2,7 @@
   {
     "name": "Base engine (chart types + indicators + watermark + shortcuts + trading API)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "24 KB",
+    "limit": "25 KB",
     "brotli": true
   },
   {
