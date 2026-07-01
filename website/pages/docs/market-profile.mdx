@@ -1,0 +1,177 @@
+---
+title: Market Profile (TPO)
+description: Time Price Opportunity profiles - sessions, letters, POC / value area, initial balance, single prints, and the on-chart renderer.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Market Profile (TPO)
+
+Market Profile organizes a session's trade into **Time Price Opportunities (TPOs)**: the
+session is split into fixed-length time **periods** (one letter each), and every price a
+period traded at earns that letter. Stacking the letters sideways draws a distribution that
+shows where the market spent its time - the fat middle is acceptance, the thin edges are
+rejection.
+
+It is two pieces: **`computeMarketProfile`** (pure analytics, in the `profile` tier) and the
+**`MarketProfile`** primitive that renders the result on the chart.
+
+```ts
+import { computeMarketProfile, MarketProfile } from 'openalgo-charts/profile';
+
+const result = computeMarketProfile(bars, { tickSize: 0.05, session: 'day', blockMinutes: 30 });
+chart.addPrimitive(new MarketProfile(result));
+```
+
+## Concepts
+
+- **Session** - how bars are grouped into profiles: `day`, `week`, `month`, or `composite`
+  (one profile over everything). Grouping is by the IST calendar.
+- **Period / letter** - each `blockMinutes` slice of a session is one TPO letter (`A`, `B`,
+  ... `Z`, then `a`..`z`).
+- **POC** - Point of Control, the price with the most TPOs (the longest row).
+- **Value Area (VAH / VAL)** - the band around the POC holding `valueAreaPercent` of all TPOs.
+- **Initial Balance** - the price range of the opening `initialBalancePeriods` periods.
+- **Single prints** - lone TPOs away from the extremes (quick moves that left a gap in time).
+- **Poor high / low** - a session extreme printed by more than one TPO (a weak, often
+  revisited, edge).
+
+## A profile in a few lines
+
+The renderer overlays the price series, so add a price series first (it provides the time
+axis). Here is a **composite** profile - one distribution over all the bars, letters packed
+from the left:
+
+<RunnableExample height={380} tiers={['profile']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 26, 1800); // 30-min bars
+chart.addSeries('candlestick').setData(bars);
+
+const mp = lib.computeMarketProfile(bars, { tickSize: 1, session: 'composite', blockMinutes: 30 });
+chart.addPrimitive(new lib.MarketProfile(mp));
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="Composite TPO: letters packed left, POC (gold) and value area with a faint fill." />
+
+## Sessions
+
+Switch `session` to split the same bars into one profile per day / week / month. Each
+session's profile is drawn under its own bars, so you can read structure across time:
+
+<RunnableExample height={400} tiers={['profile']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 120, 1800);
+chart.addSeries('candlestick').setData(bars);
+
+const mp = lib.computeMarketProfile(bars, { tickSize: 1, session: 'day', blockMinutes: 60, valueAreaPercent: 0.7 });
+chart.addPrimitive(new lib.MarketProfile(mp)); // IB bracket on the left of each session
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="Day sessions: a separate profile per IST day, each with its own POC, value area, and initial-balance bracket." />
+
+## Color modes & volume sub-profile
+
+`colorMode` is `valueArea` (default), `uniform`, or `heat` (opacity scales with TPO count).
+Turn letters off for a solid histogram, and overlay a volume-at-price sub-profile:
+
+<RunnableExample height={380} tiers={['profile']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 40, 1800);
+chart.addSeries('candlestick').setData(bars);
+
+const mp = lib.computeMarketProfile(bars, { tickSize: 1, session: 'composite', blockMinutes: 30 });
+chart.addPrimitive(new lib.MarketProfile(mp, {
+  colorMode: 'heat',
+  showLetters: false,        // solid blocks instead of letters
+  showVolumeProfile: true,   // volume-at-price on the right edge
+  volumeProfileWidth: 70,
+}));
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="Heat coloring by TPO count, solid blocks, with a volume sub-profile." />
+
+## `computeMarketProfile` options
+
+```ts
+computeMarketProfile(bars, options): MarketProfileResult
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `tickSize` | `0.05` | price bucket size TPOs are counted on |
+| `session` | `'day'` | `'day'` / `'week'` / `'month'` / `'composite'` |
+| `blockMinutes` | `30` | period length (one letter per period) |
+| `valueAreaPercent` | `0.7` | fraction of TPOs inside the value area (0..1) |
+| `initialBalancePeriods` | `2` | opening periods that form the Initial Balance |
+
+## `MarketProfile` primitive options
+
+Pass in the constructor (`new MarketProfile(result, options)`) or update live with
+`profile.setOptions({ ... })`.
+
+| Option | Default | Description |
+|---|---|---|
+| `showLetters` | `true` | draw TPO letters (else solid blocks) |
+| `letterWidth` | `8` | width of one TPO column, px |
+| `font` | `10` | letter font size, px |
+| `colorMode` | `valueArea` | `uniform` / `valueArea` / `heat` |
+| `color` / `vaColor` | grays | base and value-area colors |
+| `opacity` | `0.9` | letters / blocks opacity |
+| `showPoc` / `pocColor` / `showPocLabel` | `true` / gold / `true` | Point of Control line + label |
+| `showValueArea` / `vahColor` / `valColor` / `showValueAreaLabels` | `true` | VAH & VAL lines + labels |
+| `fillValueArea` / `valueAreaFillColor` / `valueAreaFillOpacity` | `true` / teal / `0.08` | shade the value-area band |
+| `showInitialBalance` / `ibColor` | `true` | opening-range bracket |
+| `showSinglePrints` / `singlePrintColor` | `true` | mark lone TPOs |
+| `showVolumeProfile` / `volumeProfileWidth` / `volumeColor` | `false` / `60` / slate | volume-at-price sub-profile |
+| `zOrder` | `top` | draw over (`top`) or behind (`bottom`) the series |
+
+## Data model
+
+```ts
+interface MarketProfileResult {
+  sessions: MarketProfileSessionResult[];
+  options: MarketProfileOptions;
+}
+
+interface MarketProfileSessionResult {
+  startTime: number;      // UTC seconds (first bar)
+  endTime: number;        // UTC seconds (last bar)
+  levels: { price: number; count: number; letters: string; volume: number }[]; // high -> low
+  poc: number;
+  vah: number; val: number;
+  periods: number;
+  initialBalance: { high: number; low: number };
+  singlePrints: number[];
+  poorHigh: boolean; poorLow: boolean;
+  totalVolume: number;
+}
+```
+
+Everything you need for your own annotations (naked POCs, day-type labels, alerts) is on the
+result - the primitive is just one way to draw it.
+
+## Live updates
+
+Recompute on new bars and hand the fresh result to the same primitive; `setData` repaints:
+
+```ts
+const profile = new MarketProfile(computeMarketProfile(bars, opts));
+chart.addPrimitive(profile);
+
+// later, as bars grow:
+profile.setData(computeMarketProfile(bars, opts));
+profile.setOptions({ colorMode: 'heat' }); // restyle without recomputing
+```
+
+<Callout type="info">
+Volume-at-price here comes from each bar's `volume` spread across its range - a fast
+approximation. For true bid/ask volume distribution use the [Footprint](/docs/profiles-and-orderflow).
+</Callout>
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Nothing renders | No price series, so the time axis has no bars | Add a series (`addSeries`) before the profile |
+| Only one profile for many days | `session: 'composite'` | Use `session: 'day'` (or `week` / `month`) |
+| Letters overlap vertically | `tickSize` too small for the price range | Increase `tickSize` (fewer, taller rows) |
+| Letters run past the session | Many periods and a wide `letterWidth` | Lower `letterWidth`, or raise `blockMinutes` |
+| Value area looks wrong | `valueAreaPercent` not in 0..1 | Pass a fraction (0.7), not a percent (70) |

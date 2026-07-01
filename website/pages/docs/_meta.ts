@@ -13,6 +13,7 @@ export default {
   transforms: 'Transforms',
   'primitives-and-plugins': 'Primitives & Plugins',
   'profiles-and-orderflow': 'Profiles & Order Flow',
+  'market-profile': 'Market Profile (TPO)',
   'crosshair-and-legend': 'Crosshair & Legend',
   interactions: 'Interactions & A11y',
 
