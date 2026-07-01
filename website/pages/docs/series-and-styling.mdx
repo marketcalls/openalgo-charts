@@ -15,10 +15,16 @@ import RunnableExample from '../../components/RunnableExample'
 const series = chart.addSeries('candlestick', { paneIndex: 0, style: { /* ... */ } });
 
 series.setData(bars);          // replace all data
+series.prependData(older);     // merge older bars (history paging), viewport kept
 series.update(bar);            // mutate the last bar or append a new one
-series.setStyle({ upColor: '#26a69a' });  // restyle live
-series.remove();               // detach
+const bars = series.getData(); // current bars, sorted old -> new
+const markers = series.createMarkers();  // a markers layer bound to this series
 ```
+
+The five methods above are the complete `SeriesApi`. Style is set when you add
+the series (the `style` option below); to change styling live, keep the value in
+your own state and re-create the series, or drive colors through the
+[theme](/docs/themes).
 
 ## Per-series style
 

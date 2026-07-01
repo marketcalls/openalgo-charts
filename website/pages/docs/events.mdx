@@ -180,10 +180,10 @@ chart.on('ready', () => console.log('ready'));  // still fires
 
 ## Trading events
 
-Every `chart.trading.on(name, cb)` event is mirrored onto the main bus, so
+Every trading event is mirrored onto the main bus, so
 `chart.on('trading:order_modify', cb)` and
-`chart.trading.on('order_modify', cb)` are equivalent. Use whichever reads better
-in your code.
+`chart.trading.on('trading:order_modify', cb)` are equivalent (both use the full
+`trading:` prefixed name). Use whichever reads better in your code.
 
 | Event | Payload |
 |-------|---------|
