@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { TradingController } from '../src/core/trading-controller';
+import { TradingController, TradeMarkersPrimitive } from '../src/core/trading-controller';
 import type { TradingHost } from '../src/core/trading-controller';
 import { PriceLine } from '../src/primitives/price-line';
 import type { IPrimitive } from '../src/primitives/primitive';
@@ -110,6 +110,57 @@ describe('TradingController', () => {
       trades: [{ id: 't1', side: 'buy', price: 100, size: 1, timestamp: 1700000000000 }],
     });
     expect(h.lines()[0].options().closeButton).toBe(false);
+    expect(tc.getTrades()).toHaveLength(1);
+  });
+});
+
+describe('TradingController — T2 (brackets, markers, settings, clicks)', () => {
+  it('applies color settings and re-renders lines', () => {
+    const h = fakeHost();
+    const tc = new TradingController(h.host);
+    tc.setPositions([{ id: 'p1', side: 'long', entryPrice: 100, size: 1 }]);
+    expect(h.lines()[0].options().color).toBe('#2f6df6'); // default long
+    tc.setSettings({ longColor: '#00C853' });
+    expect(tc.getSettings().long).toBe('#00C853');
+    expect(h.lines()[0].options().color).toBe('#00C853'); // recolored
+  });
+
+  it('bracket child drag emits bracket_modify (not order_modify)', () => {
+    const h = fakeHost();
+    const tc = new TradingController(h.host);
+    const onBracket = vi.fn();
+    const onModify = vi.fn();
+    tc.on('trading:bracket_modify', onBracket);
+    tc.on('trading:order_modify', onModify);
+    tc.setOrders([{ id: 'tp1', type: 'limit', side: 'sell', price: 110, size: 1, parentId: 'pos1', bracketRole: 'tp' }]);
+    expect(h.lines()[0].options().leftLabel).toBe('TP 1');
+    h.drag('ord:tp1', 112);
+    h.dragEnd('ord:tp1', 112);
+    expect(onBracket).toHaveBeenCalledWith({ parentId: 'pos1', bracketRole: 'tp', newPrice: 112 });
+    expect(onModify).not.toHaveBeenCalled();
+  });
+
+  it('emits body-click events', () => {
+    const h = fakeHost();
+    const tc = new TradingController(h.host);
+    const onPos = vi.fn();
+    const onOrd = vi.fn();
+    tc.on('trading:position_click', onPos);
+    tc.on('trading:order_click', onOrd);
+    tc.setPositions([{ id: 'p1', side: 'long', entryPrice: 100, size: 1 }]);
+    tc.setOrders([{ id: 'o1', type: 'limit', side: 'buy', price: 90, size: 1 }]);
+    h.click('pos:p1');
+    h.click('ord:o1');
+    expect(onPos).toHaveBeenCalledWith({ position: expect.objectContaining({ id: 'p1' }) });
+    expect(onOrd).toHaveBeenCalledWith({ order: expect.objectContaining({ id: 'o1' }) });
+  });
+
+  it('adds a trade-marker primitive on setTrades', () => {
+    const h = fakeHost();
+    const tc = new TradingController(h.host);
+    tc.setTrades([{ id: 't1', side: 'buy', price: 100, size: 1, timestamp: 1700000000000, variant: 'bubble' }]);
+    const markers = h.added.find((p) => p instanceof TradeMarkersPrimitive);
+    expect(markers).toBeDefined();
     expect(tc.getTrades()).toHaveLength(1);
   });
 });

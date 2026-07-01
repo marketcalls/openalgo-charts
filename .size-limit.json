@@ -1,14 +1,14 @@
 [
   {
-    "name": "Base engine (chart types + EMA/RSI/ATR/Supertrend + watermark + keyboard shortcuts)",
+    "name": "Base engine (chart types + indicators + watermark + shortcuts + trading API)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "22 KB",
+    "limit": "24 KB",
     "brotli": true
   },
   {
     "name": "Base + trade layer",
     "path": ["dist/openalgo-charts.mjs", "dist/openalgo-charts.trade.mjs"],
-    "limit": "28 KB",
+    "limit": "30 KB",
     "brotli": true
   },
   {
