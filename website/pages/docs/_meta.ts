@@ -20,7 +20,8 @@ export default {
   'keyboard-shortcuts': 'Keyboard Shortcuts',
 
   '-- trading': { type: 'separator', title: 'Trading' },
-  trading: 'On-Chart Trading',
+  'trading-api': 'Trading API',
+  trading: 'Order Engine & Ladder',
 
   '-- data': { type: 'separator', title: 'Data & Feeds' },
   'live-data': 'Live Data (OpenAlgo)',
