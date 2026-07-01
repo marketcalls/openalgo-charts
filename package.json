@@ -30,7 +30,9 @@
     }
   },
   "files": [
-    "dist/**"
+    "dist/**",
+    "!dist/openalgo-charts.all.mjs",
+    "!dist/openalgo-charts.all.mjs.map"
   ],
   "sideEffects": [
     "**/transform/**",
