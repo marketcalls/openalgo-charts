@@ -63,7 +63,12 @@ export function drawLine(
   ctx.strokeStyle = style.color ?? '#4f8cff';
   ctx.lineWidth = Math.max(1, Math.round((style.lineWidth ?? 1.5) * dpr));
   ctx.lineJoin = 'round';
+  const dash = style.lineStyle === 'dashed' ? [6 * dpr, 4 * dpr]
+    : style.lineStyle === 'dotted' ? [1 * dpr, 3 * dpr]
+    : [];
+  ctx.setLineDash(dash);
   strokePolyline(ctx, pts, dpr);
+  ctx.setLineDash([]);
   if (style.markers) {
     const r = (style.markerRadius ?? 2) * dpr;
     ctx.fillStyle = style.color ?? '#4f8cff';

@@ -21,6 +21,8 @@ export interface SeriesStyle {
   // line / area / baseline / hlc-area family
   color?: string;
   lineWidth?: number;
+  /** Line dash style for line/step/area/HLC series. Default 'solid'. */
+  lineStyle?: 'solid' | 'dashed' | 'dotted';
   step?: boolean;
   markers?: boolean;
   markerRadius?: number;

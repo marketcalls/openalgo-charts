@@ -36,7 +36,7 @@ export class RecordingContext {
   public strokeRect(x: number, y: number, w: number, h: number): void {
     this.ops.push({ type: 'strokeRect', args: [x, y, w, h], strokeStyle: this.strokeStyle });
   }
-  public setLineDash(_d: number[]): void { this.ops.push({ type: 'setLineDash', args: [] }); }
+  public setLineDash(d: number[]): void { this.ops.push({ type: 'setLineDash', args: [...d] }); }
   public rect(x: number, y: number, w: number, h: number): void { this.ops.push({ type: 'rect', args: [x, y, w, h] }); }
   public clip(): void { this.ops.push({ type: 'clip', args: [] }); }
   public createLinearGradient(): { addColorStop(o: number, c: string): void } {

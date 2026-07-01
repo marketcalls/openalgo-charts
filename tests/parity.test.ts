@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { TimeScale } from '../src/scale/time-scale';
+import { getChartType } from '../src/model/chart-type-registry';
+import { darkTheme } from '../src/theme';
+import { makeCtx } from './helpers/fake-ctx';
+import type { Bar } from '../src/model/bar';
+
+const di = (x: number, close: number): { x: number; bar: Bar } => ({ x, bar: { time: x, open: close, high: close, low: close, close } });
 
 // Parity gaps to replace a third-party charting lib in OpenAlgo.
 // Task 3: timeScale.setVisibleLogicalRange (preserve zoom across a data reload).
@@ -36,5 +42,26 @@ describe('Task 3: setVisibleLogicalRange', () => {
     ts.setVisibleLogicalRange({ from: 40, to: 90 }); // valid
     expect(fired).toBe(1);
     expect(ts.visibleRange().to).toBeCloseTo(90, 3);
+  });
+});
+
+describe('Task 5: dashed / dotted line series', () => {
+  const rc = { plotHeight: 100, maxVolume: 0, theme: darkTheme };
+  const items = [di(0, 1), di(10, 2), di(20, 1.5)];
+  it('applies a dash pattern for a dashed line and none for solid', () => {
+    const dashed = makeCtx();
+    getChartType('line').draw(dashed.ctx, items, (v) => v, 8, 1, { lineStyle: 'dashed' }, rc);
+    expect(dashed.rec.ops.some((o) => o.type === 'setLineDash' && o.args.length > 0)).toBe(true);
+
+    const solid = makeCtx();
+    getChartType('line').draw(solid.ctx, items, (v) => v, 8, 1, {}, rc);
+    // solid only ever sets an empty dash
+    expect(solid.rec.ops.filter((o) => o.type === 'setLineDash').every((o) => o.args.length === 0)).toBe(true);
+  });
+  it('dotted uses a tighter pattern than dashed', () => {
+    const dotted = makeCtx();
+    getChartType('line').draw(dotted.ctx, items, (v) => v, 8, 1, { lineStyle: 'dotted' }, rc);
+    const set = dotted.rec.ops.find((o) => o.type === 'setLineDash' && o.args.length > 0);
+    expect(set?.args[0]).toBe(1); // dotted dash length
   });
 });
