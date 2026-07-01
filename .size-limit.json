@@ -18,9 +18,9 @@
     "brotli": true
   },
   {
-    "name": "Profile tier (Volume Profile/TPO/Footprint/Orderflow)",
+    "name": "Profile tier (Volume Profile/TPO/Market Profile/Footprint/Orderflow)",
     "path": "dist/openalgo-charts.profile.mjs",
-    "limit": "4 KB",
+    "limit": "8 KB",
     "brotli": true
   },
   {

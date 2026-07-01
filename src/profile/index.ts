@@ -7,6 +7,15 @@ export const PROFILE_TIER = 'profile' as const;
 export type { VolumeProfileResult, TpoResult, FootprintBar, FootprintCell } from './profile-model';
 export { bucketPrice, priceBuckets } from './profile-model';
 export { computeVolumeProfile, type VolumeProfileOptions } from './volume-profile';
+export {
+  computeVolumeProfileSessions,
+  DEFAULT_VOLUME_PROFILE_FAMILY_OPTIONS,
+  type VolumeProfileFamilyOptions,
+  type VolumeProfileSession,
+  type VolumeProfileLevel,
+  type VolumeProfileSessionResult,
+  type VolumeProfileFamilyResult,
+} from './volume-profile-family';
 export { computeTpo } from './tpo';
 export {
   computeMarketProfile,
