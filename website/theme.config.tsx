@@ -5,11 +5,13 @@ const REPO = 'https://github.com/marketcalls/openalgo-charts';
 
 const Logo = () => (
   <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, letterSpacing: '-0.02em', fontSize: '1.05rem' }}>
-    <span aria-hidden style={{
-      width: 22, height: 22, borderRadius: 6,
-      background: 'linear-gradient(135deg, #4f8cff 0%, #22c1a4 100%)',
-      display: 'inline-block',
-    }} />
+    <img
+      src="/openalgo-charts/openalgo-logo.svg"
+      alt="OpenAlgo"
+      width={24}
+      height={24}
+      style={{ borderRadius: 6, display: 'block' }}
+    />
     OpenAlgo<span style={{ color: 'var(--oac-accent, #4f8cff)' }}>Charts</span>
   </span>
 );
