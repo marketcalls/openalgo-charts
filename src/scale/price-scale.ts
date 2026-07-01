@@ -58,6 +58,7 @@ export class PriceScale {
   private _min = 0;
   private _max = 1;
   private _autoScale = true;
+  private _priceFormatter: ((price: number) => string) | null = null;
 
   public constructor(options: Partial<PriceScaleOptions> = {}) {
     this._options = { ...DEFAULT_PRICE_SCALE_OPTIONS, ...options };
@@ -168,8 +169,18 @@ export class PriceScale {
     return Math.round(price / step) * step;
   }
 
+  /**
+   * Override the numeric formatting used for axis tick labels, the last-price
+   * tag, and price-line labels (e.g. a currency or percent format). Pass null
+   * to restore the default tick-size-aware `toFixed`.
+   */
+  public setPriceFormatter(fn: ((price: number) => string) | null): void {
+    this._priceFormatter = fn;
+  }
+
   /** Format a price for axis/label display. */
   public format(price: number): string {
+    if (this._priceFormatter !== null) return this._priceFormatter(price);
     return price.toFixed(this.precision());
   }
 

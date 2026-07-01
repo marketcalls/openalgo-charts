@@ -54,6 +54,12 @@ export interface ChartOptions {
    * one, or `false` to disable keyboard control. Defaults to the built-in keymap.
    */
   shortcuts?: ShortcutManager | Partial<ShortcutManagerOptions> | false;
+  /**
+   * Custom price formatter for every pane's axis tick labels, the last-price
+   * tag, and price-line labels. e.g. `(p) => '$' + p.toFixed(2)`. When omitted,
+   * a tick-size-aware `toFixed` is used. Change it later via `setPriceFormatter`.
+   */
+  priceFormatter?: (price: number) => string;
 }
 
 export interface AddSeriesOptions {
@@ -150,6 +156,7 @@ export class Chart {
   private _axisStartMin = 0;
   private _axisStartMax = 0;
   private _axisStartSpacing = 0;
+  private _priceFormatter: ((price: number) => string) | null = null;
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._container = container;
@@ -164,6 +171,7 @@ export class Chart {
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
+    this._priceFormatter = options.priceFormatter ?? null;
     this._gridVert = options.grid?.vertLines ?? true;
     this._gridHorz = options.grid?.horzLines ?? true;
 
@@ -499,9 +507,21 @@ export class Chart {
   private _addPane(weight = 1): Pane {
     const pane = new Pane(this._doc);
     pane.weight = weight;
+    pane.priceScale.setPriceFormatter(this._priceFormatter);
     this._panes.push(pane);
     this._container.appendChild(pane.element);
     return pane;
+  }
+
+  /**
+   * Set a custom price formatter for every pane's axis labels, last-price tag,
+   * and price-line labels at runtime (e.g. switch to a currency format). Pass
+   * null to restore the default tick-size-aware formatting.
+   */
+  public setPriceFormatter(fn: ((price: number) => string) | null): void {
+    this._priceFormatter = fn;
+    for (const pane of this._panes) pane.priceScale.setPriceFormatter(fn);
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
   public panes(): readonly Pane[] {
