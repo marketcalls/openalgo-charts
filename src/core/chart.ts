@@ -18,6 +18,7 @@ import { KineticAnimation } from '../input/kinetic';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
 import { ShortcutManager } from '../input/shortcuts';
 import type { ShortcutManagerOptions } from '../input/shortcuts';
+import { TradingController } from './trading-controller';
 import { pinchState, pinchDelta, type PinchState } from '../input/touch';
 import type { IPrimitive, PrimitiveHost } from '../primitives/primitive';
 import { PriceLine, type PriceLineOptions } from '../primitives/price-line';
@@ -105,6 +106,7 @@ export class Chart {
   // interaction state
   private _crosshairMode: CrosshairMode;
   private _shortcuts: ShortcutManager | null = null;
+  private _trading: TradingController | null = null;
   private _pointerInside = false;
   private _keyTarget: HTMLElement | Document | null = null;
   private readonly _now: () => number;
@@ -223,6 +225,16 @@ export class Chart {
   /** The keyboard shortcut manager (null when shortcuts are disabled). */
   public get shortcuts(): ShortcutManager | null {
     return this._shortcuts;
+  }
+
+  /**
+   * The data-driven trading layer: push positions/orders/trades and the chart
+   * renders pills + markers, emitting `trading:*` events on interaction. Created
+   * on first access.
+   */
+  public get trading(): TradingController {
+    if (this._trading === null) this._trading = new TradingController(this);
+    return this._trading;
   }
 
   /** Add a series and return its data handle. */

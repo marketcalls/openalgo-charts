@@ -87,6 +87,21 @@ export {
 
 export { clamp, lerp, roundToTick } from './helpers/math';
 
+export { TradingController, DEFAULT_TRADING_COLORS } from './core/trading-controller';
+export type {
+  TradingHost,
+  TradingPosition,
+  TradingOrder,
+  TradingTrade,
+  TradingSyncPayload,
+  PositionSide,
+  TradingOrderSide,
+  TradingOrderType,
+  TradeMarkerVariant,
+  TradingLineVariant,
+  TradingLineStyle,
+} from './core/trading-controller';
+
 export {
   ShortcutManager,
   DEFAULT_KEYMAP,
