@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { FakeDataFeed } from '../src/feed/fake-feed';
 import { Chart } from '../src/core/chart';
+import { DataLayer } from '../src/model/data-layer';
 import { RecordingContext } from './helpers/fake-ctx';
 import type { Bar } from '../src/model/bar';
 
@@ -31,6 +32,38 @@ function makeChart(opts: Record<string, unknown> = {}): Chart {
   });
 }
 const bar = (time: number, c: number): Bar => ({ time, open: c, high: c + 2, low: c - 2, close: c, volume: 100 });
+
+describe('DataLayer visible-range binary search (Gap 7)', () => {
+  const b = (t: number, c: number): Bar => ({ time: t, open: c, high: c + 1, low: c - 1, close: c });
+  it('returns exactly the bars in the logical window', () => {
+    const dl = new DataLayer();
+    const id = dl.createSeries();
+    dl.setSeriesData(id, Array.from({ length: 100 }, (_, i) => b(1000 + i * 60, i)));
+    const win = dl.visibleBars(id, 10, 20);
+    expect(win.map((x) => x.index)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    expect(win[0].bar.close).toBe(10);
+    expect(win[win.length - 1].bar.close).toBe(20);
+  });
+  it('lastIndexedBar returns the newest bar and null for an empty series', () => {
+    const dl = new DataLayer();
+    const id = dl.createSeries();
+    dl.setSeriesData(id, [b(1000, 1), b(1060, 2), b(1120, 3)]);
+    const last = dl.lastIndexedBar(id);
+    expect(last?.index).toBe(2);
+    expect(last?.bar.close).toBe(3);
+    expect(dl.lastIndexedBar(dl.createSeries())).toBeNull();
+  });
+  it('maps a partially-overlapping series to the right global indices', () => {
+    const dl = new DataLayer();
+    const a = dl.createSeries();
+    const c = dl.createSeries();
+    dl.setSeriesData(a, [b(100, 1), b(200, 2), b(300, 3)]);
+    dl.setSeriesData(c, [b(200, 9)]); // only present at time 200 -> global index 1
+    const win = dl.visibleBars(c, 0, 2);
+    expect(win.map((x) => x.index)).toEqual([1]);
+    expect(win[0].bar.close).toBe(9);
+  });
+});
 
 describe('FakeDataFeed.subscribeBars streams (not a silent no-op)', () => {
   it('emits deterministic advancing bars on the injected scheduler and stops on unsubscribe', () => {

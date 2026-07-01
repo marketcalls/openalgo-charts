@@ -200,9 +200,8 @@ export class Pane {
       const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume, theme: ctx.theme };
       entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
       if (entry.isPriceSeries) {
-        const all = ctx.dataLayer.indexedBars(s.dataId);
-        const last = all[all.length - 1];
-        if (last !== undefined) {
+        const last = ctx.dataLayer.lastIndexedBar(s.dataId);
+        if (last !== null) {
           lastClose = last.bar.close;
           lastUp = last.bar.close >= last.bar.open;
         }

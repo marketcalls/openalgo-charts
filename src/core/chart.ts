@@ -927,9 +927,8 @@ export class Chart {
     const n = this._dataLayer.length;
     let txt = `${n} bar${n === 1 ? '' : 's'}`;
     if (this._firstDataId.value !== null && this._panes[0] !== undefined) {
-      const all = this._dataLayer.indexedBars(this._firstDataId.value);
-      const last = all[all.length - 1];
-      if (last !== undefined) txt += `, latest price ${this._panes[0].priceScale.format(last.bar.close)}`;
+      const last = this._dataLayer.lastIndexedBar(this._firstDataId.value);
+      if (last !== null) txt += `, latest price ${this._panes[0].priceScale.format(last.bar.close)}`;
     }
     this._liveRegion.textContent = `Financial chart, ${txt}`;
   }

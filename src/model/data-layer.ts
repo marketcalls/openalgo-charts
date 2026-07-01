@@ -143,15 +143,47 @@ export class DataLayer {
     return out;
   }
 
-  /** Bars of a series whose logical index lies within [fromIndex, toIndex]. */
+  /**
+   * Bars of a series whose logical index lies within [fromIndex, toIndex].
+   * Binary-searches the (time-sorted) series into the visible time window instead
+   * of scanning all bars, so a full repaint costs O(log n + visible) per series,
+   * not O(total bars) - the hot path called for autoscale and drawing every frame.
+   */
   public visibleBars(id: SeriesId, fromIndex: number, toIndex: number): IndexedBar[] {
+    const entry = this._series.get(id);
+    if (entry === undefined) return [];
+    const bars = entry.bars;
     const lo = Math.max(0, Math.floor(fromIndex));
     const hi = Math.min(this.baseIndex, Math.ceil(toIndex));
+    if (hi < lo || bars.length === 0) return [];
+    const loTime = this._sortedTimes[lo];
+    const hiTime = this._sortedTimes[hi];
+    if (loTime === undefined || hiTime === undefined) return [];
+    // First bar with time >= loTime (bars are sorted by time).
+    let start = 0;
+    let end = bars.length;
+    while (start < end) {
+      const mid = (start + end) >> 1;
+      if (bars[mid].time < loTime) start = mid + 1;
+      else end = mid;
+    }
     const out: IndexedBar[] = [];
-    for (const ib of this.indexedBars(id)) {
-      if (ib.index >= lo && ib.index <= hi) out.push(ib);
+    for (let i = start; i < bars.length; i++) {
+      const t = bars[i].time;
+      if (t > hiTime) break;
+      const index = this._indexByTime.get(t);
+      if (index !== undefined) out.push({ index, bar: bars[i] });
     }
     return out;
+  }
+
+  /** The last bar of a series with its shared logical index, in O(1). */
+  public lastIndexedBar(id: SeriesId): IndexedBar | null {
+    const entry = this._series.get(id);
+    if (entry === undefined || entry.bars.length === 0) return null;
+    const bar = entry.bars[entry.bars.length - 1];
+    const index = this._indexByTime.get(bar.time);
+    return index === undefined ? null : { index, bar };
   }
 
   private _rebuild(): void {
