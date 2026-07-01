@@ -17,11 +17,13 @@ export function drawCrosshair(
   plotHeight: number,
   dpr: number,
   color: string,
+  width = 1,
+  dash: number[] = [4 * dpr, 4 * dpr],
 ): void {
   ctx.save();
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1; // 1 device px = hairline (thin on HiDPI)
-  ctx.setLineDash([4 * dpr, 4 * dpr]);
+  ctx.lineWidth = Math.max(1, width); // device px; 1 = hairline (thin on HiDPI)
+  ctx.setLineDash(dash);
   if (x >= 0 && x <= plotWidth) {
     const px = Math.round(x * dpr) + 0.5;
     ctx.beginPath();

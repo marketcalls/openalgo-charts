@@ -11,6 +11,7 @@ import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale } from '../scale/time-scale';
 import type { LogicalRange } from '../scale/time-scale';
 import type { PriceScaleOptions, PriceScale } from '../scale/price-scale';
+import type { TickMarkType } from '../render/axis';
 import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type PriceScaleId } from '../model/series';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
@@ -74,7 +75,7 @@ export interface ChartOptions {
    * omitted, labels use IST (Indian market default). e.g. for UTC:
    * `(s) => new Date(s * 1000).toISOString().slice(11, 16)`.
    */
-  timeFormatter?: (utcSeconds: number) => string;
+  timeFormatter?: (utcSeconds: number, tickMark?: TickMarkType) => string;
 }
 
 export interface AddSeriesOptions {
@@ -197,7 +198,7 @@ export class Chart {
   private _axisStartSpacing = 0;
   private _priceFormatter: ((price: number) => string) | null = null;
   private _priceScaleOptions: Partial<PriceScaleOptions> | null = null;
-  private _timeFormatter: ((utcSeconds: number) => string) | undefined = undefined;
+  private _timeFormatter: ((utcSeconds: number, tickMark?: TickMarkType) => string) | undefined = undefined;
   private _leftAxisWidth = 0; // chart-wide reserved left-axis column (0 = none)
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
@@ -621,7 +622,7 @@ export class Chart {
    * Set a custom time-axis + crosshair label formatter (UTC seconds -> string)
    * at runtime. Pass undefined to restore the IST default.
    */
-  public setTimeFormatter(fn: ((utcSeconds: number) => string) | undefined): void {
+  public setTimeFormatter(fn: ((utcSeconds: number, tickMark?: TickMarkType) => string) | undefined): void {
     this._timeFormatter = fn;
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
@@ -641,7 +642,7 @@ export class Chart {
     theme?: ChartTheme;
     grid?: { vertLines?: boolean; horzLines?: boolean };
     priceFormatter?: ((price: number) => string) | null;
-    timeFormatter?: ((utcSeconds: number) => string) | undefined;
+    timeFormatter?: ((utcSeconds: number, tickMark?: TickMarkType) => string) | undefined;
     crosshairMode?: CrosshairMode;
   }): void {
     if (opts.theme) this.setTheme(opts.theme);

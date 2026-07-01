@@ -19,6 +19,7 @@ export type { PriceRange, PriceScaleOptions, PriceScaleMode } from './scale/pric
 export { TimeScale, DEFAULT_TIME_SCALE_OPTIONS } from './scale/time-scale';
 export type { LogicalRange, TimeScaleOptions } from './scale/time-scale';
 export { niceTicks, precisionForStep } from './scale/ticks';
+export type { TickMarkType } from './render/axis';
 
 export { DEFAULT_CANDLE_STYLE, optimalBarWidth } from './render/candles';
 export type { CandleStyle } from './render/candles';

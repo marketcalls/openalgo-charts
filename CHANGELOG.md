@@ -2,6 +2,23 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 1.0.3
+
+Cosmetic parity to close the last visual gaps for a lightweight-charts migration.
+318 unit tests; base engine ~24.8 KB Brotli.
+
+### Added
+- `SeriesStyle.priceLineVisible` and `lastValueVisible` toggle the dashed last-price
+  line and the axis value tag per series; `SeriesStyle.title` carries a label for
+  host-drawn legends. The last-price line/tag now follow the first right-scale price
+  series (the main series) rather than whichever was added last.
+- Crosshair styling via the theme: `crosshairStyle` (`solid` | `dashed` | `dotted`),
+  `crosshairWidth`, `crosshairLabelBackground`, and `crosshairLabelVisible`.
+- `timeFormatter` receives an optional `tickMarkType` hint
+  (`year` | `month` | `day` | `time` | `timeWithSeconds`) so a host can render adaptive
+  axis labels (year at year boundaries, month at month, day otherwise). New exported
+  type `TickMarkType`.
+
 ## 1.0.2
 
 Drop-in parity work so a host app can back every chart with this engine. Base

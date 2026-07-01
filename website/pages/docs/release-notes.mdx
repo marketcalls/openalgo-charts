@@ -8,6 +8,19 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 1.0.3
+
+Cosmetic parity — the last visual gaps for a lightweight-charts migration.
+
+**Added**
+
+- Per-series `priceLineVisible` / `lastValueVisible` (toggle the last-price line and axis
+  tag) and `title`. The last-price line/tag now follows the main (first right-scale) series.
+- Crosshair styling in the theme: `crosshairStyle`, `crosshairWidth`,
+  `crosshairLabelBackground`, `crosshairLabelVisible`.
+- `timeFormatter` gets an optional `tickMarkType` boundary hint for adaptive axis labels;
+  new exported type `TickMarkType`.
+
 ## 1.0.2
 
 Drop-in parity work so an app can back all its charts with this engine.

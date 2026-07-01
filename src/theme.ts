@@ -14,6 +14,14 @@ export interface ChartTheme {
   axisFontSize?: number;
   /** Grid line dash style (default 'solid'). */
   gridStyle?: 'solid' | 'dashed' | 'dotted';
+  /** Crosshair line dash style (default 'dashed'). */
+  crosshairStyle?: 'solid' | 'dashed' | 'dotted';
+  /** Crosshair line width in device px (default 1 = hairline). */
+  crosshairWidth?: number;
+  /** Background of the crosshair value tags (defaults to `crosshair`). */
+  crosshairLabelBackground?: string;
+  /** Show the crosshair price/time value tags (default true). */
+  crosshairLabelVisible?: boolean;
   // candle / bar / column up & down
   upColor: string;
   downColor: string;

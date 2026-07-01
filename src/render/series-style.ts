@@ -20,6 +20,12 @@ export interface SeriesStyle {
 
   /** Whether the series is drawn and counted in autoscale. Default true. */
   visible?: boolean;
+  /** Optional label carried with the series (for host-drawn legends). */
+  title?: string;
+  /** Show the dashed horizontal last-price line across the plot. Default true. */
+  priceLineVisible?: boolean;
+  /** Show the last-value tag on the price axis. Default true. */
+  lastValueVisible?: boolean;
 
   // line / area / baseline / hlc-area family
   color?: string;

@@ -5,6 +5,9 @@ import { darkTheme, lightTheme } from '../src/theme';
 import { Chart } from '../src/core/chart';
 import { makeCtx, RecordingContext } from './helpers/fake-ctx';
 import type { Bar } from '../src/model/bar';
+import { PriceScale } from '../src/scale/price-scale';
+import { drawLastPriceLabel } from '../src/render/axis';
+import { drawCrosshair } from '../src/render/crosshair';
 
 const di = (x: number, close: number): { x: number; bar: Bar } => ({ x, bar: { time: x, open: close, high: close, low: close, close } });
 const bar = (time: number, c: number): Bar => ({ time, open: c, high: c + 1, low: c - 1, close: c });
@@ -234,5 +237,65 @@ describe('Task 7: cosmetic parity', () => {
     rec.ops.length = 0;
     chart.setTheme({ ...darkTheme, gridStyle: 'dotted' });
     expect(rec.ops.some((o) => o.type === 'setLineDash' && o.args.length > 0)).toBe(true);
+  });
+});
+
+describe('Gap 1: title / priceLineVisible / lastValueVisible', () => {
+  const immediate = { raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} } };
+  const layout = { plotWidth: 200, plotHeight: 100, priceAxisWidth: 60, timeAxisHeight: 20, plotLeft: 0 };
+  const ps = () => { const s = new PriceScale(); s.setHeight(100); s.autoscale(10, 20); return s; };
+
+  it('drawLastPriceLabel honors showLine / showTag', () => {
+    const none = makeCtx();
+    drawLastPriceLabel(none.ctx, ps(), 15, true, layout, 1, undefined, undefined, false, false);
+    expect(none.rec.ops.length).toBe(0);
+
+    const lineOnly = makeCtx();
+    drawLastPriceLabel(lineOnly.ctx, ps(), 15, true, layout, 1, undefined, undefined, true, false);
+    expect(lineOnly.rec.ops.some((o) => o.type === 'stroke')).toBe(true);
+    expect(lineOnly.rec.ops.some((o) => o.type === 'fillRect')).toBe(false); // no tag box
+
+    const tagOnly = makeCtx();
+    drawLastPriceLabel(tagOnly.ctx, ps(), 15, true, layout, 1, undefined, undefined, false, true);
+    expect(tagOnly.rec.ops.some((o) => o.type === 'fillRect')).toBe(true);
+    expect(tagOnly.rec.ops.some((o) => o.type === 'stroke')).toBe(false); // no line
+  });
+
+  it('priceLineVisible:false hides the last-price line on the pane (default shows it)', () => {
+    const off = makeChart(immediate);
+    off.addSeries('candlestick', { style: { priceLineVisible: false } }).setData([bar(100, 10), bar(160, 20)]);
+    const recOff = (off.panes()[0].base as unknown as { ctx: RecordingContext }).ctx;
+    const lineOff = recOff.ops.some((o) => o.type === 'setLineDash' && o.args[0] === 3 && o.args[1] === 3);
+    expect(lineOff).toBe(false);
+
+    const on = makeChart(immediate);
+    on.addSeries('candlestick').setData([bar(100, 10), bar(160, 20)]);
+    const recOn = (on.panes()[0].base as unknown as { ctx: RecordingContext }).ctx;
+    const lineOn = recOn.ops.some((o) => o.type === 'setLineDash' && o.args[0] === 3 && o.args[1] === 3);
+    expect(lineOn).toBe(true);
+  });
+});
+
+describe('Gap 2: crosshair line styling', () => {
+  it('drawCrosshair applies the given dash pattern', () => {
+    const g = makeCtx();
+    drawCrosshair(g.ctx, 50, 25, 200, 100, 1, '#fff', 2, [1, 3]);
+    const dash = g.rec.ops.find((o) => o.type === 'setLineDash' && o.args.length > 0);
+    expect(dash?.args).toEqual([1, 3]);
+  });
+});
+
+describe('Gap 3: tickMarkType hint in timeFormatter', () => {
+  const immediate = { raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} } };
+  it('a custom timeFormatter receives a boundary hint', () => {
+    const seen = new Set<string>();
+    const chart = makeChart({ ...immediate, timeFormatter: (t: number, tm?: string) => { if (tm) seen.add(tm); return String(t); } });
+    const bars: Bar[] = [];
+    let t = 1703030400; // 2023-12-20 UTC → spans into 2024
+    for (let i = 0; i < 45; i++) { bars.push(bar(t, 100 + i)); t += 86400; }
+    chart.addSeries('candlestick').setData(bars);
+    chart.fitContent();
+    expect(seen.size).toBeGreaterThan(0);
+    expect(seen.has('day')).toBe(true);
   });
 });

@@ -7,7 +7,15 @@ import type { PriceScale } from '../scale/price-scale';
 import type { TimeScale } from '../scale/time-scale';
 import type { DataLayer } from '../model/data-layer';
 import { niceTicks } from '../scale/ticks';
-import { formatIstTime, formatIstTimeSeconds, formatIstDate, isNewIstDay } from '../feed/time';
+import { formatIstTime, formatIstTimeSeconds, formatIstDate, isNewIstDay, utcSecondsToIstParts } from '../feed/time';
+
+/**
+ * Boundary class of a time-axis label, passed to a custom `timeFormatter` as a
+ * hint so a host can render adaptive labels (year at year boundaries, month at
+ * month boundaries, day otherwise, clock intraday) — parity with common
+ * `tickMarkFormatter(time, tickMarkType)` APIs.
+ */
+export type TickMarkType = 'year' | 'month' | 'day' | 'time' | 'timeWithSeconds';
 
 export interface AxisStyle {
   textColor: string;
@@ -110,7 +118,7 @@ export function drawTimeAxis(
   layout: PlotLayout,
   dpr: number,
   style: AxisStyle = DEFAULT_AXIS_STYLE,
-  timeFormatter?: (utcSeconds: number) => string,
+  timeFormatter?: (utcSeconds: number, tickMark?: TickMarkType) => string,
 ): void {
   const range = timeScale.visibleRange();
   const from = Math.max(0, Math.floor(range.from));
@@ -161,13 +169,27 @@ export function drawTimeAxis(
       prevTime = time;
       continue;
     }
-    const label = timeFormatter
-      ? timeFormatter(time)
-      : prevTime === undefined || isNewIstDay(prevTime, time)
+    let label: string;
+    if (timeFormatter) {
+      let tm: TickMarkType;
+      if (prevTime === undefined) {
+        tm = 'day';
+      } else {
+        const a = utcSecondsToIstParts(prevTime);
+        const b = utcSecondsToIstParts(time);
+        tm = a.year !== b.year ? 'year'
+          : a.month !== b.month ? 'month'
+            : a.day !== b.day ? 'day'
+              : subMinute ? 'timeWithSeconds' : 'time';
+      }
+      label = timeFormatter(time, tm);
+    } else {
+      label = prevTime === undefined || isNewIstDay(prevTime, time)
         ? formatIstDate(time)
         : subMinute
           ? formatIstTimeSeconds(time)
           : formatIstTime(time);
+    }
     ctx.fillText(label, x, yBase + 4 * dpr);
     prevTime = time;
   }
@@ -193,35 +215,42 @@ export function drawLastPriceLabel(
   dpr: number,
   style: AxisStyle = DEFAULT_AXIS_STYLE,
   colors: LastPriceColors = { up: '#26a69a', down: '#ef5350', text: '#0d0e12' },
+  showLine = true,
+  showTag = true,
 ): void {
+  if (!showLine && !showTag) return;
   const y = Math.round(priceScale.priceToY(price) * dpr);
   if (y < 0 || y > layout.plotHeight * dpr) return;
   const color = up ? colors.up : colors.down;
   const xStart = Math.round(layout.plotWidth * dpr);
 
   ctx.save();
-  // dashed line across the plot
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1, Math.round(dpr));
-  ctx.setLineDash([3 * dpr, 3 * dpr]);
-  ctx.beginPath();
-  ctx.moveTo(0, y + 0.5);
-  ctx.lineTo(xStart, y + 0.5);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  if (showLine) {
+    // dashed line across the plot
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1, Math.round(dpr));
+    ctx.setLineDash([3 * dpr, 3 * dpr]);
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(xStart, y + 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
-  // filled price tag on the right axis
-  const label = priceScale.format(price);
-  ctx.font = scaleFont(style.font, dpr);
-  const padX = 6 * dpr;
-  const boxH = 16 * dpr;
-  const textW = ctx.measureText(label).width;
-  ctx.fillStyle = color;
-  ctx.fillRect(xStart + 1, y - boxH / 2, textW + padX * 2, boxH);
-  ctx.fillStyle = colors.text;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, xStart + 1 + padX, y);
+  if (showTag) {
+    // filled price tag on the right axis
+    const label = priceScale.format(price);
+    ctx.font = scaleFont(style.font, dpr);
+    const padX = 6 * dpr;
+    const boxH = 16 * dpr;
+    const textW = ctx.measureText(label).width;
+    ctx.fillStyle = color;
+    ctx.fillRect(xStart + 1, y - boxH / 2, textW + padX * 2, boxH);
+    ctx.fillStyle = colors.text;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, xStart + 1 + padX, y);
+  }
   ctx.restore();
 }
 

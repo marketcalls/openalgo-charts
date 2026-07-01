@@ -11,7 +11,7 @@ import type { SeriesRecord, PriceScaleId } from '../model/series';
 import { computeGridLines, drawGrid } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
 import { conflationGroupSize, conflateItems } from '../model/conflation';
-import { drawPriceAxis, drawLeftPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, type PlotLayout } from '../render/axis';
+import { drawPriceAxis, drawLeftPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, type PlotLayout, type TickMarkType } from '../render/axis';
 import { drawCrosshair, drawCrosshairTag } from '../render/crosshair';
 import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
 import type { ChartTheme } from '../theme';
@@ -38,7 +38,7 @@ export interface PaneRenderContext {
   /** Draw the horizontal (price) grid lines. */
   showHorzGrid: boolean;
   /** Optional custom time label formatter (UTC seconds -> string). Defaults to IST. */
-  timeFormatter?: (utcSeconds: number) => string;
+  timeFormatter?: (utcSeconds: number, tickMark?: TickMarkType) => string;
 }
 
 export class Pane {
@@ -250,8 +250,8 @@ export class Pane {
 
     // series (registry-driven — the core never switches on type)
     const range = ctx.timeScale.visibleRange();
-    let lastClose: number | null = null;
-    let lastUp = true;
+    // Last-price line/tag follows the first right-scale price series (the main series).
+    let lastEntry: { close: number; up: boolean; showLine: boolean; showTag: boolean } | null = null;
     const groupSize = ctx.conflate
       ? conflationGroupSize(ctx.timeScale.barSpacing, dpr, 0.5, ctx.conflationFactor)
       : 1;
@@ -267,11 +267,15 @@ export class Pane {
       for (const it of items) if ((it.bar.volume ?? 0) > maxVolume) maxVolume = it.bar.volume ?? 0;
       const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume, theme: ctx.theme };
       entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
-      if (entry.isPriceSeries) {
+      if (entry.isPriceSeries && lastEntry === null && scale === this.priceScale) {
         const last = ctx.dataLayer.lastIndexedBar(s.dataId);
         if (last !== null) {
-          lastClose = last.bar.close;
-          lastUp = last.bar.close >= last.bar.open;
+          lastEntry = {
+            close: last.bar.close,
+            up: last.bar.close >= last.bar.open,
+            showLine: s.style.priceLineVisible !== false,
+            showTag: s.style.lastValueVisible !== false,
+          };
         }
       }
     }
@@ -281,10 +285,10 @@ export class Pane {
 
     // axes
     drawPriceAxis(g, this.priceScale, layout, dpr, axisStyle);
-    if (lastClose !== null) {
-      drawLastPriceLabel(g, this.priceScale, lastClose, lastUp, layout, dpr, axisStyle, {
+    if (lastEntry !== null) {
+      drawLastPriceLabel(g, this.priceScale, lastEntry.close, lastEntry.up, layout, dpr, axisStyle, {
         up: ctx.theme.lastPriceUp, down: ctx.theme.lastPriceDown, text: ctx.theme.lastPriceText,
-      });
+      }, lastEntry.showLine, lastEntry.showTag);
     }
     if (ctx.showTimeAxis) {
       drawTimeAxis(g, ctx.timeScale, ctx.dataLayer, layout, dpr, axisStyle, ctx.timeFormatter);
@@ -313,21 +317,27 @@ export class Pane {
     const prc = this._primitiveContext(ctx);
     for (const p of this._primitives) if (p.zOrder() === 'top') p.draw(g, prc);
     if (cross !== null) {
-      drawCrosshair(g, cross.x, cross.yLocal, layout.plotWidth, layout.plotHeight, dpr, ctx.theme.crosshair);
+      const crossDash = ctx.theme.crosshairStyle === 'solid' ? []
+        : ctx.theme.crosshairStyle === 'dotted' ? [1 * dpr, 3 * dpr]
+        : [4 * dpr, 4 * dpr];
+      drawCrosshair(g, cross.x, cross.yLocal, layout.plotWidth, layout.plotHeight, dpr,
+        ctx.theme.crosshair, ctx.theme.crosshairWidth ?? 1, crossDash);
 
+      const tagBg = ctx.theme.crosshairLabelBackground ?? ctx.theme.crosshair;
+      const showTags = ctx.theme.crosshairLabelVisible !== false;
       // price tag on the right axis (hovered pane only)
-      if (cross.yLocal !== null) {
+      if (showTags && cross.yLocal !== null) {
         const price = this.priceScale.yToPrice(cross.yLocal);
         drawCrosshairTag(g, this.priceScale.format(price), layout.plotWidth * dpr, cross.yLocal * dpr, dpr,
-          ctx.theme.crosshair, ctx.theme.lastPriceText, 'right');
+          tagBg, ctx.theme.lastPriceText, 'right');
       }
       // date/time tag on the bottom pane's axis strip (cross.x is plot-relative)
-      if (cross.showTimeTag && cross.x >= 0 && cross.x <= layout.plotWidth) {
+      if (showTags && cross.showTimeTag && cross.x >= 0 && cross.x <= layout.plotWidth) {
         const idx = Math.round(ctx.timeScale.xToIndex(cross.x));
         const t = ctx.dataLayer.indexToTime(idx);
         if (t !== undefined) {
           drawCrosshairTag(g, ctx.timeFormatter ? ctx.timeFormatter(t) : formatIstCrosshairLabel(t), cross.x * dpr, layout.plotHeight * dpr, dpr,
-            ctx.theme.crosshair, ctx.theme.lastPriceText, 'bottom');
+            tagBg, ctx.theme.lastPriceText, 'bottom');
         }
       }
     }
