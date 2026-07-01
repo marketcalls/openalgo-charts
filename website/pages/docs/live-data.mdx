@@ -65,7 +65,13 @@ const live = new OpenAlgoLiveDataFeed({
 });
 const bars = await live.getBars({ symbol: 'RELIANCE', exchange: 'NSE', interval: '1m', from, to });
 series.setData(bars);
-live.subscribe('RELIANCE', 'NSE', '1m', (u) => series.update(u.bar));
+// Pass seedFrom to continue the last history bar's bucket seamlessly.
+// Pass cumDayVolumeSoFar if using volumeMode: 'day-delta' to diff against the right baseline.
+live.subscribeBars(
+  { symbol: 'RELIANCE', exchange: 'NSE', interval: '1m', from, to },
+  (bar) => series.update(bar),
+  { seedFrom: bars[bars.length - 1] },
+);
 ```
 
 <Callout type="warning">

@@ -262,7 +262,8 @@ const buildData: BuildFn = (el, lib, tab) => {
     const raw = walk(7, 170, 1700000000, 86400, 60, 1.2);
     // Null out OHLC for two stretches -> whitespace items break the line at gaps.
     const data = raw.map((b: any, i: number) => ((i >= 60 && i < 74) || (i >= 120 && i < 130) ? { time: b.time } : b));
-    chart.addSeries('area', { style: { color: '#4f8cff', lineWidth: 2, areaTopColor: 'rgba(79,140,255,0.4)', areaBottomColor: 'rgba(79,140,255,0)' } }).setData(data);
+    // A line series breaks cleanly at whitespace items ({ time } with no OHLC).
+    chart.addSeries('line', { style: { color: '#4f8cff', lineWidth: 2 } }).setData(data);
     chart.timeScale.fitContent(raw.length);
     return chart;
   }

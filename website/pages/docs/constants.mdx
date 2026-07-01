@@ -24,7 +24,7 @@ import {
 ### VERSION and version()
 
 ```ts
-export const VERSION = '0.1.0';
+export const VERSION = '1.0.0';
 export function version(): string;
 ```
 
@@ -582,8 +582,9 @@ function intervalToSeconds(interval: string): number
 ```
 
 Maps an interval token to seconds: `'1m'` -> `60`, `'5m'` -> `300`, `'1h'` -> `3600`,
-`'D'` (or any unrecognised token) -> `60`. Accepts case-insensitive suffixes `s`, `m`, `h`,
-`d`, `w`.
+`'D'` -> `86400`, `'W'` -> `604800`. The bare daily/weekly tokens `D` and `W` are supported
+alongside `1d`/`1w`. Unknown tokens fall back to `60`. Accepts case-insensitive suffixes
+`s`, `m`, `h`, `d`, `w`.
 
 #### mapHistoryResponse, rowTimeToUtcSeconds
 
@@ -667,6 +668,6 @@ To add a live EMA overlay from real data:
 ```ts
 import { emaSeries } from 'openalgo-charts';
 
-const emaSeries20 = chart.addSeries('line', { color: '#f59e0b' });
+const emaSeries20 = chart.addSeries('line', { style: { color: '#f59e0b' } });
 emaSeries20.setData(emaSeries(bars, 20));
 ```

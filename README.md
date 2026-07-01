@@ -21,16 +21,17 @@ npm run build                 # build the library (dist/) the live demos import
 cd website && npm install && npm run dev   # http://localhost:3000/openalgo-charts
 ```
 
-> Status: **pre-release (0.1.0)** — all 12 build phases of the engine are
+> Status: **1.0.0 (published)** — all 12 build phases of the engine are
 > implemented (standard chart types, transforms, trade terminal, depth ladder,
-> profiles) with 190+ unit tests, full package **~26 KB Brotli**. See
+> profiles) with 286 unit tests, base engine **~23 KB Brotli**, full package
+> **~37 KB Brotli** (all tiers). See
 > [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`docs/getting-started.md`](./docs/getting-started.md),
 > and [`examples/index.html`](./examples/index.html).
 >
 > **Known limitations (not yet production-complete):** the OpenAlgo WS/trade
 > adapters ship but their exact message/endpoint schemas must be verified against
-> your running OpenAlgo build; there is **no real-browser/pixel test suite yet**
-> (logic is covered by a recording-canvas harness); multi-touch pinch, separate
+> your running OpenAlgo build; a Playwright Chromium e2e suite exists
+> (`tests/e2e`, run via `npm run e2e`) but multi-touch pinch, separate
 > axis-widget canvases, and overlay/indexed-to-100 price scales are not
 > implemented. See [`END_TO_END_AUDIT.md`](./END_TO_END_AUDIT.md) for the full list.
 

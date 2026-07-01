@@ -9,8 +9,9 @@ import { Callout } from 'nextra/components'
 # Indicators
 
 The base tier ships **EMA, RSI, ATR, and Supertrend**, computed with Wilder semantics to
-match `openalgo.ta`. The `*Series` helpers return plottable `{ time, value }` points; warmup
-slots carry `NaN`, which the line renderer skips as whitespace.
+match `openalgo.ta`. The `*Series` helpers return `Bar[]` (time + close set to the indicator
+value; other OHLC fields mirror close). Warmup slots carry `NaN`, which the line renderer
+skips as whitespace.
 
 ```ts
 import {
@@ -75,8 +76,8 @@ return chart;`} />
 
 <Callout type="info">
 Need an indicator that is not built in? Compute it however you like - these helpers just
-return arrays of `{ time, value }`. Plot the result as a `line` series. For an entirely new
-on-chart drawing, write a [primitive](/docs/primitives-and-plugins).
+return `Bar[]` (set close to the indicator value). Plot the result as a `line` series. For
+an entirely new on-chart drawing, write a [primitive](/docs/primitives-and-plugins).
 </Callout>
 
 ## ATR
