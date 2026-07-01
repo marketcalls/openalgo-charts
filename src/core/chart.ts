@@ -135,7 +135,7 @@ export class Chart {
   private readonly _container: HTMLElement;
   private readonly _doc: Document;
   private readonly _pixelRatio: () => number;
-  private readonly _theme: ChartTheme;
+  private _theme: ChartTheme;
   private readonly _panes: Pane[] = [];
   private readonly _loop: RenderLoop;
   private readonly _dataLayer = new DataLayer();
@@ -617,6 +617,31 @@ export class Chart {
   public setTimeFormatter(fn: ((utcSeconds: number) => string) | undefined): void {
     this._timeFormatter = fn;
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
+  /** Swap the palette at runtime (dark/light toggle) without recreating the chart. */
+  public setTheme(theme: ChartTheme): void {
+    this._theme = theme;
+    this._container.style.background = theme.background;
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
+  /**
+   * Apply a subset of chart options at runtime (theme, grid, formatters,
+   * crosshair mode) without recreating the chart.
+   */
+  public applyOptions(opts: {
+    theme?: ChartTheme;
+    grid?: { vertLines?: boolean; horzLines?: boolean };
+    priceFormatter?: ((price: number) => string) | null;
+    timeFormatter?: ((utcSeconds: number) => string) | undefined;
+    crosshairMode?: CrosshairMode;
+  }): void {
+    if (opts.theme) this.setTheme(opts.theme);
+    if (opts.grid) this.setGridOptions(opts.grid);
+    if (opts.priceFormatter !== undefined) this.setPriceFormatter(opts.priceFormatter);
+    if ('timeFormatter' in opts) this.setTimeFormatter(opts.timeFormatter);
+    if (opts.crosshairMode) this._crosshairMode = opts.crosshairMode;
   }
 
   public panes(): readonly Pane[] {

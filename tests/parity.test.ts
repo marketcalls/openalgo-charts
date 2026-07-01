@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { TimeScale } from '../src/scale/time-scale';
 import { getChartType } from '../src/model/chart-type-registry';
-import { darkTheme } from '../src/theme';
+import { darkTheme, lightTheme } from '../src/theme';
 import { Chart } from '../src/core/chart';
 import { makeCtx, RecordingContext } from './helpers/fake-ctx';
 import type { Bar } from '../src/model/bar';
@@ -190,5 +190,19 @@ describe('Task 4: per-series priceFormat', () => {
     const chart = makeChart(immediate);
     const s = chart.addSeries('line', { priceFormat: { type: 'price', minMove: 0.05 } });
     expect(s.priceScale().format(100.123)).toBe('100.12');
+  });
+});
+
+describe('Task 6: chart.applyOptions (runtime theme / grid)', () => {
+  const immediate = { raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} } };
+  it('swaps theme and grid live without recreating the chart', () => {
+    const chart = makeChart(immediate);
+    chart.addSeries('line').setData([bar(100, 1), bar(160, 2)]);
+    expect(chart.gridOptions().vertLines).toBe(true);
+    chart.applyOptions({ theme: lightTheme, grid: { vertLines: false } });
+    expect(chart.gridOptions().vertLines).toBe(false);
+    expect(chart.gridOptions().horzLines).toBe(true);
+    // theme swap applies without throwing and repaints
+    expect(() => chart.setTheme(darkTheme)).not.toThrow();
   });
 });
