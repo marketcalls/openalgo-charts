@@ -1,6 +1,6 @@
 {
   "name": "openalgo-charts",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "From-scratch, dependency-free canvas charting engine for OpenAlgo: professional-grade interactive rendering plus advanced on-chart trading.",
   "license": "Apache-2.0",
   "author": "marketcalls",

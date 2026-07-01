@@ -4,7 +4,7 @@
 > Target: **< 50 KB Brotli** for the full package (engine + trade overlay), no runtime dependencies. *(Brotli is the size metric we hold the budget against - see §11. Gzip runs ~10-15% larger.)*
 > Goal: professional-grade interactive financial-chart rendering + advanced on-chart trading & trade management.
 
-> **Status: shipped as 1.0.0.** The design below is implemented and published to npm. The pre-implementation size estimates have been superseded by measured `size-limit` (Brotli) budgets: **base engine ~24 KB, base+trade ~29 KB, transform ~4 KB, profile ~6 KB, everything ~38 KB** against a 50 KB budget. See the *Revision log* for the point-by-point mapping and §13a for the honest deferred list.
+> **Status: shipped as 1.0.1.** The design below is implemented and published to npm. The pre-implementation size estimates have been superseded by measured `size-limit` (Brotli) budgets: **base engine ~24 KB, base+trade ~29 KB, transform ~4 KB, profile ~6 KB, everything ~38 KB** against a 50 KB budget. See the *Revision log* for the point-by-point mapping and §13a for the honest deferred list.
 
 <p align="center">
   <img src="docs/architecture-diagram.png" alt="OpenAlgo Charts layered architecture" width="900" />
@@ -891,7 +891,7 @@ Two principles: **(1) the API reference is generated, never hand-maintained** (i
 
 ## 13a. Deferred / not-yet-implemented (honest status)
 
-These are designed-for but **not implemented** in the current 1.0.0 release.
+These are designed-for but **not implemented** in the current 1.0.1 release.
 They are documented here so the architecture doesn't over-promise:
 
 - **Price-scale `percentage`, `indexed-to-100`, and overlay scales** - only

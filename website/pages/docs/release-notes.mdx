@@ -8,6 +8,36 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 1.0.1
+
+Full package ~38 KB Brotli (all tiers), base engine ~24 KB, zero runtime dependencies.
+
+**Added**
+
+- Unified event bus: `chart.on` / `off` / `once` (`crosshair:move`, `click`, `pan`, `zoom`,
+  `resize`, `lazy-load`, `ready`), with `trading:*` mirrored through it.
+- Data-driven trading visualization (`chart.trading`): position/order pills, TP/SL brackets,
+  and fill markers (chevron / bubble / count).
+- Custom `priceFormatter` and `timeFormatter` (with runtime setters); per-pane `priceScale`
+  options; the time axis is no longer IST-only.
+- `setData` accepts `Bar | LinePoint | Whitespace` (normalized via `toBar`);
+  `series.getData()` reads the current bars.
+- WebSocket auto-reconnect (backoff + re-auth + resubscribe); `OpenAlgoLiveDataFeed` bare
+  `D`/`W` intervals, day-delta volume, and symbol+exchange tick filtering.
+- Docs: an interactive example gallery (chart type, themes, tooltips, event markers, live
+  streaming) plus framework-integration, mobile, data-loading, events, types, constants, and
+  glossary pages.
+
+**Fixed**
+
+- Multi-series `DataLayer.update` time-axis ordering; the package now ships `NOTICE`; the
+  accessible summary refreshes on live updates; `visibleBars` uses binary search.
+
+**Quality**
+
+- 297 unit tests (39 files) + the Playwright smoke suite; CI adds a docs-site build and a
+  `NOTICE` pack check.
+
 ## 1.0.0
 
 First public release. Full package ~30 KB Brotli (all tiers), zero runtime dependencies,

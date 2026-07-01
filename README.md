@@ -105,7 +105,7 @@ npm run verify     # typecheck + test + build + size
 
 ## Status &amp; limitations
 
-Version **1.0.0 (published)** - all engine build phases are implemented with 297 unit tests, base engine ~24 KB Brotli, full package ~38 KB Brotli (all tiers). The OpenAlgo WS/trade adapters ship and auto-reconnect, but their exact message/endpoint schemas should be verified against your running OpenAlgo build. Overlay and `indexed-to-100` price scales are not yet implemented - see [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the honest deferred list.
+Version **1.0.1 (published)** - all engine build phases are implemented with 297 unit tests, base engine ~24 KB Brotli, full package ~38 KB Brotli (all tiers). The OpenAlgo WS/trade adapters ship and auto-reconnect, but their exact message/endpoint schemas should be verified against your running OpenAlgo build. Overlay and `indexed-to-100` price scales are not yet implemented - see [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the honest deferred list.
 
 ## License
 
