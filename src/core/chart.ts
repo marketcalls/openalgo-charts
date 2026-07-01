@@ -471,6 +471,7 @@ export class Chart {
       this._timeScale.setRightOffset(this._timeScale.rightOffset - 1);
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._updateAccessibleSummary();
   }
 
   private _ensurePane(index: number): void {
@@ -502,6 +503,7 @@ export class Chart {
     // bars on screen because (rightEdge − index) is invariant.
     this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._updateAccessibleSummary();
   }
 
   private _addPane(weight = 1): Pane {

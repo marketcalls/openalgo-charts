@@ -82,7 +82,9 @@ describe('V2-M1 — interval parsing for the live feed', () => {
     expect(intervalToSeconds('1m')).toBe(60);
     expect(intervalToSeconds('5m')).toBe(300);
     expect(intervalToSeconds('1h')).toBe(3600);
-    expect(intervalToSeconds('D')).toBe(60); // unknown → safe default
+    expect(intervalToSeconds('D')).toBe(86400); // bare daily token
+    expect(intervalToSeconds('W')).toBe(604800); // bare weekly token
+    expect(intervalToSeconds('bogus')).toBe(60); // unknown → safe default
   });
 });
 

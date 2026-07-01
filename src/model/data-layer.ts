@@ -77,9 +77,20 @@ export class DataLayer {
     const bars = entry.bars;
     const last = bars[bars.length - 1];
     if (last === undefined || bar.time > last.time) {
+      // Newer than THIS series' last bar, so pushing keeps the series sorted.
       bars.push(bar);
-      this._appendTime(bar.time);
-      return 'append';
+      const n = this._sortedTimes.length;
+      const globalLast = n > 0 ? this._sortedTimes[n - 1] : undefined;
+      if (globalLast === undefined || bar.time > globalLast) {
+        this._appendTime(bar.time); // genuine global right-edge append
+        return 'append';
+      }
+      // Series-local append but NOT the global newest: the time belongs mid-axis.
+      // If it already exists globally (another series has it) no new index is
+      // added; otherwise reindex so _sortedTimes stays ordered.
+      if (this._indexByTime.has(bar.time)) return 'replace';
+      this._rebuild();
+      return 'insert';
     }
     if (bar.time === last.time) {
       bars[bars.length - 1] = bar; // mutate last

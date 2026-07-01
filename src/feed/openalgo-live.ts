@@ -7,7 +7,7 @@
 import type { Bar } from '../model/bar';
 import type { BarsRequest, DataFeed, MarketDepth, UnsubscribeFn } from './types';
 import { OpenAlgoDataFeed, type OpenAlgoConfig } from './openalgo-rest';
-import { OpenAlgoWsFeed } from './openalgo-ws';
+import { OpenAlgoWsFeed, type SocketFactory } from './openalgo-ws';
 import { CandleBuilder, type VolumeMode } from './candle-builder';
 
 export interface OpenAlgoLiveConfig extends OpenAlgoConfig {
@@ -15,13 +15,19 @@ export interface OpenAlgoLiveConfig extends OpenAlgoConfig {
   wsUrl: string;
   /** Volume accounting for the live candle builder (default 'ltq-sum'). */
   volumeMode?: VolumeMode;
+  /** Inject a custom socket (tests, React Native, non-browser runtimes). */
+  socketFactory?: SocketFactory;
 }
 
-/** Map an interval token (e.g. '1m','5m','1h','D') to seconds for bucketing. */
+/**
+ * Map an interval token to seconds for bucketing. The count is optional so the
+ * bare OpenAlgo tokens `D` and `W` (daily / weekly) work alongside `1d`/`1w`,
+ * e.g. `D` -> 86400, `1m` -> 60, `1h` -> 3600. Unknown tokens fall back to 60.
+ */
 export function intervalToSeconds(interval: string): number {
-  const m = /^(\d+)\s*([smhdw])$/i.exec(interval.trim());
+  const m = /^(\d*)\s*([smhdw])$/i.exec(interval.trim());
   if (m === null) return 60;
-  const n = Number(m[1]);
+  const n = m[1] === '' ? 1 : Number(m[1]);
   const unit = m[2].toLowerCase();
   const mult = unit === 's' ? 1 : unit === 'm' ? 60 : unit === 'h' ? 3600 : unit === 'd' ? 86400 : 604800;
   return n * mult;
@@ -34,7 +40,7 @@ export class OpenAlgoLiveDataFeed implements DataFeed {
 
   public constructor(config: OpenAlgoLiveConfig) {
     this._rest = new OpenAlgoDataFeed(config);
-    this._ws = new OpenAlgoWsFeed({ url: config.wsUrl, apiKey: config.apiKey });
+    this._ws = new OpenAlgoWsFeed({ url: config.wsUrl, apiKey: config.apiKey, socketFactory: config.socketFactory });
     this._volumeMode = config.volumeMode ?? 'ltq-sum';
     this._ws.connect();
   }
@@ -43,12 +49,27 @@ export class OpenAlgoLiveDataFeed implements DataFeed {
     return this._rest.getBars(req);
   }
 
-  /** Live interval bars: WS LTP → CandleBuilder → onBar (mutated/append bar). */
-  public subscribeBars(req: BarsRequest, onBar: (bar: Bar) => void): UnsubscribeFn {
+  /**
+   * Live interval bars: WS LTP -> CandleBuilder -> onBar (mutated/append bar).
+   * Pass `opts.seedFrom` (the last history bar) to continue that bar's bucket
+   * seamlessly instead of starting a fresh one, and `opts.cumDayVolumeSoFar`
+   * so a `day-delta` builder diffs against the right baseline.
+   */
+  public subscribeBars(
+    req: BarsRequest,
+    onBar: (bar: Bar) => void,
+    opts?: { seedFrom?: Bar; cumDayVolumeSoFar?: number },
+  ): UnsubscribeFn {
     const builder = new CandleBuilder({ intervalSec: intervalToSeconds(req.interval), volumeMode: this._volumeMode });
+    if (opts?.seedFrom) builder.seed(opts.seedFrom, opts.cumDayVolumeSoFar);
     const off = this._ws.onLtp((e) => {
+      // Match both symbol and exchange (a broker can multiplex venues on one socket).
       if (e.symbol !== req.symbol) return;
-      const u = builder.onTick({ time: e.timeSec, price: e.ltp, ltq: e.ltq });
+      if (e.exchange && req.exchange && e.exchange !== req.exchange) return;
+      // A broker may omit the tick timestamp; never bucket at the epoch, use now.
+      const time = e.timeSec && e.timeSec > 0 ? e.timeSec : Math.floor(Date.now() / 1000);
+      // cumDayVolume is only consumed in 'day-delta' mode; harmless otherwise.
+      const u = builder.onTick({ time, price: e.ltp, ltq: e.ltq, cumDayVolume: e.volume });
       if (u !== null) onBar(u.bar);
     });
     this._ws.subscribe('LTP', req.symbol, req.exchange);
@@ -56,7 +77,11 @@ export class OpenAlgoLiveDataFeed implements DataFeed {
   }
 
   public subscribeDepth(req: BarsRequest, onDepth: (depth: MarketDepth) => void): UnsubscribeFn {
-    const off = this._ws.onDepth((symbol, _ex, depth) => { if (symbol === req.symbol) onDepth(depth); });
+    const off = this._ws.onDepth((symbol, ex, depth) => {
+      if (symbol !== req.symbol) return;
+      if (ex && req.exchange && ex !== req.exchange) return;
+      onDepth(depth);
+    });
     this._ws.subscribe('Depth', req.symbol, req.exchange);
     return () => { off(); this._ws.unsubscribe('Depth', req.symbol, req.exchange); };
   }
