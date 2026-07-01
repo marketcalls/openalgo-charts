@@ -9,6 +9,7 @@ import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop'
 import { Pane, type PaneRenderContext } from './pane';
 import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale } from '../scale/time-scale';
+import type { LogicalRange } from '../scale/time-scale';
 import type { PriceScaleOptions } from '../scale/price-scale';
 import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi } from '../model/series';
@@ -227,6 +228,9 @@ export class Chart {
     this._addPane();
     this._observeSize();
     this._attachInput();
+    // A host that mutates the time scale directly (e.g. setVisibleLogicalRange to
+    // preserve zoom across a data reload) still triggers a repaint.
+    this._timeScale.setChangeHandler(() => this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full)));
     this.applySize(container.clientWidth, container.clientHeight);
     // 'ready' fires on a microtask so `createChart(el).on('ready', ...)` — a
     // subscription registered on the very next line — still receives it.
@@ -249,6 +253,16 @@ export class Chart {
 
   public get timeScale(): TimeScale {
     return this._timeScale;
+  }
+
+  /** Restore a saved logical range (e.g. preserve the user's zoom across a data reload). */
+  public setVisibleLogicalRange(range: LogicalRange): void {
+    this._timeScale.setVisibleLogicalRange(range);
+  }
+
+  /** The current visible logical range. */
+  public getVisibleLogicalRange(): LogicalRange {
+    return this._timeScale.visibleRange();
   }
 
   /** The keyboard shortcut manager (null when shortcuts are disabled). */

@@ -92,6 +92,32 @@ export class TimeScale {
     return { from, to };
   }
 
+  /** Alias of `visibleRange()` for naming parity with common charting APIs. */
+  public getVisibleLogicalRange(): LogicalRange {
+    return this.visibleRange();
+  }
+
+  /**
+   * Set the visible logical range (best effort): pick a bar spacing so the span
+   * fills the width and anchor the right edge at `range.to`. Bar spacing is
+   * clamped to [min,max], so an extreme span lands at the nearest zoom. Fires the
+   * change handler so a host that mutates the scale directly still repaints.
+   */
+  public setVisibleLogicalRange(range: LogicalRange): void {
+    if (this._width <= 0) return;
+    const span = range.to - range.from;
+    if (!(span > 0)) return;
+    this.setBarSpacing(this._width / span);
+    this._rightOffset = range.to - this._baseIndex;
+    this._onChange?.();
+  }
+
+  /** Repaint hook injected by the host chart, fired after `setVisibleLogicalRange`. */
+  public setChangeHandler(fn: (() => void) | null): void {
+    this._onChange = fn;
+  }
+  private _onChange: (() => void) | null = null;
+
   /**
    * Pan by a pixel delta. Positive `dx` drags chart content to the right
    * (revealing older bars), matching a natural left-button drag.
