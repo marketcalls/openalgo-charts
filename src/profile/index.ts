@@ -16,6 +16,13 @@ export {
   type VolumeProfileSessionResult,
   type VolumeProfileFamilyResult,
 } from './volume-profile-family';
+export {
+  VolumeProfile,
+  DEFAULT_VOLUME_PROFILE_PRIMITIVE_OPTIONS,
+  type VolumeProfilePrimitiveOptions,
+  type VolumeDisplayMode,
+  type VolumeProfileSide,
+} from './volume-profile-primitive';
 export { computeTpo } from './tpo';
 export {
   computeMarketProfile,
