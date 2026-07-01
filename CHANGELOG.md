@@ -2,7 +2,7 @@
 
 All notable changes to OpenAlgo Charts.
 
-## 1.0.2 (unreleased)
+## 1.0.2
 
 Drop-in parity work so a host app can back every chart with this engine. Base
 engine ~24.7 KB Brotli; 314 unit tests (40 files).
