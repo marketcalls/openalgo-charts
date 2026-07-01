@@ -1,3 +1,33 @@
+/* ----------------------------------------------------------------------------
+   Interactive example gallery (components/gallery.tsx)
+---------------------------------------------------------------------------- */
+.oac-cardgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin: 1.5rem 0; }
+@media (max-width: 900px) { .oac-cardgrid { grid-template-columns: 1fr; } }
+.oac-card {
+  border: 1px solid var(--oac-card-border); border-radius: 14px;
+  background: var(--oac-card); padding: 14px 16px 10px; min-width: 0;
+}
+.oac-card h3 { margin: 0 0 10px; font-size: 1.15rem; font-weight: 750; }
+.oac-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.oac-tab {
+  font: 600 13px ui-sans-serif, system-ui, sans-serif; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid transparent; background: transparent; color: var(--oac-muted); cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.oac-tab:hover { color: inherit; }
+.oac-tab--on { background: color-mix(in srgb, var(--oac-accent) 16%, transparent); color: var(--oac-accent); }
+.oac-card__chart { position: relative; width: 100%; }
+.oac-legend {
+  position: absolute; left: 14px; top: 10px; z-index: 4; pointer-events: none;
+  font: 13px ui-sans-serif, system-ui, sans-serif; color: #cbd5e1; line-height: 1.35;
+}
+.dark .oac-legend { color: #cbd5e1; }
+.oac-legend__title { font-weight: 700; letter-spacing: 0.02em; }
+.oac-legend__big { font-size: 1.5rem; font-weight: 750; }
+.oac-legend__sub { color: var(--oac-muted); font-size: 0.8rem; }
+.oac-legend--multi { display: flex; flex-direction: column; gap: 2px; font-weight: 600; }
+.oac-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
 :root {
   --oac-accent: #2f6df6;
   --oac-accent-2: #14b8a6;
