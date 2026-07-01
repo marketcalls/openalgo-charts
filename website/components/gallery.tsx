@@ -347,6 +347,51 @@ export const CustomPluginsCard = () => (
 );
 
 /* -------------------------------------------------------------------------- */
+/* Chart type switcher                                                        */
+const TYPE_BY_TAB: Record<string, string> = {
+  candles: 'candlestick', line: 'line', bars: 'bar', area: 'area', baseline: 'baseline', step: 'step',
+};
+const buildChartType: BuildFn = (el, lib, tab) => {
+  const chart = lib.createChart(el);
+  const bars = lib.generateBars(1700000000, 160, 86400);
+  const type = TYPE_BY_TAB[tab] ?? 'candlestick';
+  const style = type === 'area'
+    ? { color: '#4f8cff', lineWidth: 2, areaTopColor: 'rgba(79,140,255,0.4)', areaBottomColor: 'rgba(79,140,255,0)' }
+    : (type === 'line' || type === 'step') ? { color: '#4f8cff', lineWidth: 2 }
+    : {};
+  chart.addSeries(type, { style }).setData(bars);
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+export const ChartTypeCard = () => (
+  <InteractiveChart title="Chart type" build={buildChartType}
+    tabs={[{ label: 'Candles', key: 'candles' }, { label: 'Line', key: 'line' }, { label: 'Bars', key: 'bars' }, { label: 'Area', key: 'area' }, { label: 'Baseline', key: 'baseline' }, { label: 'Step', key: 'step' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
+/* Custom theme switcher (theme drives chrome + series defaults)              */
+const buildTheme: BuildFn = (el, lib, tab) => {
+  const colorful = {
+    ...lib.darkTheme,
+    background: '#0b0710', grid: '#1a1030', axisText: '#a99bd6', axisLine: '#33224d', crosshair: '#8b7bb8',
+    lineColor: '#8b5cf6', areaTopColor: 'rgba(139,92,246,0.5)', areaBottomColor: 'rgba(139,92,246,0)',
+    upColor: '#a855f7', downColor: '#f472b6', wickUpColor: '#a855f7', wickDownColor: '#f472b6',
+    lastPriceUp: '#8b5cf6', lastPriceDown: '#f472b6', lastPriceText: '#0b0710',
+  };
+  const theme = tab === 'light' ? lib.lightTheme : tab === 'colorful' ? colorful : lib.darkTheme;
+  const chart = lib.createChart(el, { theme });
+  const bars = walk(5, 200, 1700000000, 86400, 45, 1.25);
+  // No per-series style -> the area series reads its colors from the active theme.
+  chart.addSeries('area').setData(bars);
+  chart.timeScale.fitContent(bars.length);
+  return chart;
+};
+export const ThemeCard = () => (
+  <InteractiveChart title="Custom theme" build={buildTheme}
+    tabs={[{ label: 'Dark', key: 'dark' }, { label: 'Light', key: 'light' }, { label: 'Colorful', key: 'colorful' }]} />
+);
+
+/* -------------------------------------------------------------------------- */
 /* Positions & orders (chart.trading)                                         */
 const buildPositions: BuildFn = (el, lib, tab) => {
   const chart = lib.createChart(el);
