@@ -23,7 +23,7 @@ cd website && npm install && npm run dev   # http://localhost:3000/openalgo-char
 
 > Status: **1.0.0 (published)** — all 12 build phases of the engine are
 > implemented (standard chart types, transforms, trade terminal, depth ladder,
-> profiles) with 286 unit tests, base engine **~23 KB Brotli**, full package
+> profiles) with 297 unit tests, base engine **~23 KB Brotli**, full package
 > **~37 KB Brotli** (all tiers). See
 > [`ARCHITECTURE.md`](./ARCHITECTURE.md), [`docs/getting-started.md`](./docs/getting-started.md),
 > and [`examples/index.html`](./examples/index.html).
