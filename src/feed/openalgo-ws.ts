@@ -18,7 +18,7 @@ import { epochMsToUtcSeconds } from './time';
 export type WsMode = 'LTP' | 'Quote' | 'Depth';
 
 /** Socket lifecycle reported by `onState`. */
-export type WsState = 'connecting' | 'open' | 'closed' | 'error';
+export type WsState = 'connecting' | 'open' | 'closed' | 'error' | 'reconnecting';
 
 /** A non-market-data control frame (auth / subscribe ack, or a server error). */
 export interface WsControlMessage {
@@ -49,6 +49,12 @@ export interface OpenAlgoWsConfig {
   url: string; // e.g. ws://127.0.0.1:8765 (or wss://host/ws)
   apiKey: string;
   socketFactory?: SocketFactory;
+  /**
+   * Auto-reconnect after an unexpected close: re-authenticate and resubscribe
+   * every active subscription, with exponential backoff. Enabled by default;
+   * `close()` is treated as intentional and never reconnects.
+   */
+  reconnect?: { enabled?: boolean; baseDelayMs?: number; maxDelayMs?: number; maxAttempts?: number };
 }
 
 export interface LtpEvent {
@@ -150,12 +156,26 @@ export class OpenAlgoWsFeed {
   private readonly _depthCbs = new Set<(symbol: string, exchange: string, depth: MarketDepth) => void>();
   private readonly _stateCbs = new Set<(state: WsState) => void>();
   private readonly _controlCbs = new Set<(msg: WsControlMessage) => void>();
+  // Active subscriptions, replayed on reconnect. Keyed by mode:symbol:exchange.
+  private readonly _subs = new Map<string, { mode: WsMode; symbol: string; exchange: string; depthLevel?: number }>();
+  private _userClosed = false;
+  private _attempts = 0;
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _resubscribeOnOpen = false;
+  private readonly _rc: { enabled: boolean; baseDelayMs: number; maxDelayMs: number; maxAttempts: number };
 
   public constructor(config: OpenAlgoWsConfig) {
     this._config = config;
     const f = config.socketFactory
       ?? ((url: string) => new WebSocket(url) as unknown as SocketLike);
     this._factory = f;
+    const r = config.reconnect ?? {};
+    this._rc = {
+      enabled: r.enabled ?? true,
+      baseDelayMs: r.baseDelayMs ?? 1000,
+      maxDelayMs: r.maxDelayMs ?? 30000,
+      maxAttempts: r.maxAttempts ?? Infinity,
+    };
   }
 
   public connect(): void {
@@ -164,7 +184,7 @@ export class OpenAlgoWsFeed {
     const sock = this._factory(this._config.url);
     sock.onmessage = (ev): void => this._dispatch(ev.data);
     sock.onopen = (): void => this._onOpen();
-    sock.onclose = (): void => { this._open = false; this._emitState('closed'); };
+    sock.onclose = (): void => this._onClose();
     sock.onerror = (): void => this._emitState('error');
     this._sock = sock;
     // Some sockets connect synchronously (readyState OPEN) before onopen fires.
@@ -191,9 +211,35 @@ export class OpenAlgoWsFeed {
   private _onOpen(): void {
     if (this._open) return;
     this._open = true;
+    this._attempts = 0; // a successful open resets the backoff
     this._emitState('open');
     this._sock?.send(formatAuthenticate(this._config.apiKey));
     this._flush();
+    if (this._resubscribeOnOpen) {
+      this._resubscribeOnOpen = false;
+      for (const s of this._subs.values()) this._sock?.send(formatSubscribe(s.mode, s.symbol, s.exchange, s.depthLevel));
+    }
+  }
+
+  private _onClose(): void {
+    this._open = false;
+    this._emitState('closed');
+    this._maybeReconnect();
+  }
+
+  /** Schedule a reconnect with exponential backoff unless the user closed us. */
+  private _maybeReconnect(): void {
+    if (this._userClosed || !this._rc.enabled || this._attempts >= this._rc.maxAttempts) return;
+    const n = this._attempts++;
+    const delay = Math.min(this._rc.maxDelayMs, this._rc.baseDelayMs * 2 ** n);
+    this._emitState('reconnecting');
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      this._sock = null;
+      this._open = false;
+      this._resubscribeOnOpen = this._subs.size > 0;
+      this.connect();
+    }, delay);
   }
 
   /** Send now if open; otherwise queue until onopen (browsers throw on send-before-open). */
@@ -219,14 +265,18 @@ export class OpenAlgoWsFeed {
   }
 
   public subscribe(mode: WsMode, symbol: string, exchange: string, depthLevel?: number): void {
+    this._subs.set(`${mode}:${symbol}:${exchange}`, { mode, symbol, exchange, depthLevel });
     this._send(formatSubscribe(mode, symbol, exchange, depthLevel));
   }
 
   public unsubscribe(mode: WsMode, symbol: string, exchange: string): void {
+    this._subs.delete(`${mode}:${symbol}:${exchange}`);
     this._send(formatUnsubscribe(mode, symbol, exchange));
   }
 
   public close(): void {
+    this._userClosed = true; // intentional: never auto-reconnect after this
+    if (this._reconnectTimer !== null) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
     this._sock?.close();
     this._sock = null;
     this._open = false;

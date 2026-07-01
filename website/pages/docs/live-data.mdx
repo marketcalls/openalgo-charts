@@ -52,6 +52,18 @@ ws.subscribe('LTP', 'RELIANCE', 'NSE');
 The WS adapter speaks the documented OpenAlgo protocol (authenticate → numeric-mode subscribe
 → `market_data`), with connection and control callbacks (`onState` / `onControl`).
 
+After an unexpected close it **auto-reconnects** with exponential backoff, then
+re-authenticates and replays every active subscription. `close()` is treated as
+intentional and never reconnects. `onState` reports a `'reconnecting'` phase in
+between. Tune or disable it:
+
+```ts
+new OpenAlgoWsFeed({
+  url, apiKey,
+  reconnect: { enabled: true, baseDelayMs: 1000, maxDelayMs: 30000, maxAttempts: Infinity },
+});
+```
+
 ## All-in-one live feed
 
 `OpenAlgoLiveDataFeed` composes REST history + WebSocket + the candle builder so you get a
