@@ -3,6 +3,8 @@ import { FakeDataFeed } from '../src/feed/fake-feed';
 import { Chart } from '../src/core/chart';
 import { DataLayer } from '../src/model/data-layer';
 import { toBar } from '../src/model/bar';
+import { drawTimeAxis } from '../src/render/axis';
+import { TimeScale } from '../src/scale/time-scale';
 import { RecordingContext } from './helpers/fake-ctx';
 import type { Bar } from '../src/model/bar';
 
@@ -80,6 +82,25 @@ describe('FakeDataFeed.subscribeBars streams (not a silent no-op)', () => {
     expect(bars.every((b) => b.high >= b.close && b.low <= b.close)).toBe(true);
     off();
     expect(cleared).toBe(true);
+  });
+});
+
+describe('Custom time formatter (Gap 10)', () => {
+  const b = (t: number, c: number): Bar => ({ time: t, open: c, high: c + 1, low: c - 1, close: c });
+  it('drawTimeAxis routes axis labels through a custom formatter (UTC seconds)', () => {
+    const dl = new DataLayer();
+    const id = dl.createSeries();
+    dl.setSeriesData(id, Array.from({ length: 20 }, (_, i) => b(1_700_000_000 + i * 60, i)));
+    const ts = new TimeScale();
+    ts.setWidth(400);
+    ts.setBaseIndex(dl.baseIndex);
+    ts.fitContent(dl.length);
+    const seen: number[] = [];
+    const rec = new RecordingContext();
+    drawTimeAxis(rec as unknown as CanvasRenderingContext2D, ts, dl,
+      { plotWidth: 400, plotHeight: 100 } as never, 1, undefined, (s) => { seen.push(s); return 'X'; });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((s) => s >= 1_700_000_000)).toBe(true); // real bar times, not IST-mangled
   });
 });
 

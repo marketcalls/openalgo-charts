@@ -35,6 +35,8 @@ export interface PaneRenderContext {
   showVertGrid: boolean;
   /** Draw the horizontal (price) grid lines. */
   showHorzGrid: boolean;
+  /** Optional custom time label formatter (UTC seconds -> string). Defaults to IST. */
+  timeFormatter?: (utcSeconds: number) => string;
 }
 
 export class Pane {
@@ -219,7 +221,7 @@ export class Pane {
       });
     }
     if (ctx.showTimeAxis) {
-      drawTimeAxis(g, ctx.timeScale, ctx.dataLayer, layout, dpr, axisStyle);
+      drawTimeAxis(g, ctx.timeScale, ctx.dataLayer, layout, dpr, axisStyle, ctx.timeFormatter);
     }
   }
 
@@ -255,7 +257,7 @@ export class Pane {
       const idx = Math.round(ctx.timeScale.xToIndex(cross.x));
       const t = ctx.dataLayer.indexToTime(idx);
       if (t !== undefined) {
-        drawCrosshairTag(g, formatIstCrosshairLabel(t), cross.x * dpr, layout.plotHeight * dpr, dpr,
+        drawCrosshairTag(g, ctx.timeFormatter ? ctx.timeFormatter(t) : formatIstCrosshairLabel(t), cross.x * dpr, layout.plotHeight * dpr, dpr,
           ctx.theme.crosshair, ctx.theme.lastPriceText, 'bottom');
       }
     }

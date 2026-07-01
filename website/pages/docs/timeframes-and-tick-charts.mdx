@@ -9,8 +9,17 @@ import { Callout } from 'nextra/components'
 # Timeframes & tick charts
 
 OpenAlgo Charts handles the full range of timeframes - from **seconds** and **ticks** up to
-**weeks** - because the time axis is a logical index, not a fixed grid. There are two
-sources of bars:
+**weeks** - because the time axis is a logical index, not a fixed grid.
+
+<Callout type="info">
+Time labels default to **IST** (the Indian-market default). For other markets,
+pass a `timeFormatter` (UTC seconds -> string) to `createChart`, or call
+`chart.setTimeFormatter(...)` at runtime. For example, UTC time labels:
+`createChart(el, { timeFormatter: (s) => new Date(s * 1000).toISOString().slice(11, 16) })`.
+It drives both the time-axis ticks and the crosshair pill.
+</Callout>
+
+There are two sources of bars:
 
 1. **Historical bars** come from your data feed at a chosen interval (`5s`, `1m`, `1h`,
    `D`, `W`, ...). The chart just draws them.

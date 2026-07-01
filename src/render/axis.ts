@@ -70,6 +70,7 @@ export function drawTimeAxis(
   layout: PlotLayout,
   dpr: number,
   style: AxisStyle = DEFAULT_AXIS_STYLE,
+  timeFormatter?: (utcSeconds: number) => string,
 ): void {
   const range = timeScale.visibleRange();
   const from = Math.max(0, Math.floor(range.from));
@@ -120,11 +121,13 @@ export function drawTimeAxis(
       prevTime = time;
       continue;
     }
-    const label = prevTime === undefined || isNewIstDay(prevTime, time)
-      ? formatIstDate(time)
-      : subMinute
-        ? formatIstTimeSeconds(time)
-        : formatIstTime(time);
+    const label = timeFormatter
+      ? timeFormatter(time)
+      : prevTime === undefined || isNewIstDay(prevTime, time)
+        ? formatIstDate(time)
+        : subMinute
+          ? formatIstTimeSeconds(time)
+          : formatIstTime(time);
     ctx.fillText(label, x, yBase + 4 * dpr);
     prevTime = time;
   }

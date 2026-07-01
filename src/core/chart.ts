@@ -68,6 +68,12 @@ export interface ChartOptions {
    * Tune a single pane later via `chart.panes()[n].priceScale.setOptions(...)`.
    */
   priceScale?: Partial<PriceScaleOptions>;
+  /**
+   * Custom time-axis and crosshair label formatter (receives UTC seconds). When
+   * omitted, labels use IST (Indian market default). e.g. for UTC:
+   * `(s) => new Date(s * 1000).toISOString().slice(11, 16)`.
+   */
+  timeFormatter?: (utcSeconds: number) => string;
 }
 
 export interface AddSeriesOptions {
@@ -166,6 +172,7 @@ export class Chart {
   private _axisStartSpacing = 0;
   private _priceFormatter: ((price: number) => string) | null = null;
   private _priceScaleOptions: Partial<PriceScaleOptions> | null = null;
+  private _timeFormatter: ((utcSeconds: number) => string) | undefined = undefined;
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._container = container;
@@ -182,6 +189,7 @@ export class Chart {
     this._conflationFactor = options.conflationFactor ?? 1;
     this._priceFormatter = options.priceFormatter ?? null;
     this._priceScaleOptions = options.priceScale ?? null;
+    this._timeFormatter = options.timeFormatter;
     this._gridVert = options.grid?.vertLines ?? true;
     this._gridHorz = options.grid?.horzLines ?? true;
 
@@ -537,6 +545,15 @@ export class Chart {
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
+  /**
+   * Set a custom time-axis + crosshair label formatter (UTC seconds -> string)
+   * at runtime. Pass undefined to restore the IST default.
+   */
+  public setTimeFormatter(fn: ((utcSeconds: number) => string) | undefined): void {
+    this._timeFormatter = fn;
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
   public panes(): readonly Pane[] {
     return this._panes;
   }
@@ -600,6 +617,7 @@ export class Chart {
       theme: this._theme,
       showVertGrid: this._gridVert,
       showHorzGrid: this._gridHorz,
+      timeFormatter: this._timeFormatter,
     };
   }
 
