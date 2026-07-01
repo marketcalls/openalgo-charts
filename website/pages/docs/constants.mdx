@@ -326,6 +326,14 @@ function roundToTick(value: number, step: number): number
 Rounds `value` to the nearest multiple of `step` (the instrument tick size). Returns `value`
 unchanged when `step <= 0`. Used internally to snap dragged order/SL/TP prices to a valid tick.
 
+```ts
+function compactVolume(value: number): string
+```
+
+Compact number formatting for volume axes: `1.2K` / `3.4M` / `5.6B` (values under 1000 are
+rounded integers). This is what `addSeries(type, { priceFormat: { type: 'volume' } })` installs
+on the series' price scale.
+
 ---
 
 ### Tick generation

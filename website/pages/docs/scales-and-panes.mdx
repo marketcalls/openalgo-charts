@@ -13,9 +13,24 @@ The time scale is shared by all panes. Useful methods:
 
 ```ts
 chart.timeScale.fitContent(barCount);      // fit all bars to the width
+chart.fitContent();                        // no-arg convenience (bar count from data)
 chart.timeScale.setBarSpacing(8);          // pixels per bar (zoom)
 chart.timeScale.scrollToRealtime?.();      // jump to the latest bar
 ```
+
+### Preserve zoom across a data reload
+
+Snapshot the visible logical range before replacing the data and restore it after, so a
+full-history reconcile does not throw away the user's zoom/scroll:
+
+```ts
+const range = chart.getVisibleLogicalRange();   // { from, to }
+mainSeries.setData(fullHistory);                 // would otherwise jump to the default view
+chart.setVisibleLogicalRange(range);             // restore the exact window
+```
+
+Both methods also exist directly on `chart.timeScale` (`getVisibleLogicalRange` /
+`setVisibleLogicalRange`); mutating the scale repaints automatically.
 
 ## Price scale & axis-drag rescale
 
@@ -58,6 +73,66 @@ chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id
 chart.timeScale.fitContent(bars.length);
 return chart;`} />
 
+## Left, right & overlay price scales
+
+Assign a series to a price axis with `priceScaleId`:
+
+- **`'right'`** (default) and **`'left'`** each draw their own axis and autoscale
+  independently — spot price on one side, a premium or spread on the other.
+- **`''`** (empty string) is a hidden overlay scale with no axis, autoscaled on its own —
+  the standard way to pin a volume histogram inside the price pane.
+
+Reach a series' scale with `series.priceScale()` and tune it via `.setOptions(...)`.
+
+### Dual left / right axes
+
+<RunnableExample height={380} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+
+// spot price on the RIGHT axis
+chart.addSeries('line', { priceScaleId: 'right', style: { color: '#2962ff' } })
+     .setData(bars.map(b => ({ time: b.time, value: b.close, close: b.close })));
+
+// a premium series (different magnitude) on the LEFT axis, drawn dashed
+chart.addSeries('line', {
+  priceScaleId: 'left',
+  style: { color: '#e0473e', lineStyle: 'dashed' },
+}).setData(bars.map(b => ({ time: b.time, value: b.close * 0.02 + 40, close: b.close * 0.02 + 40 })));
+
+chart.fitContent();
+return chart;`} />
+
+### Volume overlay on a hidden scale
+
+<RunnableExample height={380} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+// volume on a hidden '' overlay scale, pinned to the bottom ~20%
+const vol = chart.addSeries('histogram', {
+  priceScaleId: '',
+  priceFormat: { type: 'volume' },   // compact 1.2K / 3.4M / 5.6B on its own axis
+});
+vol.setData(bars.map(b => ({ time: b.time, value: b.volume, close: b.volume })));
+vol.priceScale().setOptions({ marginTop: 0.8, marginBottom: 0 });
+
+chart.fitContent();
+return chart;`} />
+
+### Per-series price format
+
+`priceFormat` sets a series' axis and crosshair-tag formatting without affecting other
+series (each has its own scale):
+
+```ts
+// currency
+chart.addSeries('area', { priceFormat: { type: 'custom', formatter: (v) => 'Rs ' + v.toFixed(2) } });
+// compact volume: 1.2K / 3.4M / 5.6B
+chart.addSeries('histogram', { priceScaleId: '', priceFormat: { type: 'volume' } });
+// fixed precision derived from the tick size
+chart.addSeries('line', { priceFormat: { type: 'price', minMove: 0.05 } });
+```
+
 ## PriceScaleOptions
 
 Each pane has an independent `PriceScale`. The options that control it are typed as
@@ -78,8 +153,7 @@ import { DEFAULT_PRICE_SCALE_OPTIONS } from 'openalgo-charts';
 | `inverted` | `boolean` | `false` | Flips the Y axis so prices increase downward, useful for spread or inverted-chart views. |
 
 Only `linear` and `logarithmic` modes are implemented. `percentage` and `indexed-to-100`
-rebasing modes are planned but not yet available; see `END_TO_END_AUDIT.md` and the
-README known-limitations section.
+rebasing modes are planned but not yet available; see the README known-limitations section.
 
 ## TimeScaleOptions
 

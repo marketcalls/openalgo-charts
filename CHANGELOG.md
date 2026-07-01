@@ -2,6 +2,29 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 1.0.2 (unreleased)
+
+Drop-in parity work so a host app can back every chart with this engine. Base
+engine ~24.7 KB Brotli; 314 unit tests (40 files).
+
+### Added
+- Left / right / overlay price scales: `addSeries(type, { priceScaleId: 'right' | 'left' | '' })`.
+  `'left'`/`'right'` draw independent, independently-autoscaled axes; `''` is a hidden
+  overlay scale (volume-in-price-pane). `series.priceScale()` exposes the scale so
+  `.setOptions({ marginTop, marginBottom })` can pin a volume histogram to the bottom.
+- Mutable series handle: `series.applyOptions(partialStyle)`, `series.remove()`, and
+  `SeriesStyle.visible` (hidden series are excluded from autoscale).
+- Viewport preservation: `timeScale.setVisibleLogicalRange()` / `getVisibleLogicalRange()`
+  and `chart.fitContent()` (no-arg) — keep the user's zoom across a full-history reload.
+- Per-series `priceFormat` (`price` / `volume` / `custom`), applied to the series' scale;
+  `compactVolume` helper.
+- Dashed / dotted line series via `SeriesStyle.lineStyle`.
+- Runtime `chart.applyOptions()` / `chart.setTheme()` (theme, grid, formatters, crosshair
+  mode) without recreating the chart; theme `axisFontSize`, `gridStyle`, transparent `background`.
+
+### Fixed
+- `RenderLoop` no longer stalls after the first frame under a synchronous scheduler.
+
 ## 1.0.1
 
 Full package ~38 KB Brotli (all tiers), base engine ~24 KB, zero runtime

@@ -8,6 +8,35 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 1.0.2 (unreleased)
+
+Drop-in parity work so an app can back all its charts with this engine.
+
+**Added**
+
+- **Left / right / overlay price scales.** `addSeries(type, { priceScaleId: 'right' | 'left' | '' })`.
+  `'left'` and `'right'` draw independent, independently-autoscaled axes; `''` is a hidden
+  overlay scale (volume-in-price-pane). `series.priceScale()` returns the scale
+  (`.setOptions({ marginTop, marginBottom })` pins a volume histogram to the bottom).
+- **Mutable series.** `series.applyOptions(partialStyle)`, `series.remove()`, and
+  `style.visible` — restyle, hide (also drops from autoscale), and remove at runtime.
+- **`timeScale.setVisibleLogicalRange()` / `getVisibleLogicalRange()`** and
+  `chart.fitContent()` — preserve the user's zoom across a full-history reload.
+- **Per-series `priceFormat`** (`price` / `volume` / `custom`), applied to that series'
+  scale; `compactVolume` helper (1.2K / 3.4M / 5.6B).
+- **Dashed / dotted line series** via `style.lineStyle`.
+- **Runtime `chart.applyOptions()` / `chart.setTheme()`** — swap theme, grid, and formatters
+  without recreating the chart. New theme fields `axisFontSize`, `gridStyle`, and transparent
+  `background`.
+
+**Fixed**
+
+- `RenderLoop` no longer skips frames after the first when driven by a synchronous scheduler.
+
+**Quality**
+
+- 314 unit tests (40 files); base engine ~24.7 KB Brotli.
+
 ## 1.0.1
 
 Full package ~38 KB Brotli (all tiers), base engine ~24 KB, zero runtime dependencies.

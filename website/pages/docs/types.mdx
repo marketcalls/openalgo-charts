@@ -109,10 +109,15 @@ Options passed to `createChart(container, options)`. All fields are optional; de
 interface AddSeriesOptions {
   paneIndex?: number;
   style?: SeriesStyle;
+  priceScaleId?: 'right' | 'left' | '';
+  priceFormat?:
+    | { type: 'price'; precision?: number; minMove?: number }
+    | { type: 'volume' }
+    | { type: 'custom'; formatter: (value: number) => string };
 }
 ```
 
-Options passed to `chart.addSeries(type, options)`. `paneIndex` defaults to `0` (price pane); higher indices create sub-panes on demand.
+Options passed to `chart.addSeries(type, options)`. `paneIndex` defaults to `0` (price pane); higher indices create sub-panes on demand. `priceScaleId` picks the axis: `'right'` (default) and `'left'` autoscale independently and each draw an axis; `''` is a hidden overlay scale (volume-in-price-pane). `priceFormat` sets that series' axis and crosshair-tag formatting — see [Scales & panes](/docs/scales-and-panes#left-right--overlay-price-scales).
 
 ### `CrosshairMoveEvent`
 
@@ -132,15 +137,18 @@ Emitted on every crosshair move via `chart.subscribeCrosshairMove(cb)`. All fiel
 
 ```ts
 interface SeriesApi {
-  setData(bars: readonly Bar[]): void;
-  prependData(bars: readonly Bar[]): void;
-  update(bar: Bar): void;
+  setData(bars: readonly SeriesDataItem[]): void;
+  prependData(bars: readonly SeriesDataItem[]): void;
+  update(bar: SeriesDataItem): void;
   getData(): Bar[];
+  applyOptions(style: Partial<SeriesStyle>): void;
+  remove(): void;
+  priceScale(): PriceScale;
   createMarkers(): SeriesMarkers;
 }
 ```
 
-The public handle returned by `chart.addSeries(...)`. Use `setData` for the initial load, `update` for live bar ticks, and `prependData` when paging older history. `createMarkers()` attaches a buy/sell signal layer bound to this series.
+The public handle returned by `chart.addSeries(...)`. Use `setData` for the initial load, `update` for live bar ticks, and `prependData` when paging older history. `applyOptions` merges a partial style and repaints (recolor, `{ visible: false }` to hide); `remove` detaches the series and frees its data; `priceScale()` returns the scale this series maps to; `createMarkers()` attaches a buy/sell signal layer bound to this series.
 
 ---
 

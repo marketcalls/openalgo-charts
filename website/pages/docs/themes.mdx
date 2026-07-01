@@ -35,15 +35,34 @@ A theme is a plain object - spread a built-in and override what you need:
     background: '#0b0f17',
     upColor: '#00b386',
     downColor: '#ff5d6c',
-    gridColor: '#161b27',
+    grid: '#161b27',
   },
 });
 chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 140, 3600));
 chart.timeScale.fitContent(140);
 return chart;`} />
 
+Optional cosmetic fields: `axisFontSize` (px, default `11`), `gridStyle`
+(`'solid'` | `'dashed'` | `'dotted'`), and `background: 'transparent'` to skip the pane
+fill so the page shows through.
+
 ## Dark / light at runtime
 
-Recreate the chart with a different theme, or build your own toggle that swaps the `theme`
-object and re-applies series styles. The docs site itself uses the engine's dark theme by
-default and the light theme when you flip the page to light mode.
+Swap the palette live with `chart.setTheme(theme)` — no recreate, no flicker. Click the
+chart below to toggle:
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el, { theme: lib.darkTheme });
+chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 140, 3600));
+chart.fitContent();
+
+let dark = true;
+el.onclick = () => { dark = !dark; chart.setTheme(dark ? lib.darkTheme : lib.lightTheme); };
+return chart;`} />
+
+`applyOptions` swaps several options at once — theme, grid visibility, formatters, and
+crosshair mode — at runtime:
+
+```ts
+chart.applyOptions({ theme: lightTheme, grid: { vertLines: false } });
+chart.applyOptions({ crosshairMode: 'magnet' });
+```

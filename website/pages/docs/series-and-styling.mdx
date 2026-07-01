@@ -19,12 +19,18 @@ series.prependData(older);     // merge older bars (history paging), viewport ke
 series.update(bar);            // mutate the last bar or append a new one
 const bars = series.getData(); // current bars, sorted old -> new
 const markers = series.createMarkers();  // a markers layer bound to this series
+
+// mutate a live series (no re-create needed):
+series.applyOptions({ color: '#f00' });   // merge a partial style + repaint
+series.applyOptions({ visible: false });  // hide it (also excluded from autoscale)
+const scale = series.priceScale();         // the PriceScale this series maps to
+series.remove();                           // detach from the pane + free its data
 ```
 
-The five methods above are the complete `SeriesApi`. Style is set when you add
-the series (the `style` option below); to change styling live, keep the value in
-your own state and re-create the series, or drive colors through the
-[theme](/docs/themes).
+`addSeries` also accepts `priceScaleId` (`'right'` / `'left'` / `''` overlay) and
+`priceFormat` — see [Scales & panes](/docs/scales-and-panes#left-right--overlay-price-scales).
+`applyOptions` / `remove` make dynamic charts (add, restyle, hide, and remove series at
+runtime) straightforward without recreating the chart.
 
 `setData`, `prependData`, and `update` accept three item shapes (normalized to
 bars internally, so `getData` always returns `Bar[]`):
@@ -58,6 +64,26 @@ chart.addSeries('line', { style: { color: '#a855f7', lineWidth: 2 } })
 chart.timeScale.fitContent(140);
 return chart;`} />
 
+## Dynamic series & dashed lines
+
+Series are mutable at runtime — restyle, hide, or remove without recreating the chart.
+`lineStyle: 'dashed'` renders a reference line dashed:
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 140, 3600);
+chart.addSeries('line', { style: { color: '#2962ff' } })
+     .setData(bars.map(b => ({ time: b.time, value: b.close, close: b.close })));
+
+// a dashed EMA(20) reference overlay
+const ema = chart.addSeries('line', { style: { color: '#e0b020', lineStyle: 'dashed', lineWidth: 2 } });
+ema.setData(lib.emaSeries(bars, 20));
+
+// recolor it live via applyOptions (no re-create)
+ema.applyOptions({ color: '#16a34a' });
+
+chart.fitContent();
+return chart;`} />
+
 ## Common style fields
 
 | Field | Applies to | Notes |
@@ -66,6 +92,8 @@ return chart;`} />
 | `wickUpColor` / `wickDownColor` | candle | wick color |
 | `color` | line, area, baseline, column | primary stroke |
 | `lineWidth` | line, area, baseline | pixels |
+| `lineStyle` | line, step, area, HLC | `'solid'` (default), `'dashed'`, `'dotted'` |
+| `visible` | all | `false` hides the series and drops it from autoscale |
 | `areaTopColor` / `areaBottomColor` | area | vertical gradient stops |
 | `baseValue` | baseline | the reference level |
 | `priceLineVisible` | all price series | the dashed last-price line |
