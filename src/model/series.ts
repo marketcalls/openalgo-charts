@@ -24,6 +24,8 @@ export interface SeriesApi {
   setData(bars: readonly Bar[]): void;
   prependData(bars: readonly Bar[]): void;
   update(bar: Bar): void;
+  /** Current bars for this series (sorted old -> new). Handy for computing the next live update. */
+  getData(): Bar[];
   /** Create a markers layer (buy/sell signals, shapes) bound to this series. */
   createMarkers(): SeriesMarkers;
 }

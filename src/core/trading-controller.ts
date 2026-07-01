@@ -88,6 +88,8 @@ export interface TradingHost {
   removePrimitive(p: IPrimitive): void;
   subscribeClick(cb: (externalId: string) => void): void;
   subscribeDrag(onDrag: (externalId: string, price: number) => void, onDragEnd?: (externalId: string, price: number) => void): void;
+  /** Optional: route trading events onto the chart's unified `chart.on(...)` bus. */
+  emit?(event: string, payload: unknown): void;
 }
 
 export const DEFAULT_TRADING_COLORS: TradingColors = {
@@ -243,6 +245,8 @@ export class TradingController {
   private _emit(event: string, payload: unknown): void {
     const set = this._listeners.get(event);
     if (set !== undefined) for (const cb of set) cb(payload);
+    // Mirror onto the chart's unified bus so `chart.on('trading:...')` works too.
+    this._host.emit?.(event, payload);
   }
 
   // ── settings ────────────────────────────────────────────────────────────────

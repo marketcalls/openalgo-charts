@@ -202,6 +202,9 @@ export class Chart {
     this._observeSize();
     this._attachInput();
     this.applySize(container.clientWidth, container.clientHeight);
+    // 'ready' fires on a microtask so `createChart(el).on('ready', ...)` — a
+    // subscription registered on the very next line — still receives it.
+    if (typeof queueMicrotask === 'function') queueMicrotask(() => this.emit('ready', {}));
   }
 
   /** Register a callback fired when the user pans near the left (oldest) edge. */
@@ -252,6 +255,7 @@ export class Chart {
       setData: (bars: readonly Bar[]): void => this._setData(dataId, bars),
       prependData: (bars: readonly Bar[]): void => this._prependData(dataId, bars),
       update: (bar: Bar): void => this._updateBar(dataId, bar),
+      getData: (): Bar[] => this._dataLayer.indexedBars(dataId).map((ib) => ib.bar),
       createMarkers: (): SeriesMarkers => {
         const m = new SeriesMarkers(dataId);
         this._addPrimitive(paneIndex, m);
@@ -292,6 +296,68 @@ export class Chart {
   public subscribeDrag(onDrag: (externalId: string, price: number) => void, onDragEnd?: (externalId: string, price: number) => void): void {
     this._dragCb = onDrag;
     this._dragEndCb = onDragEnd ?? null;
+  }
+
+  // ── unified event bus ─────────────────────────────────────────────────────
+  // One `on(name, cb)` surface for every chart event, complementing the typed
+  // `subscribe*` helpers. Names emitted by the core: 'ready', 'crosshair:move',
+  // 'click', 'pan', 'zoom', 'resize', 'lazy-load'. The trade layer routes its
+  // 'trading:*' events through here too, so `chart.on('trading:order_modify')`
+  // and `chart.trading.on('order_modify')` are equivalent.
+  private readonly _listeners = new Map<string, Set<(payload: unknown) => void>>();
+
+  /** Subscribe to a named chart event. Returns an unsubscribe function. */
+  public on(event: string, cb: (payload: unknown) => void): () => void {
+    let set = this._listeners.get(event);
+    if (set === undefined) {
+      set = new Set();
+      this._listeners.set(event, set);
+    }
+    set.add(cb);
+    return (): void => this.off(event, cb);
+  }
+
+  /** Subscribe to the next occurrence of an event, then auto-unsubscribe. */
+  public once(event: string, cb: (payload: unknown) => void): () => void {
+    const wrap = (payload: unknown): void => {
+      this.off(event, wrap);
+      cb(payload);
+    };
+    return this.on(event, wrap);
+  }
+
+  /** Remove one listener, or (when `cb` is omitted) every listener for an event. */
+  public off(event: string, cb?: (payload: unknown) => void): void {
+    if (cb === undefined) {
+      this._listeners.delete(event);
+      return;
+    }
+    this._listeners.get(event)?.delete(cb);
+  }
+
+  /** Dispatch a named event. Public so the lazy trade layer can route through it. */
+  public emit(event: string, payload: unknown): void {
+    const set = this._listeners.get(event);
+    if (set === undefined) return;
+    for (const cb of [...set]) {
+      try {
+        cb(payload);
+      } catch {
+        /* one bad listener must not break the others or the render loop */
+      }
+    }
+  }
+
+  /** Emit a viewport event ('pan' | 'zoom') carrying the visible time + logical range. */
+  private _emitViewport(type: 'pan' | 'zoom'): void {
+    if (this._listeners.get(type) === undefined) return;
+    const r = this._timeScale.visibleRange();
+    this.emit(type, {
+      from: this._dataLayer.indexToTime(Math.round(r.from)) ?? null,
+      to: this._dataLayer.indexToTime(Math.round(r.to)) ?? null,
+      logicalFrom: r.from,
+      logicalTo: r.to,
+    });
   }
 
   /** Public: attach any primitive (indicators, profiles, custom overlays) to a pane. */
@@ -454,6 +520,7 @@ export class Chart {
     this._height = height;
     this._relayout();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this.emit('resize', { width, height });
   }
 
   /** Distribute height across panes by weight; sync the shared time-scale width. */
@@ -669,6 +736,7 @@ export class Chart {
       this._lastDragT = t;
       this._maybeLoadHistory();
       this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      this._emitViewport('pan');
       return;
     }
     this._updateCursor(p.pane, p.x, p.localY, p.y);
@@ -697,7 +765,10 @@ export class Chart {
     if (!this._pointerMoved && this._clickCb !== null) {
       const isBottom = this._downPane === this._panes.length - 1;
       const hit = this._panes[this._downPane]?.hitTestPrimitives(this._downX, this._downLocalY, this._renderContext(isBottom));
-      if (hit) this._clickCb(hit.externalId);
+      if (hit) {
+        this._clickCb(hit.externalId);
+        this.emit('click', { id: hit.externalId });
+      }
       return;
     }
     if (KineticAnimation.shouldAnimate(this._dragVelocity)) this._startKinetic(this._dragVelocity);
@@ -710,7 +781,9 @@ export class Chart {
       this._cursorPane = null;
       // clear the crosshair from every pane (global vertical line)
       this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
-      this._crosshairCb?.({ time: null, index: null, price: null, bar: null, point: null });
+      const cleared = { time: null, index: null, price: null, bar: null, point: null };
+      this._crosshairCb?.(cleared);
+      this.emit('crosshair:move', cleared);
     }
   };
 
@@ -721,6 +794,7 @@ export class Chart {
     this._timeScale.zoomAtX(p.x, factor);
     this._maybeLoadHistory();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._emitViewport('zoom');
   };
 
   /**
@@ -756,6 +830,7 @@ export class Chart {
     this._pinch = cur;
     this._maybeLoadHistory();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._emitViewport(d.factor !== 1 ? 'zoom' : 'pan');
   }
 
   // ── keyboard navigation (focus the chart, then arrows / +- / Home) ────────
@@ -853,15 +928,17 @@ export class Chart {
     this._cursor = { x, y };
     // global crosshair → repaint every pane's overlay (cheap; base untouched)
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
-    if (this._crosshairCb !== null) {
+    if (this._crosshairCb !== null || this._listeners.get('crosshair:move') !== undefined) {
       const time = this._dataLayer.indexToTime(index);
-      this._crosshairCb({
+      const move = {
         time: time ?? null,
         index,
         price: pane.yToPrice(localY),
         bar: hoveredBar,
         point: { x, y: containerY },
-      });
+      };
+      this._crosshairCb?.(move);
+      this.emit('crosshair:move', move);
     }
   }
 
@@ -870,6 +947,11 @@ export class Chart {
     const range = this._timeScale.visibleRange();
     if (range.from < 10) {
       this._loadingHistory = true;
+      this.emit('lazy-load', {
+        from: this._dataLayer.indexToTime(Math.round(range.from)) ?? null,
+        to: this._dataLayer.indexToTime(Math.round(range.to)) ?? null,
+        direction: 'backward',
+      });
       this._historyLoader();
     }
   }
