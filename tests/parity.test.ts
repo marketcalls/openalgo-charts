@@ -155,3 +155,19 @@ describe('Task 1a: independent per-series price scales + overlay', () => {
     expect(vol.priceScale().options.marginBottom).toBe(0);
   });
 });
+
+describe('Task 1b: reserved left-axis column', () => {
+  const immediate = { raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} } };
+  it('reserves a left-axis column (shrinks the plot) when a left scale is used, and frees it on remove', () => {
+    const chart = makeChart(immediate);
+    chart.addSeries('line').setData([bar(100, 1), bar(160, 2)]);
+    const widthNoLeft = chart.timeScale.width;
+
+    const left = chart.addSeries('line', { priceScaleId: 'left' });
+    left.setData([bar(100, 10), bar(160, 20)]);
+    expect(chart.timeScale.width).toBeLessThan(widthNoLeft); // left column reserved
+
+    left.remove();
+    expect(chart.timeScale.width).toBe(widthNoLeft); // column freed
+  });
+});

@@ -26,6 +26,8 @@ export interface PlotLayout {
   plotHeight: number;
   priceAxisWidth: number;
   timeAxisHeight: number;
+  /** Left inset (px) reserved for a left price axis; 0 when there is no left axis. */
+  plotLeft: number;
 }
 
 /** Draw price tick labels in the right axis strip (bitmap scope). */
@@ -58,6 +60,44 @@ export function drawPriceAxis(
     const y = Math.round(priceScale.priceToY(price) * dpr);
     if (y < 0 || y > layout.plotHeight * dpr) continue;
     ctx.fillText(priceScale.format(price), xStart + 6 * dpr, y);
+  }
+  ctx.restore();
+}
+
+/**
+ * Draw price tick labels in the LEFT axis strip. `plotLeft` is the strip width in
+ * media px; the separator sits at its inner edge and labels are right-aligned into
+ * the strip. Drawn in absolute pane coordinates (not the shifted plot frame).
+ */
+export function drawLeftPriceAxis(
+  ctx: CanvasRenderingContext2D,
+  priceScale: PriceScale,
+  plotLeft: number,
+  plotHeight: number,
+  dpr: number,
+  style: AxisStyle = DEFAULT_AXIS_STYLE,
+): void {
+  const range = priceScale.priceRange();
+  const ticks = niceTicks(range.min, range.max, 6);
+  const xEdge = Math.round(plotLeft * dpr);
+
+  ctx.save();
+  ctx.strokeStyle = style.lineColor;
+  ctx.fillStyle = style.textColor;
+  ctx.font = scaleFont(style.font, dpr);
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 1;
+
+  ctx.beginPath();
+  ctx.moveTo(xEdge - 0.5, 0);
+  ctx.lineTo(xEdge - 0.5, Math.round(plotHeight * dpr));
+  ctx.stroke();
+
+  for (const price of ticks) {
+    const y = Math.round(priceScale.priceToY(price) * dpr);
+    if (y < 0 || y > plotHeight * dpr) continue;
+    ctx.fillText(priceScale.format(price), xEdge - 6 * dpr, y);
   }
   ctx.restore();
 }

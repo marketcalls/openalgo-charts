@@ -11,7 +11,7 @@ import type { SeriesRecord, PriceScaleId } from '../model/series';
 import { computeGridLines, drawGrid } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
 import { conflationGroupSize, conflateItems } from '../model/conflation';
-import { drawPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, type PlotLayout } from '../render/axis';
+import { drawPriceAxis, drawLeftPriceAxis, drawTimeAxis, drawLastPriceLabel, type AxisStyle, type PlotLayout } from '../render/axis';
 import { drawCrosshair, drawCrosshairTag } from '../render/crosshair';
 import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
 import type { ChartTheme } from '../theme';
@@ -22,6 +22,8 @@ export interface PaneRenderContext {
   dataLayer: DataLayer;
   dpr: number;
   priceAxisWidth: number;
+  /** Left inset (px) reserved chart-wide for a left price axis; 0/absent when none. */
+  leftAxisWidth?: number;
   timeAxisHeight: number;
   /** Only the bottom pane draws the time axis. */
   showTimeAxis: boolean;
@@ -149,11 +151,13 @@ export class Pane {
   }
 
   private _layout(ctx: PaneRenderContext): PlotLayout {
+    const plotLeft = ctx.leftAxisWidth ?? 0;
     return {
-      plotWidth: Math.max(0, this._width - ctx.priceAxisWidth),
+      plotWidth: Math.max(0, this._width - ctx.priceAxisWidth - plotLeft),
       plotHeight: Math.max(0, this._height - (ctx.showTimeAxis ? ctx.timeAxisHeight : 0)),
       priceAxisWidth: ctx.priceAxisWidth,
       timeAxisHeight: ctx.showTimeAxis ? ctx.timeAxisHeight : 0,
+      plotLeft,
     };
   }
 
@@ -217,6 +221,15 @@ export class Pane {
     g.fillStyle = ctx.theme.background;
     g.fillRect(0, 0, Math.round(this._width * dpr), Math.round(this._height * dpr));
 
+    // Left price axis strip (absolute coords), drawn before the plot is shifted.
+    if (this._leftScale && layout.plotLeft > 0) {
+      drawLeftPriceAxis(g, this._leftScale, layout.plotLeft, layout.plotHeight, dpr, axisStyle);
+    }
+
+    // Shift the plot right by the reserved left-axis width (0 = a no-op).
+    g.save();
+    if (layout.plotLeft > 0) g.translate(Math.round(layout.plotLeft * dpr), 0);
+
     // grid within the plot area (vertical/horizontal independently toggleable)
     if (ctx.showVertGrid || ctx.showHorzGrid) {
       const lines = computeGridLines(layout.plotWidth, layout.plotHeight, { spacing: 60 });
@@ -271,6 +284,7 @@ export class Pane {
     if (ctx.showTimeAxis) {
       drawTimeAxis(g, ctx.timeScale, ctx.dataLayer, layout, dpr, axisStyle, ctx.timeFormatter);
     }
+    g.restore(); // end plot shift
   }
 
   /**
@@ -285,30 +299,34 @@ export class Pane {
     ctx: PaneRenderContext,
   ): void {
     this.top.clearBitmap();
-    const prc = this._primitiveContext(ctx);
-    for (const p of this._primitives) if (p.zOrder() === 'top') p.draw(this.top.ctx, prc);
-    if (cross === null) return;
-
     const layout = this._layout(ctx);
     const g = this.top.ctx;
     const dpr = ctx.dpr;
-    drawCrosshair(g, cross.x, cross.yLocal, layout.plotWidth, layout.plotHeight, dpr, ctx.theme.crosshair);
+    // Shift top-layer primitives + crosshair by the reserved left-axis width.
+    g.save();
+    if (layout.plotLeft > 0) g.translate(Math.round(layout.plotLeft * dpr), 0);
+    const prc = this._primitiveContext(ctx);
+    for (const p of this._primitives) if (p.zOrder() === 'top') p.draw(g, prc);
+    if (cross !== null) {
+      drawCrosshair(g, cross.x, cross.yLocal, layout.plotWidth, layout.plotHeight, dpr, ctx.theme.crosshair);
 
-    // price tag on the right axis (hovered pane only)
-    if (cross.yLocal !== null) {
-      const price = this.priceScale.yToPrice(cross.yLocal);
-      drawCrosshairTag(g, this.priceScale.format(price), layout.plotWidth * dpr, cross.yLocal * dpr, dpr,
-        ctx.theme.crosshair, ctx.theme.lastPriceText, 'right');
-    }
-    // date/time tag on the bottom pane's axis strip
-    if (cross.showTimeTag && cross.x >= 0 && cross.x <= layout.plotWidth) {
-      const idx = Math.round(ctx.timeScale.xToIndex(cross.x));
-      const t = ctx.dataLayer.indexToTime(idx);
-      if (t !== undefined) {
-        drawCrosshairTag(g, ctx.timeFormatter ? ctx.timeFormatter(t) : formatIstCrosshairLabel(t), cross.x * dpr, layout.plotHeight * dpr, dpr,
-          ctx.theme.crosshair, ctx.theme.lastPriceText, 'bottom');
+      // price tag on the right axis (hovered pane only)
+      if (cross.yLocal !== null) {
+        const price = this.priceScale.yToPrice(cross.yLocal);
+        drawCrosshairTag(g, this.priceScale.format(price), layout.plotWidth * dpr, cross.yLocal * dpr, dpr,
+          ctx.theme.crosshair, ctx.theme.lastPriceText, 'right');
+      }
+      // date/time tag on the bottom pane's axis strip (cross.x is plot-relative)
+      if (cross.showTimeTag && cross.x >= 0 && cross.x <= layout.plotWidth) {
+        const idx = Math.round(ctx.timeScale.xToIndex(cross.x));
+        const t = ctx.dataLayer.indexToTime(idx);
+        if (t !== undefined) {
+          drawCrosshairTag(g, ctx.timeFormatter ? ctx.timeFormatter(t) : formatIstCrosshairLabel(t), cross.x * dpr, layout.plotHeight * dpr, dpr,
+            ctx.theme.crosshair, ctx.theme.lastPriceText, 'bottom');
+        }
       }
     }
+    g.restore();
   }
 
   /** Price at a media-px y on this pane (for crosshair magnet). */

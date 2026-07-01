@@ -46,6 +46,7 @@ export class RecordingContext {
   public fillText(_t: string, x: number, y: number): void { this.ops.push({ type: 'fillText', args: [x, y] }); }
   public measureText(t: string): { width: number } { return { width: t.length * 6 }; }
   public setTransform(): void { this.ops.push({ type: 'setTransform', args: [] }); }
+  public translate(x: number, y: number): void { this.ops.push({ type: 'translate', args: [x, y] }); }
   public clearRect(x: number, y: number, w: number, h: number): void { this.ops.push({ type: 'clearRect', args: [x, y, w, h] }); }
   public scale(): void { this.ops.push({ type: 'scale', args: [] }); }
   public drawImage(_img: unknown, x: number, y: number): void { this.ops.push({ type: 'drawImage', args: [x, y] }); }

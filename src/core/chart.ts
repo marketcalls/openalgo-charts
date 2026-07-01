@@ -180,6 +180,7 @@ export class Chart {
   private _priceFormatter: ((price: number) => string) | null = null;
   private _priceScaleOptions: Partial<PriceScaleOptions> | null = null;
   private _timeFormatter: ((utcSeconds: number) => string) | undefined = undefined;
+  private _leftAxisWidth = 0; // chart-wide reserved left-axis column (0 = none)
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._container = container;
@@ -298,6 +299,8 @@ export class Chart {
     }
     const record = createSeriesRecord(dataId, type, options.style, options.priceScaleId ?? 'right');
     this._panes[paneIndex].addSeries(record);
+    this._recomputeLeftAxis(); // reserve/free the left-axis column
+
     return {
       setData: (bars: readonly SeriesDataItem[]): void => this._setData(dataId, bars.map(toBar)),
       prependData: (bars: readonly SeriesDataItem[]): void => this._prependData(dataId, bars.map(toBar)),
@@ -312,6 +315,7 @@ export class Chart {
         this._dataLayer.removeSeries(dataId);
         if (this._firstDataId.value === dataId) this._firstDataId.value = null;
         this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
+        this._recomputeLeftAxis();
         this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
       },
       priceScale: (): PriceScale => this._panes[paneIndex].scaleOf(record),
@@ -539,7 +543,7 @@ export class Chart {
     this._dataLayer.setSeriesData(dataId, bars);
     this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
     if (!this._hasFitContent && this._dataLayer.length > 0) {
-      this._timeScale.setWidth(Math.max(0, this._width - this._priceAxisWidth));
+      this._timeScale.setWidth(Math.max(0, this._width - this._priceAxisWidth - this._leftAxisWidth));
       this._timeScale.fitContent(this._dataLayer.length);
       this._hasFitContent = true;
     }
@@ -615,7 +619,16 @@ export class Chart {
       pane.element.style.flex = `${pane.weight} 1 0`;
       pane.resize(this._width, (this._height * pane.weight) / total, dpr);
     }
-    this._timeScale.setWidth(Math.max(0, this._width - this._priceAxisWidth));
+    this._timeScale.setWidth(Math.max(0, this._width - this._priceAxisWidth - this._leftAxisWidth));
+  }
+
+  /** Reserve a chart-wide left-axis column when any pane has a left price scale. */
+  private _recomputeLeftAxis(): void {
+    const w = this._panes.some((p) => p.hasLeftScale()) ? this._priceAxisWidth : 0;
+    if (w === this._leftAxisWidth) return;
+    this._leftAxisWidth = w;
+    this._relayout();
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
   private _weightTotal(): number {
@@ -651,6 +664,7 @@ export class Chart {
       showVertGrid: this._gridVert,
       showHorzGrid: this._gridHorz,
       timeFormatter: this._timeFormatter,
+      leftAxisWidth: this._leftAxisWidth,
     };
   }
 
@@ -758,7 +772,7 @@ export class Chart {
     }
 
     // If the press lands on a draggable line (order/SL/TP), drag it — don't pan.
-    const hit = this._panes[p.pane]?.hitTestPrimitives(p.x, p.localY, this._renderContext(p.pane === this._panes.length - 1));
+    const hit = this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane === this._panes.length - 1));
     if (hit && hit.cursor === 'ns-resize' && this._dragCb !== null) {
       this._dragId = hit.externalId;
       this._dragging = false;
@@ -848,7 +862,7 @@ export class Chart {
     this._dragging = false;
     if (!this._pointerMoved && this._clickCb !== null) {
       const isBottom = this._downPane === this._panes.length - 1;
-      const hit = this._panes[this._downPane]?.hitTestPrimitives(this._downX, this._downLocalY, this._renderContext(isBottom));
+      const hit = this._panes[this._downPane]?.hitTestPrimitives(this._downX - this._leftAxisWidth, this._downLocalY, this._renderContext(isBottom));
       if (hit) {
         this._clickCb(hit.externalId);
         this.emit('click', { id: hit.externalId });
@@ -986,14 +1000,17 @@ export class Chart {
   }
 
   private _updateCursor(paneIndex: number, x: number, localY: number, containerY = localY): void {
-    const plotWidth = Math.max(0, this._width - this._priceAxisWidth);
-    if (x > plotWidth) {
+    // Plot spans [leftAxisWidth, width - priceAxisWidth]; work in plot-relative x.
+    const rightEdge = this._width - this._priceAxisWidth;
+    const plotX = x - this._leftAxisWidth;
+    const plotWidth = Math.max(0, rightEdge - this._leftAxisWidth);
+    if (plotX < 0 || plotX > plotWidth) {
       this._onPointerLeave();
       return;
     }
     const pane = this._panes[paneIndex];
     let y = localY;
-    const index = Math.round(this._timeScale.xToIndex(x));
+    const index = Math.round(this._timeScale.xToIndex(plotX));
     let hoveredBar: Bar | null = null;
     if (this._firstDataId.value !== null) {
       const bars = this._dataLayer.visibleBars(this._firstDataId.value, index, index);
@@ -1008,7 +1025,7 @@ export class Chart {
       }
     }
     this._cursorPane = paneIndex;
-    this._cursor = { x, y };
+    this._cursor = { x: plotX, y }; // plot-relative; the crosshair line is drawn inside the plot shift
     // global crosshair → repaint every pane's overlay (cheap; base untouched)
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
     if (this._crosshairCb !== null || this._listeners.get('crosshair:move') !== undefined) {
