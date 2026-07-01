@@ -23,12 +23,17 @@ const bars = lib.generateBars(1700000000, 140, 3600);
 chart.addSeries('candlestick').setData(bars);
 
 const last = bars[bars.length - 1].close;
-chart.addPriceLine({ price: last,        color: '#3b82f6', lineWidth: 2, id: 'entry' });
-chart.addPriceLine({ price: last * 0.98, color: '#ef5350', lineWidth: 1, dashed: true, id: 'sl' });
-chart.addPriceLine({ price: last * 1.03, color: '#26a69a', lineWidth: 1, dashed: true, id: 'tp' });
+// Short, labelled lines anchored to the price axis, each with an X to
+// cancel / exit - the same style as the live trading example.
+chart.addPriceLine({ price: last, color: '#3b82f6', lineWidth: 2, id: 'entry',
+  extentFromRight: 0.30, leftLabel: 'BUY 10 LIMIT', closeButton: true, cursor: 'ns-resize' });
+chart.addPriceLine({ price: last * 0.98, color: '#ef5350', lineWidth: 1, dashed: true, id: 'sl',
+  extentFromRight: 0.30, leftLabel: 'SL', closeButton: true, cursor: 'ns-resize' });
+chart.addPriceLine({ price: last * 1.03, color: '#26a69a', lineWidth: 1, dashed: true, id: 'tp',
+  extentFromRight: 0.30, leftLabel: 'TARGET', closeButton: true, cursor: 'ns-resize' });
 
 chart.timeScale.fitContent(bars.length);
-return chart;`} caption="Entry, stop-loss and target as draggable price lines." />
+return chart;`} caption="Entry, stop-loss and target as short, labelled, draggable price lines with an X to cancel/exit - as in the live example." />
 
 ## The order engine
 
