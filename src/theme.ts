@@ -87,4 +87,4 @@ export const lightTheme: ChartTheme = {
   loss: '#e0473e',
 };
 
-export const DEFAULT_THEME = darkTheme;
+export const DEFAULT_THEME = lightTheme;
