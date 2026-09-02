@@ -137,6 +137,10 @@ mean stringifying every entry on every write, which costs more than the cache sa
 single series larger than the whole `maxBars` budget is simply **not cached**, since it would
 evict everything else and then itself on the next write.
 
+These limits apply to warm-load data in the cache. They do not trim bars that a
+chart already holds. Set a separate retained-history policy for a long-running
+live chart, as described in [Performance & Operations](/docs/performance-and-operations).
+
 ## Options
 
 | Option | Type | Default | Description |
@@ -146,28 +150,32 @@ evict everything else and then itself on the next write.
 | `maxBars` | `number` | `250_000` | Maximum total cached bars. |
 | `storage` | `BarCacheStore` | in-memory `Map` | Backing store. Sync or async. |
 | `now` | `() => number` | `Date.now` | Injectable clock, for tests and for a host with a server clock. |
-| `intervalSeconds` | `(interval: string) => number` | built-in token parser | Bar length for interval codes the parser does not know. Return `0` to disable caching for that code. |
+| `barCloses` | `(interval, barStartSec) => number \| null` | interval registry | Returns a bar-close time. Return `null` when close time is unknowable, which disables caching for that interval. |
 
-The built-in parser reads the usual tokens and is **case-sensitive where it disambiguates**:
-lowercase `m` is minutes, uppercase `M` is months. Treating a monthly bar as a minute would
-make the cache believe a new bar had closed every 60 seconds. An unrecognised token falls
-back to 60 s, which errs toward refetching rather than toward serving something stale.
+The default close-time resolver asks the interval registry. It handles fixed and
+calendar intervals, including registered interval codes. Tick, volume, range,
+Renko, and unknown intervals have no clock-derived close time, so the resolver
+returns `null` and the cache passes them through rather than guessing.
 
 <Callout type="info">
-Register a [custom interval](/docs/custom-intervals) such as `1Q` and you should hand the
-cache its length too, since a code the parser does not recognise is gated at a minute:
+Register a [custom interval](/docs/custom-intervals) such as `1Q` and the
+default resolver follows that registered bucketing rule. Supply `barCloses` only
+when your feed has a non-registered interval whose close time you can state
+exactly:
 
 ```ts
-import { withBarCache } from 'openalgo-charts';
+import { barCloseSec, withBarCache } from 'openalgo-charts';
 
 const feed = withBarCache(source, {
-  // Consulted only for codes the built-in parser does not recognise.
-  intervalSeconds: (code) => (code === '1Q' ? 92 * 86400 : 0),
+  barCloses: (code, start) => {
+    if (code === 'settlement') return start + 86400;
+    return barCloseSec(code, start, 'Asia/Kolkata');
+  },
 });
 ```
 
-Return `0` for tick, Renko and range codes, whose bars have no clock length at all: they are
-then passed straight through, uncached.
+Return `null` for tick, Renko, range, and other bars whose close depends on
+trade flow. They are then passed straight through, uncached.
 </Callout>
 
 ## Opting out and invalidating

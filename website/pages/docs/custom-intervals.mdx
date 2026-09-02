@@ -264,15 +264,20 @@ re-bucketed into them, and neither can a 1-minute one: the trades were never cou
 
 ## Caching a custom code
 
-The [bar cache](/docs/bar-cache) gates freshness on a bar length, and its own token parser
-does not know your codes. Hand it one, or opt the code out with `0`:
+The [bar cache](/docs/bar-cache) asks the same interval registry when it needs
+to know whether the trailing bar has closed. A registered fixed or calendar
+code is therefore cacheable without a second duration parser. Tick-count and
+volume codes have no clock-derived close, so the cache safely passes them
+through uncached.
+
+Supply `barCloses` only for a non-registered code whose close time your feed can
+state exactly:
 
 ```ts
 const feed = withBarCache(source, {
-  intervalSeconds: (code) => {
-    if (code === '1MO') return 30 * 86400;   // a gate, not a truth: close enough to expire on
-    if (code === 'T500') return 0;           // count-driven: never cached
-    return intervalToCacheSeconds(code);
+  barCloses: (code, start) => {
+    if (code === 'settlement') return start + 86400;
+    return null;  // unknown or trade-flow-driven bars are not cached
   },
 });
 ```

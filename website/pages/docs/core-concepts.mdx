@@ -66,9 +66,10 @@ demand the first time you reference them.
 ## The render loop
 
 Drawing is centralized in a single `requestAnimationFrame` loop driven by an **invalidation
-mask**. Cursor moves only repaint the crosshair layer; data changes repaint the series; a
-resize repaints everything. This keeps interaction at 60 fps without redrawing the world on
-every event.
+mask**. Cursor moves only repaint the crosshair layer, while repeated data updates before
+the next frame are coalesced. A current source-bar update repaints base content across active
+panes, so sustained charts should also keep retained history and pane count within a measured
+budget. See [Performance & Operations](/docs/performance-and-operations).
 
 ## Time at the edge
 

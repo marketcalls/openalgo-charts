@@ -44,11 +44,17 @@ const builder = new CandleBuilder({ intervalSec: 60, volumeMode: 'ltq-sum' });
 builder.seed(bars[bars.length - 1]);
 
 ws.connect();
-ws.onLtp((e) => {
+const stopLtp = ws.onLtp((e) => {
   const u = builder.onTick({ time: e.timeSec, price: e.ltp, ltq: e.ltq });
   if (u) series.update(u.bar);
 });
 ws.subscribe('LTP', 'RELIANCE', 'NSE');
+
+function disposeChart() {
+  stopLtp();
+  ws.close();
+  chart.destroy();
+}
 ```
 
 **Seed the builder**, and seed it again after every reconnect. History normally ends
@@ -118,12 +124,43 @@ const bars = await live.getBars({ symbol: 'RELIANCE', exchange: 'NSE', interval:
 series.setData(bars);
 // Pass seedFrom to continue the last history bar's bucket seamlessly.
 // Pass cumDayVolumeSoFar if using volumeMode: 'day-delta' to diff against the right baseline.
-live.subscribeBars(
+const stopBars = live.subscribeBars(
   { symbol: 'RELIANCE', exchange: 'NSE', interval: '1m', from, to },
   (bar) => series.update(bar),
   { seedFrom: bars[bars.length - 1] },
 );
+
+function disposeChart() {
+  stopBars();
+  live.close();
+  chart.destroy();
+}
 ```
+
+## Long-running chart lifecycle
+
+Keep every unsubscribe returned by a feed or chart event, and release it before
+the chart view goes away. `chart.destroy()` cleans up chart-owned canvases,
+observers, and listeners, but it cannot close a feed that your application
+created:
+
+```ts
+const stopBars = live.subscribeBars(request, onBar, { seedFrom: bars[bars.length - 1] });
+const stopState = chart.on('pan', persistViewport);
+
+function disposeLiveChart() {
+  stopBars();
+  stopState();
+  live.close();
+  chart.destroy();
+}
+```
+
+For a direct `OpenAlgoWsFeed`, also keep the functions returned by `onLtp`,
+`onDepth`, `onState`, and `onControl`. Call them during teardown, then call
+`ws.close()` to stop reconnect and heartbeat timers. See
+[Performance & Operations](/docs/performance-and-operations) for bounded
+history and browser-memory guidance.
 
 <Callout type="warning">
 Your API key lives only in your app/browser - never commit it. Verify the exact REST paths

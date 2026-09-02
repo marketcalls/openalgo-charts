@@ -61,6 +61,11 @@ Entries are keyed `symbol | exchange | interval` with the range deliberately lef
 is confidently wrong with no spinner to warn anyone. See [Bar Cache](/docs/bar-cache) for
 the freshness rules, the memory bounds, and how to plug in your own persistent store.
 
+The cache is separate from the bars already retained by a chart. For a live
+adapter that stays open for hours, keep a bounded source window and release
+every subscription during teardown. See
+[Performance & Operations](/docs/performance-and-operations).
+
 ## TradeFeed
 
 There are **two** interfaces here and they are not interchangeable. `OrderEngine` takes the

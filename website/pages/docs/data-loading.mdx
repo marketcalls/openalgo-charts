@@ -87,12 +87,13 @@ right edge** (`rightOffset >= 0`). If the user has scrolled left into history,
 new bars accumulate off-screen without disturbing the view.
 </Callout>
 
-Contrast this with `setData`, which does a full replace and resets the time
-axis. Use `update` for ticks; use `setData` when you need to swap in a
-completely different dataset (timeframe change, symbol change).
+Contrast this with `setData`, which replaces the full in-memory series and can
+rebuild derived indicator data. Use `update` for ticks; use `setData` when you
+need to swap in a completely different dataset (timeframe change, symbol
+change).
 
-To compute the next update value from the current bar (for example, to
-accumulate volume), read the live bar with `getData`:
+To inspect the current bar occasionally (for example, from a click handler),
+read it with `getData`:
 
 ```ts
 // getData() returns bars sorted oldest -> newest
@@ -100,6 +101,10 @@ const bars = series.getData();
 const last = bars[bars.length - 1];
 series.update({ ...last, close: newPrice, high: Math.max(last.high, newPrice) });
 ```
+
+`getData()` creates a new array. Keep the forming bar in your feed or component
+state instead of calling it for every incoming tick. For bounded live history,
+see [Performance & Operations](/docs/performance-and-operations).
 
 ### Live streaming demo
 
@@ -131,9 +136,42 @@ const id = setInterval(() => {
 }, 700);
 
 // Stop the stream when the chart is torn down.
-const destroy = chart.destroy.bind(chart);
-chart.destroy = () => { clearInterval(id); destroy(); };
+chart.on('destroy', () => clearInterval(id));
 return chart;`} />
+
+### Bounded history for long-running charts
+
+`series.update` does not discard old bars. For a chart that remains open for a
+session, retain a fixed source window and do the full replacement only when a
+new bar crosses that boundary:
+
+```ts
+const MAX_BARS = 5_000;
+let retained = initialBars.slice(-MAX_BARS);
+series.setData(retained);
+
+function applyLiveBar(bar) {
+  const previous = retained[retained.length - 1];
+  if (previous?.time === bar.time) {
+    retained[retained.length - 1] = bar;
+    series.update(bar);
+    return;
+  }
+
+  retained.push(bar);
+  if (retained.length > MAX_BARS) {
+    retained = retained.slice(-MAX_BARS);
+    series.setData(retained);
+  } else {
+    series.update(bar);
+  }
+}
+```
+
+Do not run `setData` for forming-bar ticks. It replaces the complete series;
+the example above pays that cost only when the oldest retained bar is dropped.
+See [Performance & Operations](/docs/performance-and-operations) for indicator,
+canvas, cache, and lifecycle budgets.
 
 ## Building bars from a tick stream
 
@@ -208,6 +246,13 @@ whether or not new bars were returned. Omitting it latches the "loading" flag
 permanently and paging stalls.
 </Callout>
 
+<Callout type="warning">
+Paging is intentionally unbounded unless the host imposes a policy. A
+long-running live chart should fetch pages outside its retained window from the
+feed or an application cache, rather than continually prepending them into the
+same chart.
+</Callout>
+
 You can also listen to the `'lazy-load'` event on the unified bus (for example,
 to log or debounce independently of the loader function):
 
@@ -274,6 +319,10 @@ const single = mergeBars(bars.slice(0, 5)); // merge a specific group
 
 See [Core Concepts](/docs/core-concepts) for the gapless index model that makes
 conflation align correctly.
+
+Conflation reduces rendering work for zoomed-out data. It does not reduce the
+memory retained by the source series or indicator outputs. Pair it with a
+history window for sustained sessions.
 
 ## Reconnect and gap recovery
 

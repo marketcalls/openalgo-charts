@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" role="img" aria-label="OpenAlgo Charts layered architecture">
 <title>OpenAlgo Charts architecture</title>
-<desc>Seven layers from public API down to feeds and data, with a six-tier bundle legend: base 61 KB, indicators 27 KB, draw 13 KB, profile 11 KB, trade 8 KB, transform 3 KB, everything 124 KB Brotli.</desc>
+<desc>Seven layers from public API down to feeds and data, with a six-tier bundle legend: base 60.88 KB, indicators 27.27 KB, draw 15.39 KB, profile 10.66 KB, trade 7.61 KB, transform 2.66 KB, everything 124.47 KB Brotli.</desc>
 
 <defs>
 <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
@@ -163,37 +163,37 @@
 
 <rect x="248" y="855" width="170" height="110" rx="12" fill="#2DD4BF" fill-opacity="0.07" stroke="#2DD4BF" stroke-opacity="0.55" stroke-width="1.5"/>
 <text x="333" y="884" fill="#7FE8D8" font-size="16" text-anchor="middle" dominant-baseline="central">base</text>
-<text x="333" y="915" fill="#2DD4BF" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">61 KB</text>
+<text x="333" y="915" fill="#2DD4BF" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">60.88 KB</text>
 <text x="333" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">Charting engine core</text>
 
 <rect x="434" y="855" width="170" height="110" rx="12" fill="#A78BFA" fill-opacity="0.07" stroke="#A78BFA" stroke-opacity="0.55" stroke-width="1.5"/>
 <text x="519" y="884" fill="#C9B8FF" font-size="16" text-anchor="middle" dominant-baseline="central">/indicators</text>
-<text x="519" y="915" fill="#A78BFA" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">27 KB</text>
+<text x="519" y="915" fill="#A78BFA" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">27.27 KB</text>
 <text x="519" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">102 built-in indicators</text>
 
 <rect x="620" y="855" width="170" height="110" rx="12" fill="#8B5CF6" fill-opacity="0.07" stroke="#8B5CF6" stroke-opacity="0.55" stroke-width="1.5"/>
 <text x="705" y="884" fill="#B79BFF" font-size="16" text-anchor="middle" dominant-baseline="central">/draw</text>
-<text x="705" y="915" fill="#8B5CF6" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">13 KB</text>
+<text x="705" y="915" fill="#8B5CF6" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">15.39 KB</text>
 <text x="705" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">51 drawing tools</text>
 
 <rect x="806" y="855" width="170" height="110" rx="12" fill="#F0B429" fill-opacity="0.07" stroke="#F0B429" stroke-opacity="0.55" stroke-width="1.5"/>
 <text x="891" y="884" fill="#F7D07A" font-size="16" text-anchor="middle" dominant-baseline="central">/profile</text>
-<text x="891" y="915" fill="#F0B429" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">11 KB</text>
+<text x="891" y="915" fill="#F0B429" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">10.66 KB</text>
 <text x="891" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">Profiles &amp; orderflow</text>
 
 <rect x="992" y="855" width="170" height="110" rx="12" fill="#EF4444" fill-opacity="0.07" stroke="#EF4444" stroke-opacity="0.55" stroke-width="1.5"/>
 <text x="1077" y="884" fill="#F79191" font-size="16" text-anchor="middle" dominant-baseline="central">/trade</text>
-<text x="1077" y="915" fill="#EF4444" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">8 KB</text>
+<text x="1077" y="915" fill="#EF4444" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">7.61 KB</text>
 <text x="1077" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">Trading &amp; order layer</text>
 
 <rect x="1178" y="855" width="170" height="110" rx="12" fill="#3B82F6" fill-opacity="0.07" stroke="#3B82F6" stroke-opacity="0.55" stroke-width="1.5"/>
 <text x="1263" y="884" fill="#8FB8F8" font-size="16" text-anchor="middle" dominant-baseline="central">/transform</text>
-<text x="1263" y="915" fill="#3B82F6" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">3 KB</text>
+<text x="1263" y="915" fill="#3B82F6" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">2.66 KB</text>
 <text x="1263" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">Price transforms</text>
 
 <rect x="1378" y="855" width="190" height="110" rx="12" fill="#0E1015" stroke="#4A5160" stroke-width="1.5" stroke-dasharray="6 5"/>
 <text x="1473" y="884" fill="#B9C0CC" font-size="16" text-anchor="middle" dominant-baseline="central">Everything</text>
-<text x="1473" y="915" fill="#E8EBF0" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">124 KB</text>
+<text x="1473" y="915" fill="#E8EBF0" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">124.47 KB</text>
 <text x="1473" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">All tiers combined</text>
 
 <rect x="330" y="990" width="940" height="76" rx="12" fill="#0C0E13" stroke="#2A2F3A" stroke-width="1.5"/>

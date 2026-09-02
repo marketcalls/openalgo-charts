@@ -132,7 +132,7 @@ src/
 
 > **Methodology (point of record):** numbers are **Brotli-compressed**. Since we have zero runtime dependencies, nothing is excluded from the measurement. Raw-minified ≈ 3–3.5× the Brotli figure; gzip ≈ 1.1–1.15× Brotli. **All figures below are pre-implementation estimates** and the first deliverable of Phase 1 is to wire `size-limit` and replace them with measured values.
 
-We split the package into **six loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This is the key to keeping the base engine near 59 KB Brotli while supporting 102 indicators, 43 drawing tools, and footprint/TPO/orderflow. Measured sizes for every tier are in the README size budget.
+We split the package into **six loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 60.88 KB Brotli while supporting 102 indicators, 51 drawing tools, and footprint/TPO/orderflow. Measured sizes for every tier are in the README size budget.
 
 **Tier 1 — Base bundle (always loaded):**
 
@@ -264,7 +264,11 @@ function frame(now) {
 }
 ```
 
-This lets a live tick (Light on the price pane only), an RSI recompute (Light on the RSI pane only), and a crosshair sweep (Cursor on the hovered pane) all coexist without any of them forcing a full multi-pane repaint.
+The mask supports independent cursor and per-pane work, and repeated invalidations still
+coalesce into one animation frame. The current source-bar update path raises a global Full
+invalidation, so a live tick repaints base content across active panes. Visible-range reads
+keep drawing bounded by the viewport, while retained history and indicator count remain the
+main sustained-session budgets.
 
 ### 3.3 Chart & Pane orchestration — panes stay in sync
 
@@ -790,7 +794,7 @@ Rules:
 
 The engine handles both modes through a **simple two-method contract**, so the mental model is consistent:
 - **Historical**: `series.setData(bars)` — bulk-load a fetched range; autoscale + fit-content; this is the static/backtest/replay case.
-- **Live**: `series.update(bar)` — same `time` as last bar → mutate the last candle in place (intra-bar tick); newer `time` → append a new bar and advance real-time mode. This is the 60 fps hot path; it allocates nothing and triggers a `Light`/last-bar redraw, not a full repaint.
+- **Live**: `series.update(bar)` applies a same-time bar as the stored last candle and appends a newer-time bar. Updates arriving before one animation frame are coalesced, but the current source-bar path triggers full base work across active panes. Hosts should bound retained history for sustained sessions.
 
 Standard live behaviors: **auto-scroll to realtime** only when the user is already at the right edge (don't yank the view if they've scrolled into history), a **last-price line + label**, and **lazy history paging** — when the user pans left past the loaded range, fire `getBars(olderRange)` and prepend. Family B transforms and Family C profiles consume the *same* `setData`/`update` stream; the transform/profile pipelines are incremental so live ticks extend Renko bricks / footprint cells correctly without recompute.
 

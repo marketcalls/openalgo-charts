@@ -40,6 +40,7 @@ export default {
   '-- data': { type: 'separator', title: 'Data & Feeds' },
   'data-loading': 'Data Loading',
   'live-data': 'Live Data (OpenAlgo)',
+  'performance-and-operations': 'Performance & Operations',
   'data-feeds': 'Custom Data Feeds',
   'bar-cache': 'Bar Cache',
   'custom-intervals': 'Custom Intervals',

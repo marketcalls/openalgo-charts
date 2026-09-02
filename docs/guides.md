@@ -190,7 +190,10 @@ createChart(el, { conflate: true, conflationFactor: 1 });
 ```
 
 Bars below ~0.5px are merged OHLC-preserving (open=first, close=last, high=max,
-low=min, volume=sum) — never a lossy average.
+low=min, volume=sum), never a lossy average. Conflation lowers drawing work but
+does not limit retained history. For a chart that stays open through a market
+session, use a bounded source window, explicit feed cleanup, and a measured
+canvas-pixel budget. See the [Performance & Operations guide](https://marketcalls.github.io/openalgo-charts/docs/performance-and-operations/).
 
 ## Touch & accessibility
 

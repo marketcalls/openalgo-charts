@@ -1,0 +1,197 @@
+---
+title: Performance & Operations
+description: Run live OpenAlgo Charts sessions with bounded history, deliberate cleanup, and measurable memory and frame-time budgets.
+---
+
+import { Callout } from 'nextra/components'
+
+# Performance and operations
+
+This is the production guide for a chart that stays open for a market session.
+It separates three concerns that are easy to confuse: keeping the frame path
+responsive, bounding retained data, and releasing resources when a view goes
+away.
+
+## What the engine already bounds
+
+- Multiple `series.update(...)` calls before the next animation frame are
+  coalesced into one render frame.
+- Rendering, autoscaling, and hit testing read only the visible range of a
+  series, not every bar in history.
+- `withBarCache` has LRU limits for both cache entries and total cached bars.
+- `chart.destroy()` cancels its pending animation work, disconnects its resize
+  observer, removes chart listeners and canvases, detaches primitives, and
+  drops its event listeners.
+
+Those controls do not make the chart's data history finite. A chart owns its
+source bars and the series generated for indicators, so an app that appends
+forever retains history forever.
+
+## Keep a fixed live-data window
+
+Choose a bar budget that matches the longest lookback users need, then retain
+that many bars in application state. Start conservatively, for example 5,000
+bars, and measure on the target devices with the intended indicator and pane
+set.
+
+Use `series.update` for every forming-bar tick. Only replace the full series
+when a newly closed bar pushes the retained window over its limit:
+
+```ts
+const MAX_BARS = 5_000;
+let retained = initialBars.slice(-MAX_BARS);
+series.setData(retained);
+
+function applyLiveBar(bar) {
+  const previous = retained[retained.length - 1];
+
+  if (previous?.time === bar.time) {
+    // The forming bar stays on the incremental path.
+    retained[retained.length - 1] = bar;
+    series.update(bar);
+    return;
+  }
+
+  retained.push(bar);
+  if (retained.length <= MAX_BARS) {
+    series.update(bar);
+    return;
+  }
+
+  // This happens only on a new-bar boundary, never for every tick.
+  retained = retained.slice(-MAX_BARS);
+  series.setData(retained);
+}
+```
+
+`setData` intentionally replaces the full series, so it can rebuild derived
+indicator data. Do not use it for forming-bar ticks. Keep the latest source bar
+in your own state too: `series.getData()` returns a newly allocated array and
+is useful for inspection, not as a per-tick state store.
+
+<Callout type="warning">
+Infinite history paging and a fixed in-memory window are different policies.
+When the user pans beyond the retained window, fetch that page from the feed or
+from an application cache. Do not let `prependData` grow the live chart without
+an explicit upper bound.
+</Callout>
+
+## Plan for indicators and panes
+
+Each indicator holds output aligned with its source bars. A deep retained range
+therefore costs more in a chart with several indicators or multi-plot studies
+than in a bare price chart. `calcTail` can reduce the calculation work for a
+forming bar, but it is not a data-retention policy: output arrays still follow
+the length of the retained source history.
+
+Keep the live layout purposeful. Remove hidden studies that are no longer
+needed, avoid attaching expensive profile or order-flow views to every chart in
+a large grid, and profile the exact configuration users will keep open.
+
+Every pane also owns a base canvas and an overlay canvas. Canvas backing storage
+grows with the square of device pixel ratio:
+
+```text
+approximate bytes per pane = 2 canvases * CSS width * CSS height * DPR^2 * 4
+```
+
+For example, a 1,600 by 900 CSS-pixel pane at DPR 3 needs about 104 MB of
+bitmap backing storage before browser overhead. That is not a leak, but it is a
+real working-set cost. Cap DPR where sharpness beyond 2x is not worth the
+memory:
+
+```ts
+const chart = createChart(el, {
+  pixelRatio: () => Math.min(window.devicePixelRatio || 1, 2),
+});
+```
+
+## Close every owner
+
+The chart does not own your network feed, timers, or host callbacks. On route
+change or component unmount, stop those owners before destroying the chart:
+
+```ts
+const stopBars = live.subscribeBars(request, applyLiveBar, { seedFrom: retained[retained.length - 1] });
+const stopViewport = chart.on('pan', saveViewport);
+
+function disposeLiveChart() {
+  stopBars();
+  stopViewport();
+  live.close();
+  chart.destroy();
+}
+```
+
+For `OpenAlgoWsFeed`, keep the function returned by `onLtp` or `onDepth`, call
+it on teardown, then call `ws.close()`. `close()` is intentional, clears socket
+state and cancels reconnect and heartbeat timers. The same rule applies to host
+`setInterval`, `setTimeout`, DOM listeners, chart event subscriptions, drawing
+controllers, link groups, and application stores that hold a chart reference.
+
+## Cache memory is a separate budget
+
+The bar cache avoids repeated network loads. It does not limit bars currently
+held by a chart. Set its limits independently and inspect its counters:
+
+```ts
+const feed = withBarCache(source, {
+  ttlMs: 60_000,
+  max: 16,
+  maxBars: 50_000,
+});
+
+console.log(feed.stats());
+// { entries, bars, hits, misses, evictions }
+```
+
+See [Bar Cache](/docs/bar-cache) for cache freshness and persistent-store
+responsibilities.
+
+## Measure the actual session
+
+Run the repository checks against a fresh library build:
+
+```sh
+npm run build
+npm run bench
+npm run soak
+```
+
+`npm run bench` measures indicator calculation cost and verifies that a burst
+of live ticks recomputes indicators once per frame. `npm run soak` requires
+Node's exposed garbage collector and checks both repeated create/destroy cycles
+and a fixed-bar live session. To model a 6.25-hour session at four ticks per
+second, use 90,000 ticks:
+
+```powershell
+$env:SOAK_TICKS = '90000'
+npm run soak
+```
+
+```sh
+SOAK_TICKS=90000 npm run soak
+```
+
+For browser verification, record a performance trace and heap snapshots with a
+constant bar count. A flat retained-data count with a steadily rising heap is a
+leak. A growing retained-data count is a retention policy issue. Check canvas
+memory separately, especially on high-DPR displays and charts with many panes.
+
+## Current runtime tradeoff
+
+Live updates are coalesced to animation frames, but a source-bar update currently
+invalidates the base rendering work across active panes. The visible-range data
+path keeps drawing bounded by what is on screen, while retained history and the
+number of indicator outputs still determine calculation and allocation cost.
+
+For a sustained chart, the practical order is: bound source history, keep the
+forming bar on `update`, cap canvas density where needed, remove unused panes
+and studies, then measure a representative session.
+
+## Related
+
+- [Data Loading](/docs/data-loading) for rolling history and paging.
+- [Live Data](/docs/live-data) for feed and WebSocket teardown.
+- [Bar Cache](/docs/bar-cache) for separate cache limits.
+- [Events](/docs/events) for chart subscription cleanup.

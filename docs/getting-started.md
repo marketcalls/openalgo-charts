@@ -51,7 +51,7 @@ Only pay for what you use — each tier is a separate entry point:
 | `openalgo-charts/transform` | Renko, Range, Point &amp; Figure, Kagi, Line Break, Heikin Ashi |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow |
 | `openalgo-charts/indicators` | 102 built-in indicators (SMA/EMA/MACD/Bollinger/RSI/ADX/...) + the Tier-2 contract |
-| `openalgo-charts/draw` | 43 drawing tools + a headless drawing controller |
+| `openalgo-charts/draw` | 51 drawing tools + a headless drawing controller |
 
 ## OpenAlgo data
 

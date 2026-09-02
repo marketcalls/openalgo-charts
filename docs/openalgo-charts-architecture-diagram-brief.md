@@ -6,6 +6,10 @@ Written 2026-08-28 against openalgo-charts 1.8.2.
 > `docs/architecture-diagram.svg`; the PNG is gone. This document is kept as the
 > record of what was wrong, what the measured figures were, and why each change
 > was made, so the next redraw starts from evidence rather than memory.
+>
+> **Current source of truth, 1.9.2:** the SVG now reports 60.88 KB base, 124.47
+> KB for every tier, and 51 drawing tools. The figures below record the 1.8.2
+> redraw unless an appendix says otherwise.
 
 Build brief for the replacement of `docs/architecture-diagram.png` in
 `openalgo-charts`, shown in `README.md` at 920 px wide.
