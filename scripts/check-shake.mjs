@@ -16,7 +16,6 @@
  */
 import { rollup } from 'rollup';
 import { brotliCompressSync } from 'node:zlib';
-import { readFileSync } from 'node:fs';
 
 const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 // Raised from 38 to 39 kB in 1.8.6, for the per-series axis value tags: the

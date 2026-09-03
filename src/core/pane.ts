@@ -5,8 +5,8 @@
  */
 import { CanvasLayer } from './canvas';
 import { PriceScale } from '../scale/price-scale';
-import { TimeScale } from '../scale/time-scale';
-import { DataLayer } from '../model/data-layer';
+import { type TimeScale } from '../scale/time-scale';
+import { type DataLayer } from '../model/data-layer';
 import type { SeriesRecord, PriceScaleId } from '../model/series';
 import { computeGridLines, drawGrid, resolveGridStyle, resolveScaleStyle, type CanvasOptions } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';

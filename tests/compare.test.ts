@@ -4,6 +4,7 @@
  * readable together.
  */
 import { describe, it, expect } from 'vitest';
+import type { PriceScale } from '../src/scale/price-scale';
 import { Chart } from '../src/core/chart';
 import { fakeDocument } from './helpers/fake-dom';
 import { alignToPrimary } from '../src/compare/align';
@@ -347,7 +348,7 @@ describe('regressions found by the browser pass, not by unit tests', () => {
     expect(after.max).toBeCloseTo(primary.max * k, 6);
   });
 
-  function chart0Scale(): import('../src/scale/price-scale').PriceScale {
+  function chart0Scale(): PriceScale {
     const chart = makeChart();
     chart.addSeries('candlestick').setData(bars(50, 100));
     return chart.panes()[0].priceScale;
