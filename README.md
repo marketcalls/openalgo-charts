@@ -268,6 +268,7 @@ Runnable demos in [`examples/`](./examples), including a full **yfinance termina
 npm run build
 cd examples/yfinance && pip install -r requirements.txt && python server.py
 # → http://127.0.0.1:8000/examples/yfinance/index.html
+python server.py --fixture   # no yfinance, no network: deterministic synthetic bars
 ```
 
 ## Develop

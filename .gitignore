@@ -1,6 +1,7 @@
 node_modules/
 dist/
 docs/api/
+__pycache__/
 website/public/api/
 *.log
 .DS_Store
