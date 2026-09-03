@@ -132,7 +132,7 @@ src/
 
 > **Methodology (point of record):** numbers are **Brotli-compressed**. Since we have zero runtime dependencies, nothing is excluded from the measurement. Raw-minified ≈ 3–3.5× the Brotli figure; gzip ≈ 1.1–1.15× Brotli. **All figures below are pre-implementation estimates** and the first deliverable of Phase 1 is to wire `size-limit` and replace them with measured values.
 
-We split the package into **six loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 60.88 KB Brotli while supporting 102 indicators, 51 drawing tools, and footprint/TPO/orderflow. Measured sizes for every tier are in the README size budget.
+We split the package into **six loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 61.46 KB Brotli while supporting 102 indicators, 51 drawing tools, and footprint/TPO/orderflow. Measured sizes for every tier are in the README size budget.
 
 **Tier 1 — Base bundle (always loaded):**
 
@@ -642,6 +642,17 @@ Behavior:
 Both 8.1 and 8.2 live in the **base bundle** (they're tiny — part of the ~1.8 KB primitives budget plus a little for the event strip) and need no engine changes.
 
 ---
+
+### 8.3 The drawing tier (`draw/`): the 2.0 model
+
+Drawings are pane primitives (a `DrawingLayer` per pane, implementing `IPrimitive`), driven by a headless `DrawingController` that owns the model, the history and the selection and ships no DOM. Four decisions from the 2.0 rebuild are worth recording, because each replaced something that had shipped and looked fine:
+
+- **Paint order is a field, not a side effect of creation.** `zIndex` below zero paints under the series, at or above zero over it, with ties broken by list order; two layers per pane (`'bottom'` and `'top'`) are what lets a drawing sit behind the candles at all. The default of 0 reproduces 1.9.2 pixel for pixel, which the render-parity harness enforces at zero differing pixels, so "add an ordering" could not quietly move anything.
+- **Text is its own block.** Seven text keys had accumulated on `DrawingStyle`, where every trend line carried them and no host could tell a label colour from a stroke colour without knowing the tool. `drawing.text` is closed to the `DrawingText` keys; `style` stays what a stroke needs.
+- **A tool declares which of its fields a host may show** (`schema.ts`, `drawingSettingsSchema`), as dot paths with a control kind, and only fields its `draw` reads. A schema is not a wish list: a control backed by nothing is a defect (see CLAUDE.md). The registry lookup lives in `tools.ts`, not `schema.ts`, because `tools.ts` reads the field constants at module-evaluation time and the reverse import would throw on the temporal dead zone.
+- **Load is lenient, paste is strict.** `migrate.ts` upgrades any 1.9.x array or v2 document and keeps whatever it can render, dropping a malformed optional field on its own rather than the drawing; the clipboard sanitiser rejects a body all-or-nothing. A saved layout is the user's own work and deserves the benefit of the doubt; a paste is foreign input.
+
+The level palette (`levels.ts`) is the one statement of the conventional colour per Fibonacci ratio. Before it, each ladder tool restated those colours, and restated colours drift.
 
 ## 9. The trade-management layer (`trade/`) — advanced on-chart trading
 

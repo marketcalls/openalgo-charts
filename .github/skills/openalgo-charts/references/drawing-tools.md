@@ -164,16 +164,39 @@ Tool-specific `defaultStyle` values that change behaviour, not just colour:
 | Tool | `defaultStyle` |
 |---|---|
 | `trend-line` / `ray` / `extended-line` | `extendLeft`/`extendRight` = `false,false` / `false,true` / `true,true` |
-| `rectangle` | `fill: true, fontSize: 14, textAlign: 'left', textVAlign: 'top', textPosition: 'inside'` |
-| `ellipse` | `fill: true, fontSize: 14, textAlign: 'center', textVAlign: 'middle', textPosition: 'inside'` |
-| `fib-retracement` / `fib-extension` / `fib-channel` | `levels: [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]`, `showLabels: true` |
-| `fib-fan` | `levels: [0.236, 0.382, 0.5, 0.618, 0.786, 1]` |
+| `rectangle` / `ellipse` / `circle` / `triangle` / `rotated-rectangle` | `fill: true`; a label comes from `drawing.text` (`align`, `valign`, `position: 'inside' | 'outside'`), 14 px when the block sets no size |
+| `fib-retracement` / `fib-extension` / `fib-channel` | `levels: cloneLevels(DEFAULT_FIB)` (ratios 0 to 1 with the conventional colours), `showLabels: true`. The anchor leg is stroked in `style.color`; bands are tinted by the level that closes them unless `fillColor` is set; `extendLeft` / `extendRight` are honoured |
+| `fib-fan` / `gann-fan` / `gann-box` / `fib-time-zone` | `levels: cloneLevels(DEFAULT_FIB_FAN / DEFAULT_GANN_FAN / DEFAULT_GANN_BOX / DEFAULT_FIB_TIME_ZONE)` |
 | `long-position` / `short-position` | `accountSize: 100000, risk: 1, fillOpacity: 0.13, showLabels: true` |
-| `text` / `callout` | `text: 'Text'` / `'Note'`, `fontSize: 14` / `12`, `wrapWidth: 220` |
+| `text` / `callout` | `defaultText: { value: 'Text', fontSize: 14 }` / `{ value: 'Note', fontSize: 12 }` (a `DrawingText`, merged under the caller's `text`) |
 | `brush` / `highlighter` | `lineWidth: 2` / `lineWidth: 12, fillOpacity: 0.28` |
 | `cyclic-lines` / `forecast` | `lineStyle: 'dashed'` |
 
-`fib-time-zone` uses the Fibonacci **sequence** (`0,1,2,3,5,8,13,21,34,55` bar multiples), not ratios. `gann-fan` draws the fixed ratios `1x8 … 1x1 … 8x1`; `gann-box` is an 8x8 grid plus the 1x1 diagonal. `circle` measures its radius in screen px so it stays round. `arc` passes *through* its middle anchor; `curve` treats it as an off-curve control.
+`fib-time-zone` uses the Fibonacci **sequence** (`0,1,2,3,5,8,13,21,34,55` bar multiples), not ratios, and its levels carry no colour (they fall back to `style.color`). `gann-fan` levels are price-per-time ratios (`1x1` = 1, `1x2` = 0.5, `2x1` = 2), coloured by `cycleColor(i)` and labelled by `gannLabel`; `gann-box` applies `DEFAULT_GANN_BOX` (0, .25, .382, .5, .618, .75, 1) to both axes plus the 1x1 diagonal. `circle` measures its radius in screen px so it stays round. `arc` passes *through* its middle anchor; `curve` treats it as an off-curve control.
+
+## The 2.0 drawing model
+
+`Drawing` is `{ id, tool, points, style, text?, props?, paneIndex, locked?, visible?, zIndex, createdAt? }`.
+
+- **`text` is its own block (`DrawingText`)**, not a set of keys on `style`: `{ value, color?, fontSize?, fontFamily?, bold?, italic?, align?, valign?, wrap?, wrapWidth?, background?, backgroundColor?, backgroundOpacity?, border?, borderColor?, position? }`. A 1.9.x `style.text` / `fontColor` / `textAlign` / `textVAlign` / `textPosition` / `fontWeight` / `fontStyle` is lifted into it on load and paste. The text tool is its content; a shape's text is a label placed by `position`.
+- **`style.levels` is `FibLevel[]`** (`{ ratio, color?, visible? }`), not `number[]`. A bare ratio takes the conventional colour from `levelColor(ratio)` (`LEVEL_NEUTRAL` for 0, 1, 2, 3 and anything unnamed); the migration attaches those colours, and `cloneLevels` copies a ladder so a tool default is never shared. `formatRatio` prints a level label, `CYCLE_PALETTE` / `cycleColor(i)` colour a sequence, and `DEFAULT_FIB`, `DEFAULT_FIB_FAN`, `DEFAULT_GANN_BOX`, `DEFAULT_GANN_FAN`, `DEFAULT_FIB_TIME_ZONE` are the frozen defaults.
+- **`zIndex` is paint order.** Below zero paints under the series, at or above zero over it; ties break by list order, so `drawings()` is the paint order. `sortByZIndex(list)` is the stable sort the layer uses, and `DrawingLayerOrder` (`'bottom' | 'top'`) is which of the two layers a pane primitive is. A default of 0 paints exactly where 1.9.2 painted.
+- **`props`** is a JSON-safe bag for a tool's extras (a table's cells, a callout's tail side), persisted verbatim.
+- **`DRAWING_STATE_VERSION`** (`2`) is the document version `toJSON` writes.
+
+### Settings schema
+
+Every tool declares which of its fields a host may show, as dot paths with a control kind, and **only fields its `draw` reads**: a control with nothing behind it is a bug, not a style choice.
+
+```ts
+import { drawingSettingsSchema, readDrawingSettings, applyDrawingSettings } from 'openalgo-charts/draw';
+
+const schema = drawingSettingsSchema(d.tool);          // { fields, textIsContent? }
+const values = readDrawingSettings(d, schema);         // { 'style.color': '#..', 'text.value': 'Hi', ... }
+draw.update(d.id, applyDrawingSettings(d, formState, schema));
+```
+
+`SettingsField` is `{ path, label, kind, min?, max?, step?, options?, group? }`; `FieldKind` is `'color' | 'number' | 'select' | 'lineStyle' | 'boolean' | 'text' | 'opacity' | 'levels'` and `FieldGroup` is `'line' | 'fill' | 'text' | 'levels' | 'behavior'`. `textIsContent` is true for `text`, `callout`, `note`, `balloon`, `comment`, `signpost`, `price-note` and `table`: ask for the text the moment the tool is placed. `readDrawingSetting(d, path)` reads one value (`levels` comes back as a copy). `coerceSettingValue(field, raw)` turns a form string into what the kind stores. `applyDrawingSettings` returns whole `style` / `text` bags; with a schema it coerces and drops undeclared paths, and a value of `undefined` deletes the key (the host's "reset to default"). A custom tool builds its own with `composeSettings([LINE_FIELDS, FILL_FIELDS], { textIsContent })`, from the shared lists `LINE_FIELDS`, `FILL_FIELDS`, `EXTEND_FIELDS`, `LEVEL_FIELDS`, `TEXT_FIELDS`, `FONT_FIELDS`, `SHAPE_TEXT_FIELDS`, `PLATE_TEXT_FIELDS`, the single fields `COLOR_FIELD`, `LINE_WIDTH_FIELD`, `LINE_STYLE_FIELD`, `SHOW_LABELS_FIELD`, `TEXT_VALUE_FIELD`, and the option lists `LINE_STYLE_OPTIONS`, `ALIGN_OPTIONS`, `VALIGN_OPTIONS`, `TEXT_POSITION_OPTIONS`, `FONT_OPTIONS`. `drawingSettingsSchema` is a registry lookup (a tool without a declaration gets the line fields), which is why it lives in tools.ts rather than with the pure schema helpers.
 
 ## DrawingController API
 
@@ -194,19 +217,24 @@ new DrawingController(chart, {
 | `setTool(id \| null)` | Arms a tool; throws on an unregistered id. Also calls `chart.setPlacementMode(true/false)`. |
 | `activeTool()` | Armed id, or `null`. |
 | `setOptions(patch)` | Live-patch the four options above. |
-| `drawings()` / `get(id)` | Read the model. `drawings()` is the live array, in creation order. |
-| `add(drawing)` | `add({ tool, points, style, paneIndex, id?, locked?, visible? })` returns the created `Drawing`. |
-| `update(id, patch)` | Patch `points` \| `style` \| `locked` \| `visible`. `style` merges; `points` replaces. |
-| `remove(id)` / `clear()` | Delete one / all. |
+| `drawings()` / `get(id)` | Read the model. `drawings()` is the live array, in **paint order** (creation order until a reorder; `createdAt` keeps the creation time). |
+| `add(drawing)` | `add({ tool, points, style, paneIndex, text?, props?, id?, locked?, visible?, zIndex? })` (a `DrawingInput`) returns the created `Drawing`, with `zIndex` 0, `createdAt` and a minted id (a supplied id that collides with a restored one is replaced). The tool's `defaultText` merges under `text` the way `defaultStyle` merges under `style`. |
+| `update(id, patch)` / `updateMany(patches)` | Patch `points` \| `style` \| `text` \| `props` \| `locked` \| `visible` \| `zIndex` (a `DrawingPatch`). `style`, `text` and `props` merge; `points` replaces. `updateMany([{ id, patch }])` is one undo step and one `drawing:change`. |
+| `remove(id)` / `removeMany(ids)` / `clear()` | Delete one / several (one undo step) / all. |
 | `finish()` | Commit a `points: 0` tool at the anchors placed so far. Returns whether it committed. |
-| `select(id \| null)` / `selected()` | Selection. |
+| `select(id \| ids \| null, additive = false)` / `selected()` / `selection()` | Selection. `additive` toggles each id (shift, ctrl or meta click does this for you); unknown ids are ignored. `selected()` is the primary (first picked) id; `selection()` is the list in pick order. Events fire only when the selection actually changes. |
+| `duplicate(ids)` | Clones with the paste offset (`pasteOffsetBars` / `pasteOffsetPixels`), selects the clones, one undo step. Returns the clones. |
+| `nudge(ids, dx, dy)` | Moves by a screen distance in media px (right and down positive); locked members stay. One undo step. Needs `timeToCoordinate` / `coordinateToTime` on the host for the horizontal half, else assumes the default 8 px bar spacing. |
+| `setZIndex(id, z)` / `bringToFront(id)` / `sendToBack(id)` | Paint order. The two shortcuts are **band-local**: they set `zIndex` to the max / min of the same pane on the same side of the series and move the drawing to the end / start of the list, never crossing the series. |
+| `sendBehindSeries(id)` / `bringAboveSeries(id)` | Set `zIndex` to -1 / 0. No-ops (no history) when already on that side. |
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. |
 | `copy(target?)` / `cut(target?)` / `paste()` | **Async.** See the clipboard section. |
 | `clipboard()` | The `DrawingClipboard` behind them, for reporting failures. |
-| `toJSON()` / `fromJSON(data)` | Deep-copied `Drawing[]` out, replace-all in (and clears history + selection). |
+| `toJSON()` / `fromJSON(data)` | `{ version: 2, drawings }` (a `DrawingsDocument`) out, deep-copied; replace-all in (and clears history + selection). `fromJSON` accepts a 1.9.x bare `Drawing[]` too and upgrades it. |
+| `migrateDrawings(input)` | The upgrade `fromJSON` runs, exported for a host reading a saved layout on its own: any 1.9.x array or v2 document in, a v2 `DrawingsDocument` out, never throws. |
 | `destroy()` | Unhooks listeners, removes every pane layer, releases placement mode. |
 
-Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select`, `draw:copy`, `draw:cut`, `draw:paste`.
+Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select` (the primary id), `draw:copy`, `draw:cut`, `draw:paste`, plus the 2.0 pair `drawing:select` (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind: 'add' | 'update' | 'remove' | 'reorder' }`, one per mutation, after the per-drawing `draw:*` events). `DrawingChangeKind` names the `kind` union.
 
 **The controller listens on `chart.on(...)`, not `subscribeClick` / `subscribeDrag`.** Those two are single-slot callbacks the host needs for its own order lines; routing drawings through the bus means the two never contend.
 
@@ -221,7 +249,7 @@ Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, 
 
 ### Selection and dragging
 
-Hit ids are `draw:<id>` for the body and `draw:<id>#<n>` for anchor `n`. Dragging the body translates **every** anchor by the cursor delta; dragging a handle moves that one anchor to the cursor. The grab radius is 6 media px for a body, 7 for a handle; handles of the selected drawing win over its own body.
+Hit ids are `draw:<id>` for the body and `draw:<id>#<n>` for anchor `n`. A body drag on an unselected drawing selects it alone first; then the **whole selection** moves as one undo entry (locked members stay, other-pane members through `priceToCoordinate` / `coordinateToPrice`); dragging a handle moves that one anchor to the cursor. `draw:update` fires per moved drawing on `drag:end`, plus one `drawing:change`. The grab radius is 6 media px for a body, 7 for a handle; handles of the selected drawing win over its own body.
 
 Freehand strokes expose only their first and last handle — one handle per sample would bury the ink.
 
@@ -307,6 +335,8 @@ matchDrawingShortcut(e); // tool id, or null
 
 **The library installs no key listener.** Only the host knows whether the chart has focus, a dialog is open, or the user is typing in a field. `matchDrawingShortcut` is pure and takes any `{ key, altKey?, ctrlKey?, metaKey?, shiftKey? }`.
 
+Editing chords are the same shape: `keyToDrawingAction(e, { hasSelection, hasTarget, editingText })` returns a `DrawingKeyAction` (`{ type: 'undo' | 'redo' | 'copy' | 'cut' | 'paste' | 'duplicate' | 'delete' }` or `{ type: 'nudge', dx, dy }`) or `null`. Ctrl/Cmd+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes, Ctrl+C / X / D need a selection or a hovered target, Ctrl+V always pastes, Delete / Backspace need a selection or target, and the arrows nudge the selection by `NUDGE_STEP_PX` (1) or `NUDGE_STEP_SHIFT_PX` (10) with Shift. `editingText`, any Alt, or an extra Shift on a chord returns `null`. `DrawingKeyEvent` and `DrawingKeyContext` type the two arguments. The host maps each action to the matching controller call: `duplicate(selection())`, `removeMany(selection())`, `nudge(selection(), dx, dy)`.
+
 Matching rules, all verified in `tests/draw-tier.test.ts`:
 
 - Key comparison is case-insensitive (`'t'` and `'T'` both match `Alt+T`).
@@ -367,7 +397,7 @@ The pattern the OpenAlgo terminal uses (`D:\testing\openalgo\frontend\src\lib\tr
 
 ```ts
 // Lazy-load the tier the first time a drawing control is touched.
-const { DrawingController, drawingShortcuts, matchDrawingShortcut } =
+const { DrawingController, drawingShortcuts, matchDrawingShortcut, drawingSettingsSchema } =
   await import('openalgo-charts/draw');
 
 const draw = new DrawingController(chart, { magnet, stayInDrawingMode: false });
@@ -388,8 +418,8 @@ for (const ev of ['draw:tool', 'draw:add', 'draw:update', 'draw:remove', 'draw:s
 
 // A text tool is useless empty: open the host's dialog as soon as one lands.
 chart.on('draw:add', (p) => {
-  const d = (p as { drawing: { id: string; tool: string; style?: { text?: string } } }).drawing;
-  if (d.tool === 'text' || d.tool === 'callout') openTextDialog(d.id, d.style?.text ?? '');
+  const d = (p as { drawing: { id: string; tool: string; text?: { value: string } } }).drawing;
+  if (drawingSettingsSchema(d.tool).textIsContent) openTextDialog(d.id, d.text?.value ?? '');
 });
 
 // Keys: the host decides when the chart owns them.
@@ -412,6 +442,8 @@ draw.update(draw.selected()!, { style: { color, lineWidth, lineStyle, fillOpacit
 **Tool `defaultStyle` beats the controller's `defaultStyle`.** The merge order in `add()` is `{ ...controller.defaultStyle, ...tool.defaultStyle, ...drawing.style }`, so a controller-wide `{ fill: false }` will not turn off a rectangle's fill. Patch the drawing, or pass `style` on `add`.
 
 **`drawings()` returns the live array, not a copy.** Mutating it desynchronises the pane layers and the chart state. Use `toJSON()` when you need a snapshot.
+
+**`boundsOf(points)`** (with `rectOf` and the `distTo*` helpers) is the screen-space bounding box a custom tool's `distance` or a host's marquee wants; it is exported so nobody restates it.
 
 **A drawing renders only once it has `max(1, tool.points)` anchors.** A partially-placed `points: 0` shape lives in the preview slot, not the model, so it is absent from `toJSON()` until committed.
 
@@ -444,12 +476,18 @@ for (const t of [TREND_LINE, FIB_RETRACEMENT, RECTANGLE]) registerDrawingTool(t)
 | `RAY` &rarr; `ray` | `RECTANGLE` &rarr; `rectangle` | `SHORT_POSITION` &rarr; `short-position` |
 | `TEXT` &rarr; `text` | `TREND_LINE` &rarr; `trend-line` | `VERTICAL_LINE` &rarr; `vertical-line` |
 
-The remaining tools are registered by `registerBuiltinDrawingTools()` and reachable
+The 2.0 entry also names the measurement, shape, freehand, fib and cycle families:
+`FORECAST`, `PRICE_RANGE`, `DATE_RANGE`, `CIRCLE`, `TRIANGLE`, `POLYLINE`, `ARC`,
+`CURVE`, `ROTATED_RECTANGLE`, `DOUBLE_CURVE`, `HIGHLIGHTER`, `BRUSH`, `FIB_CHANNEL`,
+`FIB_TIME_ZONE`, `FIB_FAN`, `GANN_FAN`, `GANN_BOX`, `CYCLIC_LINES`, `TIME_CYCLES`,
+`SINE_LINE`. The remaining tools are registered by `registerBuiltinDrawingTools()` and reachable
 through `getDrawingTool(id)` / `hasDrawingTool(id)` / `registeredDrawingTools()`.
 
 Clipboard persistence uses `DRAWING_CLIPBOARD_KEY` (`'openalgo-charts/drawings'`)
-and `DRAWING_CLIPBOARD_VERSION` (`1`); `systemClipboard` and
-`clearMemoryClipboard` are the two backing stores. `DRAW_TIER` is the tier constant.
+and `DRAWING_CLIPBOARD_VERSION` (`2`, tracking `DRAWING_STATE_VERSION`; a version 1 body is
+accepted and upgraded); `systemClipboard` and
+`clearMemoryClipboard` are the two backing stores. `cloneDrawing` is the deep copy a
+copy or a `duplicate` makes. `DRAW_TIER` is the tier constant.
 
 ## Types for a custom tool
 
@@ -457,3 +495,5 @@ and `DRAWING_CLIPBOARD_VERSION` (`1`); `systemClipboard` and
 |---|---|
 | `DrawingChartHost` | What `new DrawingController(chart)` accepts. Wire the controller to something other than a `Chart` by satisfying this |
 | `ExpandContext` | The argument to `DrawingTool.expand`, so a custom tool can type its own implementation |
+| `DrawingInput` / `DrawingPatch` / `DrawingsDocument` | What `add` accepts, what `update` accepts, what `toJSON` returns |
+| `DrawingText` / `FibLevel` | The text block and one level of a ladder (see the 2.0 model above) |

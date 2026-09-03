@@ -4,11 +4,11 @@
 
 **A from-scratch, dependency-free HTML5-canvas charting engine for OpenAlgo.**
 
-Professional interactive charts, 102 built-in indicators plus your own custom ones, drawing tools, order flow, market replay, linked chart grids, and on-chart trading. Six lazy-loaded tiers, zero runtime dependencies, 60.88 KB Brotli for the base engine.
+Professional interactive charts, 102 built-in indicators plus your own custom ones, drawing tools, order flow, market replay, linked chart grids, and on-chart trading. Six lazy-loaded tiers, zero runtime dependencies, 61.46 KB Brotli for the base engine.
 
 [![npm version](https://img.shields.io/npm/v/openalgo-charts.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/openalgo-charts)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![bundle](https://img.shields.io/badge/brotli-61%20KB%20base%20%C2%B7%20124%20KB%20all%20tiers-brightgreen.svg)](#size-budget)
+[![bundle](https://img.shields.io/badge/brotli-61%20KB%20base%20%C2%B7%20131%20KB%20all%20tiers-brightgreen.svg)](#size-budget)
 [![tests](https://img.shields.io/badge/tests-2898%20passing-brightgreen.svg)](#develop)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](#principles)
 
@@ -79,14 +79,14 @@ Import only what you use. Each tier is a separate bundle that registers into the
 
 | Import | Contents | Brotli |
 |---|---|---|
-| `openalgo-charts` | Engine, 13 chart types, panes &amp; scales, primitives, registries, chart state, chart linking, bar cache, interval registry, trading overlay, OpenAlgo feeds | 60.9 KB |
+| `openalgo-charts` | Engine, 13 chart types, panes &amp; scales, primitives, registries, chart state, chart linking, bar cache, interval registry, trading overlay, OpenAlgo feeds | 61.5 KB |
 | `openalgo-charts/indicators` | 102 built-in indicators, the `registerIndicator` contract for your own, and the Tier-2 (external-data) contract | 27.3 KB |
-| `openalgo-charts/draw` | 51 drawing tools + a headless drawing controller and clipboard | 15.4 KB |
+| `openalgo-charts/draw` | 51 drawing tools + a headless drawing controller, clipboard, settings schema and level palette | 21.4 KB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point &amp; Figure, Kagi | 2.7 KB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 10.7 KB |
 | `openalgo-charts/trade` | Order / position / bracket tools + DOM ladder | 7.6 KB |
 
-Everything together is **124.47 KB Brotli**. Figures are the measured `size-limit` output. The trade tier is listed as its delta over the base, so loading base + trade costs 68.49 KB.
+Everything together is **131.09 KB Brotli**. Figures are the measured `size-limit` output. The trade tier is listed as its delta over the base, so loading base + trade costs 69.07 KB.
 
 ## What's built
 
@@ -227,13 +227,13 @@ Enforced in CI by [`size-limit`](./.size-limit.json). Nothing is excluded, becau
 
 | Bundle | Limit | Actual |
 |---|---|---|
-| Base engine | 62 KB | 60.88 KB |
-| Base + trade | 70 KB | 68.49 KB |
+| Base engine | 62 KB | 61.46 KB |
+| Base + trade | 70 KB | 69.07 KB |
 | Indicators tier | 30 KB | 27.27 KB |
-| Draw tier | 16 KB | 15.39 KB |
+| Draw tier | 22 KB | 21.43 KB |
 | Transform tier | 5 KB | 2.66 KB |
 | Profile tier | 11 KB | 10.66 KB |
-| **Everything** | **126 KB** | **124.47 KB** |
+| **Everything** | **132 KB** | **131.09 KB** |
 
 ## Documentation
 

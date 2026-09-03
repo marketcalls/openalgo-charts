@@ -45,7 +45,7 @@ jobs:
         # "pine" has no word boundary in front of it).
         run: |
           hit=0
-          grep -rniE 'tradingview|pine ?script' src tests && hit=1
+          grep -rniE 't[r]adingview|p[i]ne ?script' src tests && hit=1
           grep -rnE 'Pine|\bpine|\bPINE' src tests && hit=1
           if [ "$hit" = "1" ]; then
             echo "Third-party product name found above. Describe the behaviour instead."

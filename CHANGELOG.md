@@ -2,6 +2,96 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.0.0 (unreleased)
+
+The drawing model, rebuilt. A `Drawing` now carries a paint order, a text
+block and a per-level colour, and the controller selects more than one at a
+time. Saved 1.9.x layouts and clipboard bodies are upgraded on the way in.
+
+### Changed (breaking)
+
+- **`DrawingStyle` no longer carries text.** `text`, `fontColor`, `fontWeight`,
+  `fontStyle`, `textAlign`, `textVAlign` and `textPosition` moved into their own
+  block, `drawing.text` (a `DrawingText`: `value`, `color`, `bold`, `italic`,
+  `align`, `valign`, `position`, the font and plate keys). Seven keys that only
+  meant something to the eight tools that draw words were sitting on every
+  trend line's style bag, and a host could not tell a label from a stroke
+  colour without knowing the tool. Tools now merge a `defaultText` under the
+  caller's text the way `defaultStyle` merges under style.
+
+- **`style.levels` is `FibLevel[]`, not `number[]`.** Each rung is
+  `{ ratio, color?, visible? }`, so one level can be recoloured or hidden
+  without rebuilding the ladder. `levelColor(ratio)` is the one statement of
+  the conventional colour per ratio (`LEVEL_NEUTRAL` for the anchors and for
+  anything unnamed), shared by every fib and gann tool and by the migration,
+  so 0.618 reads as the same thing on every tool.
+
+- **`toJSON()` returns `{ version: 2, drawings }`** (a `DrawingsDocument`), and
+  `chart.getState().drawings` is therefore a document. `fromJSON` still
+  accepts a 1.9.x bare array. `DRAWING_CLIPBOARD_VERSION` is now 2 and tracks
+  `DRAWING_STATE_VERSION`; a version 1 clipboard body is accepted and upgraded.
+
+- **`drawings()` is paint order**, not creation order; `createdAt` keeps the
+  creation time. `Drawing.zIndex` is required on the type (`add()` fills in 0).
+
+### Added
+
+- **`zIndex`.** Below zero paints under the series, at or above zero over it;
+  ties break by list order. `setZIndex`, `bringToFront` and `sendToBack`
+  (band-local: they never cross the series), `sendBehindSeries` and
+  `bringAboveSeries`. A default of 0 paints exactly where 1.9.2 painted, which
+  the render-parity harness checks at zero differing pixels.
+
+- **Multi-select.** `select(id | ids | null, additive)`, `selection()`,
+  `updateMany`, `removeMany`, `duplicate(ids)` and `nudge(ids, dx, dy)`. A
+  shift, ctrl or meta click is additive (the chart's `click` payload now
+  carries the three flags). A body drag on an unselected drawing selects it
+  alone and then moves the whole selection as one undo entry; locked members
+  stay. New bus events `drawing:select { ids }` and
+  `drawing:change { ids, kind }` fire alongside the legacy `draw:*` names,
+  which are unchanged.
+
+- **A per-tool settings schema.** `drawingSettingsSchema(toolId)` returns the
+  fields a host may show, as dot paths with a control kind, and a tool
+  declares only fields its `draw` reads: a control with nothing behind it is
+  a defect, not a style choice. `readDrawingSettings` and
+  `applyDrawingSettings` move values between a form and a drawing, coercing
+  form strings by kind; `composeSettings` and the shared field lists build a
+  custom tool's schema. `textIsContent` tells a host which tools are their
+  text, so it can ask for it on placement.
+
+- **`migrateDrawings(input)`**, the pure 1.9.x to 2.0 upgrade `fromJSON` runs,
+  exported for a host reading a saved layout on its own. Load is lenient
+  (anything renderable survives; a malformed optional field is dropped on its
+  own); paste stays strict.
+
+- **`keyToDrawingAction(e, ctx)`**, the editing counterpart of
+  `matchDrawingShortcut`: undo, redo, copy, cut, paste, duplicate, delete and
+  arrow-key nudge as a pure mapping the host wires to the controller.
+
+- Named descriptors for the tools the entry did not name: `FORECAST`,
+  `PRICE_RANGE`, `DATE_RANGE`, `CIRCLE`, `TRIANGLE`, `POLYLINE`, `ARC`, `CURVE`,
+  `ROTATED_RECTANGLE`, `DOUBLE_CURVE`, `HIGHLIGHTER`, `BRUSH`, `FIB_CHANNEL`,
+  `FIB_TIME_ZONE`, `FIB_FAN`, `GANN_FAN`, `GANN_BOX`, `CYCLIC_LINES`,
+  `TIME_CYCLES`, `SINE_LINE`; `boundsOf` from the geometry helpers;
+  `cloneDrawing` from the clipboard.
+
+### Fixed
+
+- Fib retracement and extension stroke their anchor leg in `style.color`, so
+  the colour control has a job; their bands are tinted by the level that
+  closes them; `extendLeft` is honoured by retracement, extension and channel.
+- `price-range` and `date-range` honour `showLabels`, which was declared but
+  never read.
+- Flag mark and arrow markers honour `style.fill = false`.
+- Circle, triangle and rotated rectangle carry a shape label like rectangle
+  and ellipse; the text tool honours `valign` as its vertical anchor.
+
+The draw tier grows from 15.39 KB to 21.43 KB Brotli for the schema, the
+level palette, the migration, the key map and the multi-select controller;
+its budget moves from 16 KB to 22 KB and the all-tiers budget from 126 KB to
+132 KB. Tool count is unchanged at 51.
+
 ## 1.9.2
 
 Eight annotation tools, and the icon set that was missing for all of them.

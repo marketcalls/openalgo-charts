@@ -10,7 +10,7 @@ import {
   BUILTIN_DRAWING_TOOLS,
   distToSegment, distToLine, distToRect, distToEllipse, rectOf, extendSegment,
 } from '../src/draw/index';
-import type { Drawing } from '../src/draw/types';
+import type { Drawing, DrawingText } from '../src/draw/types';
 import type { Bar } from '../src/model/bar';
 
 const W = 800;
@@ -42,7 +42,7 @@ describe('coordinate conversion before the first paint', () => {
   // The render loop never runs in these tests (`raf.schedule` is a no-op), which
   // is exactly the state a caller is in between `setData` and the first frame.
   // Price conversion used to depend on the autoscale pass, so it answered
-  // ±Infinity there — and a drawing placed from a click got a NaN anchor that
+  // ±Infinity there and a drawing placed from a click got a NaN anchor that
   // serialised to null and could never be rendered again.
   it('coordinateToPrice returns a real price with no frame having run', () => {
     const { chart } = makeChart();
@@ -79,7 +79,7 @@ describe('coordinate conversion before the first paint', () => {
 
 describe('clicking a drawing selects it', () => {
   // A press on a draggable primitive arms a drag, and the drag-end branch used
-  // to return before the click path ran — so a drawing could be dragged but
+  // to return before the click path ran so a drawing could be dragged but
   // never selected, and its anchor handles never appeared.
   it('a press that never moves still selects', () => {
     const { chart, el } = makeChart();
@@ -188,7 +188,7 @@ describe('new tool families', () => {
       pts,
       rc: rc2,
       drawing: {
-        id: 'd', tool: id, paneIndex: 0,
+        id: 'd', tool: id, paneIndex: 0, zIndex: 0,
         style: { ...(tool.defaultStyle ?? {}) },
         points: pts.map((_, i) => ({ time: i, price: 100 })),
       },
@@ -337,12 +337,13 @@ describe('every built-in tool renders and hit-tests', () => {
       const clicked = Array.from({ length: n }, (_, i) => ({ time: 1700000000 + i * 600, price: 100 + i * 5 }));
       // A tool with `expand` is placed with fewer clicks than it has anchors
       // (the position tools drop a 1:1 box off one click), so the real anchor
-      // set is what the hook returns — feeding it `tool.points` would render a
+      // set is what the hook returns: feeding it `tool.points` would render a
       // half-built shape and prove nothing.
       const drawing: Drawing = {
-        id: 'x', tool: tool.id, paneIndex: 0,
+        id: 'x', tool: tool.id, paneIndex: 0, zIndex: 0,
         points: tool.expand ? tool.expand(clicked, { barSeconds: 600, visibleBars: 120 }) : clicked,
-        style: { color: '#4f8cff', lineWidth: 1.5, text: 'hi' },
+        style: { color: '#4f8cff', lineWidth: 1.5 },
+        text: { value: 'hi' },
       };
       const pts = drawing.points.map((_, i) => ({ x: 50 + i * 40, y: 100 + i * 30 }));
       const { ctx, rec } = makeCtx();
@@ -367,31 +368,34 @@ describe('text styling', () => {
     plotWidth: W, plotHeight: H, priceAxisWidth: 60, dpr: 1, theme: darkTheme,
   } as never;
 
-  const render = (style: Record<string, unknown>) => {
+  /** Render the text tool with a text block, and hand back what it painted. */
+  const render = (text: DrawingText) => {
     const drawing: Drawing = {
-      id: 't', tool: 'text', paneIndex: 0,
+      id: 't', tool: 'text', paneIndex: 0, zIndex: 0,
       points: [{ time: 10, price: 10 }],
-      style: { color: '#fff', lineWidth: 1, ...style },
+      style: { color: '#fff', lineWidth: 1 },
+      text,
     };
     const { ctx, rec } = makeCtx();
     getDrawingTool('text').draw({
       ctx, rc, drawing, selected: false, pts: [{ x: 50, y: 60 }],
-      style: { color: '#fff', lineWidth: 1, ...style },
+      style: { color: '#fff', lineWidth: 1 },
       formatPrice: (v) => String(v),
     });
     return rec;
   };
 
-  it('ships the full style surface as defaults', () => {
-    const d = getDrawingTool('text').defaultStyle ?? {};
-    expect(d).toMatchObject({
-      fontWeight: 'normal', fontStyle: 'normal',
-      background: false, border: false, wrap: false, textAlign: 'left',
-    });
+  it('ships placeholder content as default text, and none of it in the style bag', () => {
+    // The text tool is its own box, so a fresh one must have something to show,
+    // and in 2.0 that lives on the drawing's text, never in its style.
+    const tool = getDrawingTool('text');
+    expect(typeof tool.defaultText?.value).toBe('string');
+    expect(tool.defaultStyle ?? {}).not.toHaveProperty('text');
+    expect(tool.defaultStyle ?? {}).not.toHaveProperty('fontSize');
   });
 
   it('applies weight, style, and family to the canvas font', () => {
-    const rec = render({ text: 'Hi', fontSize: 20, fontWeight: 'bold', fontStyle: 'italic', fontFamily: 'Georgia' });
+    const rec = render({ value: 'Hi', fontSize: 20, bold: true, italic: true, fontFamily: 'Georgia' });
     // The recording context keeps the last font assigned before fillText.
     expect(rec.ops.some((o) => o.type === 'fillText')).toBe(true);
     expect(rec.font).toContain('italic');
@@ -401,32 +405,33 @@ describe('text styling', () => {
   });
 
   it('draws one line per newline', () => {
-    const one = render({ text: 'a' });
-    const three = render({ text: 'a\nb\nc' });
+    const one = render({ value: 'a' });
+    const three = render({ value: 'a\nb\nc' });
     expect(three.count('fillText')).toBe(one.count('fillText') + 2);
   });
 
   it('adds a background plate and a border only when asked', () => {
-    const plain = render({ text: 'x' });
+    const plain = render({ value: 'x' });
     expect(plain.count('fill')).toBe(0);
     expect(plain.count('stroke')).toBe(0);
-    const boxed = render({ text: 'x', background: true, border: true, backgroundColor: '#123456' });
+    const boxed = render({ value: 'x', background: true, border: true, backgroundColor: '#123456' });
     expect(boxed.count('fill')).toBe(1);
     expect(boxed.count('stroke')).toBe(1);
   });
 
   it('soft-wraps at wrapWidth, producing more lines than unwrapped', () => {
-    const text = 'the quick brown fox jumps over the lazy dog again and again';
-    const unwrapped = render({ text, wrap: false });
-    const wrapped = render({ text, wrap: true, wrapWidth: 60 });
+    const value = 'the quick brown fox jumps over the lazy dog again and again';
+    const unwrapped = render({ value, wrap: false });
+    const wrapped = render({ value, wrap: true, wrapWidth: 60 });
     expect(wrapped.count('fillText')).toBeGreaterThan(unwrapped.count('fillText'));
   });
 
   it('hit-tests the measured box, not a character count', () => {
     const tool = getDrawingTool('text');
     const drawing: Drawing = {
-      id: 't', tool: 'text', paneIndex: 0, points: [{ time: 10, price: 10 }],
-      style: { text: 'hello', fontSize: 14 },
+      id: 't', tool: 'text', paneIndex: 0, zIndex: 0, points: [{ time: 10, price: 10 }],
+      style: {},
+      text: { value: 'hello', fontSize: 14 },
     };
     const pts = [{ x: 50, y: 60 }];
     expect(tool.distance(52, 62, { pts, drawing, rc })).toBe(0);   // inside
@@ -443,48 +448,49 @@ describe('shape labels', () => {
     plotWidth: W, plotHeight: H, priceAxisWidth: 60, dpr: 1, theme: darkTheme,
   } as never;
 
-  const render = (tool: string, style: Record<string, unknown>) => {
+  const render = (tool: string, text?: DrawingText) => {
     const drawing: Drawing = {
-      id: 's', tool, paneIndex: 0,
+      id: 's', tool, paneIndex: 0, zIndex: 0,
       points: [{ time: 10, price: 10 }, { time: 20, price: 40 }, { time: 30, price: 60 }],
-      style: { color: '#a855f7', lineWidth: 1.5, ...style },
+      style: { color: '#a855f7', lineWidth: 1.5 },
+      ...(text === undefined ? {} : { text }),
     };
     const pts = [{ x: 40, y: 40 }, { x: 200, y: 140 }, { x: 260, y: 180 }];
     const { ctx, rec } = makeCtx();
     getDrawingTool(tool).draw({
       ctx, rc, drawing, selected: false, pts,
-      style: { color: '#a855f7', lineWidth: 1.5, ...style },
+      style: { color: '#a855f7', lineWidth: 1.5 },
       formatPrice: (v) => String(v),
     });
     return rec;
   };
 
   it('a shape with no text draws no label', () => {
-    expect(render('rectangle', {}).count('fillText')).toBe(0);
+    expect(render('rectangle').count('fillText')).toBe(0);
   });
 
   it('rectangle, ellipse, and channel all carry a label', () => {
     for (const tool of ['rectangle', 'ellipse', 'parallel-channel']) {
-      expect(render(tool, { text: 'zone' }).count('fillText'), tool).toBe(1);
+      expect(render(tool, { value: 'zone' }).count('fillText'), tool).toBe(1);
     }
   });
 
-  it('uses fontColor for the label, keeping color as the outline', () => {
-    const rec = render('rectangle', { text: 'hi', fontColor: '#ffffff' });
+  it('uses the text colour for the label, keeping color as the outline', () => {
+    const rec = render('rectangle', { value: 'hi', color: '#ffffff' });
     const textFill = rec.ops.filter((o) => o.type === 'fillText').map((o) => o.fillStyle);
     expect(textFill).toContain('#ffffff');
     // The outline is still stroked in the shape colour.
     expect(rec.ops.some((o) => o.type === 'strokeRect' && o.strokeStyle === '#a855f7')).toBe(true);
   });
 
-  it('falls back to the shape colour when no fontColor is set', () => {
-    const rec = render('rectangle', { text: 'hi' });
+  it('falls back to the shape colour when the text has none', () => {
+    const rec = render('rectangle', { value: 'hi' });
     expect(rec.ops.filter((o) => o.type === 'fillText').map((o) => o.fillStyle)).toContain('#a855f7');
   });
 
   it('places an outside label above the shape and an inside one within it', () => {
-    const inside = render('rectangle', { text: 'hi', textPosition: 'inside' });
-    const outside = render('rectangle', { text: 'hi', textPosition: 'outside' });
+    const inside = render('rectangle', { value: 'hi', position: 'inside' });
+    const outside = render('rectangle', { value: 'hi', position: 'outside' });
     const y = (rec: ReturnType<typeof render>) =>
       (rec.ops.find((o) => o.type === 'fillText') as { args: number[] }).args[1];
     expect(y(outside)).toBeLessThan(40);      // above the top edge (y0 = 40)
@@ -492,9 +498,9 @@ describe('shape labels', () => {
   });
 
   it('honours multiline and vertical alignment', () => {
-    expect(render('rectangle', { text: 'a\nb\nc' }).count('fillText')).toBe(3);
-    const top = render('rectangle', { text: 'x', textVAlign: 'top' });
-    const bottom = render('rectangle', { text: 'x', textVAlign: 'bottom' });
+    expect(render('rectangle', { value: 'a\nb\nc' }).count('fillText')).toBe(3);
+    const top = render('rectangle', { value: 'x', valign: 'top' });
+    const bottom = render('rectangle', { value: 'x', valign: 'bottom' });
     const y = (rec: ReturnType<typeof render>) =>
       (rec.ops.find((o) => o.type === 'fillText') as { args: number[] }).args[1];
     expect(y(bottom)).toBeGreaterThan(y(top));
@@ -515,7 +521,7 @@ describe('DrawingController', () => {
     expect(draw.drawings()).toHaveLength(1);
     const d = draw.drawings()[0];
     expect(d.tool).toBe('rectangle');
-    // Both anchors distinct — a degenerate rect renders as nothing at all.
+    // Both anchors distinct: a degenerate rect renders as nothing at all.
     expect(d.points).toEqual([
       { time: 1700000600, price: 101 },
       { time: 1700003600, price: 108 },
@@ -523,7 +529,7 @@ describe('DrawingController', () => {
   });
 
   // A brush is `points: 0` like `polyline`, so it used to collect one vertex per
-  // click and never terminate — you got a polyline instead of ink. Freehand
+  // click and never terminate: you got a polyline instead of ink. Freehand
   // tools sample `crosshair:move` while the pointer is held and commit on
   // release.
   const stroke = (chart: Chart, pts: readonly [number, number][], pane = 0): void => {
@@ -546,7 +552,7 @@ describe('DrawingController', () => {
       expect(draw.drawings()).toHaveLength(1);
       const d = draw.drawings()[0];
       expect(d.tool).toBe(tool);
-      // Every sampled position is kept — that curve is the whole point.
+      // Every sampled position is kept: that curve is the whole point.
       expect(d.points).toHaveLength(4);
       expect(d.points[0]).toEqual({ time: 1700000600, price: 101 });
       expect(d.points[3]).toEqual({ time: 1700002400, price: 105 });
@@ -556,7 +562,7 @@ describe('DrawingController', () => {
   }
 
   it('a selected brush stroke offers only its two end handles', () => {
-    // One anchor per sample means one handle per sample — dozens of circles
+    // One anchor per sample means one handle per sample: dozens of circles
     // burying the ink, and no way to grab the stroke itself.
     const { chart } = makeChart();
     const draw = new DrawingController(chart);
@@ -570,7 +576,7 @@ describe('DrawingController', () => {
 
     const layer = new DrawingLayer();
     layer.setDrawings(draw.drawings());
-    layer.setSelected(d.id);
+    layer.setSelected([d.id]);
     const rc = {
       timeScale: { indexToX: (i: number) => i * 5 },
       priceScale: { priceToY: (p: number) => 300 - p, format: (p: number) => p.toFixed(2) },
@@ -584,7 +590,7 @@ describe('DrawingController', () => {
   });
 
   // `points: 0` tools collect anchors until something ends them, and nothing
-  // could — double-click reset the view instead. They were unfinishable.
+  // could: double-click reset the view instead. They were unfinishable.
   for (const tool of ['polyline', 'path'] as const) {
     it(`${tool} finishes on double-click`, () => {
       const { chart } = makeChart();
@@ -677,7 +683,7 @@ describe('DrawingController', () => {
       expect(draw.drawings()).toHaveLength(1);
       const [entry, target, stop] = draw.drawings()[0].points;
       expect(entry).toEqual({ time: 1700003000, price: 100 });
-      // Reward and risk equal — a 1:1 ratio out of the box.
+      // Reward and risk equal: a 1:1 ratio out of the box.
       expect(Math.abs(target.price - entry.price)).toBeCloseTo(Math.abs(entry.price - stop.price), 9);
       // Target on the profitable side for the direction.
       expect(Math.sign(target.price - entry.price)).toBe(sign);
@@ -847,8 +853,10 @@ describe('DrawingController', () => {
     const draw = new DrawingController(chart);
     draw.add({ tool: 'rectangle', paneIndex: 0, style: { color: '#abc' }, points: [{ time: 1, price: 1 }, { time: 2, price: 2 }] });
     const state = JSON.parse(JSON.stringify(chart.getState()));
-    expect(state.drawings).toHaveLength(1);
-    expect(state.drawings[0].tool).toBe('rectangle');
+    // The slot carries a versioned document, not a bare list.
+    expect(state.drawings.version).toBe(2);
+    expect(state.drawings.drawings).toHaveLength(1);
+    expect(state.drawings.drawings[0].tool).toBe('rectangle');
 
     // A fresh chart + controller picks the drawings back up from the state.
     const other = makeChart();
@@ -902,7 +910,7 @@ describe('DrawingLayer hit-testing', () => {
   } as never;
 
   const line = (id: string): Drawing => ({
-    id, tool: 'trend-line', paneIndex: 0,
+    id, tool: 'trend-line', paneIndex: 0, zIndex: 0,
     points: [{ time: 100, price: 100 }, { time: 200, price: 200 }],
     style: {},
   });
@@ -923,7 +931,7 @@ describe('DrawingLayer hit-testing', () => {
   it('an anchor handle of the selected drawing beats its body', () => {
     const layer = new DrawingLayer();
     layer.setDrawings([line('a')]);
-    layer.setSelected('a');
+    layer.setSelected(['a']);
     const hit = layer.hitTest(100, 100, rc);
     expect(hit?.externalId).toBe('draw:a#0');
   });

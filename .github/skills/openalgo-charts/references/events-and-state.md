@@ -61,9 +61,11 @@ Every name emitted by the engine, verified against the `emit(` call sites in `sr
 | `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` | A bracket leg (TP/SL) was dragged. |
 | `draw:tool` | `{ tool }` | A drawing tool was armed or disarmed (`null`). Drawing tier only. |
 | `draw:add` | `{ drawing }` | A drawing was created. Drawing tier only. |
-| `draw:update` | `{ drawing }` | A drawing's points or style changed. Drawing tier only. |
+| `draw:update` | `{ drawing }` | A drawing's points, style, text, props or flags changed. Fires once per drawing, so a multi-drag emits one per member. Drawing tier only. |
 | `draw:remove` | `{ drawing }` | A drawing was deleted. Drawing tier only. |
-| `draw:select` | `{ id }` | Selection changed; `id` is `null` on deselect. Drawing tier only. |
+| `draw:select` | `{ id }` | Selection changed; `id` is the primary (first picked) id, `null` on deselect. Drawing tier only. |
+| `drawing:select` | `{ ids }` | The whole selection in pick order, empty on deselect. Fires with `draw:select`, and only when the selection actually changed. Drawing tier only. |
+| `drawing:change` | `{ ids, kind }` | One event per model mutation, after the per-drawing `draw:*` events; `kind` is `'add' | 'update' | 'remove' | 'reorder'`. Drawing tier only. |
 | `draw:copy` | `{ drawings }` | A copy reached the clipboard (deep copies, not the live objects). Drawing tier only. |
 | `draw:cut` | `{ drawings }` | A cut wrote **and then** deleted. A refused write emits nothing. Drawing tier only. |
 | `draw:paste` | `{ drawings }` | The newly created drawings, after their own `draw:add` events. Drawing tier only. |
@@ -95,7 +97,7 @@ Notes:
 | `timezone` (IANA name) | yes, but a name this runtime does not recognise is **skipped**, not thrown, so one stale zone cannot cost the whole layout |
 | `panes[]` — `weight`, and per-pane `priceScale` `{ marginTop, marginBottom, minMove, mode, inverted, autoScale, range? }` | yes; panes are created as needed, `range` only present when `autoScale` is false |
 | `indicators[]` — `{ indicatorId, settings, paneIndex }` | yes, replaced not appended |
-| `drawings` | round-tripped opaquely; only present when a drawing state has been set |
+| `drawings` | round-tripped opaquely; only present when a drawing state has been set. The draw tier writes a `DrawingsDocument` (`{ version: 2, drawings }`) here and reads a 1.9.x bare array too |
 | `series[]` — `{ type, style, paneIndex, priceScaleId }` | **no**, reported back to you |
 | series **data** | **no**, never captured |
 

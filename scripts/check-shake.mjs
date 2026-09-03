@@ -24,7 +24,13 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // baseline. Raise this only with the same kind of note, and never to get a
 // build green: the point of the number is that a feature has to be worth its
 // bytes to a host that only wanted a chart.
-const LIMIT_BYTES = 39 * 1024;
+//
+// Raised from 39 to 40 kB for 2.0. The wheel zoom glide (398e813) took the
+// chart-only import to 39.05 kB on its own, measured by building without the
+// 2.0 change; the three modifier flags the click payload now carries for
+// additive drawing selection land inside the same 39.05 kB reading. Both are
+// core input behaviour a host that only wanted a chart still gets.
+const LIMIT_BYTES = 40 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

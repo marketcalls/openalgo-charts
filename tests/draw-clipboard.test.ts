@@ -8,6 +8,7 @@ import { DrawingController } from '../src/draw/index';
 import type { DrawingChartHost } from '../src/draw/controller';
 import {
   DrawingClipboard, clearMemoryClipboard, decodeClipboardPayload, encodeClipboardPayload,
+  sanitizeDrawing, cloneDrawing,
   DRAWING_CLIPBOARD_KEY, DRAWING_CLIPBOARD_VERSION,
   type ClipboardPort,
 } from '../src/draw/clipboard';
@@ -79,6 +80,10 @@ function trendLine(draw: DrawingController, chart: Chart): Drawing {
   });
 }
 
+/** A clipboard body of the given version, as text. */
+const payloadOf = (version: number, drawings: unknown): string =>
+  JSON.stringify({ [DRAWING_CLIPBOARD_KEY]: { version, drawings } });
+
 describe('copy and paste round trip', () => {
   it('copies to the clipboard and pastes a second drawing back', async () => {
     const os: Os = { text: '' };
@@ -108,6 +113,18 @@ describe('copy and paste round trip', () => {
     draw.select(original.id);
     expect(await draw.copy()).toBe(true);
     expect(await draw.paste()).toHaveLength(1);
+  });
+
+  it('copies every selected drawing, and a paste selects every copy', async () => {
+    const chart = makeChart();
+    const draw = new DrawingController(chart, { clipboard: null });
+    const a = trendLine(draw, chart);
+    const b = trendLine(draw, chart);
+    draw.select([a.id, b.id]);
+    expect(await draw.copy()).toBe(true);
+    const pasted = await draw.paste();
+    expect(pasted).toHaveLength(2);
+    expect(draw.selection()).toEqual(pasted.map((d) => d.id));
   });
 
   it('pastes a copy, not a second reference to the original', async () => {
@@ -173,6 +190,28 @@ describe('copy and paste round trip', () => {
     expect(draw.undo()).toBe(true);
     expect(draw.drawings()).toHaveLength(2);
   });
+
+  it('carries text, props and z-order through a paste', async () => {
+    const chart = makeChart();
+    const draw = new DrawingController(chart, { clipboard: null });
+    const original = draw.add({
+      tool: 'rectangle', paneIndex: 0, zIndex: -2,
+      style: { color: '#123456', fill: true },
+      text: { value: 'zone', color: '#ffffff', bold: true, align: 'center', position: 'inside' },
+      props: { note: 'breakout', tags: ['a', 'b'], grid: { rows: 2 } },
+      points: [
+        { time: chart.coordinateToTime(200), price: chart.coordinateToPrice(300, 0) as number },
+        { time: chart.coordinateToTime(400), price: chart.coordinateToPrice(200, 0) as number },
+      ],
+    });
+    await draw.copy(original.id);
+    const [copy] = await draw.paste();
+    expect(copy.text).toEqual(original.text);
+    expect(copy.text).not.toBe(original.text);
+    expect(copy.props).toEqual(original.props);
+    expect(copy.props).not.toBe(original.props);
+    expect(copy.zIndex).toBe(-2);
+  });
 });
 
 describe('undo', () => {
@@ -205,6 +244,19 @@ describe('undo', () => {
 
     expect(draw.undo()).toBe(true);
     expect(draw.drawings()).toHaveLength(1);
+  });
+
+  it('a cut of a multi-selection is one undo step too', async () => {
+    const chart = makeChart();
+    const draw = new DrawingController(chart, { clipboard: null });
+    const a = trendLine(draw, chart);
+    const b = trendLine(draw, chart);
+    draw.select([a.id, b.id]);
+    expect(await draw.cut()).toBe(true);
+    expect(draw.drawings()).toHaveLength(0);
+    expect(draw.selection()).toEqual([]);
+    expect(draw.undo()).toBe(true);
+    expect(draw.drawings()).toHaveLength(2);
   });
 
   it('a cut drawing can be pasted back', async () => {
@@ -246,15 +298,10 @@ describe('a second chart', () => {
   it('folds a pane index the receiving chart does not have onto one it does', async () => {
     // Adding a primitive creates the pane it names, so a drawing copied out of
     // an indicator pane must not conjure an empty pane in a chart without one.
-    const os: Os = { text: JSON.stringify({
-      [DRAWING_CLIPBOARD_KEY]: {
-        version: 1,
-        drawings: [{
-          tool: 'trend-line', paneIndex: 7,
-          points: [{ time: 1700000000, price: 100 }, { time: 1700000600, price: 105 }],
-        }],
-      },
-    }) };
+    const os: Os = { text: payloadOf(DRAWING_CLIPBOARD_VERSION, [{
+      tool: 'trend-line', paneIndex: 7,
+      points: [{ time: 1700000000, price: 100 }, { time: 1700000600, price: 105 }],
+    }]) };
     const chart = makeChart();
     const paneCount = chart.panes().length;
     const draw = new DrawingController(chart, { clipboard: osPort(os) });
@@ -271,6 +318,57 @@ describe('a second chart', () => {
     const original = trendLine(drawA, chartA);
     expect(await drawA.copy(original.id)).toBe(true);
     expect(await drawB.paste()).toHaveLength(1);
+  });
+});
+
+describe('a payload from a 1.9.x build', () => {
+  const pasteText = async (text: string): Promise<Drawing[]> => {
+    const os: Os = { text };
+    const draw = new DrawingController(makeChart(), { clipboard: osPort(os) });
+    return draw.paste();
+  };
+
+  it('lifts the style-bag text fields into the text block', async () => {
+    const [pasted] = await pasteText(payloadOf(1, [{
+      tool: 'text', paneIndex: 0,
+      points: [{ time: 1700000000, price: 100 }],
+      style: {
+        color: '#abcdef', text: 'Hello', fontColor: '#ffffff', fontSize: 16, fontWeight: 'bold',
+        fontStyle: 'italic', textAlign: 'center', textVAlign: 'bottom', textPosition: 'outside',
+        background: true, backgroundColor: '#000', backgroundOpacity: 0.5, border: true,
+        borderColor: '#111', wrap: true, wrapWidth: 180, fontFamily: 'Georgia',
+      },
+    }]));
+    expect(pasted.text).toEqual({
+      value: 'Hello', color: '#ffffff', fontSize: 16, bold: true, italic: true,
+      align: 'center', valign: 'bottom', position: 'outside',
+      background: true, backgroundColor: '#000', backgroundOpacity: 0.5, border: true,
+      borderColor: '#111', wrap: true, wrapWidth: 180, fontFamily: 'Georgia',
+    });
+    // Nothing textual is left behind in the style bag.
+    expect(pasted.style).toEqual({ color: '#abcdef' });
+    expect(pasted.zIndex).toBe(0);
+  });
+
+  it('turns bare level ratios into levels', async () => {
+    const [pasted] = await pasteText(payloadOf(1, [{
+      tool: 'fib-retracement', paneIndex: 0,
+      points: [{ time: 1700000000, price: 100 }, { time: 1700000600, price: 110 }],
+      style: { levels: [0, 0.5, 1] },
+    }]));
+    expect(pasted.style.levels?.map((l) => l.ratio)).toEqual([0, 0.5, 1]);
+  });
+
+  it('leaves a shape with no text value without a text block', async () => {
+    // A rectangle with a font colour but nothing to say has no label to keep.
+    const [pasted] = await pasteText(payloadOf(1, [{
+      tool: 'rectangle', paneIndex: 0,
+      points: [{ time: 1700000000, price: 100 }, { time: 1700000600, price: 110 }],
+      style: { color: '#abcdef', fontColor: '#ffffff' },
+    }]));
+    expect(pasted.text).toBeUndefined();
+    expect(pasted.style.color).toBe('#abcdef');
+    expect(pasted.style).not.toHaveProperty('fontColor');
   });
 });
 
@@ -299,11 +397,10 @@ describe('a hostile or foreign clipboard', () => {
   });
 
   it('rejects a malformed payload without mutating the model or history', async () => {
-    const payload = (drawings: unknown): string =>
-      JSON.stringify({ [DRAWING_CLIPBOARD_KEY]: { version: 1, drawings } });
+    const payload = (drawings: unknown): string => payloadOf(DRAWING_CLIPBOARD_VERSION, drawings);
     const bad: string[] = [
       // Truncated: valid JSON prefix, nothing more.
-      '{"openalgo-charts/drawings":{"version":1,"draw',
+      '{"openalgo-charts/drawings":{"version":2,"draw',
       payload('not-an-array'),
       payload([]),
       payload([{ tool: 'trend-line' }]),                                   // no points
@@ -320,7 +417,7 @@ describe('a hostile or foreign clipboard', () => {
         { tool: 'trend-line', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] },
         { tool: 'trend-line', points: [{ time: 1, price: Number.NaN }] },
       ]),
-      JSON.stringify({ [DRAWING_CLIPBOARD_KEY]: { version: 99, drawings: [] } }),
+      payloadOf(99, []),
       JSON.stringify({ [DRAWING_CLIPBOARD_KEY]: 'drawings' }),
     ];
     for (const text of bad) {
@@ -336,26 +433,59 @@ describe('a hostile or foreign clipboard', () => {
   });
 
   it('drops style values it cannot render instead of failing the paste', async () => {
-    const text = JSON.stringify({
-      [DRAWING_CLIPBOARD_KEY]: {
-        version: 1,
-        drawings: [{
-          tool: 'trend-line',
-          points: [{ time: 1700000000, price: 100 }, { time: 1700000600, price: 105 }],
-          style: { color: '#abcdef', onDraw: null, nested: { a: 1 }, levels: [0, 0.5, 1] },
-        }],
+    const { pasted } = await pasteText(payloadOf(DRAWING_CLIPBOARD_VERSION, [{
+      tool: 'trend-line',
+      points: [{ time: 1700000000, price: 100 }, { time: 1700000600, price: 105 }],
+      style: {
+        color: '#abcdef', onDraw: null, nested: { a: 1 }, lineStyle: 'wavy', lineWidth: 'fat',
+        levels: [0, { ratio: 0.5, color: '#f00', enabled: false, label: 'half' }, 1],
       },
-    });
-    const { pasted } = await pasteText(text);
+    }]));
     expect(pasted).toHaveLength(1);
     expect(pasted[0].style.color).toBe('#abcdef');
-    expect(pasted[0].style.levels).toEqual([0, 0.5, 1]);
-    expect((pasted[0].style as Record<string, unknown>).nested).toBeUndefined();
+    // Ratios survive in order, and what a level said about itself survives; a
+    // bare ratio may pick up a default colour on the way through the migration.
+    const levels = pasted[0].style.levels ?? [];
+    expect(levels.map((l) => l.ratio)).toEqual([0, 0.5, 1]);
+    expect(levels[1]).toMatchObject({ ratio: 0.5, color: '#f00', enabled: false, label: 'half' });
+    const style = pasted[0].style as Record<string, unknown>;
+    expect(style.nested).toBeUndefined();
+    expect(style.lineStyle).toBeUndefined();   // not one of the three styles
+    expect(style.lineWidth).toBeUndefined();   // not a number
+  });
+
+  it('drops a text block with no value and text keys it does not draw', async () => {
+    const good = { tool: 'rectangle', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] };
+    const { pasted: noValue } = await pasteText(payloadOf(DRAWING_CLIPBOARD_VERSION, [
+      { ...good, text: { color: '#fff' } },
+    ]));
+    expect(noValue).toHaveLength(1);
+    expect(noValue[0].text).toBeUndefined();
+
+    const { pasted: extras } = await pasteText(payloadOf(DRAWING_CLIPBOARD_VERSION, [
+      { ...good, text: { value: 'hi', align: 'sideways', fontSize: 'big', onClick: 'x', bold: true } },
+    ]));
+    expect(extras[0].text).toEqual({ value: 'hi', bold: true });
+  });
+
+  it('keeps props that are plain data and drops the rest', async () => {
+    const { pasted } = await pasteText(payloadOf(DRAWING_CLIPBOARD_VERSION, [{
+      tool: 'rectangle', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }],
+      props: {
+        label: 'x', count: 3, on: true, list: [1, 'two'], cells: { a: 1 },
+        fn: null, deep: { a: { b: { c: 1 } } },
+      },
+    }]));
+    // Three levels of records are kept (`props.deep.a`); the fourth is not.
+    expect(pasted[0].props).toEqual({
+      label: 'x', count: 3, on: true, list: [1, 'two'], cells: { a: 1 }, deep: { a: {} },
+    });
   });
 
   it('never lets a payload reach Object.prototype', async () => {
-    const text = '{"openalgo-charts/drawings":{"version":1,"drawings":[{"tool":"trend-line",'
-      + '"points":[{"time":1,"price":2},{"time":3,"price":4}],"style":{"__proto__":{"polluted":true}}}]}}';
+    const text = '{"openalgo-charts/drawings":{"version":2,"drawings":[{"tool":"trend-line",'
+      + '"points":[{"time":1,"price":2},{"time":3,"price":4}],"style":{"__proto__":{"polluted":true}},'
+      + '"props":{"__proto__":{"polluted":true}},"text":{"value":"x","__proto__":{"polluted":true}}}]}}';
     const { pasted } = await pasteText(text);
     expect(pasted).toHaveLength(1);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
@@ -363,10 +493,7 @@ describe('a hostile or foreign clipboard', () => {
 
   it('refuses a payload with more anchors than a pointer could produce', () => {
     const points = Array.from({ length: 20001 }, (_, i) => ({ time: i, price: i }));
-    const text = JSON.stringify({
-      [DRAWING_CLIPBOARD_KEY]: { version: 1, drawings: [{ tool: 'path', points }] },
-    });
-    expect(decodeClipboardPayload(text)).toBeNull();
+    expect(decodeClipboardPayload(payloadOf(DRAWING_CLIPBOARD_VERSION, [{ tool: 'path', points }]))).toBeNull();
   });
 });
 
@@ -415,26 +542,64 @@ describe('a refused clipboard permission', () => {
 describe('payload encoding', () => {
   it('round-trips through encode and decode without an id', () => {
     const d: Drawing = {
-      id: 'd42', tool: 'rectangle', paneIndex: 1, locked: true, visible: false,
+      id: 'd42', tool: 'rectangle', paneIndex: 1, zIndex: 3, locked: true, visible: false,
       points: [{ time: 1700000000, price: 100 }, { time: 1700000600, price: 110 }],
-      style: { color: '#fff', fill: true, fillOpacity: 0.2 },
+      style: { color: '#fff', fill: true, fillOpacity: 0.2, levels: [{ ratio: 0.5, color: '#0f0' }] },
+      text: { value: 'box', italic: true, valign: 'middle' },
+      props: { kind: 'zone' },
+      createdAt: 1700000000000,
     };
     const decoded = decodeClipboardPayload(encodeClipboardPayload([d]));
     expect(decoded).not.toBeNull();
     expect(decoded).toHaveLength(1);
     expect(decoded?.[0]).toEqual({
-      tool: 'rectangle', paneIndex: 1, locked: true, visible: false,
-      points: d.points, style: d.style,
+      tool: 'rectangle', paneIndex: 1, zIndex: 3, locked: true, visible: false,
+      points: d.points, style: d.style, text: d.text, props: d.props,
     });
     expect((decoded?.[0] as Record<string, unknown>).id).toBeUndefined();
+    // The moment of creation belongs to the original, not to the copy.
+    expect((decoded?.[0] as Record<string, unknown>).createdAt).toBeUndefined();
   });
 
   it('names its version so an older build can refuse a newer payload', () => {
     const parsed = JSON.parse(encodeClipboardPayload([{
-      id: 'x', tool: 'trend-line', paneIndex: 0, style: {},
+      id: 'x', tool: 'trend-line', paneIndex: 0, zIndex: 0, style: {},
       points: [{ time: 1, price: 2 }, { time: 3, price: 4 }],
     }])) as Record<string, { version: number }>;
     expect(parsed[DRAWING_CLIPBOARD_KEY].version).toBe(DRAWING_CLIPBOARD_VERSION);
+    // The body is a drawings document, so it tracks the model version.
+    expect(DRAWING_CLIPBOARD_VERSION).toBe(2);
+  });
+
+  it('still accepts a version 1 body, and refuses one from the future', () => {
+    const entry = { tool: 'trend-line', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] };
+    expect(decodeClipboardPayload(payloadOf(1, [entry]))).toHaveLength(1);
+    expect(decodeClipboardPayload(payloadOf(DRAWING_CLIPBOARD_VERSION + 1, [entry]))).toBeNull();
+  });
+
+  it('sanitizeDrawing fills in z-order and accepts the old shape', () => {
+    const d = sanitizeDrawing({
+      tool: 'text', points: [{ time: 1, price: 2 }],
+      style: { text: 'old', fontWeight: 'bold' },
+    });
+    expect(d).not.toBeNull();
+    expect(d?.zIndex).toBe(0);
+    expect(d?.text).toEqual({ value: 'old', bold: true });
+    expect(sanitizeDrawing({ tool: 'no-such-tool', points: [{ time: 1, price: 2 }] })).toBeNull();
+  });
+
+  it('cloneDrawing shares nothing with its source', () => {
+    const d: Drawing = {
+      id: 'a', tool: 'fib-retracement', paneIndex: 0, zIndex: 0,
+      points: [{ time: 1, price: 2 }, { time: 3, price: 4 }],
+      style: { levels: [{ ratio: 0.5 }] }, text: { value: 'x' }, props: { rows: [1, 2] },
+    };
+    const c = cloneDrawing(d);
+    expect(c).toEqual(d);
+    expect(c.points[0]).not.toBe(d.points[0]);
+    expect(c.style.levels?.[0]).not.toBe(d.style.levels?.[0]);
+    expect(c.text).not.toBe(d.text);
+    expect(c.props?.rows).not.toBe(d.props?.rows);
   });
 
   it('reads nothing from an empty clipboard', async () => {
@@ -495,7 +660,7 @@ describe('the memory fallback is reachable from the controller', () => {
     const d = trendLine(draw, chart);
 
     await draw.cut([d.id]);
-    expect(draw.toJSON().map((x) => x.id)).toContain(d.id);
+    expect(draw.toJSON().drawings.map((x) => x.id)).toContain(d.id);
     draw.destroy();
   });
 
@@ -505,9 +670,9 @@ describe('the memory fallback is reachable from the controller', () => {
     const d = trendLine(draw, chart);
 
     await draw.copy([d.id]);
-    const before = draw.toJSON().length;
+    const before = draw.toJSON().drawings.length;
     await draw.paste();
-    expect(draw.toJSON().length).toBe(before + 1);
+    expect(draw.toJSON().drawings.length).toBe(before + 1);
     draw.destroy();
   });
 });

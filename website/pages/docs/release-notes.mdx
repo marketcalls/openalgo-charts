@@ -8,6 +8,46 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.0.0 (unreleased)
+
+The drawing model, rebuilt: paint order, a text block, per-level colours, multi-select,
+a per-tool settings schema, and an upgrade path for every 1.9.x layout and clipboard body.
+
+**Changed (breaking)**
+
+- `DrawingStyle` no longer carries text. The seven text keys moved into `drawing.text`
+  (a `DrawingText`), so a host can tell a label from a stroke colour without knowing the
+  tool. Tools merge a `defaultText` under the caller's text.
+- `style.levels` is `FibLevel[]` (`{ ratio, color?, visible? }`), not `number[]`, with
+  `levelColor(ratio)` as the one statement of the conventional colour per ratio.
+- `toJSON()` returns `{ version: 2, drawings }`; `fromJSON` still accepts a 1.9.x array.
+  `DRAWING_CLIPBOARD_VERSION` is 2; version 1 bodies are upgraded.
+- `drawings()` is paint order, and `Drawing.zIndex` is required on the type.
+
+**Added**
+
+- `zIndex` with `setZIndex`, `bringToFront`, `sendToBack`, `sendBehindSeries` and
+  `bringAboveSeries`. The default paints exactly where 1.9.2 painted.
+- Multi-select: `select(ids, additive)`, `selection()`, `updateMany`, `removeMany`,
+  `duplicate`, `nudge`; shift, ctrl or meta click is additive; a body drag moves the whole
+  selection as one undo entry. New events `drawing:select` and `drawing:change`.
+- `drawingSettingsSchema(toolId)` with `readDrawingSettings`, `applyDrawingSettings` and
+  `composeSettings`: a tool declares only fields its renderer reads.
+- `migrateDrawings(input)`, the pure 1.9.x to 2.0 upgrade, exported for hosts.
+- `keyToDrawingAction(e, ctx)`: undo, redo, copy, cut, paste, duplicate, delete and
+  arrow-key nudge as a pure mapping.
+- Named descriptors for every built-in tool, `boundsOf`, `cloneDrawing`.
+
+**Fixed**
+
+- Fib retracement and extension stroke their anchor leg and tint bands per level;
+  `extendLeft` is honoured. `price-range` and `date-range` honour `showLabels`. Flag mark
+  and arrow markers honour `fill: false`. Circle, triangle and rotated rectangle carry a
+  shape label.
+
+The draw tier grows from 15.39 KB to 21.43 KB Brotli; its budget moves to 22 KB and the
+all-tiers budget to 132 KB.
+
 ## 1.9.2
 
 Eight annotation tools, and the icon set that was missing for all of them.

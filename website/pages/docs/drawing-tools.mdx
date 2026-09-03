@@ -145,23 +145,28 @@ chart has a different interval loaded.
 |---|---|
 | `setTool(id \| null)` | Arm a tool for placement, or return to the cursor. |
 | `activeTool()` | The armed tool id, or null. |
-| `drawings()` / `get(id)` | The model. |
-| `add(drawing)` | Add one directly (import, or host-authored). |
-| `update(id, patch)` | Patch `points`, `style`, `locked`, or `visible`. |
-| `remove(id)` / `clear()` | Delete one, or all. |
+| `drawings()` / `get(id)` | The model, in paint order. |
+| `add(drawing)` | Add one directly (import, or host-authored). `zIndex`, `createdAt` and `id` are filled in. |
+| `update(id, patch)` / `updateMany(patches)` | Patch `points`, `style`, `text`, `props`, `locked`, `visible` or `zIndex`. `updateMany` is one undo step. |
+| `remove(id)` / `removeMany(ids)` / `clear()` | Delete one, several (one undo step), or all. |
 | `finish()` | End a variable-anchor shape (`path`, `polyline`) at the anchors placed so far. Returns whether it committed. Double-click already calls it. |
-| `select(id \| null)` / `selected()` | Selection. |
+| `select(id \| ids \| null, additive?)` / `selected()` / `selection()` | Selection. `additive` toggles each id; `selected()` is the primary id, `selection()` the list in pick order. |
+| `duplicate(ids)` / `nudge(ids, dx, dy)` | Clone with the paste offset and select the clones; move by a screen distance. One undo step each. |
+| `setZIndex(id, z)` / `bringToFront(id)` / `sendToBack(id)` | Paint order within the drawing's own side of the series. |
+| `sendBehindSeries(id)` / `bringAboveSeries(id)` | Cross the series: below zero paints under the candles. |
 | `copy(target?)` / `cut(target?)` / `paste()` | Clipboard, all async. See [Drawing Clipboard](/docs/drawing-clipboard). |
 | `clipboard()` | The `DrawingClipboard` behind those three, for reporting why a copy did not reach the OS clipboard. |
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A paste of several drawings is one step. |
-| `toJSON()` / `fromJSON(data)` | Explicit serialisation. |
+| `toJSON()` / `fromJSON(data)` | Explicit serialisation: a `{ version: 2, drawings }` document out; a document or a 1.9.x bare array in, upgraded by `migrateDrawings`. |
 | `setOptions(patch)` | `magnet`, `stayInDrawingMode`, `historyLimit`, `defaultStyle`, `pasteOffsetBars`, `pasteOffsetPixels`, `clipboard`. |
 | `destroy()` | Detach layers and listeners. |
 
 ### Events
 
 `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select`, `draw:copy`,
-`draw:cut` and `draw:paste` all fire on `chart.on(...)`.
+`draw:cut` and `draw:paste` all fire on `chart.on(...)`. The 2.0 pair `drawing:select`
+(`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind }`, one per mutation)
+fire alongside them for a host that tracks a multi-selection.
 
 <Callout type="info">
 The controller listens on the **event bus** (`click`, `crosshair:move`, `drag`, `drag:end`),

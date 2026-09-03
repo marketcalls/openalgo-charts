@@ -5,13 +5,34 @@
  *
  * `draw` receives anchors already in device px; `distance` receives them in
  * media px, the same space as the incoming cursor.
+ *
+ * Text lives in `drawing.text` (a `DrawingText`), never in the style bag: a
+ * shape's outline colour and its label colour are two decisions, and a tool
+ * that prints only a readout (a fib ladder, a measure chip) still reads its
+ * face from there. Ladders read `FibLevel[]` and stroke each level in its own
+ * colour, taken from the shared palette in levels.ts.
+ *
+ * Every tool declares `settings`: the fields a host may show for it. The
+ * schema is a contract, not a wish list. A field is declared only when this
+ * file reads it, because a control with nothing behind it is a defect.
  */
-import type { DrawContext, DrawingStyle, DrawingTool, ScreenPoint } from './types';
+import type { DrawContext, Drawing, DrawingText, DrawingTool, FibLevel, ScreenPoint } from './types';
 import {
   distToSegment, distToLine, distToHorizontal, distToVertical,
-  distToRect, distToEllipse, distToPolyline, rectOf, extendSegment,
+  distToRect, distToEllipse, distToPolyline, rectOf, boundsOf, extendSegment,
 } from './geometry';
 import { roundRectPath, contrastText } from '../render/pill';
+import {
+  type SettingsField, type SettingsSchema,
+  LINE_FIELDS, FILL_FIELDS, TEXT_FIELDS, LEVEL_FIELDS, EXTEND_FIELDS, FONT_FIELDS,
+  SHAPE_TEXT_FIELDS, PLATE_TEXT_FIELDS,
+  COLOR_FIELD, LINE_WIDTH_FIELD, LINE_STYLE_FIELD, SHOW_LABELS_FIELD, TEXT_VALUE_FIELD,
+  composeSettings,
+} from './schema';
+import {
+  DEFAULT_FIB, DEFAULT_FIB_FAN, DEFAULT_GANN_FAN, DEFAULT_GANN_BOX, DEFAULT_FIB_TIME_ZONE,
+  cloneLevels, cycleColor, levelColor, formatRatio, gannLabel,
+} from './levels';
 
 const registry = new Map<string, DrawingTool>();
 
@@ -58,7 +79,7 @@ function parseShortcut(spec: string): { key: string; alt: boolean; ctrl: boolean
  * The id of the tool whose `shortcut` matches this key event, or `null`.
  *
  * Pure, so a host can bind one `keydown` listener and decide for itself when
- * shortcuts apply — the library installs no listener, because only the host
+ * shortcuts apply. The library installs no listener, because only the host
  * knows whether the chart has focus, a dialog is open, or the user is typing.
  *
  * Modifiers must match exactly: `Alt+T` will not fire for `Ctrl+Alt+T`, so a
@@ -92,6 +113,34 @@ export function drawingShortcuts(): Record<string, string> {
   return out;
 }
 
+// ── settings vocabulary shared by several tools ───────────────────────────
+
+/** Colour, width and dash: the least any tool drawn through `applyStroke` honours. */
+const LINE_SETTINGS: SettingsSchema = composeSettings([LINE_FIELDS]);
+
+/**
+ * The settings a host may show for a tool: the tool's own declaration, else
+ * the line fields, which every stroked custom tool reads. This is a registry
+ * lookup, which is why it lives here and not in schema.ts: that module stays
+ * free of any import that could loop back into this one.
+ */
+export function drawingSettingsSchema(toolId: string): SettingsSchema {
+  return registry.get(toolId)?.settings ?? LINE_SETTINGS;
+}
+
+/** A translucent tool's one opacity (highlighter ink, a measure's band). */
+const OPACITY_FIELD: SettingsField = {
+  path: 'style.fillOpacity', label: 'Opacity', kind: 'opacity', min: 0, max: 1, step: 0.01, group: 'fill',
+};
+
+/** `showLabels` on a horizontal line toggles exactly one thing: the price tag. */
+const PRICE_TAG_FIELD: SettingsField = { ...SHOW_LABELS_FIELD, label: 'Show price' };
+
+const POSITION_FIELDS: readonly SettingsField[] = [
+  { path: 'style.accountSize', label: 'Account size', kind: 'number', min: 0, step: 1000, group: 'behavior' },
+  { path: 'style.risk', label: 'Risk %', kind: 'number', min: 0, max: 100, step: 0.1, group: 'behavior' },
+];
+
 // ── shared drawing helpers ────────────────────────────────────────────────
 
 function applyStroke(c: DrawContext): void {
@@ -122,12 +171,50 @@ function withFill(c: DrawContext, paint: () => void): void {
   ctx.restore();
 }
 
+// ── text ──────────────────────────────────────────────────────────────────
+
+const DEFAULT_FONT = 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+const NO_TEXT: DrawingText = { value: '' };
+
+/** The drawing's text block, or an empty one so every reader falls back per field. */
+function textOf(d: Drawing): DrawingText {
+  return d.text ?? NO_TEXT;
+}
+
+/**
+ * The CSS font shorthand for a text block at `sizePx`. `weight` overrides the
+ * bold flag, for the one place (a table header) that wants a weight of its own.
+ */
+function fontOf(t: DrawingText, sizePx: number, weight?: string): string {
+  const w = weight ?? (t.bold === true ? '700' : '');
+  const italic = t.italic === true ? 'italic ' : '';
+  const family = t.fontFamily === undefined || t.fontFamily === '' ? DEFAULT_FONT : t.fontFamily;
+  return `${italic}${w === '' ? '' : `${w} `}${sizePx}px ${family}`;
+}
+
+/**
+ * The text a mark shows, with the tool's own fallback when there is none. An
+ * annotation with no text is still a mark on the chart, and an empty plate
+ * reads as a rendering bug rather than as a note waiting for content; worse,
+ * it cannot be seen, so it cannot be found and deleted.
+ */
+function contentOf(d: Drawing, fallback: string): string {
+  const v = d.text?.value;
+  return v === undefined || v === '' ? fallback : v;
+}
+
+/**
+ * A readout on a plate of the pane background. `color` is the mark the text
+ * belongs to (a level's colour); the text block's own colour wins over it,
+ * and the drawing's colour is the last resort.
+ */
 function label(c: DrawContext, text: string, x: number, y: number, color?: string): void {
   const { ctx, rc, style } = c;
-  const size = (style.fontSize ?? 11) * rc.dpr;
+  const t = textOf(c.drawing);
+  const size = (t.fontSize ?? 11) * rc.dpr;
   ctx.save();
   ctx.setLineDash([]);
-  ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.font = fontOf(t, size);
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   const w = ctx.measureText(text).width;
@@ -135,13 +222,13 @@ function label(c: DrawContext, text: string, x: number, y: number, color?: strin
   ctx.fillStyle = rc.theme.background;
   ctx.fillRect(x - 2 * rc.dpr, y - size * 0.75, w + 4 * rc.dpr, size * 1.5);
   ctx.globalAlpha = 1;
-  ctx.fillStyle = color ?? style.color;
+  ctx.fillStyle = t.color ?? color ?? style.color;
   ctx.fillText(text, x, y);
   ctx.restore();
 }
 
 /**
- * A solid rounded chip with contrasting text, one row per line — the readout
+ * A solid rounded chip with contrasting text, one row per line: the readout
  * style the position and forecast tools share. `align` positions the box
  * horizontally about `x`, `place` vertically about `y`. Returns its height so a
  * caller can stack chips.
@@ -156,18 +243,19 @@ function chip(
 ): number {
   const { ctx, rc } = c;
   const d = rc.dpr;
-  const size = (c.style.fontSize ?? 11) * d;
+  const t = textOf(c.drawing);
+  const size = (t.fontSize ?? 11) * d;
   ctx.save();
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
-  ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.font = fontOf(t, size);
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   const padX = 5 * d;
   const padY = 3 * d;
   const lh = size * 1.35;
   let textW = 0;
-  for (const t of lines) textW = Math.max(textW, ctx.measureText(t).width);
+  for (const s of lines) textW = Math.max(textW, ctx.measureText(s).width);
   const w = textW + padX * 2;
   const h = lh * lines.length + padY * 2;
   const align = opts.align ?? 'left';
@@ -178,7 +266,7 @@ function chip(
   roundRectPath(ctx, bx, by, w, h, 3 * d);
   ctx.fillStyle = bg;
   ctx.fill();
-  ctx.fillStyle = contrastText(bg);
+  ctx.fillStyle = t.color ?? contrastText(bg);
   for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], bx + padX, by + padY + lh * (i + 0.5));
   ctx.restore();
   return h;
@@ -191,7 +279,7 @@ function grouped(n: number, dp = 0): string {
   return sign + i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (f === undefined ? '' : '.' + f);
 }
 
-/** `YYYY-MM-DD` in UTC — enough to anchor a label to its bar. */
+/** `YYYY-MM-DD` in UTC: enough to anchor a label to its bar. */
 function isoDate(sec: number): string {
   const dt = new Date(sec * 1000);
   const p = (n: number): string => String(n).padStart(2, '0');
@@ -222,7 +310,7 @@ function arrowHead(c: DrawContext, a: ScreenPoint, b: ScreenPoint): void {
   c.ctx.fill();
 }
 
-/** 172.79M / 1.2K — a raw volume sum is unreadable in a label. */
+/** 172.79M / 1.2K: a raw volume sum is unreadable in a label. */
 function compactNumber(n: number): string {
   const abs = Math.abs(n);
   if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
@@ -234,7 +322,26 @@ function compactNumber(n: number): string {
 const UP_TINT = '#26a69a';
 const DOWN_TINT = '#ef5350';
 
-const DEFAULT_FIB: readonly number[] = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+// ── levels ────────────────────────────────────────────────────────────────
+
+/**
+ * The levels a ladder strokes: the drawing's own, else the tool's default,
+ * minus the ones switched off and any with a ratio that is not a number
+ * (a hand-edited state file is the usual source).
+ */
+function activeLevels(own: readonly FibLevel[] | undefined, fallback: readonly FibLevel[]): FibLevel[] {
+  return (own ?? fallback).filter((l) => l.enabled !== false && Number.isFinite(l.ratio));
+}
+
+/** A fib level's colour: its own, else the convention for its ratio. */
+function fibColor(lv: FibLevel): string {
+  return lv.color ?? levelColor(lv.ratio);
+}
+
+/** A fib level's text: its own, else the ratio as a percentage. */
+function fibText(lv: FibLevel): string {
+  return lv.label ?? formatRatio(lv.ratio);
+}
 
 // ── line family ───────────────────────────────────────────────────────────
 
@@ -243,6 +350,7 @@ function lineTool(id: string, name: string, left: boolean, right: boolean): Draw
   return {
     id, name, points: 2,
     defaultStyle: { extendLeft: left, extendRight: right },
+    settings: composeSettings([LINE_FIELDS, EXTEND_FIELDS]),
     draw: (c) => {
       const [a, b] = extendSegment(
         c.pts[0], c.pts[1], c.rc.plotWidth * c.rc.dpr,
@@ -271,6 +379,7 @@ export const EXTENDED_LINE = lineTool('extended-line', 'Extended Line', true, tr
 
 export const ARROW: DrawingTool = {
   id: 'arrow', name: 'Arrow', points: 2,
+  settings: LINE_SETTINGS,
   draw: (c) => {
     const [a, b] = c.pts;
     applyStroke(c);
@@ -279,15 +388,7 @@ export const ARROW: DrawingTool = {
     c.ctx.lineTo(b.x, b.y);
     c.ctx.stroke();
     // Head at the far anchor, sized off the line width so it scales with style.
-    const head = Math.max(8, c.style.lineWidth * 5) * c.rc.dpr;
-    const ang = Math.atan2(b.y - a.y, b.x - a.x);
-    c.ctx.beginPath();
-    c.ctx.moveTo(b.x, b.y);
-    c.ctx.lineTo(b.x - head * Math.cos(ang - 0.4), b.y - head * Math.sin(ang - 0.4));
-    c.ctx.lineTo(b.x - head * Math.cos(ang + 0.4), b.y - head * Math.sin(ang + 0.4));
-    c.ctx.closePath();
-    c.ctx.fillStyle = c.style.color;
-    c.ctx.fill();
+    arrowHead(c, a, b);
     c.ctx.setLineDash([]);
   },
   distance: (x, y, h) => distToSegment(x, y, h.pts[0], h.pts[1]),
@@ -296,6 +397,7 @@ export const ARROW: DrawingTool = {
 export const HORIZONTAL_LINE: DrawingTool = {
   id: 'horizontal-line', name: 'Horizontal Line', points: 1, shortcut: 'Alt+H',
   defaultStyle: { showLabels: true },
+  settings: composeSettings([LINE_FIELDS, PRICE_TAG_FIELD, FONT_FIELDS]),
   draw: (c) => {
     const y = Math.round(c.pts[0].y) + 0.5;
     applyStroke(c);
@@ -314,6 +416,7 @@ export const HORIZONTAL_LINE: DrawingTool = {
 export const HORIZONTAL_RAY: DrawingTool = {
   id: 'horizontal-ray', name: 'Horizontal Ray', points: 1, shortcut: 'Alt+J',
   defaultStyle: { showLabels: true },
+  settings: composeSettings([LINE_FIELDS, PRICE_TAG_FIELD, FONT_FIELDS]),
   draw: (c) => {
     const y = Math.round(c.pts[0].y) + 0.5;
     applyStroke(c);
@@ -331,6 +434,7 @@ export const HORIZONTAL_RAY: DrawingTool = {
 
 export const VERTICAL_LINE: DrawingTool = {
   id: 'vertical-line', name: 'Vertical Line', points: 1, shortcut: 'Alt+V',
+  settings: LINE_SETTINGS,
   draw: (c) => {
     const x = Math.round(c.pts[0].x) + 0.5;
     applyStroke(c);
@@ -345,6 +449,7 @@ export const VERTICAL_LINE: DrawingTool = {
 
 export const CROSS_LINE: DrawingTool = {
   id: 'cross-line', name: 'Cross Line', points: 1, shortcut: 'Alt+C',
+  settings: LINE_SETTINGS,
   draw: (c) => {
     const x = Math.round(c.pts[0].x) + 0.5;
     const y = Math.round(c.pts[0].y) + 0.5;
@@ -360,23 +465,28 @@ export const CROSS_LINE: DrawingTool = {
 
 // ── shapes ────────────────────────────────────────────────────────────────
 
+/** What every labelled shape declares: outline, fill, and the attached label. */
+const SHAPE_SETTINGS: SettingsSchema = composeSettings([LINE_FIELDS, FILL_FIELDS, SHAPE_TEXT_FIELDS]);
+
 export const RECTANGLE: DrawingTool = {
   id: 'rectangle', name: 'Rectangle', points: 2,
-  defaultStyle: { fill: true, fontSize: 14, textAlign: 'left', textVAlign: 'top', textPosition: 'inside' },
+  defaultStyle: { fill: true },
+  settings: SHAPE_SETTINGS,
   draw: (c) => {
     const r = rectOf(c.pts[0], c.pts[1]);
     withFill(c, () => c.ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0));
     applyStroke(c);
     c.ctx.strokeRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
     c.ctx.setLineDash([]);
-    shapeLabel(c, r.x0, r.y0, r.x1, r.y1);
+    shapeLabel(c, r);
   },
   distance: (x, y, h) => distToRect(x, y, h.pts[0], h.pts[1], h.drawing.style.fill === true),
 };
 
 export const ELLIPSE: DrawingTool = {
   id: 'ellipse', name: 'Ellipse', points: 2,
-  defaultStyle: { fill: true, fontSize: 14, textAlign: 'center', textVAlign: 'middle', textPosition: 'inside' },
+  defaultStyle: { fill: true },
+  settings: SHAPE_SETTINGS,
   draw: (c) => {
     const r = rectOf(c.pts[0], c.pts[1]);
     const cx = (r.x0 + r.x1) / 2;
@@ -392,7 +502,9 @@ export const ELLIPSE: DrawingTool = {
     path();
     c.ctx.stroke();
     c.ctx.setLineDash([]);
-    shapeLabel(c, r.x0, r.y0, r.x1, r.y1);
+    // A corner of an ellipse's box is outside the ellipse, so the label
+    // defaults to the middle, where there is shape behind it.
+    shapeLabel(c, r, 'center', 'middle');
   },
   distance: (x, y, h) => distToEllipse(x, y, h.pts[0], h.pts[1], h.drawing.style.fill === true),
 };
@@ -400,6 +512,7 @@ export const ELLIPSE: DrawingTool = {
 export const PARALLEL_CHANNEL: DrawingTool = {
   id: 'parallel-channel', name: 'Parallel Channel', points: 3,
   defaultStyle: { fill: true },
+  settings: SHAPE_SETTINGS,
   draw: (c) => {
     const [a, b, t] = c.pts;
     // The third anchor sets the channel width as a vertical offset.
@@ -419,8 +532,7 @@ export const PARALLEL_CHANNEL: DrawingTool = {
     c.ctx.moveTo(a2.x, a2.y); c.ctx.lineTo(b2.x, b2.y);
     c.ctx.stroke();
     c.ctx.setLineDash([]);
-    shapeLabel(c, Math.min(a.x, b.x), Math.min(a.y, b.y, a2.y, b2.y),
-      Math.max(a.x, b.x), Math.max(a.y, b.y, a2.y, b2.y));
+    shapeLabel(c, boundsOf([a, b, a2, b2]));
   },
   distance: (x, y, h) => {
     const [a, b, t] = h.pts;
@@ -433,56 +545,72 @@ export const PARALLEL_CHANNEL: DrawingTool = {
 
 // ── fibonacci ─────────────────────────────────────────────────────────────
 
+const FIB_SETTINGS: SettingsSchema = composeSettings([LINE_FIELDS, LEVEL_FIELDS, FILL_FIELDS, EXTEND_FIELDS, FONT_FIELDS]);
+
 /** Retracement (2 anchors) and extension (3) share the level-drawing body. */
 function fibTool(id: string, name: string, anchors: 2 | 3): DrawingTool {
   return {
     id, name, points: anchors,
-    defaultStyle: { showLabels: true, levels: [...DEFAULT_FIB], fill: true, fillOpacity: 0.06 },
+    defaultStyle: { showLabels: true, levels: cloneLevels(DEFAULT_FIB), fill: true, fillOpacity: 0.06 },
+    settings: FIB_SETTINGS,
     draw: (c) => {
-      const levels = c.style.levels ?? DEFAULT_FIB;
+      const levels = activeLevels(c.style.levels, DEFAULT_FIB);
       const p = c.drawing.points;
-      // Retracement measures p0→p1; extension projects that leg from p2.
+      const d = c.rc.dpr;
+      // Retracement measures p0 to p1; extension projects that leg from p2.
       const from = anchors === 2 ? p[0].price : p[2].price;
-      const span = anchors === 2 ? p[1].price - p[0].price : p[1].price - p[0].price;
-      const x0 = Math.min(c.pts[0].x, c.pts[anchors - 1].x);
-      const x1 = Math.max(c.pts[0].x, c.pts[anchors - 1].x);
-      const right = c.style.extendRight === true ? c.rc.plotWidth * c.rc.dpr : x1;
+      const span = p[1].price - p[0].price;
+      const xa = Math.min(c.pts[0].x, c.pts[anchors - 1].x);
+      const xb = Math.max(c.pts[0].x, c.pts[anchors - 1].x);
+      const x0 = c.style.extendLeft === true ? 0 : xa;
+      const x1 = c.style.extendRight === true ? c.rc.plotWidth * d : xb;
+      // The leg the ratios are ratios of, in the drawing's own colour. The
+      // levels are horizontal, so nothing else shows where the swing ran.
       applyStroke(c);
+      c.ctx.beginPath();
+      c.ctx.moveTo(c.pts[0].x, c.pts[0].y);
+      c.ctx.lineTo(c.pts[1].x, c.pts[1].y);
+      if (anchors === 3) c.ctx.lineTo(c.pts[2].x, c.pts[2].y);
+      c.ctx.stroke();
       let prevY: number | null = null;
       for (const lv of levels) {
-        const price = from + span * lv;
-        const y = Math.round(c.rc.priceScale.priceToY(price) * c.rc.dpr) + 0.5;
+        const price = from + span * lv.ratio;
+        const y = Math.round(c.rc.priceScale.priceToY(price) * d) + 0.5;
+        const color = fibColor(lv);
+        // Each band is tinted by the level that closes it, so the fill reads
+        // as part of the ladder rather than as one wash behind it.
         if (c.style.fill === true && prevY !== null) {
           c.ctx.save();
           c.ctx.globalAlpha = c.style.fillOpacity ?? 0.06;
-          c.ctx.fillStyle = fillStyleOf(c);
-          c.ctx.fillRect(x0, Math.min(prevY, y), right - x0, Math.abs(y - prevY));
+          c.ctx.fillStyle = c.style.fillColor ?? color;
+          c.ctx.fillRect(x0, Math.min(prevY, y), x1 - x0, Math.abs(y - prevY));
           c.ctx.restore();
         }
         prevY = y;
+        c.ctx.strokeStyle = color;
         c.ctx.beginPath();
         c.ctx.moveTo(x0, y);
-        c.ctx.lineTo(right, y);
+        c.ctx.lineTo(x1, y);
         c.ctx.stroke();
         if (c.style.showLabels !== false) {
-          label(c, `${(lv * 100).toFixed(1)}%  ${c.formatPrice(price)}`, x0 + 4 * c.rc.dpr, y - 8 * c.rc.dpr);
+          label(c, `${fibText(lv)}  ${c.formatPrice(price)}`, x0 + 4 * d, y - 8 * d, color);
         }
       }
       c.ctx.setLineDash([]);
     },
     distance: (x, y, h) => {
-      const levels = h.drawing.style.levels ?? DEFAULT_FIB;
+      const levels = activeLevels(h.drawing.style.levels, DEFAULT_FIB);
       const p = h.drawing.points;
       const from = anchors === 2 ? p[0].price : p[2].price;
       const span = p[1].price - p[0].price;
-      const x0 = Math.min(h.pts[0].x, h.pts[anchors - 1].x);
+      const x0 = h.drawing.style.extendLeft === true ? 0 : Math.min(h.pts[0].x, h.pts[anchors - 1].x);
       const x1 = h.drawing.style.extendRight === true
         ? h.rc.plotWidth : Math.max(h.pts[0].x, h.pts[anchors - 1].x);
       if (x < x0 - 4 || x > x1 + 4) return null;
       let best = Infinity;
       for (const lv of levels) {
-        const d = Math.abs(y - h.rc.priceScale.priceToY(from + span * lv));
-        if (d < best) best = d;
+        const dd = Math.abs(y - h.rc.priceScale.priceToY(from + span * lv.ratio));
+        if (dd < best) best = dd;
       }
       return best;
     },
@@ -494,9 +622,15 @@ export const FIB_EXTENSION = fibTool('fib-extension', 'Fib Extension', 3);
 
 // ── measurement & positions ───────────────────────────────────────────────
 
+/** Measurers are tinted by direction, so they read width, dash and opacity but not a colour. */
+const MEASURE_SETTINGS: SettingsSchema = composeSettings([
+  LINE_WIDTH_FIELD, LINE_STYLE_FIELD, OPACITY_FIELD, SHOW_LABELS_FIELD, FONT_FIELDS,
+]);
+
 export const MEASURE: DrawingTool = {
   id: 'measure', name: 'Measure', points: 2,
   defaultStyle: { fill: true, showLabels: true, fillOpacity: 0.14 },
+  settings: MEASURE_SETTINGS,
   draw: (c) => {
     const r = rectOf(c.pts[0], c.pts[1]);
     const d = c.rc.dpr;
@@ -563,7 +697,7 @@ export const MEASURE: DrawingTool = {
 };
 
 /**
- * Long / short position calculator — entry, target, stop.
+ * Long / short position calculator: entry, target, stop.
  *
  * One click places the whole thing at a 1:1 reward:risk and every anchor stays
  * draggable, so the tool opens with something to adjust rather than asking for
@@ -573,6 +707,7 @@ function positionTool(id: string, name: string, long: boolean): DrawingTool {
   return {
     id, name, points: 1,
     defaultStyle: { showLabels: true, fillOpacity: 0.13, accountSize: 100000, risk: 1 },
+    settings: composeSettings([LINE_FIELDS, OPACITY_FIELD, SHOW_LABELS_FIELD, POSITION_FIELDS, FONT_FIELDS]),
     expand: (clicked, ctx) => {
       const p = clicked[0];
       // 1% of price gives a 1:1 box that reads sensibly on any instrument; the
@@ -618,7 +753,7 @@ function positionTool(id: string, name: string, long: boolean): DrawingTool {
       const risk = Math.abs(entry.price - stop.price);
       const reward = Math.abs(target.price - entry.price);
       const rr = risk > 0 ? reward / risk : 0;
-      // Position size from risk budget ÷ stop distance — the number a trader
+      // Position size from risk budget over stop distance: the number a trader
       // actually wants off this tool.
       const account = c.style.accountSize ?? 0;
       const riskPct = c.style.risk ?? 0;
@@ -627,7 +762,7 @@ function positionTool(id: string, name: string, long: boolean): DrawingTool {
         (entry.price !== 0 ? (delta / entry.price) * 100 : 0).toFixed(3);
       const cash = (delta: number): string => (qty > 0 ? `, Amount: ${grouped(qty * delta)}` : '');
       const cx = (x0 + x1) / 2;
-      // Each readout hugs its own line, on the outside of the box — the target
+      // Each readout hugs its own line, on the outside of the box: the target
       // chip sits past the target line whichever side of entry it landed on, so
       // it reads the same for a long and an inverted-drag short.
       chip(c, [`Target: ${c.formatPrice(reward)} (${pctOf(reward)}%)${cash(reward)}`],
@@ -635,7 +770,7 @@ function positionTool(id: string, name: string, long: boolean): DrawingTool {
       chip(c, [`Stop: ${c.formatPrice(risk)} (${pctOf(risk)}%)${cash(risk)}`],
         cx, yS, DOWN_TINT, { align: 'center', place: yS >= yE ? 'below' : 'above' });
       chip(c, [
-        `${long ? 'Long' : 'Short'} · Qty: ${qty > 0 ? grouped(qty) : '—'}`,
+        `${long ? 'Long' : 'Short'}, Qty: ${qty > 0 ? grouped(qty) : '-'}`,
         `Risk/reward ratio: ${rr.toFixed(2)}`,
       ], cx, yE, c.rc.theme.background, { align: 'center', place: 'middle' });
     },
@@ -659,23 +794,17 @@ export const SHORT_POSITION = positionTool('short-position', 'Short Position', f
 
 const TEXT_PAD = 5;
 const LINE_GAP = 1.35;
-const DEFAULT_FONT = 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-
-/** The CSS font shorthand for a text drawing's style. */
-function textFont(style: DrawingStyle, sizePx: number): string {
-  const weight = style.fontWeight === 'bold' ? '700 ' : '';
-  const italic = style.fontStyle === 'italic' ? 'italic ' : '';
-  return `${italic}${weight}${sizePx}px ${style.fontFamily ?? DEFAULT_FONT}`;
-}
+/** The text tool's size when the block sets none. */
+const TEXT_SIZE = 14;
 
 /**
  * Split into rendered lines: honour explicit `\n` always, and soft-wrap each
- * paragraph at `wrapWidth` when `wrap` is on. Measured with the *live* context
+ * paragraph at `maxWidth` when `wrap` is on. Measured with the *live* context
  * so the wrap matches the font actually being drawn.
  */
-function textLines(ctx: CanvasRenderingContext2D, style: DrawingStyle, maxWidth: number): string[] {
-  const paragraphs = (style.text ?? '').split('\n');
-  if (style.wrap !== true) return paragraphs;
+function textLines(ctx: CanvasRenderingContext2D, t: DrawingText, value: string, maxWidth: number): string[] {
+  const paragraphs = value.split('\n');
+  if (t.wrap !== true) return paragraphs;
   const out: string[] = [];
   for (const para of paragraphs) {
     const words = para.split(/\s+/).filter((w) => w !== '');
@@ -691,16 +820,17 @@ function textLines(ctx: CanvasRenderingContext2D, style: DrawingStyle, maxWidth:
   return out;
 }
 
-/** Measured box of a text drawing, in media px, anchored at its top-left. */
+/** Measured box of a text drawing, in the context's px, anchored at its top-left. */
 function textBox(
   ctx: CanvasRenderingContext2D,
-  style: DrawingStyle,
+  t: DrawingText,
+  value: string,
   dpr: number,
 ): { lines: string[]; width: number; height: number; lineHeight: number } {
-  const size = (style.fontSize ?? 13) * dpr;
-  ctx.font = textFont(style, size);
-  const maxWidth = (style.wrapWidth ?? 220) * dpr;
-  const lines = textLines(ctx, style, maxWidth);
+  const size = (t.fontSize ?? TEXT_SIZE) * dpr;
+  ctx.font = fontOf(t, size);
+  const maxWidth = (t.wrapWidth ?? 220) * dpr;
+  const lines = textLines(ctx, t, value, maxWidth);
   let width = 0;
   for (const l of lines) width = Math.max(width, ctx.measureText(l).width);
   const lineHeight = size * LINE_GAP;
@@ -712,44 +842,49 @@ function textBox(
   };
 }
 
-
 /**
- * Draw a shape's attached label. Shapes carry an optional `text` that renders
- * inside (or just above) their bounds, with its own colour, font, and
- * alignment — the outline colour and the label colour are different decisions.
+ * Draw a shape's attached label. Shapes carry an optional text block that
+ * renders inside (or just above) their bounds, with its own colour, font and
+ * alignment: the outline colour and the label colour are different decisions.
+ * `align` and `valign` are the shape's own defaults for when the block sets
+ * neither; a rectangle labels its corner, an ellipse its middle.
  */
-function shapeLabel(c: DrawContext, x0: number, y0: number, x1: number, y1: number): void {
+function shapeLabel(
+  c: DrawContext,
+  r: { x0: number; y0: number; x1: number; y1: number },
+  align: 'left' | 'center' | 'right' = 'left',
+  valign: 'top' | 'middle' | 'bottom' = 'top',
+): void {
   const { ctx, rc, style } = c;
-  const text = style.text;
-  if (text === undefined || text === '') return;
+  const t = textOf(c.drawing);
+  if (t.value === '') return;
   const d = rc.dpr;
-  const size = (style.fontSize ?? 14) * d;
+  const size = (t.fontSize ?? TEXT_SIZE) * d;
   const pad = 6 * d;
   ctx.save();
   ctx.setLineDash([]);
-  ctx.font = textFont(style, size);
-  ctx.fillStyle = style.fontColor ?? style.color;
+  ctx.font = fontOf(t, size);
+  ctx.fillStyle = t.color ?? style.color;
   ctx.textBaseline = 'top';
 
-  const lines = style.wrap === true
-    ? textLines(ctx, style, Math.max(20 * d, x1 - x0 - pad * 2))
-    : text.split('\n');
+  // A shape's label wraps to the shape, not to a width of its own.
+  const lines = textLines(ctx, t, t.value, Math.max(20 * d, r.x1 - r.x0 - pad * 2));
   const lineHeight = size * LINE_GAP;
   const blockH = lines.length * lineHeight;
 
-  const align = style.textAlign ?? 'left';
-  ctx.textAlign = align;
-  const tx = align === 'center' ? (x0 + x1) / 2 : align === 'right' ? x1 - pad : x0 + pad;
+  const a = t.align ?? align;
+  ctx.textAlign = a;
+  const tx = a === 'center' ? (r.x0 + r.x1) / 2 : a === 'right' ? r.x1 - pad : r.x0 + pad;
 
   // `outside` lifts the block clear of the shape so it never sits on the outline.
   let ty: number;
-  if (style.textPosition === 'outside') {
-    ty = y0 - blockH - pad;
+  if (t.position === 'outside') {
+    ty = r.y0 - blockH - pad;
   } else {
-    const v = style.textVAlign ?? 'top';
-    ty = v === 'middle' ? (y0 + y1 - blockH) / 2
-      : v === 'bottom' ? y1 - blockH - pad
-      : y0 + pad;
+    const v = t.valign ?? valign;
+    ty = v === 'middle' ? (r.y0 + r.y1 - blockH) / 2
+      : v === 'bottom' ? r.y1 - blockH - pad
+      : r.y0 + pad;
   }
   for (const line of lines) {
     ctx.fillText(line, tx, ty);
@@ -760,42 +895,44 @@ function shapeLabel(c: DrawContext, x0: number, y0: number, x1: number, y1: numb
 
 export const TEXT: DrawingTool = {
   id: 'text', name: 'Text', points: 1,
-  defaultStyle: {
-    text: 'Text', fontSize: 14, fontWeight: 'normal', fontStyle: 'normal',
-    background: false, backgroundOpacity: 1, border: false, wrap: false,
-    wrapWidth: 220, textAlign: 'left',
-  },
+  defaultText: { value: 'Text', fontSize: TEXT_SIZE },
+  settings: composeSettings([TEXT_FIELDS], { textIsContent: true }),
   draw: (c) => {
     const { ctx, rc, style } = c;
     const d = rc.dpr;
-    const box = textBox(ctx, style, d);
+    const t = textOf(c.drawing);
+    const box = textBox(ctx, t, contentOf(c.drawing, 'Text'), d);
     const x = c.pts[0].x;
-    const y = c.pts[0].y;
+    // The anchor is the box's top, middle or bottom edge: `bottom` is how a
+    // note sits above a bar instead of covering it.
+    const v = t.valign ?? 'top';
+    const y = v === 'middle' ? c.pts[0].y - box.height / 2
+      : v === 'bottom' ? c.pts[0].y - box.height
+      : c.pts[0].y;
 
     ctx.save();
     ctx.setLineDash([]);
-    if (style.background === true) {
-      ctx.globalAlpha = style.backgroundOpacity ?? 1;
-      ctx.fillStyle = style.backgroundColor ?? rc.theme.background;
+    if (t.background === true) {
+      ctx.globalAlpha = t.backgroundOpacity ?? 1;
+      ctx.fillStyle = t.backgroundColor ?? rc.theme.background;
       ctx.beginPath();
       ctx.roundRect(x, y, box.width, box.height, 4 * d);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
-    if (style.border === true) {
-      ctx.strokeStyle = style.borderColor ?? style.color;
+    if (t.border === true) {
+      ctx.strokeStyle = t.borderColor ?? style.color;
       ctx.lineWidth = Math.max(1, style.lineWidth * d);
       ctx.beginPath();
       ctx.roundRect(x, y, box.width, box.height, 4 * d);
       ctx.stroke();
     }
 
-    ctx.font = textFont(style, (style.fontSize ?? 13) * d);
-    ctx.fillStyle = style.color;
+    ctx.font = fontOf(t, (t.fontSize ?? TEXT_SIZE) * d);
+    ctx.fillStyle = t.color ?? style.color;
     ctx.textBaseline = 'top';
-    const align = style.textAlign ?? 'left';
+    const align = t.align ?? 'left';
     ctx.textAlign = align;
-    const inner = box.width - TEXT_PAD * 2 * d;
     const tx = align === 'center' ? x + box.width / 2
       : align === 'right' ? x + box.width - TEXT_PAD * d
       : x + TEXT_PAD * d;
@@ -804,25 +941,27 @@ export const TEXT: DrawingTool = {
       ctx.fillText(line, tx, ty);
       ty += box.lineHeight;
     }
-    void inner;
     ctx.restore();
   },
   distance: (x, y, h) => {
     // Measure with a throwaway 2D context so the hit box matches what is drawn
     // (wrapping and font metrics decide the real size, not a character count).
-    const style = h.drawing.style;
-    const size = style.fontSize ?? 13;
+    const t = textOf(h.drawing);
+    const value = contentOf(h.drawing, 'Text');
+    const size = t.fontSize ?? TEXT_SIZE;
     const p = h.pts[0];
     const probe = measureContext();
     const box = probe === null
-      ? { width: (style.text ?? '').length * size * 0.6 + 10, height: size * LINE_GAP + 10 }
-      : textBox(probe, style, 1);
+      ? { width: value.length * size * 0.6 + 10, height: size * LINE_GAP + 10 }
+      : textBox(probe, t, value, 1);
+    const v = t.valign ?? 'top';
+    const top = v === 'middle' ? p.y - box.height / 2 : v === 'bottom' ? p.y - box.height : p.y;
     return x >= p.x - 3 && x <= p.x + box.width + 3
-      && y >= p.y - 3 && y <= p.y + box.height + 3 ? 0 : null;
+      && y >= top - 3 && y <= top + box.height + 3 ? 0 : null;
   },
 };
 
-/** A 1×1 offscreen context used only for text measurement. Cached. */
+/** A 1x1 offscreen context used only for text measurement. Cached. */
 let _probe: CanvasRenderingContext2D | null | undefined;
 function measureContext(): CanvasRenderingContext2D | null {
   if (_probe !== undefined) return _probe;
@@ -835,11 +974,12 @@ function measureContext(): CanvasRenderingContext2D | null {
 }
 
 /**
- * Path — click each vertex, double-click to finish, arrowhead on the last leg.
+ * Path: click each vertex, double-click to finish, arrowhead on the last leg.
  * The arrow is what separates it from `polyline`: a path points somewhere.
  */
 export const PATH: DrawingTool = {
   id: 'path', name: 'Path', points: 0,
+  settings: LINE_SETTINGS,
   draw: (c) => {
     if (c.pts.length < 2) return;
     applyStroke(c);
@@ -853,10 +993,11 @@ export const PATH: DrawingTool = {
   distance: (x, y, h) => (h.pts.length < 2 ? null : distToPolyline(x, y, h.pts)),
 };
 
-/** Brush — freehand ink: press, drag, release. */
+/** Brush: freehand ink. Press, drag, release. */
 export const BRUSH: DrawingTool = {
   id: 'brush', name: 'Brush', points: 0, freehand: true,
   defaultStyle: { lineWidth: 2 },
+  settings: LINE_SETTINGS,
   draw: (c) => {
     if (c.pts.length < 2) return;
     applyStroke(c);
@@ -872,13 +1013,14 @@ export const BRUSH: DrawingTool = {
 };
 
 /**
- * Rotated rectangle — anchors 0→1 lay out one edge (and so the rotation), and
- * anchor 2 sets the depth perpendicular to it. An axis-aligned `rectangle`
+ * Rotated rectangle: anchors 0 and 1 lay out one edge (and so the rotation),
+ * and anchor 2 sets the depth perpendicular to it. An axis-aligned `rectangle`
  * cannot follow a trend channel; this can.
  */
 export const ROTATED_RECTANGLE: DrawingTool = {
   id: 'rotated-rectangle', name: 'Rotated Rectangle', points: 3,
   defaultStyle: { fill: true, fillOpacity: 0.12 },
+  settings: SHAPE_SETTINGS,
   draw: (c) => {
     if (c.pts.length < 3) return;
     const corners = rotatedCorners(c.pts[0], c.pts[1], c.pts[2]);
@@ -886,16 +1028,11 @@ export const ROTATED_RECTANGLE: DrawingTool = {
     c.ctx.moveTo(corners[0].x, corners[0].y);
     for (let i = 1; i < 4; i++) c.ctx.lineTo(corners[i].x, corners[i].y);
     c.ctx.closePath();
-    if (c.style.fill === true) {
-      c.ctx.save();
-      c.ctx.globalAlpha = c.style.fillOpacity ?? 0.12;
-      c.ctx.fillStyle = fillStyleOf(c);
-      c.ctx.fill();
-      c.ctx.restore();
-    }
+    withFill(c, () => c.ctx.fill());
     applyStroke(c);
     c.ctx.stroke();
     c.ctx.setLineDash([]);
+    shapeLabel(c, boundsOf(corners), 'center', 'middle');
   },
   distance: (x, y, h) => {
     if (h.pts.length < 3) return null;
@@ -910,14 +1047,14 @@ export const ROTATED_RECTANGLE: DrawingTool = {
 };
 
 /**
- * The four corners of a rotated rectangle: `a`→`b` is one edge, and `c` is
+ * The four corners of a rotated rectangle: `a` to `b` is one edge, and `c` is
  * projected onto the perpendicular to give the depth.
  */
 function rotatedCorners(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint): ScreenPoint[] {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const len = Math.hypot(dx, dy) || 1;
-  // Unit normal to the a→b edge; the signed projection of `c` onto it is depth.
+  // Unit normal to the a-b edge; the signed projection of `c` onto it is depth.
   const nx = -dy / len;
   const ny = dx / len;
   const depth = (c.x - b.x) * nx + (c.y - b.y) * ny;
@@ -940,12 +1077,13 @@ function pointInPolygon(x: number, y: number, poly: readonly ScreenPoint[]): boo
 }
 
 /**
- * Double curve — an S through three anchors. `curve` bends one way off a single
+ * Double curve: an S through three anchors. `curve` bends one way off a single
  * control; this mirrors that control about the midpoint so the second half bends
  * back, which is the shape a rounded top-then-bottom actually needs.
  */
 export const DOUBLE_CURVE: DrawingTool = {
   id: 'double-curve', name: 'Double Curve', points: 3,
+  settings: LINE_SETTINGS,
   draw: (c) => {
     if (c.pts.length < 3) return;
     const [a, mid, b] = c.pts;
@@ -989,12 +1127,13 @@ function sampleCubic(a: ScreenPoint, c1: ScreenPoint, c2: ScreenPoint, b: Screen
 const CYCLE_REPEATS = 12;
 
 /**
- * Cyclic lines — vertical lines repeating at the interval the two anchors set,
+ * Cyclic lines: vertical lines repeating at the interval the two anchors set,
  * for reading a rhythm forward off a measured swing.
  */
 export const CYCLIC_LINES: DrawingTool = {
   id: 'cyclic-lines', name: 'Cyclic Lines', points: 2,
   defaultStyle: { lineStyle: 'dashed' },
+  settings: LINE_SETTINGS,
   draw: (c) => {
     const [a, b] = c.pts;
     const step = b.x - a.x;
@@ -1024,11 +1163,12 @@ export const CYCLIC_LINES: DrawingTool = {
 };
 
 /**
- * Time cycles — semicircles of the anchors' width repeating along the axis, the
+ * Time cycles: semicircles of the anchors' width repeating along the axis, the
  * classic cycle-projection overlay.
  */
 export const TIME_CYCLES: DrawingTool = {
   id: 'time-cycles', name: 'Time Cycles', points: 2,
+  settings: LINE_SETTINGS,
   draw: (c) => {
     const [a, b] = c.pts;
     const step = b.x - a.x;
@@ -1062,11 +1202,12 @@ export const TIME_CYCLES: DrawingTool = {
 };
 
 /**
- * Sine line — a full wave between the anchors: the horizontal span is one
+ * Sine line: a full wave between the anchors. The horizontal span is one
  * period, the vertical offset its amplitude.
  */
 export const SINE_LINE: DrawingTool = {
   id: 'sine-line', name: 'Sine Line', points: 2,
+  settings: LINE_SETTINGS,
   draw: (c) => {
     const pts = sinePoints(c.pts[0], c.pts[1]);
     if (pts === null) return;
@@ -1099,25 +1240,27 @@ function sinePoints(a: ScreenPoint, b: ScreenPoint): ScreenPoint[] | null {
 
 // ── notes & marks ─────────────────────────────────────────────────────────
 
+/** The bubble marks share a colour, their content and a face; nothing else applies. */
+const BUBBLE_SETTINGS: SettingsSchema = composeSettings([COLOR_FIELD, TEXT_VALUE_FIELD, FONT_FIELDS], { textIsContent: true });
+
 /**
- * Price label — a pill of the anchored price with a tail pointing at the bar.
+ * Price label: a pill of the anchored price with a tail pointing at the bar.
  * Reads its value off the anchor, so dragging it re-reads rather than going
- * stale the way a typed-in `text` would.
+ * stale the way a typed-in text would. Text, when given, replaces the price.
  */
 export const PRICE_LABEL: DrawingTool = {
   id: 'price-label', name: 'Price Label', points: 1,
-  defaultStyle: { fontSize: 12 },
+  settings: composeSettings([COLOR_FIELD, { ...TEXT_VALUE_FIELD, label: 'Text (blank shows the price)' }, FONT_FIELDS]),
   draw: (c) => {
     const p = c.pts[0];
     const d = c.rc.dpr;
-    const text = c.style.text !== undefined && c.style.text !== ''
-      ? c.style.text : c.formatPrice(c.drawing.points[0].price);
-    const box = calloutBox(c, [text], p.x + 18 * d, p.y - 30 * d);
+    const text = contentOf(c.drawing, c.formatPrice(c.drawing.points[0].price));
+    const box = calloutBox(c, [text], p.x + 18 * d, p.y - 30 * d, 12);
     calloutTail(c, box, p, c.style.color);
-    calloutText(c, box, [text], c.style.color);
+    calloutText(c, box, [text], c.style.color, 12);
   },
   distance: (x, y, h) => {
-    // The anchor plus a generous box to its upper right — measuring the real
+    // The anchor plus a generous box to its upper right: measuring the real
     // text needs a context the hit path does not have.
     const p = h.pts[0];
     const w = 64;
@@ -1130,19 +1273,20 @@ export const PRICE_LABEL: DrawingTool = {
 };
 
 /**
- * Callout — a text bubble on its own anchor with a tail back to the point it
+ * Callout: a text bubble on its own anchor with a tail back to the point it
  * annotates, so the note can sit clear of the price action it refers to.
  */
 export const CALLOUT: DrawingTool = {
   id: 'callout', name: 'Callout', points: 2,
-  defaultStyle: { fontSize: 12, text: 'Note' },
+  defaultText: { value: 'Note', fontSize: 12 },
+  settings: BUBBLE_SETTINGS,
   draw: (c) => {
     if (c.pts.length < 2) return;
     const [target, seat] = c.pts;
-    const lines = (c.style.text ?? 'Note').split('\n');
-    const box = calloutBox(c, lines, seat.x, seat.y);
+    const lines = contentOf(c.drawing, 'Note').split('\n');
+    const box = calloutBox(c, lines, seat.x, seat.y, 12);
     calloutTail(c, box, target, c.style.color);
-    calloutText(c, box, lines, c.style.color);
+    calloutText(c, box, lines, c.style.color, 12);
   },
   distance: (x, y, h) => {
     if (h.pts.length < 2) return null;
@@ -1155,14 +1299,15 @@ export const CALLOUT: DrawingTool = {
 
 /** Rounded bubble at (x, y) sized to `lines`; returns its device-px box. */
 function calloutBox(
-  c: DrawContext, lines: readonly string[], x: number, y: number,
+  c: DrawContext, lines: readonly string[], x: number, y: number, defaultSize: number,
 ): { x: number; y: number; w: number; h: number } {
   const d = c.rc.dpr;
-  const size = (c.style.fontSize ?? 12) * d;
+  const t = textOf(c.drawing);
+  const size = (t.fontSize ?? defaultSize) * d;
   c.ctx.save();
-  c.ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`;
+  c.ctx.font = fontOf(t, size);
   let textW = 0;
-  for (const t of lines) textW = Math.max(textW, c.ctx.measureText(t).width);
+  for (const s of lines) textW = Math.max(textW, c.ctx.measureText(s).width);
   c.ctx.restore();
   const w = textW + 14 * d;
   const h = size * 1.4 * lines.length + 8 * d;
@@ -1177,8 +1322,8 @@ function calloutTail(
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
   const ang = Math.atan2(tip.y - cy, tip.x - cx);
-  // Two base points either side of the bubble→tip direction, so the tail always
-  // leaves from the edge facing the point it annotates.
+  // Two base points either side of the bubble-to-tip direction, so the tail
+  // always leaves from the edge facing the point it annotates.
   const base = 5 * d;
   const bx = cx + Math.cos(ang) * (box.w / 2 - base);
   const by = cy + Math.sin(ang) * (box.h / 2 - base);
@@ -1201,28 +1346,34 @@ function calloutTail(
   c.ctx.restore();
 }
 
-/** Bubble text, centred, in the contrasting colour. */
+/** Bubble text, centred, in the block's colour or the one that contrasts with the bubble. */
 function calloutText(
-  c: DrawContext, box: { x: number; y: number; w: number; h: number }, lines: readonly string[], color: string,
+  c: DrawContext, box: { x: number; y: number; w: number; h: number },
+  lines: readonly string[], color: string, defaultSize: number,
 ): void {
   const d = c.rc.dpr;
-  const size = (c.style.fontSize ?? 12) * d;
+  const t = textOf(c.drawing);
+  const size = (t.fontSize ?? defaultSize) * d;
   c.ctx.save();
   c.ctx.setLineDash([]);
-  c.ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`;
+  c.ctx.font = fontOf(t, size);
   c.ctx.textAlign = 'center';
   c.ctx.textBaseline = 'middle';
-  c.ctx.fillStyle = c.style.fontColor ?? contrastText(color);
+  c.ctx.fillStyle = t.color ?? contrastText(color);
   const lh = size * 1.4;
   const top = box.y + box.h / 2 - (lh * (lines.length - 1)) / 2;
   for (let i = 0; i < lines.length; i++) c.ctx.fillText(lines[i], box.x + box.w / 2, top + lh * i);
   c.ctx.restore();
 }
 
-/** Flag mark — a pennant on a pole at one anchor, for tagging a bar. */
+/** A one-anchor glyph: outline plus an optional fill, nothing else applies. */
+const MARK_SETTINGS: SettingsSchema = composeSettings([LINE_FIELDS, FILL_FIELDS]);
+
+/** Flag mark: a pennant on a pole at one anchor, for tagging a bar. */
 export const FLAG_MARK: DrawingTool = {
   id: 'flag-mark', name: 'Flag Mark', points: 1,
   defaultStyle: { fill: true, fillOpacity: 0.95 },
+  settings: MARK_SETTINGS,
   draw: (c) => {
     const p = c.pts[0];
     const d = c.rc.dpr;
@@ -1243,11 +1394,16 @@ export const FLAG_MARK: DrawingTool = {
     c.ctx.lineTo(p.x + flagW, p.y - pole + flagH * 0.72);
     c.ctx.lineTo(p.x, p.y - pole + flagH);
     c.ctx.closePath();
-    c.ctx.save();
-    c.ctx.globalAlpha = c.style.fillOpacity ?? 0.95;
-    c.ctx.fillStyle = fillStyleOf(c);
-    c.ctx.fill();
-    c.ctx.restore();
+    // The pennant is filled unless asked not to be: an outlined flag is a
+    // legitimate, quieter mark.
+    if (c.style.fill !== false) {
+      c.ctx.save();
+      c.ctx.globalAlpha = c.style.fillOpacity ?? 0.95;
+      c.ctx.fillStyle = fillStyleOf(c);
+      c.ctx.fill();
+      c.ctx.restore();
+    }
+    c.ctx.stroke();
   },
   distance: (x, y, h) => {
     const p = h.pts[0];
@@ -1265,10 +1421,12 @@ export const FLAG_MARK: DrawingTool = {
  * plate is shaped, not in anything structural.
  */
 
-/** Text for an annotation, falling back to the tool's own default label. */
-function noteLines(c: DrawContext, fallback: string): string[] {
-  const t = c.style.text;
-  return (t === undefined || t === '' ? fallback : t).split('\n');
+/** How an annotation's plate is drawn when its text block sets nothing. */
+interface PlateDefaults {
+  /** Font size in media px. */
+  size: number;
+  /** Plate opacity, 0..1. */
+  opacity: number;
 }
 
 /**
@@ -1279,16 +1437,22 @@ function noteLines(c: DrawContext, fallback: string): string[] {
  * text is typed, while a centred one creeps upward a half-line at a time.
  */
 function notePlate(
-  c: DrawContext, lines: readonly string[], x: number, y: number,
+  c: DrawContext, lines: readonly string[], x: number, y: number, def: PlateDefaults,
 ): { x: number; y: number; w: number; h: number } {
   const d = c.rc.dpr;
-  const size = (c.style.fontSize ?? 12) * d;
+  const t = textOf(c.drawing);
+  const size = (t.fontSize ?? def.size) * d;
   c.ctx.save();
-  c.ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`;
+  c.ctx.font = fontOf(t, size);
   let textW = 0;
-  for (const t of lines) textW = Math.max(textW, c.ctx.measureText(t).width);
+  for (const s of lines) textW = Math.max(textW, c.ctx.measureText(s).width);
   c.ctx.restore();
   return { x, y, w: textW + 16 * d, h: size * 1.45 * lines.length + 10 * d };
+}
+
+/** The plate's colour: the text block's own, else the drawing's. */
+function plateColor(c: DrawContext): string {
+  return c.drawing.text?.backgroundColor ?? c.style.color;
 }
 
 /** Fill the plate, stroke its border, and lay the lines inside it. */
@@ -1296,28 +1460,30 @@ function paintPlate(
   c: DrawContext,
   box: { x: number; y: number; w: number; h: number },
   lines: readonly string[],
+  def: PlateDefaults,
   radius = 6,
 ): void {
   const d = c.rc.dpr;
-  const size = (c.style.fontSize ?? 12) * d;
+  const t = textOf(c.drawing);
+  const size = (t.fontSize ?? def.size) * d;
+  const bg = plateColor(c);
   c.ctx.save();
   c.ctx.setLineDash([]);
-  c.ctx.globalAlpha = c.style.fillOpacity ?? 1;
-  c.ctx.fillStyle = c.style.backgroundColor ?? c.style.color;
+  c.ctx.globalAlpha = t.backgroundOpacity ?? def.opacity;
+  c.ctx.fillStyle = bg;
   c.ctx.beginPath();
   roundRectPath(c.ctx, box.x, box.y, box.w, box.h, radius * d);
   c.ctx.fill();
   c.ctx.globalAlpha = 1;
-  if (c.style.border === true) {
-    c.ctx.strokeStyle = c.style.borderColor ?? c.style.color;
+  if (t.border === true) {
+    c.ctx.strokeStyle = t.borderColor ?? c.style.color;
     c.ctx.lineWidth = Math.max(1, c.style.lineWidth * d);
     c.ctx.stroke();
   }
-  c.ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`;
+  c.ctx.font = fontOf(t, size);
   c.ctx.textAlign = 'left';
   c.ctx.textBaseline = 'middle';
-  c.ctx.fillStyle = c.style.fontColor
-    ?? contrastText(c.style.backgroundColor ?? c.style.color);
+  c.ctx.fillStyle = t.color ?? contrastText(bg);
   const lh = size * 1.45;
   const top = box.y + box.h / 2 - (lh * (lines.length - 1)) / 2;
   for (let i = 0; i < lines.length; i++) {
@@ -1340,18 +1506,24 @@ function insidePlate(
  * fixed box is the honest approximation: it is generous enough that a plate is
  * always grabbable, and the anchor dot below catches the rest.
  */
-function notePlateGuess(
-  style: DrawingStyle, lines: number,
-): { w: number; h: number } {
-  const size = style.fontSize ?? 12;
+function notePlateGuess(d: Drawing, lines: number, def: PlateDefaults): { w: number; h: number } {
+  const size = d.text?.fontSize ?? def.size;
   return { w: 120, h: size * 1.45 * Math.max(1, lines) + 10 };
 }
 
-const linesOf = (style: DrawingStyle, fallback: string): number =>
-  ((style.text === undefined || style.text === '' ? fallback : style.text).split('\n')).length;
+const linesOf = (d: Drawing, fallback: string): number => contentOf(d, fallback).split('\n').length;
+
+/** A plate on a stem: the stem's colour and width apply, and the plate's text surface. */
+const STEMMED_NOTE_SETTINGS: SettingsSchema = composeSettings(
+  [COLOR_FIELD, LINE_WIDTH_FIELD, PLATE_TEXT_FIELDS], { textIsContent: true },
+);
+/** A plate with a tail: only the colour applies outside the text surface. */
+const TAILED_NOTE_SETTINGS: SettingsSchema = composeSettings([COLOR_FIELD, PLATE_TEXT_FIELDS], { textIsContent: true });
+
+const NOTE_PLATE: PlateDefaults = { size: 12, opacity: 0.95 };
 
 /**
- * Note — a pin at the bar with its text to the upper right.
+ * Note: a pin at the bar with its text to the upper right.
  *
  * The pin is the point being annotated and the plate is the annotation, which
  * is why the two are drawn as separate marks joined by a stem rather than as
@@ -1360,12 +1532,13 @@ const linesOf = (style: DrawingStyle, fallback: string): number =>
  */
 export const NOTE: DrawingTool = {
   id: 'note', name: 'Note', points: 1,
-  defaultStyle: { text: 'Note', fontSize: 12, fillOpacity: 0.95 },
+  defaultText: { value: 'Note', fontSize: NOTE_PLATE.size },
+  settings: STEMMED_NOTE_SETTINGS,
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.pts[0];
-    const lines = noteLines(c, 'Note');
-    const box = notePlate(c, lines, p.x + 16 * d, p.y - 34 * d);
+    const lines = contentOf(c.drawing, 'Note').split('\n');
+    const box = notePlate(c, lines, p.x + 16 * d, p.y - 34 * d, NOTE_PLATE);
     c.ctx.save();
     c.ctx.setLineDash([]);
     c.ctx.strokeStyle = c.style.color;
@@ -1380,19 +1553,21 @@ export const NOTE: DrawingTool = {
     c.ctx.arc(p.x, p.y, 3.5 * d, 0, Math.PI * 2);
     c.ctx.fill();
     c.ctx.restore();
-    paintPlate(c, box, lines);
+    paintPlate(c, box, lines, NOTE_PLATE);
   },
   distance: (x, y, h) => {
     const p = h.pts[0];
-    const g = notePlateGuess(h.drawing.style, linesOf(h.drawing.style, 'Note'));
+    const g = notePlateGuess(h.drawing, linesOf(h.drawing, 'Note'), NOTE_PLATE);
     const hit = insidePlate(x, y, p.x + 16, p.y - 34, g.w, g.h);
     if (hit !== null) return hit;
     return Math.hypot(x - p.x, y - p.y) <= 8 ? 0 : null;
   },
 };
 
+const BALLOON_PLATE: PlateDefaults = { size: 12, opacity: 0.95 };
+
 /**
- * Balloon — a speech bubble sitting above its anchor, tail pointing down.
+ * Balloon: a speech bubble sitting above its anchor, tail pointing down.
  *
  * One anchor rather than the callout's two: a balloon is for saying something
  * *about this bar*, so letting the bubble be dragged away from what it labels
@@ -1400,17 +1575,18 @@ export const NOTE: DrawingTool = {
  */
 export const BALLOON: DrawingTool = {
   id: 'balloon', name: 'Balloon', points: 1,
-  defaultStyle: { text: 'Balloon', fontSize: 12, fillOpacity: 0.95 },
+  defaultText: { value: 'Balloon', fontSize: BALLOON_PLATE.size },
+  settings: TAILED_NOTE_SETTINGS,
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.pts[0];
-    const lines = noteLines(c, 'Balloon');
-    const size = notePlate(c, lines, 0, 0);
+    const lines = contentOf(c.drawing, 'Balloon').split('\n');
+    const size = notePlate(c, lines, 0, 0, BALLOON_PLATE);
     const box = { x: p.x - size.w / 2, y: p.y - size.h - 12 * d, w: size.w, h: size.h };
     c.ctx.save();
     c.ctx.setLineDash([]);
-    c.ctx.globalAlpha = c.style.fillOpacity ?? 0.95;
-    c.ctx.fillStyle = c.style.backgroundColor ?? c.style.color;
+    c.ctx.globalAlpha = c.drawing.text?.backgroundOpacity ?? BALLOON_PLATE.opacity;
+    c.ctx.fillStyle = plateColor(c);
     c.ctx.beginPath();
     c.ctx.moveTo(p.x, p.y);
     c.ctx.lineTo(p.x - 6 * d, box.y + box.h);
@@ -1418,19 +1594,21 @@ export const BALLOON: DrawingTool = {
     c.ctx.closePath();
     c.ctx.fill();
     c.ctx.restore();
-    paintPlate(c, box, lines, 8);
+    paintPlate(c, box, lines, BALLOON_PLATE, 8);
   },
   distance: (x, y, h) => {
     const p = h.pts[0];
-    const g = notePlateGuess(h.drawing.style, linesOf(h.drawing.style, 'Balloon'));
+    const g = notePlateGuess(h.drawing, linesOf(h.drawing, 'Balloon'), BALLOON_PLATE);
     const hit = insidePlate(x, y, p.x - g.w / 2, p.y - g.h - 12, g.w, g.h);
     if (hit !== null) return hit;
     return Math.hypot(x - p.x, y - p.y) <= 8 ? 0 : null;
   },
 };
 
+const COMMENT_PLATE: PlateDefaults = { size: 11, opacity: 0.92 };
+
 /**
- * Comment — a small square-cornered box with a tail off its bottom left.
+ * Comment: a small square-cornered box with a tail off its bottom left.
  *
  * Deliberately plainer than the balloon: a chart that says something at every
  * other bar needs one of these marks to be quiet, and the shape is the only
@@ -1438,17 +1616,18 @@ export const BALLOON: DrawingTool = {
  */
 export const COMMENT: DrawingTool = {
   id: 'comment', name: 'Comment', points: 1,
-  defaultStyle: { text: 'Comment', fontSize: 11, fillOpacity: 0.92 },
+  defaultText: { value: 'Comment', fontSize: COMMENT_PLATE.size },
+  settings: TAILED_NOTE_SETTINGS,
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.pts[0];
-    const lines = noteLines(c, 'Comment');
-    const size = notePlate(c, lines, 0, 0);
+    const lines = contentOf(c.drawing, 'Comment').split('\n');
+    const size = notePlate(c, lines, 0, 0, COMMENT_PLATE);
     const box = { x: p.x + 8 * d, y: p.y - size.h - 10 * d, w: size.w, h: size.h };
     c.ctx.save();
     c.ctx.setLineDash([]);
-    c.ctx.globalAlpha = c.style.fillOpacity ?? 0.92;
-    c.ctx.fillStyle = c.style.backgroundColor ?? c.style.color;
+    c.ctx.globalAlpha = c.drawing.text?.backgroundOpacity ?? COMMENT_PLATE.opacity;
+    c.ctx.fillStyle = plateColor(c);
     c.ctx.beginPath();
     c.ctx.moveTo(p.x, p.y);
     c.ctx.lineTo(box.x, box.y + box.h - 5 * d);
@@ -1456,19 +1635,21 @@ export const COMMENT: DrawingTool = {
     c.ctx.closePath();
     c.ctx.fill();
     c.ctx.restore();
-    paintPlate(c, box, lines, 3);
+    paintPlate(c, box, lines, COMMENT_PLATE, 3);
   },
   distance: (x, y, h) => {
     const p = h.pts[0];
-    const g = notePlateGuess(h.drawing.style, linesOf(h.drawing.style, 'Comment'));
+    const g = notePlateGuess(h.drawing, linesOf(h.drawing, 'Comment'), COMMENT_PLATE);
     const hit = insidePlate(x, y, p.x + 8, p.y - g.h - 10, g.w, g.h);
     if (hit !== null) return hit;
     return Math.hypot(x - p.x, y - p.y) <= 8 ? 0 : null;
   },
 };
 
+const SIGNPOST_PLATE: PlateDefaults = { size: 11, opacity: 0.95 };
+
 /**
- * Signpost — a post standing on the bar with its plate at the top.
+ * Signpost: a post standing on the bar with its plate at the top.
  *
  * The one annotation anchored to *time* rather than to a level: the post is
  * vertical so the plate can clear the price action entirely while the foot
@@ -1477,13 +1658,14 @@ export const COMMENT: DrawingTool = {
  */
 export const SIGNPOST: DrawingTool = {
   id: 'signpost', name: 'Signpost', points: 1,
-  defaultStyle: { text: 'Event', fontSize: 11, fillOpacity: 0.95 },
+  defaultText: { value: 'Event', fontSize: SIGNPOST_PLATE.size },
+  settings: STEMMED_NOTE_SETTINGS,
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.pts[0];
     const post = 34 * d;
-    const lines = noteLines(c, 'Event');
-    const size = notePlate(c, lines, 0, 0);
+    const lines = contentOf(c.drawing, 'Event').split('\n');
+    const size = notePlate(c, lines, 0, 0, SIGNPOST_PLATE);
     c.ctx.save();
     c.ctx.setLineDash([]);
     c.ctx.strokeStyle = c.style.color;
@@ -1497,11 +1679,11 @@ export const SIGNPOST: DrawingTool = {
     c.ctx.arc(p.x, p.y, 3 * d, 0, Math.PI * 2);
     c.ctx.fill();
     c.ctx.restore();
-    paintPlate(c, { x: p.x - size.w / 2, y: p.y - post - size.h, w: size.w, h: size.h }, lines, 4);
+    paintPlate(c, { x: p.x - size.w / 2, y: p.y - post - size.h, w: size.w, h: size.h }, lines, SIGNPOST_PLATE, 4);
   },
   distance: (x, y, h) => {
     const p = h.pts[0];
-    const g = notePlateGuess(h.drawing.style, linesOf(h.drawing.style, 'Event'));
+    const g = notePlateGuess(h.drawing, linesOf(h.drawing, 'Event'), SIGNPOST_PLATE);
     const hit = insidePlate(x, y, p.x - g.w / 2, p.y - 34 - g.h, g.w, g.h);
     if (hit !== null) return hit;
     // The post itself, so a signpost whose plate is off-pane stays grabbable.
@@ -1509,8 +1691,10 @@ export const SIGNPOST: DrawingTool = {
   },
 };
 
+const PRICE_NOTE_PLATE: PlateDefaults = { size: 11, opacity: 0.95 };
+
 /**
- * Price note — the anchored price, with the user's text under it.
+ * Price note: the anchored price, with the user's text under it.
  *
  * The price is read off the anchor rather than typed, so dragging the note
  * re-reads it. A typed price is a number that was true once, which on a chart
@@ -1518,12 +1702,13 @@ export const SIGNPOST: DrawingTool = {
  */
 export const PRICE_NOTE: DrawingTool = {
   id: 'price-note', name: 'Price Note', points: 1,
-  defaultStyle: { text: 'Note', fontSize: 11, fillOpacity: 0.95 },
+  defaultText: { value: 'Note', fontSize: PRICE_NOTE_PLATE.size },
+  settings: STEMMED_NOTE_SETTINGS,
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.pts[0];
-    const lines = [c.formatPrice(c.drawing.points[0].price), ...noteLines(c, 'Note')];
-    const box = notePlate(c, lines, p.x + 14 * d, p.y - 12 * d);
+    const lines = [c.formatPrice(c.drawing.points[0].price), ...contentOf(c.drawing, 'Note').split('\n')];
+    const box = notePlate(c, lines, p.x + 14 * d, p.y - 12 * d, PRICE_NOTE_PLATE);
     c.ctx.save();
     c.ctx.setLineDash([]);
     c.ctx.strokeStyle = c.style.color;
@@ -1533,40 +1718,51 @@ export const PRICE_NOTE: DrawingTool = {
     c.ctx.lineTo(box.x, p.y);
     c.ctx.stroke();
     c.ctx.restore();
-    paintPlate(c, box, lines, 4);
+    paintPlate(c, box, lines, PRICE_NOTE_PLATE, 4);
   },
   distance: (x, y, h) => {
     const p = h.pts[0];
-    const g = notePlateGuess(h.drawing.style, linesOf(h.drawing.style, 'Note') + 1);
+    const g = notePlateGuess(h.drawing, linesOf(h.drawing, 'Note') + 1, PRICE_NOTE_PLATE);
     const hit = insidePlate(x, y, p.x + 14, p.y - 12, g.w, g.h);
     if (hit !== null) return hit;
     return Math.hypot(x - p.x, y - p.y) <= 8 ? 0 : null;
   },
 };
 
+const TABLE_SIZE = 11;
+const TABLE_OPACITY = 0.92;
+
 /**
- * Table — rows of text in a grid, anchored top-left.
+ * Table: rows of text in a grid, anchored top-left.
  *
- * Cells come from `text`: a newline starts a row and a pipe separates columns,
- * so a whole table is one editable string and survives `getState` with no new
- * shape in the drawing model. The first row is drawn as a header because a
- * table on a chart is nearly always labelled.
+ * Cells come from the text: a newline starts a row and a pipe separates
+ * columns, so a whole table is one editable string and survives `getState`
+ * with no new shape in the drawing model. The first row is drawn as a header
+ * because a table on a chart is nearly always labelled.
  */
 export const TABLE: DrawingTool = {
   id: 'table', name: 'Table', points: 1,
-  defaultStyle: {
-    text: 'Level|Price\nEntry|-\nStop|-', fontSize: 11,
-    fillOpacity: 0.92, border: true,
-  },
+  defaultText: { value: 'Level|Price\nEntry|-\nStop|-', fontSize: TABLE_SIZE },
+  settings: composeSettings([
+    COLOR_FIELD,
+    { ...LINE_WIDTH_FIELD, label: 'Border width' },
+    TEXT_VALUE_FIELD,
+    FONT_FIELDS,
+    { path: 'text.backgroundColor', label: 'Background color', kind: 'color', group: 'text' },
+    { path: 'text.backgroundOpacity', label: 'Background opacity', kind: 'opacity', min: 0, max: 1, step: 0.01, group: 'text' },
+    { path: 'text.border', label: 'Border', kind: 'boolean', group: 'text' },
+    { path: 'text.borderColor', label: 'Border color', kind: 'color', group: 'text' },
+  ], { textIsContent: true }),
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.pts[0];
-    const rows = tableRows(c.style);
-    const size = (c.style.fontSize ?? 11) * d;
+    const t = textOf(c.drawing);
+    const rows = tableRows(c.drawing);
+    const size = (t.fontSize ?? TABLE_SIZE) * d;
     const pad = 7 * d;
     const rowH = size * 1.7;
     c.ctx.save();
-    c.ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`;
+    c.ctx.font = fontOf(t, size);
     // Column widths are the widest cell in each column, so a table with one
     // long label does not stretch every other column to match it.
     const cols = Math.max(...rows.map((r) => r.length));
@@ -1579,14 +1775,16 @@ export const TABLE: DrawingTool = {
     const total = widths.reduce((a, b) => a + b, 0);
     const h = rowH * rows.length;
     c.ctx.setLineDash([]);
-    c.ctx.globalAlpha = c.style.fillOpacity ?? 0.92;
-    c.ctx.fillStyle = c.style.backgroundColor ?? c.rc.theme.background;
+    c.ctx.globalAlpha = t.backgroundOpacity ?? TABLE_OPACITY;
+    c.ctx.fillStyle = t.backgroundColor ?? c.rc.theme.background;
     c.ctx.beginPath();
     roundRectPath(c.ctx, p.x, p.y, total, h, 4 * d);
     c.ctx.fill();
     c.ctx.globalAlpha = 1;
-    if (c.style.border !== false) {
-      c.ctx.strokeStyle = c.style.borderColor ?? c.style.color;
+    // A table is bordered unless told otherwise: the grid is what makes the
+    // numbers read as a table rather than as loose text.
+    if (t.border !== false) {
+      c.ctx.strokeStyle = t.borderColor ?? c.style.color;
       c.ctx.lineWidth = Math.max(1, c.style.lineWidth * d);
       c.ctx.stroke();
       // Rules between rows and columns, drawn faintly: the grid should organise
@@ -1608,11 +1806,13 @@ export const TABLE: DrawingTool = {
     }
     c.ctx.textBaseline = 'middle';
     c.ctx.textAlign = 'left';
+    // The header is a step heavier than the body, and a step heavier again
+    // when the body itself is bold, so it stays the header either way.
+    const headFont = fontOf(t, size, t.bold === true ? '800' : '600');
+    const bodyFont = fontOf(t, size);
     for (let r = 0; r < rows.length; r++) {
-      c.ctx.fillStyle = c.style.fontColor ?? c.style.color;
-      c.ctx.font = r === 0
-        ? `600 ${size}px ui-sans-serif, system-ui, sans-serif`
-        : `${size}px ui-sans-serif, system-ui, sans-serif`;
+      c.ctx.fillStyle = t.color ?? c.style.color;
+      c.ctx.font = r === 0 ? headFont : bodyFont;
       let x = p.x;
       for (let i = 0; i < widths.length; i++) {
         c.ctx.fillText(rows[r][i] ?? '', x + pad, p.y + rowH * r + rowH / 2);
@@ -1623,8 +1823,8 @@ export const TABLE: DrawingTool = {
   },
   distance: (x, y, h) => {
     const p = h.pts[0];
-    const rows = tableRows(h.drawing.style);
-    const size = h.drawing.style.fontSize ?? 11;
+    const rows = tableRows(h.drawing);
+    const size = h.drawing.text?.fontSize ?? TABLE_SIZE;
     // Width cannot be measured without a canvas, so a column-count estimate.
     const cols = Math.max(...rows.map((r) => r.length));
     return insidePlate(x, y, p.x, p.y, cols * 70, size * 1.7 * rows.length);
@@ -1632,30 +1832,29 @@ export const TABLE: DrawingTool = {
 };
 
 /** Rows of cells from the pipe-and-newline encoding. Always at least one cell. */
-function tableRows(style: DrawingStyle): string[][] {
+function tableRows(d: Drawing): string[][] {
   // An empty table is an empty grid, which reads as a rendering fault rather
   // than as a table waiting for content, so it falls back like the rest.
-  const raw = style.text === undefined || style.text === '' ? 'Level|Price' : style.text;
-  return raw.split('\n').map((r) => r.split('|'));
+  return contentOf(d, 'Level|Price').split('\n').map((r) => r.split('|'));
 }
 
-/** Every built-in, in toolbar order. */
 /**
  * Measurers. `measure` reports price *and* time together; these two constrain it
- * to one axis, which is what you want when the other one is noise — sizing a
+ * to one axis, which is what you want when the other one is noise: sizing a
  * retracement without caring how long it took, or counting bars to an event
  * without caring where price went.
  */
 export const PRICE_RANGE: DrawingTool = {
   id: 'price-range', name: 'Price Range', points: 2,
   defaultStyle: { fill: true, showLabels: true, fillOpacity: 0.1 },
+  settings: MEASURE_SETTINGS,
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.drawing.points;
     const chg = p[1].price - p[0].price;
     const pct = p[0].price !== 0 ? (chg / p[0].price) * 100 : 0;
     const up = chg >= 0;
-    const tint = up ? '#26a69a' : '#ef5350';
+    const tint = up ? UP_TINT : DOWN_TINT;
     // Span the drawn x-range so the band reads as a price zone, not a bare line.
     const x0 = Math.min(c.pts[0].x, c.pts[1].x);
     const x1 = Math.max(c.pts[0].x, c.pts[1].x) + (c.pts[0].x === c.pts[1].x ? 60 * d : 0);
@@ -1678,6 +1877,7 @@ export const PRICE_RANGE: DrawingTool = {
     c.ctx.moveTo(mx - 4 * d, y0 + 5 * d * dir); c.ctx.lineTo(mx, y0); c.ctx.lineTo(mx + 4 * d, y0 + 5 * d * dir);
     c.ctx.stroke();
     c.ctx.setLineDash([]);
+    if (c.style.showLabels === false) return;
     const sign = up ? '+' : '';
     label(c, `${sign}${c.formatPrice(chg)}  (${sign}${pct.toFixed(2)}%)`, mx + 6 * d, (y0 + y1) / 2, tint);
   },
@@ -1687,6 +1887,7 @@ export const PRICE_RANGE: DrawingTool = {
 export const DATE_RANGE: DrawingTool = {
   id: 'date-range', name: 'Date Range', points: 2,
   defaultStyle: { fill: true, showLabels: true, fillOpacity: 0.1 },
+  settings: composeSettings([LINE_FIELDS, OPACITY_FIELD, SHOW_LABELS_FIELD, FONT_FIELDS]),
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.drawing.points;
@@ -1710,6 +1911,7 @@ export const DATE_RANGE: DrawingTool = {
     c.ctx.moveTo(x0 + 5 * d * dir, my - 4 * d); c.ctx.lineTo(x0, my); c.ctx.lineTo(x0 + 5 * d * dir, my + 4 * d);
     c.ctx.stroke();
     c.ctx.setLineDash([]);
+    if (c.style.showLabels === false) return;
     // Counted on logical indices, so it matches the gapless axis rather than
     // raw elapsed time (a weekend is not 48 bars).
     const i0 = c.rc.dataLayer.timeToIndexFloat(p[0].time);
@@ -1721,13 +1923,14 @@ export const DATE_RANGE: DrawingTool = {
 };
 
 /**
- * Position forecast — project a move from an anchor. Two anchors give the
+ * Position forecast: project a move from an anchor. Two anchors give the
  * projected leg; the shape extends the same slope past the target as a dashed
  * cone, so the drawing says "if this continues" rather than just marking a line.
  */
 export const FORECAST: DrawingTool = {
   id: 'forecast', name: 'Forecast', points: 2,
   defaultStyle: { fill: true, showLabels: true, fillOpacity: 0.12, lineStyle: 'dashed' },
+  settings: MEASURE_SETTINGS,
   draw: (c) => {
     const d = c.rc.dpr;
     const p = c.drawing.points;
@@ -1735,8 +1938,8 @@ export const FORECAST: DrawingTool = {
     const chg = p[1].price - p[0].price;
     const pct = p[0].price !== 0 ? (chg / p[0].price) * 100 : 0;
     const up = chg >= 0;
-    const tint = up ? '#26a69a' : '#ef5350';
-    // The cone widens with the projected distance — a forecast is less certain
+    const tint = up ? UP_TINT : DOWN_TINT;
+    // The cone widens with the projected distance: a forecast is less certain
     // the further out it runs, and the shape should say so.
     const spread = Math.abs(b.y - a.y) * 0.35 + 6 * d;
     c.ctx.save();
@@ -1767,7 +1970,7 @@ export const FORECAST: DrawingTool = {
     // Projection chip: the move, and what it lands on when.
     chip(c, [
       `${sign}${c.formatPrice(chg)} (${sign}${pct.toFixed(2)}%) in ${humanSpan(p[1].time - p[0].time)}`,
-      `${c.formatPrice(p[1].price)} · ${isoDate(p[1].time)}`,
+      `${c.formatPrice(p[1].price)}, ${isoDate(p[1].time)}`,
     ], b.x, b.y, tint, { align: 'center', place: 'below' });
     // Verdict, once the window has actually elapsed: did price get there? A
     // forecast nobody scores is just a line.
@@ -1796,6 +1999,7 @@ export const FORECAST: DrawingTool = {
 export const CIRCLE: DrawingTool = {
   id: 'circle', name: 'Circle', points: 2,
   defaultStyle: { fill: true },
+  settings: SHAPE_SETTINGS,
   draw: (c) => {
     const [a, b] = c.pts;
     const r = Math.hypot(b.x - a.x, b.y - a.y);
@@ -1805,6 +2009,7 @@ export const CIRCLE: DrawingTool = {
     applyStroke(c);
     c.ctx.stroke();
     c.ctx.setLineDash([]);
+    shapeLabel(c, { x0: a.x - r, y0: a.y - r, x1: a.x + r, y1: a.y + r }, 'center', 'middle');
   },
   distance: (x, y, h) => {
     const [a, b] = h.pts;
@@ -1818,6 +2023,7 @@ export const CIRCLE: DrawingTool = {
 export const TRIANGLE: DrawingTool = {
   id: 'triangle', name: 'Triangle', points: 3,
   defaultStyle: { fill: true },
+  settings: SHAPE_SETTINGS,
   draw: (c) => {
     c.ctx.beginPath();
     c.ctx.moveTo(c.pts[0].x, c.pts[0].y);
@@ -1828,6 +2034,7 @@ export const TRIANGLE: DrawingTool = {
     applyStroke(c);
     c.ctx.stroke();
     c.ctx.setLineDash([]);
+    shapeLabel(c, boundsOf(c.pts.slice(0, 3)), 'center', 'middle');
   },
   distance: (x, y, h) => distToPolyline(x, y, [...h.pts, h.pts[0]]),
 };
@@ -1836,6 +2043,7 @@ export const TRIANGLE: DrawingTool = {
 export const POLYLINE: DrawingTool = {
   id: 'polyline', name: 'Polyline', points: 0,
   defaultStyle: { fill: false },
+  settings: composeSettings([LINE_FIELDS, FILL_FIELDS]),
   draw: (c) => {
     if (c.pts.length < 2) return;
     c.ctx.beginPath();
@@ -1862,9 +2070,10 @@ function quadPoints(a: ScreenPoint, m: ScreenPoint, b: ScreenPoint): ScreenPoint
   return out;
 }
 
-/** Arc through three anchors — the middle one is on the curve, not a handle. */
+/** Arc through three anchors: the middle one is on the curve, not a handle. */
 export const ARC: DrawingTool = {
   id: 'arc', name: 'Arc', points: 3,
+  settings: LINE_SETTINGS,
   draw: (c) => {
     const [a, m, b] = c.pts;
     applyStroke(c);
@@ -1879,9 +2088,10 @@ export const ARC: DrawingTool = {
   distance: (x, y, h) => distToPolyline(x, y, quadPoints(h.pts[0], h.pts[1], h.pts[2])),
 };
 
-/** Quadratic curve — the middle anchor is a control handle, off the curve. */
+/** Quadratic curve: the middle anchor is a control handle, off the curve. */
 export const CURVE: DrawingTool = {
   id: 'curve', name: 'Curve', points: 3,
+  settings: LINE_SETTINGS,
   draw: (c) => {
     const [a, m, b] = c.pts;
     applyStroke(c);
@@ -1912,6 +2122,7 @@ function arrowMarker(
   return {
     id, name, points: 1,
     defaultStyle: { fill: true, fillOpacity: 0.9 },
+    settings: MARK_SETTINGS,
     draw: (c) => {
       const d = c.rc.dpr;
       const { x, y } = c.pts[0];
@@ -1936,20 +2147,22 @@ function arrowMarker(
         c.ctx.lineTo(tipX + h * w, y + w);
         c.ctx.closePath();
       } else {
-      c.ctx.moveTo(x, tipY);
-      c.ctx.lineTo(x - w, tipY + dir * w);
-      c.ctx.lineTo(x - w / 2.4, tipY + dir * w);
-      c.ctx.lineTo(x - w / 2.4, tipY + dir * len);
-      c.ctx.lineTo(x + w / 2.4, tipY + dir * len);
-      c.ctx.lineTo(x + w / 2.4, tipY + dir * w);
-      c.ctx.lineTo(x + w, tipY + dir * w);
-      c.ctx.closePath();
+        c.ctx.moveTo(x, tipY);
+        c.ctx.lineTo(x - w, tipY + dir * w);
+        c.ctx.lineTo(x - w / 2.4, tipY + dir * w);
+        c.ctx.lineTo(x - w / 2.4, tipY + dir * len);
+        c.ctx.lineTo(x + w / 2.4, tipY + dir * len);
+        c.ctx.lineTo(x + w / 2.4, tipY + dir * w);
+        c.ctx.lineTo(x + w, tipY + dir * w);
+        c.ctx.closePath();
       }
-      c.ctx.save();
-      c.ctx.globalAlpha = c.style.fillOpacity ?? 0.9;
-      c.ctx.fillStyle = fillStyleOf(c);
-      c.ctx.fill();
-      c.ctx.restore();
+      if (c.style.fill !== false) {
+        c.ctx.save();
+        c.ctx.globalAlpha = c.style.fillOpacity ?? 0.9;
+        c.ctx.fillStyle = fillStyleOf(c);
+        c.ctx.fill();
+        c.ctx.restore();
+      }
       applyStroke(c);
       c.ctx.stroke();
       c.ctx.setLineDash([]);
@@ -1966,10 +2179,11 @@ export const ARROW_DOWN = arrowMarker('arrow-down', 'Arrow Down', false);
 export const ARROW_LEFT = arrowMarker('arrow-left', 'Arrow Left', true, 'left');
 export const ARROW_RIGHT = arrowMarker('arrow-right', 'Arrow Right', true, 'right');
 
-/** Highlighter — the brush with a fat, translucent stroke. */
+/** Highlighter: the brush with a fat, translucent stroke. */
 export const HIGHLIGHTER: DrawingTool = {
   id: 'highlighter', name: 'Highlighter', points: 0, freehand: true,
   defaultStyle: { lineWidth: 12, fillOpacity: 0.28 },
+  settings: composeSettings([COLOR_FIELD, LINE_WIDTH_FIELD, OPACITY_FIELD]),
   draw: (c) => {
     if (c.pts.length < 2) return;
     const d = c.rc.dpr;
@@ -1993,64 +2207,92 @@ export const HIGHLIGHTER: DrawingTool = {
 
 // ── fibonacci & gann ──────────────────────────────────────────────────────
 
-/** Fib channel — fib levels spread across a trend leg, parallel to it. */
+/**
+ * A ladder whose colours live entirely in its levels: the drawing's own colour
+ * would touch nothing on screen, so it is not offered. Width and dash apply to
+ * every rung.
+ */
+const LADDER_SETTINGS: SettingsSchema = composeSettings([LINE_WIDTH_FIELD, LINE_STYLE_FIELD, LEVEL_FIELDS, FONT_FIELDS]);
+
+/** Fib channel: fib levels spread across a trend leg, parallel to it. */
 export const FIB_CHANNEL: DrawingTool = {
   id: 'fib-channel', name: 'Fib Channel', points: 3,
-  defaultStyle: { showLabels: true, levels: [...DEFAULT_FIB] },
+  defaultStyle: { showLabels: true, levels: cloneLevels(DEFAULT_FIB) },
+  settings: composeSettings([LINE_WIDTH_FIELD, LINE_STYLE_FIELD, LEVEL_FIELDS, EXTEND_FIELDS, FONT_FIELDS]),
   draw: (c) => {
-    const levels = c.style.levels ?? DEFAULT_FIB;
+    const levels = activeLevels(c.style.levels, DEFAULT_FIB);
     const [a, b, w] = c.pts;
+    const d = c.rc.dpr;
     // The third anchor sets the channel width; each level is a fraction of it.
     const offX = w.x - b.x;
     const offY = w.y - b.y;
+    const left = c.style.extendLeft === true;
+    const right = c.style.extendRight === true;
     applyStroke(c);
     for (const lv of levels) {
+      const [s, e] = extendSegment(
+        { x: a.x + offX * lv.ratio, y: a.y + offY * lv.ratio },
+        { x: b.x + offX * lv.ratio, y: b.y + offY * lv.ratio },
+        c.rc.plotWidth * d, left, right,
+      );
+      const color = fibColor(lv);
+      c.ctx.strokeStyle = color;
       c.ctx.beginPath();
-      c.ctx.moveTo(a.x + offX * lv, a.y + offY * lv);
-      c.ctx.lineTo(b.x + offX * lv, b.y + offY * lv);
+      c.ctx.moveTo(s.x, s.y);
+      c.ctx.lineTo(e.x, e.y);
       c.ctx.stroke();
       if (c.style.showLabels !== false) {
-        label(c, `${(lv * 100).toFixed(1)}%`, b.x + offX * lv + 4 * c.rc.dpr, b.y + offY * lv);
+        label(c, fibText(lv), b.x + offX * lv.ratio + 4 * d, b.y + offY * lv.ratio, color);
       }
     }
     c.ctx.setLineDash([]);
   },
   distance: (x, y, h) => {
-    const levels = h.drawing.style.levels ?? DEFAULT_FIB;
+    const levels = activeLevels(h.drawing.style.levels, DEFAULT_FIB);
     const [a, b, w] = h.pts;
+    const left = h.drawing.style.extendLeft === true;
+    const right = h.drawing.style.extendRight === true;
     let best = Infinity;
     for (const lv of levels) {
-      const d = distToSegment(x, y,
-        { x: a.x + (w.x - b.x) * lv, y: a.y + (w.y - b.y) * lv },
-        { x: b.x + (w.x - b.x) * lv, y: b.y + (w.y - b.y) * lv });
-      if (d < best) best = d;
+      const [s, e] = extendSegment(
+        { x: a.x + (w.x - b.x) * lv.ratio, y: a.y + (w.y - b.y) * lv.ratio },
+        { x: b.x + (w.x - b.x) * lv.ratio, y: b.y + (w.y - b.y) * lv.ratio },
+        h.rc.plotWidth, left, right,
+      );
+      const dd = distToSegment(x, y, s, e);
+      if (dd < best) best = dd;
     }
     return best;
   },
 };
 
-/** The Fibonacci sequence itself — time zones count bars, not ratios. */
-const FIB_SEQUENCE: readonly number[] = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55];
-
-/** Fib time zone — vertical lines at fib multiples of the base leg's width. */
+/**
+ * Fib time zone: vertical lines at Fibonacci multiples of the base leg's width.
+ * Its levels count bars rather than divide a leg, so they carry no convention
+ * colour and fall back to the drawing's own.
+ */
 export const FIB_TIME_ZONE: DrawingTool = {
   id: 'fib-time-zone', name: 'Fib Time Zone', points: 2,
-  defaultStyle: { showLabels: true },
+  defaultStyle: { showLabels: true, levels: cloneLevels(DEFAULT_FIB_TIME_ZONE) },
+  settings: composeSettings([LINE_FIELDS, LEVEL_FIELDS, FONT_FIELDS]),
   draw: (c) => {
     const [a, b] = c.pts;
     const unit = b.x - a.x;
     if (Math.abs(unit) < 0.5) return;
     const d = c.rc.dpr;
     const maxX = c.rc.plotWidth * d;
+    const levels = activeLevels(c.style.levels, DEFAULT_FIB_TIME_ZONE);
     applyStroke(c);
-    for (const n of FIB_SEQUENCE) {
-      const x = a.x + unit * n;
+    for (const lv of levels) {
+      const x = a.x + unit * lv.ratio;
       if (x < -10 || x > maxX + 10) continue;
+      const color = lv.color ?? c.style.color;
+      c.ctx.strokeStyle = color;
       c.ctx.beginPath();
       c.ctx.moveTo(Math.round(x) + 0.5, 0);
       c.ctx.lineTo(Math.round(x) + 0.5, c.rc.plotHeight * d);
       c.ctx.stroke();
-      if (c.style.showLabels !== false) label(c, String(n), x + 3 * d, 12 * d);
+      if (c.style.showLabels !== false) label(c, lv.label ?? String(lv.ratio), x + 3 * d, 12 * d, color);
     }
     c.ctx.setLineDash([]);
   },
@@ -2060,55 +2302,58 @@ export const FIB_TIME_ZONE: DrawingTool = {
     const unit = b.x - a.x;
     if (Math.abs(unit) < 0.5) return null;
     let best = Infinity;
-    for (const n of FIB_SEQUENCE) best = Math.min(best, Math.abs(x - (a.x + unit * n)));
-    return best;
+    for (const lv of activeLevels(h.drawing.style.levels, DEFAULT_FIB_TIME_ZONE)) {
+      best = Math.min(best, Math.abs(x - (a.x + unit * lv.ratio)));
+    }
+    return Number.isFinite(best) ? best : null;
   },
 };
 
-const FAN_LEVELS: readonly number[] = [0.236, 0.382, 0.5, 0.618, 0.786, 1];
-
-/** Rays from the anchor at fib fractions of the leg — speed resistance fan. */
+/** Rays from the anchor at fib fractions of the leg: the speed resistance fan. */
 export const FIB_FAN: DrawingTool = {
   id: 'fib-fan', name: 'Fib Speed Fan', points: 2,
-  defaultStyle: { showLabels: true, levels: [...FAN_LEVELS] },
+  defaultStyle: { showLabels: true, levels: cloneLevels(DEFAULT_FIB_FAN) },
+  settings: LADDER_SETTINGS,
   draw: (c) => {
-    const levels = c.style.levels ?? FAN_LEVELS;
+    const levels = activeLevels(c.style.levels, DEFAULT_FIB_FAN);
     const [a, b] = c.pts;
     const d = c.rc.dpr;
     const maxX = c.rc.plotWidth * d;
     applyStroke(c);
     for (const lv of levels) {
       // Each ray takes the full run but a fraction of the rise.
-      const end = extendSegment(a, { x: b.x, y: a.y + (b.y - a.y) * lv }, maxX, false, true)[1];
+      const end = extendSegment(a, { x: b.x, y: a.y + (b.y - a.y) * lv.ratio }, maxX, false, true)[1];
+      const color = fibColor(lv);
+      c.ctx.strokeStyle = color;
       c.ctx.beginPath();
       c.ctx.moveTo(a.x, a.y);
       c.ctx.lineTo(end.x, end.y);
       c.ctx.stroke();
-      if (c.style.showLabels !== false) label(c, `${(lv * 100).toFixed(1)}%`, b.x + 4 * d, a.y + (b.y - a.y) * lv);
+      if (c.style.showLabels !== false) label(c, fibText(lv), b.x + 4 * d, a.y + (b.y - a.y) * lv.ratio, color);
     }
     c.ctx.setLineDash([]);
   },
   distance: (x, y, h) => {
-    const levels = h.drawing.style.levels ?? FAN_LEVELS;
+    const levels = activeLevels(h.drawing.style.levels, DEFAULT_FIB_FAN);
     const [a, b] = h.pts;
     let best = Infinity;
     for (const lv of levels) {
       best = Math.min(best, distToSegment(x, y, a,
-        extendSegment(a, { x: b.x, y: a.y + (b.y - a.y) * lv }, h.rc.plotWidth, false, true)[1]));
+        extendSegment(a, { x: b.x, y: a.y + (b.y - a.y) * lv.ratio }, h.rc.plotWidth, false, true)[1]));
     }
-    return best;
+    return Number.isFinite(best) ? best : null;
   },
 };
 
-/** Gann price/time ratios: 1x8 … 1x1 … 8x1. */
-const GANN_RATIOS: readonly (readonly [number, number])[] = [
-  [1, 0.125], [1, 0.25], [1, 0.5], [1, 1], [0.5, 1], [0.25, 1], [0.125, 1],
-];
-
-/** Gann fan — rays at the classic price/time ratios from one anchor. */
+/**
+ * Gann fan: rays from one anchor at the classic price/time angles. A level's
+ * ratio is price per unit of time, so the 1x1 is 1, the 1x2 is 0.5 and the
+ * 2x1 is 2; each angle keeps its own colour from the cycle palette.
+ */
 export const GANN_FAN: DrawingTool = {
   id: 'gann-fan', name: 'Gann Fan', points: 2,
-  defaultStyle: { showLabels: true },
+  defaultStyle: { showLabels: true, levels: cloneLevels(DEFAULT_GANN_FAN) },
+  settings: LADDER_SETTINGS,
   draw: (c) => {
     const [a, b] = c.pts;
     const d = c.rc.dpr;
@@ -2116,50 +2361,69 @@ export const GANN_FAN: DrawingTool = {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     if (Math.abs(dx) < 0.5) return;
+    const levels = activeLevels(c.style.levels, DEFAULT_GANN_FAN);
     applyStroke(c);
-    for (const [rx, ry] of GANN_RATIOS) {
-      const end = extendSegment(a, { x: a.x + dx * rx, y: a.y + dy * ry }, maxX, false, true)[1];
+    levels.forEach((lv, i) => {
+      const end = extendSegment(a, { x: a.x + dx, y: a.y + dy * lv.ratio }, maxX, false, true)[1];
+      const color = lv.color ?? cycleColor(i);
+      c.ctx.strokeStyle = color;
       c.ctx.beginPath();
       c.ctx.moveTo(a.x, a.y);
       c.ctx.lineTo(end.x, end.y);
       c.ctx.stroke();
-    }
-    // Only the 1x1 gets a label — the rest are read off it.
-    if (c.style.showLabels !== false) label(c, '1x1', b.x + 4 * d, b.y);
+      if (c.style.showLabels !== false) label(c, lv.label ?? gannLabel(lv.ratio), b.x + 4 * d, a.y + dy * lv.ratio, color);
+    });
     c.ctx.setLineDash([]);
   },
   distance: (x, y, h) => {
     const [a, b] = h.pts;
     const dx = b.x - a.x;
     const dy = b.y - a.y;
+    if (Math.abs(dx) < 0.5) return null;
     let best = Infinity;
-    for (const [rx, ry] of GANN_RATIOS) {
+    for (const lv of activeLevels(h.drawing.style.levels, DEFAULT_GANN_FAN)) {
       best = Math.min(best, distToSegment(x, y, a,
-        extendSegment(a, { x: a.x + dx * rx, y: a.y + dy * ry }, h.rc.plotWidth, false, true)[1]));
+        extendSegment(a, { x: a.x + dx, y: a.y + dy * lv.ratio }, h.rc.plotWidth, false, true)[1]));
     }
-    return best;
+    return Number.isFinite(best) ? best : null;
   },
 };
 
-/** Gann box — an 8x8 grid over the drawn rectangle, plus the 1x1 diagonal. */
+/**
+ * Gann box: the drawn rectangle divided at its levels on both axes, plus the
+ * 1x1 diagonal. Ratio 0 is the first anchor's price and time, ratio 1 the
+ * second's, so the box reads like a retracement laid over a date range.
+ */
 export const GANN_BOX: DrawingTool = {
   id: 'gann-box', name: 'Gann Box', points: 2,
-  defaultStyle: { fill: true, fillOpacity: 0.05 },
+  defaultStyle: { fill: true, fillOpacity: 0.05, showLabels: true, levels: cloneLevels(DEFAULT_GANN_BOX) },
+  settings: composeSettings([LINE_FIELDS, FILL_FIELDS, LEVEL_FIELDS, FONT_FIELDS]),
   draw: (c) => {
-    const r = rectOf(c.pts[0], c.pts[1]);
+    const [a, b] = c.pts;
+    const r = rectOf(a, b);
+    const d = c.rc.dpr;
+    const p = c.drawing.points;
+    const levels = activeLevels(c.style.levels, DEFAULT_GANN_BOX);
     withFill(c, () => c.ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0));
+    // The diagonal first, in the drawing's colour: it is the 1x1 and the one
+    // line of the box that is not a level.
     applyStroke(c);
-    const w = r.x1 - r.x0;
-    const h = r.y1 - r.y0;
     c.ctx.beginPath();
-    for (let i = 0; i <= 8; i++) {
-      const x = Math.round(r.x0 + (w * i) / 8) + 0.5;
-      const y = Math.round(r.y0 + (h * i) / 8) + 0.5;
+    c.ctx.moveTo(a.x, a.y);
+    c.ctx.lineTo(b.x, b.y);
+    c.ctx.stroke();
+    for (const lv of levels) {
+      const x = Math.round(a.x + (b.x - a.x) * lv.ratio) + 0.5;
+      const price = p[0].price + (p[1].price - p[0].price) * lv.ratio;
+      const y = Math.round(c.rc.priceScale.priceToY(price) * d) + 0.5;
+      const color = fibColor(lv);
+      c.ctx.strokeStyle = color;
+      c.ctx.beginPath();
       c.ctx.moveTo(x, r.y0); c.ctx.lineTo(x, r.y1);
       c.ctx.moveTo(r.x0, y); c.ctx.lineTo(r.x1, y);
+      c.ctx.stroke();
+      if (c.style.showLabels !== false) label(c, fibText(lv), r.x1 + 4 * d, y, color);
     }
-    c.ctx.moveTo(r.x0, r.y1); c.ctx.lineTo(r.x1, r.y0);
-    c.ctx.stroke();
     c.ctx.setLineDash([]);
   },
   distance: (x, y, h) => distToRect(x, y, h.pts[0], h.pts[1], h.drawing.style.fill === true),

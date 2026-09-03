@@ -1288,7 +1288,8 @@ export class Chart {
   // 'lazy-load', 'paneAdded', 'paneRemoved', 'paneMoved', 'paneMaximized', 'paneResized',
   // 'priceAxisMoved', 'indicatorRemoved', 'indicatorSettings', 'destroy'. The
   // trading layer routes its 'trading:*' events through here too, and the draw
-  // tier emits 'draw:*'.
+  // tier emits 'draw:*' plus the 2.0 pair 'drawing:select' and 'drawing:change'
+  // (the legacy names carry one id; the new ones carry the whole selection).
   //
   // 'symbol' is a name the *host* emits on this bus, not the core: the engine
   // has no instrument concept, and a link group listens for it to slave a grid
@@ -3153,6 +3154,7 @@ export class Chart {
           id, price, time,
           paneIndex: this._downPane,
           point: { x: this._downX, y: this._downLocalY },
+          shiftKey: e.shiftKey === true, ctrlKey: e.ctrlKey === true, metaKey: e.metaKey === true,
         });
       }
       this._dragId = null;
@@ -3210,6 +3212,9 @@ export class Chart {
         time: this._xToTime(this._downX),
         paneIndex: this._downPane,
         point: { x: this._downX, y: this._downLocalY },
+        // Modifier flags ride along so the draw tier can make a shift or
+        // ctrl click additive to the selection; the payload carries no event.
+        shiftKey: e.shiftKey === true, ctrlKey: e.ctrlKey === true, metaKey: e.metaKey === true,
       });
       return;
     }

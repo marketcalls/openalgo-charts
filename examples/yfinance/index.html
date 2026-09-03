@@ -765,7 +765,7 @@
     </aside>
   </div>
 
-  <!-- Sahi-style bracket panel (positions tracked to price every frame) -->
+  <!-- Bracket panel (positions tracked to price every frame) -->
   <div id="bracket" hidden>
     <div class="bk tp" id="bk-tp">
       <span>TP: <b class="pts">0</b> Pts (<span class="pct">0%</span>)</span>
@@ -1661,7 +1661,7 @@
       if (volLegend) volLegend.setValues([{ text: fmtVol(bar.volume ?? 0), color: col, field: 'volume' }]);
     }
 
-    // ── Sahi-style bracket (entry / target / stop) ──────────────────────────
+    // ── Bracket (entry / target / stop) ──────────────────────────
     let bracket = null;   // { side, entry, target, stop, qty }
     let bLines = null;    // { entry, tp, sl } price-line primitives on the current chart
     const rupee = (n) => (n < 0 ? '-' : '+') + '₹' + Math.round(Math.abs(n)).toLocaleString('en-IN');
@@ -5187,11 +5187,12 @@
         const sizes = [10, 12, 13, 16, 20, 28, 40];
         const fs = document.createElement('button');
         fs.className = 'wbtn';
-        fs.textContent = String(style.fontSize || 13);
+        const textSize = (d.text && d.text.fontSize) || 13;
+        fs.textContent = String(textSize);
         attachTip(fs, { title: 'Font size', sub: 'Click to step through the sizes', side: 'top' });
         fs.addEventListener('click', () => {
-          const next = sizes[(sizes.indexOf(style.fontSize || 13) + 1) % sizes.length];
-          draw.update(id, { style: { fontSize: next } });
+          const next = sizes[(sizes.indexOf(textSize) + 1) % sizes.length];
+          draw.update(id, { text: { fontSize: next } });
           showWidget(id);
         });
         w.appendChild(fs);
@@ -5227,20 +5228,14 @@
       w.appendChild(vs);
 
       // Shapes can carry a label too — same dialog, shape-aware fields.
-      if (!isText) button(svgIcon('text'), style.text ? 'Edit text' : 'Add text', () => openTextDialog(id));
+      if (!isText) button(svgIcon('text'), d.text && d.text.value ? 'Edit text' : 'Add text', () => openTextDialog(id));
       button(svgIcon(d.locked ? 'lock' : 'unlock'), d.locked ? 'Unlock' : 'Lock', () => {
         draw.update(id, { locked: !d.locked });
         showWidget(id);
       });
-      button(svgIcon('clone'), 'Duplicate', () => {
-        const copy = draw.add({
-          tool: d.tool,
-          paneIndex: d.paneIndex,
-          style: Object.assign({}, d.style),
-          points: d.points.map((p) => ({ time: p.time, price: p.price })),
-        });
-        draw.select(copy.id);
-      });
+      // The controller's duplicate carries text and props along and offsets
+      // the clone so it reads as a second shape rather than a doubled stroke.
+      button(svgIcon('clone'), 'Duplicate', () => { draw.duplicate([id]); });
       button(svgIcon('trash'), 'Delete (Del)', () => { draw.remove(id); }, 'danger');
 
       w.hidden = false;
@@ -5261,17 +5256,18 @@
       const y = chart.priceToCoordinate(p.price, d.paneIndex);
       const input = document.createElement('input');
       input.type = 'text';
-      input.value = d.style.text || '';
+      const tx = d.text || {};
+      input.value = tx.value || '';
       input.className = 'textedit';
       input.style.left = Math.max(46, (Number.isFinite(x) ? x : 60)) + 'px';
       input.style.top = ((y == null || !Number.isFinite(y) ? 60 : y) - 12) + 'px';
-      input.style.fontSize = (d.style.fontSize || 13) + 'px';
-      input.style.color = d.style.color || '#d7dce8';
+      input.style.fontSize = (tx.fontSize || 13) + 'px';
+      input.style.color = tx.color || d.style.color || '#d7dce8';
       stage.parentElement.appendChild(input);
       input.focus();
       input.select();
       const commit = (save) => {
-        if (save) draw.update(id, { style: { text: input.value } });
+        if (save) draw.update(id, { text: { value: input.value } });
         input.remove();
         showWidget(id);
       };
@@ -5285,8 +5281,8 @@
 
 
     // ── text settings dialog ───────────────────────────────────────────────
-    // The engine draws text on canvas, so there is no DOM node to style — the
-    // dialog edits the drawing's style bag and the renderer picks it up.
+    // The engine draws text on canvas, so there is no DOM node to style: the
+    // dialog edits the drawing's text block and the renderer picks it up.
     const FONTS = [
       { label: 'Default', value: '' },
       { label: 'Sans', value: 'ui-sans-serif, system-ui, sans-serif' },
@@ -5301,6 +5297,7 @@
       if (!d) return;
       textDlgFor = id;
       const st = d.style || {};
+      const tx = d.text || {};
       const dlg = el('textdlg');
       const isShape = d.tool !== 'text';
       const toolName = (BUILTIN_DRAWING_TOOLS.find((t) => t.id === d.tool) || { name: 'Text' }).name;
@@ -5308,7 +5305,7 @@
         '<div class="set-head"><span>' + esc(toolName) + '</span><button id="td-x" title="Close">&times;</button></div>' +
         '<div class="td-body">' +
           '<div class="td-row">' +
-            '<input type="color" id="td-color" value="' + esc((d.tool !== 'text' ? st.fontColor : st.color) || st.color || '#d7dce8') + '" title="Font colour" />' +
+            '<input type="color" id="td-color" value="' + esc(tx.color || st.color || '#d7dce8') + '" title="Font colour" />' +
             '<select id="td-font" title="Font"></select>' +
             '<select id="td-size" title="Size"></select>' +
             '<button id="td-bold" class="td-tog" title="Bold"><b>B</b></button>' +
@@ -5341,7 +5338,7 @@
         o.value = f.value; o.textContent = f.label;
         fontSel.appendChild(o);
       }
-      fontSel.value = st.fontFamily || '';
+      fontSel.value = tx.fontFamily || '';
 
       const sizeSel = el('td-size');
       for (const s of FONT_SIZES) {
@@ -5349,43 +5346,45 @@
         o.value = String(s); o.textContent = String(s);
         sizeSel.appendChild(o);
       }
-      sizeSel.value = String(st.fontSize || 14);
+      sizeSel.value = String(tx.fontSize || 14);
 
-      el('td-text').value = st.text || '';
-      el('td-bold').classList.toggle('is-on', st.fontWeight === 'bold');
-      el('td-italic').classList.toggle('is-on', st.fontStyle === 'italic');
-      el('td-bg').checked = st.background === true;
-      el('td-bgc').value = st.backgroundColor || '#1e222d';
-      el('td-bd').checked = st.border === true;
-      el('td-bdc').value = st.borderColor || (st.color || '#d7dce8');
-      el('td-wrap').checked = st.wrap === true;
-      el('td-wrapw').value = String(st.wrapWidth || 220);
+      el('td-text').value = tx.value || '';
+      el('td-bold').classList.toggle('is-on', tx.bold === true);
+      el('td-italic').classList.toggle('is-on', tx.italic === true);
+      el('td-bg').checked = tx.background === true;
+      el('td-bgc').value = tx.backgroundColor || '#1e222d';
+      el('td-bd').checked = tx.border === true;
+      el('td-bdc').value = tx.borderColor || tx.color || st.color || '#d7dce8';
+      el('td-wrap').checked = tx.wrap === true;
+      el('td-wrapw').value = String(tx.wrapWidth || 220);
       if (isShape) {
-        el('td-pos').value = st.textPosition || 'inside';
-        el('td-align').value = st.textAlign || 'left';
+        el('td-pos').value = tx.position || 'inside';
+        el('td-align').value = tx.align || 'left';
       }
 
       // Live preview: every control applies immediately, Cancel reverts.
-      const before = Object.assign({}, st);
+      // Both bags are snapshotted because the text tool's colour also lands
+      // on style.color, which is what its border is stroked in.
+      const before = { style: Object.assign({}, st), text: Object.assign({}, tx) };
       const apply = () => {
         draw.update(textDlgFor, {
-          style: {
-            ...(isShape ? {} : { color: el('td-color').value }),
+          // Shapes keep the outline colour on style.color; only their label
+          // takes the dialog's colour.
+          ...(isShape ? {} : { style: { color: el('td-color').value } }),
+          text: {
+            value: el('td-text').value,
+            color: el('td-color').value,
             fontFamily: el('td-font').value || undefined,
             fontSize: Number(el('td-size').value),
-            fontWeight: el('td-bold').classList.contains('is-on') ? 'bold' : 'normal',
-            fontStyle: el('td-italic').classList.contains('is-on') ? 'italic' : 'normal',
-            text: el('td-text').value,
+            bold: el('td-bold').classList.contains('is-on'),
+            italic: el('td-italic').classList.contains('is-on'),
             background: el('td-bg').checked,
             backgroundColor: el('td-bgc').value,
             border: el('td-bd').checked,
             borderColor: el('td-bdc').value,
             wrap: el('td-wrap').checked,
             wrapWidth: Number(el('td-wrapw').value),
-            // Shapes keep the outline colour on `color`; the label uses fontColor.
-            ...(isShape
-              ? { fontColor: el('td-color').value, textPosition: el('td-pos').value, textAlign: el('td-align').value }
-              : {}),
+            ...(isShape ? { position: el('td-pos').value, align: el('td-align').value } : {}),
           },
         });
       };
@@ -5407,7 +5406,7 @@
     }
 
     function closeTextDialog(revertTo) {
-      if (revertTo && textDlgFor) draw.update(textDlgFor, { style: revertTo });
+      if (revertTo && textDlgFor) draw.update(textDlgFor, revertTo);
       el('textmodal').hidden = true;
       textDlgFor = null;
     }
