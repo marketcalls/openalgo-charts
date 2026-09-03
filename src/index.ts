@@ -7,12 +7,15 @@ export { createChart, Chart, compactVolume, PRICE_SCALE_MODES } from './core/cha
 export type {
   ChartOptions, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
   ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState,
-  AxisChromeOptions,
+  AxisChromeOptions, ZoomAnchor,
 } from './core/chart';
 export { Pane } from './core/pane';
 export { darkTheme, lightTheme, DEFAULT_THEME } from './theme';
 export type { ChartTheme } from './theme';
 export { verticalGradient, withAlpha, fromGradient } from './render/gradient';
+// eased wheel zoom (the counterpart to the kinetic pan a flick already gets)
+export { ZoomGlide, DEFAULT_ZOOM_GLIDE_OPTIONS } from './input/zoom-glide';
+export type { ZoomGlideOptions } from './input/zoom-glide';
 export { InvalidationLevel } from './core/invalidate-mask';
 export type { PaneInvalidation, TimeScaleOp } from './core/invalidate-mask';
 export { bitmapSize, snapToDevicePixel } from './core/canvas';

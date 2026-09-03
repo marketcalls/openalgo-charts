@@ -41,6 +41,11 @@ const KINETIC_VELOCITY_HALFLIFE_MS = 50;
 
 /** Hard ceiling on glide frames, about ten seconds at 60fps. See `_startKinetic`. */
 const KINETIC_MAX_FRAMES = 600;
+/** Same ceiling, same reason, for the zoom glide (see `_startKinetic`). */
+const ZOOM_GLIDE_MAX_FRAMES = 600;
+
+/** What a wheel zoom holds still. */
+export type ZoomAnchor = 'cursor' | 'right';
 
 const INSTANCE_PALETTE: readonly string[] = [
   '#f5a623', '#26a69a', '#ab47bc', '#ef5350',
@@ -58,6 +63,7 @@ import type { SeriesStyle } from '../render/series-style';
 import type { Bar, SeriesDataItem } from '../model/bar';
 import { toBar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
+import { ZoomGlide } from '../input/zoom-glide';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
 import { ShortcutManager } from '../input/shortcuts';
 import type { ShortcutManagerOptions } from '../input/shortcuts';
@@ -159,6 +165,20 @@ export interface ChartOptions {
   axisChrome?: AxisChromeOptions;
   /** Time source for kinetic animation (defaults to performance.now). */
   now?: () => number;
+  /**
+   * Ease a wheel zoom over a few frames instead of landing the whole step on
+   * one. Default true, matching the inertial pan a flick already gets: a chart
+   * that glides when panned and jumps when zoomed reads as two different
+   * instruments. Off restores the single-frame step.
+   */
+  animZoom?: boolean;
+  /**
+   * What a wheel zoom holds still: the bar under the cursor, or the right edge
+   * (the latest bar). Default `'cursor'`, which is what the chart has always
+   * done. `'right'` keeps the most recent bar pinned while history stretches
+   * away from it, which is what a live chart usually wants.
+   */
+  zoomAnchor?: ZoomAnchor;
   /** Enable OHLC-preserving conflation when zoomed out (§4.4). Default false. */
   conflate?: boolean;
   /** Conflation aggressiveness (default 1). */
@@ -457,6 +477,14 @@ export class Chart {
   private _lastDragT = 0;
   private _dragVelocity = 0;
   private _kineticHandle: number | null = null;
+  private _zoomHandle: number | null = null;
+  /** The glide in flight, so a second wheel tick folds into it (see ZoomGlide.add). */
+  private _zoomGlide: ZoomGlide | null = null;
+  private _zoomGlideStart = 0;
+  private _zoomGlideApplied = 0;
+  private _zoomGlideX = 0;
+  private readonly _animZoom: boolean;
+  private readonly _zoomAnchor: ZoomAnchor;
   private readonly _firstDataId: { value: number | null } = { value: null };
   /** Handle + record of the primary price series (see `primarySeries`). */
   private _primary: { api: SeriesApi; record: SeriesRecord } | null = null;
@@ -559,6 +587,8 @@ export class Chart {
     const sc = options.shortcuts;
     this._shortcuts = sc === false ? null : (sc instanceof ShortcutManager ? sc : new ShortcutManager(sc ?? {}));
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
+    this._animZoom = options.animZoom ?? true;
+    this._zoomAnchor = options.zoomAnchor ?? 'cursor';
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
     this._priceFormatter = options.priceFormatter ?? null;
@@ -2875,6 +2905,9 @@ export class Chart {
     // menu — arming the drag state then makes the chart pan with no button held.
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     this._stopKinetic();
+    // Taking hold of the chart ends a zoom glide too: the viewport is the
+    // user's again the moment they touch it.
+    this._stopZoomGlide();
     const p = this._localPoint(e);
     this._pointers.set(e.pointerId, { x: p.x, y: p.y, pane: p.pane });
     // `setPointerCapture` throws NotFoundError when the pointer id is not
@@ -3220,13 +3253,74 @@ export class Chart {
   private readonly _onWheel = (e: WheelEvent): void => {
     this._unfreezeOverlay();
     e.preventDefault();
-    const p = this._localPoint(e);
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    this._timeScale.zoomAtX(p.x, factor);
+    const logFactor = e.deltaY < 0 ? Math.log(1.1) : -Math.log(1.1);
+    // 'right' pins the latest bar: zoom about the right edge of the plot, so
+    // history stretches away from it instead of the cursor's bar staying put.
+    const focusX = this._zoomAnchor === 'right' ? this._timeScale.width : this._localPoint(e).x;
+
+    if (!this._animZoom || !ZoomGlide.shouldAnimate(logFactor)) {
+      this._stopZoomGlide();
+      this._applyZoom(focusX, logFactor);
+      return;
+    }
+    // A tick during a glide extends it rather than starting a new one, or a
+    // fast scroll would restart the ease on every notch and barely move.
+    // The lead lands on the event itself, so there is no input latency and a
+    // synchronous read of the viewport after a wheel sees it move.
+    const lead = logFactor * ZoomGlide.leadFraction();
+    this._applyZoom(focusX, lead);
+    const rest = logFactor - lead;
+
+    if (this._zoomGlide !== null && this._zoomGlideX === focusX) {
+      this._zoomGlide.add(rest, this._zoomGlideApplied, this._now() - this._zoomGlideStart);
+      return;
+    }
+    this._stopZoomGlide();
+    this._startZoomGlide(focusX, rest);
+  };
+
+  /** One zoom step, applied now. Shared by the instant path and each glide frame. */
+  private _applyZoom(focusX: number, logFactor: number): void {
+    this._timeScale.zoomAtX(focusX, Math.exp(logFactor));
     this._maybeLoadHistory();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._emitViewport('zoom');
-  };
+  }
+
+  private _startZoomGlide(focusX: number, logFactor: number): void {
+    const glide = new ZoomGlide(logFactor);
+    this._zoomGlide = glide;
+    this._zoomGlideStart = this._now();
+    this._zoomGlideApplied = 0;
+    this._zoomGlideX = focusX;
+    let frames = 0;
+    const step = (): void => {
+      const elapsed = this._now() - this._zoomGlideStart;
+      const applied = glide.appliedAt(elapsed);
+      const delta = applied - this._zoomGlideApplied;
+      this._zoomGlideApplied = applied;
+      // A frame that moved nothing still costs a full-pane repaint, so skip it.
+      if (delta !== 0) this._applyZoom(focusX, delta);
+      if (!glide.finished(elapsed) && ++frames < ZOOM_GLIDE_MAX_FRAMES) {
+        this._zoomHandle = this._raf.schedule(step);
+      } else {
+        // Land exactly on the target: the curve only approaches it.
+        const remainder = glide.totalLogFactor - this._zoomGlideApplied;
+        if (remainder !== 0) this._applyZoom(focusX, remainder);
+        this._zoomHandle = null;
+        this._zoomGlide = null;
+      }
+    };
+    this._zoomHandle = this._raf.schedule(step);
+  }
+
+  private _stopZoomGlide(): void {
+    if (this._zoomHandle !== null) {
+      this._raf.cancel(this._zoomHandle);
+      this._zoomHandle = null;
+    }
+    this._zoomGlide = null;
+  }
 
   /**
    * Restore the default view: fit all bars on the time axis and re-enable
@@ -3529,6 +3623,7 @@ export class Chart {
       this._remeasureHandle = null;
     }
     this._stopKinetic();
+    this._stopZoomGlide();
     for (const indicator of this._indicators) indicator.remove();
     this._indicators.length = 0;
     this._resizeObserver?.disconnect();
