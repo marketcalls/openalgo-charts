@@ -567,11 +567,12 @@ describe('DrawingController', () => {
     const { chart } = makeChart();
     const draw = new DrawingController(chart);
     draw.setTool('brush');
-    const pts: [number, number][] = Array.from({ length: 30 }, (_, i) => [1700000600 + i * 60, 100 + i * 0.2]);
+    // A zigzag, so every sample is a corner the thinning has to keep.
+    const pts: [number, number][] = Array.from({ length: 30 }, (_, i) => [1700000600 + i * 60, 100 + i * 0.2 + (i % 2)]);
     stroke(chart, pts);
 
     const d = draw.drawings()[0];
-    expect(d.points).toHaveLength(30);   // the shape keeps every sample...
+    expect(d.points).toHaveLength(30);   // every corner survives the thinning
     draw.select(d.id);
 
     const layer = new DrawingLayer();

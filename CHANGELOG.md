@@ -67,7 +67,54 @@ time. Saved 1.9.x layouts and clipboard bodies are upgraded on the way in.
 
 - **`keyToDrawingAction(e, ctx)`**, the editing counterpart of
   `matchDrawingShortcut`: undo, redo, copy, cut, paste, duplicate, delete and
-  arrow-key nudge as a pure mapping the host wires to the controller.
+  arrow-key nudge as a pure mapping the host wires to the controller. With
+  `placing: true` a bare Escape, Enter or Backspace maps to `cancel`, `finish`
+  or `popAnchor` first, so Backspace never deletes the selection while an
+  anchor is being placed.
+
+- **Drawing feel.** The controller tracks the unselected drawing under the
+  pointer from the chart's `hover` event (`hovered()`, `drawing:hover { id }`)
+  and the layer paints its handles faintly, so a drawing reads as grabbable
+  before it is grabbed; a hover change costs the overlay tier only. Shift
+  locks the free end of a line to 45 degree steps on screen while placing and
+  while dragging a handle (`DrawingTool.angleLock`, set on the line family).
+  `magnet` accepts `'off' | 'weak' | 'strong'` (`true` still means
+  `'strong'`; `magnetMode()` reports the resolved mode): `'weak'` pulls only
+  when an O/H/L/C sits within a few pixels, and either mode paints a ring
+  where the next click will land, on the bar's centre. `cancel()` and
+  `popAnchor()` join `finish()` as the placement verbs. Grab targets grow for
+  a touch pointer (`DrawingLayer.setPointerType`, `DrawingPointerKind`).
+  Dragging an under-series drawing lifts it to the top layer for the
+  gesture, so the base tier is not repainted per frame.
+
+- **Line readouts.** `style.showStats` on `trend-line`, `ray`,
+  `extended-line` and `arrow` adds a midpoint readout: signed change and
+  percent, bars between the anchors, and the angle on screen. Off by default.
+
+- **Freehand strokes.** The brush and highlighter ink every coalesced pointer
+  sample a pressed move carries, thin the trail on release to the corners its
+  shape needs, and paint it as a spline. A pen stores `DrawingPoint.pressure`
+  per sample (a mouse stores nothing) and `style.pressure` lets it drive the
+  width; the clipboard and the migration keep the field. The geometry is
+  exported, pure and DOM-free: `rdpSimplify`, `catmullRom`, `pressureWidth`.
+
+- **Icons as markup.** Beside the tool path data, a chrome set on a 16 grid
+  (`CHROME_ICONS`, `chromeIcon`, `chromeIconIds`, `CHROME_ICON_FILLED`, its
+  viewBox, stroke and attribute bag) and string builders that derive from the
+  one registry: `iconSvg` and `chromeIconSvg` (an inline `<svg>` in
+  `currentColor`), `iconSprite` and `iconUse` (one hidden symbol sheet plus
+  per-glyph `<use>`, ids under `ICON_SYMBOL_PREFIX`), and `toolCursor` (a CSS
+  `cursor` value carrying the glyph over a contrasting halo). The demo's rail
+  and flyouts read the tier's glyphs, and its armed tool becomes the cursor.
+
+- **Pointer payloads.** `crosshair:move`, `click`, `drag` and `drag:end` now
+  report `modifiers`, `pointerType` and `pressure`; `drag` carries `point`
+  and coalesced `samples`, `drag:end` carries `point`, and `crosshair:move`
+  carries `samples` while pressed, which is how a freehand stroke reads its
+  trail in placement mode. Click `pressure` is the press pressure. No
+  existing field changed. `PointerModifiers`, `PointerKind`, `PointerSample`,
+  `PointerInfo`, `ChartClickEvent`, `ChartDragEvent` and `ChartDragEndEvent`
+  are exported from the base entry.
 
 - Named descriptors for the tools the entry did not name: `FORECAST`,
   `PRICE_RANGE`, `DATE_RANGE`, `CIRCLE`, `TRIANGLE`, `POLYLINE`, `ARC`, `CURVE`,
@@ -87,10 +134,12 @@ time. Saved 1.9.x layouts and clipboard bodies are upgraded on the way in.
 - Circle, triangle and rotated rectangle carry a shape label like rectangle
   and ellipse; the text tool honours `valign` as its vertical anchor.
 
-The draw tier grows from 15.39 KB to 21.43 KB Brotli for the schema, the
-level palette, the migration, the key map and the multi-select controller;
-its budget moves from 16 KB to 22 KB and the all-tiers budget from 126 KB to
-132 KB. Tool count is unchanged at 51.
+The draw tier grows from 15.39 KB to 25.12 KB Brotli for the schema, the
+level palette, the migration, the key map, the multi-select controller, the
+interaction feel, the freehand geometry and the icon builders; its budget
+moves from 16 KB to 26 KB and the all-tiers budget from 126 KB to 136 KB.
+The base engine measures 61.81 KB against its unchanged 62 KB budget for the
+pointer payloads. Tool count is unchanged at 51.
 
 ## 1.9.2
 

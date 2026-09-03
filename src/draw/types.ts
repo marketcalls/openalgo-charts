@@ -23,7 +23,20 @@ export interface DrawingPoint {
   /** UTC seconds. May fall between bars, or past the last one. */
   time: number;
   price: number;
+  /**
+   * Pen pressure at this sample, 0..1, on a freehand stroke only. Absent means
+   * the pointer events stand-in of 0.5, which is what a mouse reports and what
+   * a stroke's width is calibrated to, so a mouse stroke stores nothing here.
+   */
+  pressure?: number;
 }
+
+/**
+ * How new anchors snap to the bar under the cursor. `weak` snaps only when an
+ * O/H/L/C sits within a few pixels of the pointer, so a click on empty space
+ * lands where it was made; `strong` always takes the nearest of the four.
+ */
+export type MagnetMode = 'off' | 'weak' | 'strong';
 
 /**
  * The text a drawing carries, and how it is set. The text tool *is* this box;
@@ -211,6 +224,14 @@ export interface DrawingTool {
    * polyline behaviour and never terminates on its own.
    */
   freehand?: boolean;
+  /**
+   * Hold Shift to snap the free end of a two-anchor tool to 45 degree steps
+   * on screen, while placing and while dragging a handle. The line family
+   * sets it; a tool whose second anchor is not the far end of a line (a
+   * rectangle's opposite corner) leaves it off, since a locked diagonal is
+   * not what Shift means there.
+   */
+  angleLock?: boolean;
   /**
    * Turn the anchors actually clicked into the full anchor set. Lets a tool drop
    * a complete, immediately editable default from fewer clicks: the position

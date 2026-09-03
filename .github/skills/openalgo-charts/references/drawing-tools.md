@@ -13,7 +13,7 @@ import { DrawingController } from 'openalgo-charts/draw';
 const chart = createChart(el);
 chart.addSeries('candlestick').setData(bars);
 
-const draw = new DrawingController(chart, { magnet: true });
+const draw = new DrawingController(chart, { magnet: 'weak' });   // or 'strong', 'off'; true means 'strong'
 draw.setTool('trend-line');   // the next two clicks place it
 ```
 
@@ -112,12 +112,24 @@ import { drawingToolIcon, ICON_ATTRS } from 'openalgo-charts/draw';
 | `drawingToolIconIds()` | Every id the set covers |
 | `ICON_VIEWBOX` | `'0 0 24 24'` |
 | `ICON_STROKE` | `2` |
-| `ICON_ATTRS` | The whole attribute bag for the `<svg>` |
+| `ICON_ATTRS` | The whole attribute bag for the `<svg>` (an `IconAttrs`) |
+| `CHROME_ICONS` | `Record<string, string>` of chrome id (undo, redo, lock, trash, magnet, ...) to `d` attribute, on a 16 grid |
+| `chromeIcon(id)` / `chromeIconIds()` | One chrome glyph or `undefined`; every chrome id |
+| `CHROME_ICON_VIEWBOX` / `CHROME_ICON_STROKE` / `CHROME_ICON_ATTRS` | `'0 0 16 16'`, `1.5`, the attribute bag |
+| `CHROME_ICON_FILLED` | The chrome ids painted solid rather than stroked (`chromeIconSvg` consults it; a host wrapping raw path data must too) |
+| `iconSvg(id, opts?)` / `chromeIconSvg(id, opts?)` | A complete inline `<svg>` string in `currentColor`; `size` in px or `'1em'` (an `IconSvgOptions`). Throws on an unknown id |
+| `iconSprite(ids?)` / `iconUse(id, opts?)` | One hidden symbol sheet (ids `oac-icon-<id>`, `ICON_SYMBOL_PREFIX`) and the per-glyph `<use>`; symbols carry no presentation attributes, so stroke and fill inherit from the frame |
+| `toolCursor(id, opts?)` | A CSS `cursor` value carrying the glyph over a contrasting halo; `size` 1..128 (default 20), `hotspot` (default the centre), `color`, `halo`, `fallback` (a `ToolCursorOptions`) |
 
-This is data, not DOM: the host still builds its own rail and flyouts. What it
-no longer does is draw fifty-one glyphs before it can show a toolbar, which is
-what every adopter had to do before, each drifting on weight and grid
-independently until the set read as fifty-one icons rather than one.
+The path data is data, not DOM: the host still builds its own rail and
+flyouts. The string builders derive from that one set, so the rail, a flyout
+and the armed cursor cannot drift apart. What the host no longer does is draw
+a glyph per tool before it can show a toolbar, which is what every adopter had
+to do before, each drifting on weight and grid independently until the set
+read as many icons rather than one. Measure the count with
+`drawingToolIconIds().length` before quoting it: the tool set covers more ids
+than there are tools (the cursor, the magnet, and glyphs drawn ahead of tools
+not yet registered).
 
 **Render at 24px, or an integer multiple.** With a 2-unit stroke on integer
 coordinates, an orthogonal edge covers exactly two device pixels at 1:1. At 18px
@@ -163,13 +175,13 @@ Tool-specific `defaultStyle` values that change behaviour, not just colour:
 
 | Tool | `defaultStyle` |
 |---|---|
-| `trend-line` / `ray` / `extended-line` | `extendLeft`/`extendRight` = `false,false` / `false,true` / `true,true` |
+| `trend-line` / `ray` / `extended-line` / `arrow` | `extendLeft`/`extendRight` = `false,false` / `false,true` / `true,true`; `showStats: true` adds a midpoint readout (price change, percent, bars, angle) |
 | `rectangle` / `ellipse` / `circle` / `triangle` / `rotated-rectangle` | `fill: true`; a label comes from `drawing.text` (`align`, `valign`, `position: 'inside' | 'outside'`), 14 px when the block sets no size |
 | `fib-retracement` / `fib-extension` / `fib-channel` | `levels: cloneLevels(DEFAULT_FIB)` (ratios 0 to 1 with the conventional colours), `showLabels: true`. The anchor leg is stroked in `style.color`; bands are tinted by the level that closes them unless `fillColor` is set; `extendLeft` / `extendRight` are honoured |
 | `fib-fan` / `gann-fan` / `gann-box` / `fib-time-zone` | `levels: cloneLevels(DEFAULT_FIB_FAN / DEFAULT_GANN_FAN / DEFAULT_GANN_BOX / DEFAULT_FIB_TIME_ZONE)` |
 | `long-position` / `short-position` | `accountSize: 100000, risk: 1, fillOpacity: 0.13, showLabels: true` |
 | `text` / `callout` | `defaultText: { value: 'Text', fontSize: 14 }` / `{ value: 'Note', fontSize: 12 }` (a `DrawingText`, merged under the caller's `text`) |
-| `brush` / `highlighter` | `lineWidth: 2` / `lineWidth: 12, fillOpacity: 0.28` |
+| `brush` / `highlighter` | `lineWidth: 2` / `lineWidth: 12, fillOpacity: 0.28`; `pressure: true` lets a pen's per-sample `DrawingPoint.pressure` drive the width (off by default, so a mouse stroke is constant) |
 | `cyclic-lines` / `forecast` | `lineStyle: 'dashed'` |
 
 `fib-time-zone` uses the Fibonacci **sequence** (`0,1,2,3,5,8,13,21,34,55` bar multiples), not ratios, and its levels carry no colour (they fall back to `style.color`). `gann-fan` levels are price-per-time ratios (`1x1` = 1, `1x2` = 0.5, `2x1` = 2), coloured by `cycleColor(i)` and labelled by `gannLabel`; `gann-box` applies `DEFAULT_GANN_BOX` (0, .25, .382, .5, .618, .75, 1) to both axes plus the 1x1 diagonal. `circle` measures its radius in screen px so it stays round. `arc` passes *through* its middle anchor; `curve` treats it as an off-curve control.
@@ -202,7 +214,7 @@ draw.update(d.id, applyDrawingSettings(d, formState, schema));
 
 ```ts
 new DrawingController(chart, {
-  magnet: false,            // snap new anchors to the hovered bar's O/H/L/C
+  magnet: 'off',            // 'weak' | 'strong' | 'off'; true = 'strong'. Snap new anchors to the hovered bar's O/H/L/C
   stayInDrawingMode: false, // stay armed after a shape completes
   historyLimit: 50,         // undo depth
   defaultStyle: {},         // merged UNDER each tool's own defaults
@@ -222,6 +234,10 @@ new DrawingController(chart, {
 | `update(id, patch)` / `updateMany(patches)` | Patch `points` \| `style` \| `text` \| `props` \| `locked` \| `visible` \| `zIndex` (a `DrawingPatch`). `style`, `text` and `props` merge; `points` replaces. `updateMany([{ id, patch }])` is one undo step and one `drawing:change`. |
 | `remove(id)` / `removeMany(ids)` / `clear()` | Delete one / several (one undo step) / all. |
 | `finish()` | Commit a `points: 0` tool at the anchors placed so far. Returns whether it committed. |
+| `cancel()` | Drop the anchors placed so far; disarms the tool unless `stayInDrawingMode` keeps it (a second call then disarms). Returns whether anything changed. |
+| `popAnchor()` | Remove the last anchor of a `points: 0` tool still being placed (the Backspace of placement). Fixed-anchor and freehand tools have nothing to pop. |
+| `hovered()` | Id of the unselected drawing under the pointer, or `null`. Fed by the chart's `hover` event; `drawing:hover { id }` fires when it changes. |
+| `magnetMode()` | The resolved `MagnetMode` (`'off' | 'weak' | 'strong'`), after the boolean shorthand is mapped. |
 | `select(id \| ids \| null, additive = false)` / `selected()` / `selection()` | Selection. `additive` toggles each id (shift, ctrl or meta click does this for you); unknown ids are ignored. `selected()` is the primary (first picked) id; `selection()` is the list in pick order. Events fire only when the selection actually changes. |
 | `duplicate(ids)` | Clones with the paste offset (`pasteOffsetBars` / `pasteOffsetPixels`), selects the clones, one undo step. Returns the clones. |
 | `nudge(ids, dx, dy)` | Moves by a screen distance in media px (right and down positive); locked members stay. One undo step. Needs `timeToCoordinate` / `coordinateToTime` on the host for the horizontal half, else assumes the default 8 px bar spacing. |
@@ -234,7 +250,7 @@ new DrawingController(chart, {
 | `migrateDrawings(input)` | The upgrade `fromJSON` runs, exported for a host reading a saved layout on its own: any 1.9.x array or v2 document in, a v2 `DrawingsDocument` out, never throws. |
 | `destroy()` | Unhooks listeners, removes every pane layer, releases placement mode. |
 
-Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select` (the primary id), `draw:copy`, `draw:cut`, `draw:paste`, plus the 2.0 pair `drawing:select` (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind: 'add' | 'update' | 'remove' | 'reorder' }`, one per mutation, after the per-drawing `draw:*` events). `DrawingChangeKind` names the `kind` union.
+Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select` (the primary id), `draw:copy`, `draw:cut`, `draw:paste`, plus the 2.0 pair `drawing:select` (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind: 'add' | 'update' | 'remove' | 'reorder' }`, one per mutation, after the per-drawing `draw:*` events), and `drawing:hover` (`{ id: string | null }`, when the unselected drawing under the pointer changes). `DrawingChangeKind` names the `kind` union.
 
 **The controller listens on `chart.on(...)`, not `subscribeClick` / `subscribeDrag`.** Those two are single-slot callbacks the host needs for its own order lines; routing drawings through the bus means the two never contend.
 
@@ -246,12 +262,18 @@ Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, 
 4. `points: 0` tools (`path`, `polyline`) never self-complete: double-click, or `finish()`. Fewer than 2 anchors discards the attempt.
 5. `freehand` tools (`brush`, `highlighter`) ignore clicks and sample the cursor while the pointer is held; the release commits. A tap that never moved is discarded.
 6. A press-drag-release also draws a two-anchor shape in one gesture: the chart emits the press point, then the release point tagged `viaDrag`.
+7. **Shift locks the angle** on tools with `angleLock` (the line family): the free end is projected onto the nearest 45 degree ray on screen, while placing and while dragging a handle. It projects rather than rotates, so a level line ends under the pointer's x. It needs the host's four pixel mappings and is inert without them.
+8. **The magnet ring.** With `magnet` on, the layer paints a ring where the next click will land (the hovered bar's time and the nearest O/H/L/C, so a snapped anchor sits on the bar centre). `'weak'` pulls only when one of the four is within a few px, and needs `priceToCoordinate` to judge that; `'strong'` always pulls. Shift's angle lock wins over the magnet and hides the ring.
+9. **Freehand strokes** read the coalesced `samples` a pressed `crosshair:move` carries, so a fast stroke inks every position the pointer passed through rather than one per frame; on release the trail is thinned (`rdpSimplify`, a pixel and a half) and painted as a spline (`catmullRom`). A pen stores `pressure` per sample (a mouse stores nothing), and `style.pressure` on the brush and highlighter lets it drive the width (`pressureWidth`).
+10. **Escape, Enter and Backspace** while a tool is armed mean `cancel()`, `finish()` and `popAnchor()`; `keyToDrawingAction` says so when the host passes `placing: true`.
 
 ### Selection and dragging
 
 Hit ids are `draw:<id>` for the body and `draw:<id>#<n>` for anchor `n`. A body drag on an unselected drawing selects it alone first; then the **whole selection** moves as one undo entry (locked members stay, other-pane members through `priceToCoordinate` / `coordinateToPrice`); dragging a handle moves that one anchor to the cursor. `draw:update` fires per moved drawing on `drag:end`, plus one `drawing:change`. The grab radius is 6 media px for a body, 7 for a handle; handles of the selected drawing win over its own body.
 
-Freehand strokes expose only their first and last handle — one handle per sample would bury the ink.
+Freehand strokes expose only their first and last handle: one handle per sample would bury the ink.
+
+The controller also tracks the unselected drawing under the pointer from the chart's `hover` event (`hovered()`, `drawing:hover`), and the layer paints its handles faintly so a drawing reads as grabbable before it is grabbed. A hover change between two drawing layers costs the overlay tier only. The layer sizes its grab targets by the last pointer device (`setPointerType`, fed from the payload's `pointerType`), so a touch gets a larger radius than a mouse. Dragging an under-series drawing lifts it to the top layer for the gesture and re-lists it on release, one Light repaint each; the drag itself is Cursor-only.
 
 ### Undo, lock, visibility
 
@@ -335,7 +357,7 @@ matchDrawingShortcut(e); // tool id, or null
 
 **The library installs no key listener.** Only the host knows whether the chart has focus, a dialog is open, or the user is typing in a field. `matchDrawingShortcut` is pure and takes any `{ key, altKey?, ctrlKey?, metaKey?, shiftKey? }`.
 
-Editing chords are the same shape: `keyToDrawingAction(e, { hasSelection, hasTarget, editingText })` returns a `DrawingKeyAction` (`{ type: 'undo' | 'redo' | 'copy' | 'cut' | 'paste' | 'duplicate' | 'delete' }` or `{ type: 'nudge', dx, dy }`) or `null`. Ctrl/Cmd+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes, Ctrl+C / X / D need a selection or a hovered target, Ctrl+V always pastes, Delete / Backspace need a selection or target, and the arrows nudge the selection by `NUDGE_STEP_PX` (1) or `NUDGE_STEP_SHIFT_PX` (10) with Shift. `editingText`, any Alt, or an extra Shift on a chord returns `null`. `DrawingKeyEvent` and `DrawingKeyContext` type the two arguments. The host maps each action to the matching controller call: `duplicate(selection())`, `removeMany(selection())`, `nudge(selection(), dx, dy)`.
+Editing chords are the same shape: `keyToDrawingAction(e, { hasSelection, hasTarget, editingText, placing? })` returns a `DrawingKeyAction` (`{ type: 'undo' | 'redo' | 'copy' | 'cut' | 'paste' | 'duplicate' | 'delete' | 'cancel' | 'finish' | 'popAnchor' }` or `{ type: 'nudge', dx, dy }`) or `null`. With `placing: true` (pass `draw.activeTool() !== null`), a bare Escape, Enter or Backspace maps to `cancel`, `finish` or `popAnchor` before anything else is considered, so Backspace never deletes the selection while an anchor is being placed; `hasTarget` is `draw.hovered() !== null`. Ctrl/Cmd+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes, Ctrl+C / X / D need a selection or a hovered target, Ctrl+V always pastes, Delete / Backspace need a selection or target, and the arrows nudge the selection by `NUDGE_STEP_PX` (1) or `NUDGE_STEP_SHIFT_PX` (10) with Shift. `editingText`, any Alt, or an extra Shift on a chord returns `null`. `DrawingKeyEvent` and `DrawingKeyContext` type the two arguments. The host maps each action to the matching controller call: `duplicate(selection())`, `removeMany(selection())`, `nudge(selection(), dx, dy)`.
 
 Matching rules, all verified in `tests/draw-tier.test.ts`:
 
@@ -378,13 +400,14 @@ registerDrawingTool({
 });
 ```
 
-Exported geometry helpers: `distToSegment`, `distToLine`, `distToPolyline`, `distToRect`, `distToEllipse`, `rectOf`, `extendSegment`.
+Exported geometry helpers: `distToSegment`, `distToLine`, `distToPolyline`, `distToRect`, `distToEllipse`, `rectOf`, `boundsOf`, `extendSegment`. Freehand geometry, pure and DOM-free, for a custom tool or a host that captures its own trail: `rdpSimplify(points, epsilonPx)` thins a `ScreenPoint[]` to the corners its shape needs; `catmullRom(ctx, points, tension = 0.5)` traces a smooth spline through them (it neither begins nor strokes the path, so the caller sets the style); `pressureWidth(baseWidth, pressure, range = 0.6)` swells or thins a width by a 0..1 pressure around the 0.5 mouse stand-in. The built-in brush and highlighter use all three.
 
-Two optional descriptor fields change *placement*, not rendering:
+Three optional descriptor fields change *placement*, not rendering:
 
 | Field | Effect |
 |---|---|
 | `freehand: true` | Sample the cursor while held, commit on release. Requires `points: 0`. Only the end anchors get handles. |
+| `angleLock: true` | Shift snaps the free end of a two-anchor tool to 45 degree steps on screen, while placing and while dragging a handle. The line family sets it; a rectangle's opposite corner is not a line end, so shapes leave it off. |
 | `expand(clicked, { barSeconds, visibleBars })` | Turn the clicked anchors into the full anchor set, so one click can drop a complete editable default. Every returned point stays a draggable handle. |
 
 Size an `expand` default against `visibleBars`, not a fixed bar count — a fixed count is a hairline zoomed out and pane-filling zoomed in. The position tools use `Math.max(5, round(visibleBars * 0.08))` bars and `±1%` of price.
@@ -497,3 +520,7 @@ copy or a `duplicate` makes. `DRAW_TIER` is the tier constant.
 | `ExpandContext` | The argument to `DrawingTool.expand`, so a custom tool can type its own implementation |
 | `DrawingInput` / `DrawingPatch` / `DrawingsDocument` | What `add` accepts, what `update` accepts, what `toJSON` returns |
 | `DrawingText` / `FibLevel` | The text block and one level of a ladder (see the 2.0 model above) |
+| `MagnetMode` | `'off' | 'weak' | 'strong'`, what `magnet` resolves to and `magnetMode()` returns |
+| `DrawingPointerKind` | `'mouse' | 'touch' | 'pen'`, what `DrawingLayer.setPointerType` takes; a touch gets larger grab targets |
+| `DrawingPoint.pressure` | Optional 0..1 pen pressure on a freehand sample; kept by the clipboard and the migration |
+| `IconAttrs` / `IconSvgOptions` / `ToolCursorOptions` | The icon attribute bag, and the option bags of `iconSvg` and `toolCursor` |

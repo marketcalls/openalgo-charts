@@ -35,7 +35,21 @@ a per-tool settings schema, and an upgrade path for every 1.9.x layout and clipb
   `composeSettings`: a tool declares only fields its renderer reads.
 - `migrateDrawings(input)`, the pure 1.9.x to 2.0 upgrade, exported for hosts.
 - `keyToDrawingAction(e, ctx)`: undo, redo, copy, cut, paste, duplicate, delete and
-  arrow-key nudge as a pure mapping.
+  arrow-key nudge as a pure mapping; with `placing: true`, Escape, Enter and Backspace map
+  to `cancel`, `finish` and `popAnchor`.
+- Drawing feel: hover handles (`hovered()`, `drawing:hover`), Shift angle lock on the line
+  family (`DrawingTool.angleLock`), `magnet: 'off' | 'weak' | 'strong'` with a ring where
+  the next click lands, `cancel()` and `popAnchor()`, touch-sized grab targets, and an
+  under-series drawing lifted to the top layer for the length of a drag.
+- `style.showStats` on the line family: a midpoint readout of change, percent, bars and angle.
+- Freehand strokes ink every coalesced pointer sample, thin on release and paint as a spline;
+  a pen's `DrawingPoint.pressure` can drive the width (`style.pressure`). `rdpSimplify`,
+  `catmullRom` and `pressureWidth` are exported.
+- Icons as markup: a chrome set (`CHROME_ICONS` and friends), `iconSvg`, `chromeIconSvg`,
+  `iconSprite`, `iconUse` and `toolCursor`, all derived from one registry.
+- Pointer payloads: `crosshair:move`, `click`, `drag` and `drag:end` report `modifiers`,
+  `pointerType` and `pressure`; `drag` carries `point` and coalesced `samples`, and so does
+  `crosshair:move` while pressed. No existing field changed.
 - Named descriptors for every built-in tool, `boundsOf`, `cloneDrawing`.
 
 **Fixed**
@@ -45,8 +59,8 @@ a per-tool settings schema, and an upgrade path for every 1.9.x layout and clipb
   and arrow markers honour `fill: false`. Circle, triangle and rotated rectangle carry a
   shape label.
 
-The draw tier grows from 15.39 KB to 21.43 KB Brotli; its budget moves to 22 KB and the
-all-tiers budget to 132 KB.
+The draw tier grows from 15.39 KB to 25.12 KB Brotli; its budget moves to 26 KB and the
+all-tiers budget to 136 KB.
 
 ## 1.9.2
 

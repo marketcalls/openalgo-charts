@@ -529,6 +529,7 @@ Because every type is just a `ChartTypeDescriptor`, **custom styles are first-cl
   - two-finger pinch → zoom; flick → **kinetic** momentum (velocity decay each frame).
   - double-click → reset to fit-content / real-time.
 - **hit-test.ts**: on move, ask each primitive "are you under (x,y)?" so order lines highlight and become draggable. Returns the topmost hit with a cursor hint (e.g. `ns-resize` over an order line).
+- **Pointer facts on every gesture payload.** `crosshair:move`, `click`, `drag` and `drag:end` carry `modifiers`, `pointerType` and `pressure`, built by one pair of module-level helpers so a field a browser omits degrades to the pointer events spec's stand-in (0.5 while a button is held, 0 otherwise) rather than to `undefined`. A pressed move also carries the coalesced `samples` since the last event, projected through one `getBoundingClientRect` and one pane layout per event rather than per sample. Click pressure is the press pressure, because a release always reads 0.
 
 ---
 
@@ -653,6 +654,15 @@ Drawings are pane primitives (a `DrawingLayer` per pane, implementing `IPrimitiv
 - **Load is lenient, paste is strict.** `migrate.ts` upgrades any 1.9.x array or v2 document and keeps whatever it can render, dropping a malformed optional field on its own rather than the drawing; the clipboard sanitiser rejects a body all-or-nothing. A saved layout is the user's own work and deserves the benefit of the doubt; a paste is foreign input.
 
 The level palette (`levels.ts`) is the one statement of the conventional colour per Fibonacci ratio. Before it, each ladder tool restated those colours, and restated colours drift.
+
+**Interaction feel (2.0).** The second half of the rebuild is about how a drawing behaves under the hand, and each piece was placed where it was for a cost reason:
+
+- **Hover is a controller fact, painted by the layer.** The chart already emits `hover` at state-change rate; the controller keeps the id (`hovered()`, `drawing:hover`) and hands it to the layer, which paints that drawing's handles faintly. Both drawing layers are `'top'` primitives, so a hover change between them raises `Cursor` rather than `Light`, and the base and the series never repaint for a pointer that merely passes over a line.
+- **Freehand reads the crosshair, not the drag.** Placement mode swallows the pan path and never arms a drag, so the coalesced `samples` a fast stroke needs ride on `crosshair:move` while `pressed` (and on `drag` for a primitive being moved). The chart projects the batch through one `getBoundingClientRect` and one pane layout per move event rather than per sample, because that is the pointer path. On release the trail is thinned (`rdpSimplify`) and painted as a spline (`catmullRom`) by `freehand.ts`, which is pure and exported; a pen's pressure is stored per anchor and kept by the clipboard and the migration, and the thinning is why a straight stroke persists as two anchors.
+- **The magnet lands on the bar, not on the price alone.** A snapped anchor takes the hovered bar's time as well as its O/H/L/C, so it sits on the bar centre where the ring is drawn; `'weak'` needs `priceToCoordinate` to judge "within a few pixels" and does not pull without it. Shift's angle lock projects the pointer onto the nearest 45 degree ray (it does not rotate), so a level line ends under the pointer's x, and it bypasses the magnet, ring included.
+- **An under-series drawing is lifted for the length of a drag.** Moving something that paints below the candles would otherwise repaint the base tier every frame. The bottom layer re-lists on the first drag frame and on release (one `Light` each) and the drag itself is `Cursor` only, the same cost as dragging an over-series drawing.
+- **Pointer payloads grew, nothing changed.** `crosshair:move`, `click`, `drag` and `drag:end` gained `modifiers`, `pointerType` and `pressure` with the pointer events spec's stand-ins, so a host never reads `undefined` or a value outside 0..1; key sets are pinned by test so a later addition is a deliberate one.
+- **Icons are one registry, three surfaces.** `icons.ts` holds the path data for both grids (24 for tools, 16 for chrome); `icon-svg.ts` derives inline markup, a sprite and a CSS cursor from it, so the rail, a flyout and the armed cursor cannot drift apart. The chrome stroke is 1.5 on a 16 grid rather than the exact 4/3 proportion because a small glyph needs a little more relative weight to read the same, which the test states as a band rather than an equality.
 
 ## 9. The trade-management layer (`trade/`) — advanced on-chart trading
 

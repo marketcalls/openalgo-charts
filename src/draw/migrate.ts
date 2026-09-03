@@ -134,7 +134,9 @@ function migratePoints(value: unknown): DrawingPoint[] | null {
   for (const p of value) {
     // One unmappable anchor is a shape that can never be drawn or hit-tested.
     if (!isRecord(p) || !isNum(p.time) || !isNum(p.price)) return null;
-    out.push({ time: p.time, price: p.price });
+    const q: DrawingPoint = { time: p.time, price: p.price };
+    if (isNum(p.pressure) && p.pressure >= 0 && p.pressure <= 1) q.pressure = p.pressure;
+    out.push(q);
   }
   return out;
 }

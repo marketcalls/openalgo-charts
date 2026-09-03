@@ -159,6 +159,8 @@ chart has a different interval loaded.
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A paste of several drawings is one step. |
 | `toJSON()` / `fromJSON(data)` | Explicit serialisation: a `{ version: 2, drawings }` document out; a document or a 1.9.x bare array in, upgraded by `migrateDrawings`. |
 | `setOptions(patch)` | `magnet`, `stayInDrawingMode`, `historyLimit`, `defaultStyle`, `pasteOffsetBars`, `pasteOffsetPixels`, `clipboard`. |
+| `cancel()` / `popAnchor()` | Drop the anchors placed so far (the tool disarms unless `stayInDrawingMode` keeps it); remove the last anchor of a variable-anchor shape still being placed. Escape and Backspace, once the host wires them. |
+| `hovered()` / `magnetMode()` | The unselected drawing under the pointer, or `null` (`drawing:hover { id }` fires when it changes); the resolved `'off' \| 'weak' \| 'strong'`. |
 | `destroy()` | Detach layers and listeners. |
 
 ### Events
@@ -166,7 +168,8 @@ chart has a different interval loaded.
 `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select`, `draw:copy`,
 `draw:cut` and `draw:paste` all fire on `chart.on(...)`. The 2.0 pair `drawing:select`
 (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind }`, one per mutation)
-fire alongside them for a host that tracks a multi-selection.
+fire alongside them for a host that tracks a multi-selection, and `drawing:hover`
+(`{ id }`) when the unselected drawing under the pointer changes.
 
 <Callout type="info">
 The controller listens on the **event bus** (`click`, `crosshair:move`, `drag`, `drag:end`),
@@ -180,7 +183,15 @@ those for its own order lines without the two fighting over one channel.
   in one gesture. A live preview follows the cursor between clicks.
 - **Select**: click a drawing; click empty space to deselect.
 - **Move**: drag the body to translate every anchor, or drag a handle to move one.
-- **Magnet**: `{ magnet: true }` snaps new anchors to the nearest O/H/L/C of the hovered bar.
+- **Magnet**: `{ magnet: 'strong' }` (or `true`) snaps new anchors to the nearest O/H/L/C
+  of the hovered bar; `'weak'` snaps only when one of the four is within a few pixels, so a
+  click on open space lands where it was made. A ring shows where the next click will land.
+- **Shift**: locks the free end of a line to 45 degree steps on screen, while placing and
+  while dragging a handle.
+- **Hover**: the drawing under the pointer shows its handles faintly before it is picked.
+- **Freehand**: the brush and highlighter ink every coalesced pointer sample, thin the trail
+  on release and paint it as a spline; a pen's pressure can drive the width
+  (`style.pressure`).
 - **Undo**: a whole drag is **one** undo step, not one per frame.
 - **Lock**: a locked drawing renders but cannot be selected or dragged.
 

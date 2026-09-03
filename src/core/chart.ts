@@ -295,6 +295,141 @@ export interface CrosshairMoveEvent {
   point: { x: number; y: number } | null;
   /** Pane under the cursor, or null on leave. */
   paneIndex?: number | null;
+  /**
+   * True while a pointer is held. Placement mode swallows the pan path, so
+   * this is the only way to tell a hover from a drag while it is still
+   * happening. Absent on the all-null leave payload.
+   */
+  pressed?: boolean;
+  /** Modifier keys held during the move. Absent on the leave payload. */
+  modifiers?: PointerModifiers;
+  /** Device behind the move. Absent on the leave payload. */
+  pointerType?: PointerKind;
+  /** Pressure as reported for the move (see `PointerSample`). Absent on the leave payload. */
+  pressure?: number;
+  /**
+   * Every position the pointer passed through since the last move, in the
+   * drag payload's space (container x, pane-local y), present only while
+   * `pressed`. Placement mode never arms a drag, so a freehand stroke reads
+   * its coalesced samples here.
+   */
+  samples?: PointerSample[];
+}
+
+/** Modifier keys held during a pointer gesture. */
+export interface PointerModifiers {
+  shift: boolean;
+  alt: boolean;
+  ctrl: boolean;
+  meta: boolean;
+}
+
+/** Device behind a pointer gesture. Anything the browser does not name reports as a mouse. */
+export type PointerKind = 'mouse' | 'touch' | 'pen';
+
+/**
+ * One position a pointer passed through during a drag, in the same media px
+ * space as the payload's `point` (container x, pane-local y). `pressure` is
+ * the pointer events convention: 0..1 from hardware that measures it, 0.5
+ * while a button that cannot is held, 0 when nothing is known.
+ */
+export interface PointerSample {
+  x: number;
+  y: number;
+  pressure: number;
+}
+
+/**
+ * What the engine reports about the physical pointer behind a gesture.
+ * `crosshair:move`, `click`, `drag` and `drag:end` all carry these keys.
+ */
+export interface PointerInfo {
+  modifiers: PointerModifiers;
+  pointerType: PointerKind;
+  pressure: number;
+}
+
+/** Payload of the `click` event (`chart.on('click', ...)`). */
+export interface ChartClickEvent extends PointerInfo {
+  /** `externalId` of the hit primitive, or null on empty plot. */
+  id: string | null;
+  /** Price under the press on that pane, or null off the plot. */
+  price: number | null;
+  /** UTC seconds under the press, interpolated between bars and past the right edge. */
+  time: number;
+  paneIndex: number;
+  /** Press position: container media x, pane-local media y. */
+  point: { x: number; y: number };
+  /** Set on the release half of a press-drag-release while a host is placing a shape. */
+  viaDrag?: boolean;
+  /**
+   * The same state as `modifiers`, in the flat form the draw tier has read
+   * since it shipped. `pressure` here is the pressure at the press, not the
+   * release, which always reads 0.
+   */
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}
+
+/** Payload of the `drag` event: a draggable primitive being moved. */
+export interface ChartDragEvent extends PointerInfo {
+  id: string;
+  price: number;
+  time: number;
+  paneIndex: number;
+  /** Where the gesture was grabbed, so a delta starts at the press rather than the first move. */
+  fromPrice: number;
+  fromTime: number;
+  /** Current pointer position: container media x, pane-local media y. */
+  point: { x: number; y: number };
+  /**
+   * Every position the pointer passed through since the previous `drag`,
+   * oldest first, the last one at `point`. Browsers deliver moves at frame
+   * rate and fold the positions between frames into the event; a freehand
+   * stroke drawn from `point` alone is a polyline of frame-rate corners.
+   */
+  samples: PointerSample[];
+}
+
+/** Payload of the `drag:end` event: the release that finished a primitive drag. */
+export interface ChartDragEndEvent extends PointerInfo {
+  id: string;
+  price: number;
+  time: number;
+  paneIndex: number;
+  /** Release position: container media x, pane-local media y. */
+  point: { x: number; y: number };
+}
+
+/**
+ * The slice of a pointer event the payload builders read. Structural so the
+ * same builders serve a coalesced sample, and so a field a browser omits
+ * degrades to the spec fallback instead of an `undefined` in a host's hands.
+ */
+type PointerLike = Partial<Pick<PointerEvent,
+  'shiftKey' | 'altKey' | 'ctrlKey' | 'metaKey' | 'pointerType' | 'pressure' | 'buttons'>>;
+
+/** The three pointer facts every gesture payload carries. */
+function pointerInfo(e: PointerLike): PointerInfo {
+  const kind = e.pointerType;
+  return {
+    modifiers: { shift: e.shiftKey === true, alt: e.altKey === true, ctrl: e.ctrlKey === true, meta: e.metaKey === true },
+    pointerType: kind === 'touch' || kind === 'pen' ? kind : 'mouse',
+    pressure: pointerPressure(e),
+  };
+}
+
+/**
+ * Pressure as the pointer events spec defines it: what the hardware measured,
+ * else 0.5 while a button is held and 0 otherwise. Browsers already report
+ * that stand-in for a mouse; the fallback covers an event that omits the
+ * field, so a host never reads `undefined` or a value outside 0..1.
+ */
+function pointerPressure(e: PointerLike): number {
+  const p = e.pressure;
+  if (typeof p === 'number' && Number.isFinite(p)) return Math.min(1, Math.max(0, p));
+  return (e.buttons ?? 0) !== 0 ? 0.5 : 0;
 }
 
 /**
@@ -523,8 +658,12 @@ export class Chart {
   private _downPane = 0;
   private _downX = 0;
   private _downLocalY = 0;
+  /** Pressure at the press; a click reports this, since its release always reads 0. */
+  private _downPressure = 0;
   private _dragId: string | null = null; // externalId of the primitive being dragged
   private _hoverId: string | null = null; // externalId of the primitive under the pointer
+  /** Whether that primitive draws below the overlay, so leaving it must repaint the base. */
+  private _hoverOnBase = false;
   private _overlayFrozen = false; // native context menu open: keep the save-image snapshot
   private _dragCb: ((externalId: string, price: number, time: number) => void) | null = null;
   private _dragEndCb: ((externalId: string, price: number, time: number) => void) | null = null;
@@ -2889,14 +3028,48 @@ export class Chart {
 
   private _localPoint(e: { clientX: number; clientY: number }): { x: number; y: number; pane: number; localY: number; paneHeight: number } {
     const rect = this._container.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    // Map Y to a pane by cumulative *weighted* heights — matches the DOM/canvas layout.
-    const layout = this._paneLayout();
+    return this._project(e.clientX - rect.left, e.clientY - rect.top, this._paneLayout());
+  }
+
+  /** Container media px to the pane under it and that pane's local y. */
+  private _project(x: number, y: number, layout: { top: number; height: number }[]): { x: number; y: number; pane: number; localY: number; paneHeight: number } {
+    // Map Y to a pane by cumulative weighted heights, matching the DOM/canvas layout.
     let pane = 0;
     for (let i = 0; i < layout.length; i++) if (y >= layout[i].top) pane = i;
     const pl = layout[pane] ?? { top: 0, height: this._height };
     return { x, y, pane, localY: y - pl.top, paneHeight: pl.height };
+  }
+
+  /**
+   * Every position a drag passed through since the previous move event, in
+   * the same space as the payload's `point`. The rect and layout are read once
+   * for the batch: a fast stroke coalesces several positions per frame, and
+   * each one going back to the DOM is layout work on the pointer path.
+   */
+  private _dragSamples(e: PointerEvent): PointerSample[] {
+    const coalesced = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+    const events: readonly PointerEvent[] = coalesced.length > 0 ? coalesced : [e];
+    const rect = this._container.getBoundingClientRect();
+    const layout = this._paneLayout();
+    const out: PointerSample[] = [];
+    for (const s of events) {
+      const p = this._project(s.clientX - rect.left, s.clientY - rect.top, layout);
+      out.push({ x: p.x, y: p.localY, pressure: pointerPressure(s) });
+    }
+    return out;
+  }
+
+  /**
+   * Pointer facts for a click. Modifiers and device come from the release,
+   * pressure from the press: a release always reads 0, which would leave the
+   * field carrying nothing on any device.
+   */
+  private _clickInfo(e: PointerLike): PointerInfo & { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean } {
+    const info = pointerInfo(e);
+    info.pressure = this._downPressure;
+    // The flat flags predate `modifiers` and the draw tier reads them; both
+    // stay so a host typed against either keeps working.
+    return { ...info, shiftKey: info.modifiers.shift, ctrlKey: info.modifiers.ctrl, metaKey: info.modifiers.meta };
   }
 
   private readonly _onPointerDown = (e: PointerEvent): void => {
@@ -2921,6 +3094,7 @@ export class Chart {
     this._downPane = p.pane;
     this._downX = p.x;
     this._downLocalY = p.localY;
+    this._downPressure = pointerPressure(e);
 
     // Pane divider: pressing within a few px of the boundary between two panes
     // starts a resize, redistributing weight between them.
@@ -3073,12 +3247,16 @@ export class Chart {
       const price = this._panes[this._downPane].yToPrice(p.localY);
       const time = this._xToTime(p.x);
       this._dragCb?.(this._dragId, price, time);
-      this.emit('drag', {
+      const drag: ChartDragEvent = {
         id: this._dragId, price, time, paneIndex: this._downPane,
         // The grab origin, so a consumer's delta starts at the press instead of
         // the first move — otherwise the shape lags the cursor by one event.
         fromPrice: this._dragFrom.price, fromTime: this._dragFrom.time,
-      });
+        point: { x: p.x, y: p.localY },
+        samples: this._dragSamples(e),
+        ...pointerInfo(e),
+      };
+      this.emit('drag', drag);
       return;
     }
     if (this._dragging) {
@@ -3108,7 +3286,7 @@ export class Chart {
       this._emitViewport('pan');
       return;
     }
-    this._updateCursor(p.pane, p.x, p.localY, p.y);
+    this._updateCursor(p.pane, p.x, p.localY, p.y, e);
   };
 
   private readonly _onPointerUp = (e: PointerEvent): void => {
@@ -3142,7 +3320,12 @@ export class Chart {
       const price = this._panes[this._downPane].yToPrice(p.localY);
       const time = this._xToTime(p.x);
       this._dragEndCb?.(this._dragId, price, time);
-      this.emit('drag:end', { id: this._dragId, price, time, paneIndex: this._downPane });
+      const end: ChartDragEndEvent = {
+        id: this._dragId, price, time, paneIndex: this._downPane,
+        point: { x: p.x, y: p.localY },
+        ...pointerInfo(e),
+      };
+      this.emit('drag:end', end);
       // A press on a draggable primitive arms a drag, so this branch used to
       // swallow the release — and a plain click on a drawing never reached the
       // click path, leaving it unselectable. A gesture that never moved is a
@@ -3150,12 +3333,13 @@ export class Chart {
       if (!this._dragMoved) {
         const id = this._dragId;
         this._clickCb?.(id);
-        this.emit('click', {
+        const click: ChartClickEvent = {
           id, price, time,
           paneIndex: this._downPane,
           point: { x: this._downX, y: this._downLocalY },
-          shiftKey: e.shiftKey === true, ctrlKey: e.ctrlKey === true, metaKey: e.metaKey === true,
-        });
+          ...this._clickInfo(e),
+        };
+        this.emit('click', click);
       }
       this._dragId = null;
       // Re-evaluate hover at the release point (mouse keeps hovering the line;
@@ -3176,21 +3360,26 @@ export class Chart {
     if (this._placementMode && this._pointerMoved) {
       const p = this._localPoint(e);
       this._ensureScaled(this._downPane);
-      this.emit('click', {
+      const info = this._clickInfo(e);
+      const press: ChartClickEvent = {
         id: null,
         price: this._panes[this._downPane]?.yToPrice(this._downLocalY) ?? null,
         time: this._xToTime(this._downX),
         paneIndex: this._downPane,
         point: { x: this._downX, y: this._downLocalY },
-      });
-      this.emit('click', {
+        ...info,
+      };
+      this.emit('click', press);
+      const release: ChartClickEvent = {
         id: null,
         price: this._panes[this._downPane]?.yToPrice(p.localY) ?? null,
         time: this._xToTime(p.x),
         paneIndex: this._downPane,
         point: { x: p.x, y: p.localY },
         viaDrag: true,
-      });
+        ...info,
+      };
+      this.emit('click', release);
       return;
     }
     // Always hit-test a clean click: the chart's own chrome (pane-legend
@@ -3206,7 +3395,7 @@ export class Chart {
       // tool that *places* something (a drawing, an alert) needs; `id` is null
       // there. `subscribeClick` stays hit-only for back-compat.
       this._ensureScaled(this._downPane);
-      this.emit('click', {
+      const click: ChartClickEvent = {
         id: hit?.externalId ?? null,
         price: this._panes[this._downPane]?.yToPrice(this._downLocalY) ?? null,
         time: this._xToTime(this._downX),
@@ -3214,8 +3403,9 @@ export class Chart {
         point: { x: this._downX, y: this._downLocalY },
         // Modifier flags ride along so the draw tier can make a shift or
         // ctrl click additive to the selection; the payload carries no event.
-        shiftKey: e.shiftKey === true, ctrlKey: e.ctrlKey === true, metaKey: e.metaKey === true,
-      });
+        ...this._clickInfo(e),
+      };
+      this.emit('click', click);
       return;
     }
     if (KineticAnimation.shouldAnimate(this._dragVelocity)) this._startKinetic(this._dragVelocity);
@@ -3479,13 +3669,20 @@ export class Chart {
     const id = hit?.externalId ?? null;
     this._container.style.cursor = hit?.cursor ?? '';
     if (id === this._hoverId) return;
+    // Hover-styled primitives on the base canvas need a light repaint, no
+    // rescale. A change that touches only 'top' primitives (leaving a drawing
+    // for another, or for empty space) is the overlay's alone: the pointer
+    // moves sixty times a second, and repainting the series for a line it
+    // merely passes over is a stutter.
+    const onBase = hit !== null && hit.zOrder !== 'top';
+    const level = onBase || this._hoverOnBase ? InvalidationLevel.Light : InvalidationLevel.Cursor;
     this._hoverId = id;
-    // hover-styled primitives draw on the base canvas → light repaint, no rescale
-    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
+    this._hoverOnBase = onBase;
+    this.invalidate((m) => m.invalidateGlobal(level));
     this.emit('hover', { id });
   }
 
-  private _updateCursor(paneIndex: number, x: number, localY: number, containerY = localY): void {
+  private _updateCursor(paneIndex: number, x: number, localY: number, containerY: number, source: PointerEvent): void {
     // Plot spans [leftAxisWidth, width - priceAxisWidth]; work in plot-relative x.
     const rightEdge = this._width - this._rightAxisWidth;
     const plotX = x - this._leftAxisWidth;
@@ -3530,7 +3727,7 @@ export class Chart {
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
     if (this._crosshairCb !== null || this._listeners.get('crosshair:move') !== undefined) {
       const time = this._dataLayer.indexToTime(index);
-      const move = {
+      const move: CrosshairMoveEvent = {
         time: time ?? null,
         index,
         price: pane.yToPrice(localY),
@@ -3541,6 +3738,10 @@ export class Chart {
         // pan path, so this is the only way a consumer can tell a hover from a
         // drag while it is still happening — what freehand drawing samples.
         pressed: this._pointers.size > 0,
+        ...pointerInfo(source),
+        // Only while pressed: a hover has no trail worth carrying, and the key
+        // set of the hover payload is what hosts and tests pin.
+        ...(this._pointers.size > 0 ? { samples: this._dragSamples(source) } : {}),
       };
       this._crosshairCb?.(move);
       this.emit('crosshair:move', move);

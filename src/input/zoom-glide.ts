@@ -2,7 +2,7 @@
  * Eased wheel zoom (ARCHITECTURE.md §3.2, §7). A wheel tick used to land its
  * whole zoom step on one frame, which reads as the chart jumping rather than
  * moving. This spreads the same step over a short exponential approach, the
- * counterpart to {@link KineticAnimation} for the other half of the viewport.
+ * counterpart to `KineticAnimation` (input/kinetic.ts) for the other half of the viewport.
  *
  *   applied(t) = base + (target − base) · (1 − e^(−t/tau))
  *

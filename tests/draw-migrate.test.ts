@@ -267,6 +267,28 @@ describe('a version 2 document', () => {
     expect(out.drawings[0]).not.toBe(doc.drawings[0]);
   });
 
+  it('keeps pen pressure on a brush sample, and drops one outside 0..1', () => {
+    // A stroke reloaded without its pressure paints at the configured width,
+    // which is graceful and lossy; the field is the user's own hand.
+    const doc: DrawingsDocument = {
+      version: DRAWING_STATE_VERSION,
+      drawings: [{
+        id: 'b', tool: 'brush', paneIndex: 0, zIndex: 0, style: { pressure: true },
+        points: [
+          { time: 1700000000, price: 100, pressure: 0.25 },
+          { time: 1700000060, price: 101 },
+          { time: 1700000120, price: 102, pressure: 2 } as unknown as { time: number; price: number },
+        ],
+      }],
+    };
+    const out = migrateDrawings(doc);
+    expect(out.drawings[0].points).toEqual([
+      { time: 1700000000, price: 100, pressure: 0.25 },
+      { time: 1700000060, price: 101 },
+      { time: 1700000120, price: 102 },
+    ]);
+  });
+
   it('keeps an empty level list empty, and every level field it knows', () => {
     const doc = migrateDrawings({
       version: 2, drawings: [{

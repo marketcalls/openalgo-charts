@@ -602,6 +602,27 @@ describe('payload encoding', () => {
     expect(c.props?.rows).not.toBe(d.props?.rows);
   });
 
+  it('keeps pen pressure through a clone and a paste, and drops a pressure it cannot trust', () => {
+    // A pen stroke that lost its pressure would paint at the configured width
+    // after a paste: graceful, but not what was copied.
+    const d: Drawing = {
+      id: 'a', tool: 'brush', paneIndex: 0, zIndex: 0,
+      points: [{ time: 1, price: 2, pressure: 0.2 }, { time: 3, price: 4 }, { time: 5, price: 6, pressure: 1 }],
+      style: { pressure: true },
+    };
+    const c = cloneDrawing(d);
+    expect(c.points).toEqual(d.points);
+    expect(c.points[1]).toEqual({ time: 3, price: 4 });   // no key invented for the mouse stand-in
+    const pasted = decodeClipboardPayload(encodeClipboardPayload([d]));
+    expect(pasted?.[0].points).toEqual(d.points);
+
+    const s = sanitizeDrawing({
+      tool: 'brush',
+      points: [{ time: 1, price: 2, pressure: 1.5 }, { time: 3, price: 4, pressure: -0.1 }, { time: 5, price: 6, pressure: 'x' }, { time: 7, price: 8, pressure: 0.4 }],
+    });
+    expect(s?.points).toEqual([{ time: 1, price: 2 }, { time: 3, price: 4 }, { time: 5, price: 6 }, { time: 7, price: 8, pressure: 0.4 }]);
+  });
+
   it('reads nothing from an empty clipboard', async () => {
     const clip = new DrawingClipboard({ port: osPort({ text: '' }) });
     expect(await clip.read()).toBeNull();

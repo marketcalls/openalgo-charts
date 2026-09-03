@@ -44,13 +44,13 @@ it on teardown (component unmount, route change) so listeners never leak.
 |-------|---------|-----------|
 | `ready` | `{}` | Once, on the microtask after `createChart` returns. |
 | `destroy` | `{}` | Once, at the end of `chart.destroy()`, with the chart already torn down. Anything holding a chart it did not create lets go of it here. |
-| `crosshair:move` | `{ time, index, price, bar, point, paneIndex, pressed }` | The pointer moves over the plot (all-null when it leaves). `pressed` is true while a pointer is held: the only way to observe a drag in progress, since placement mode suppresses panning. |
-| `click` | `{ id, price, time, paneIndex, point }` | The plot was clicked. `id` is the hit primitive's `externalId`, or **`null`** for a click on empty chart space. `point` is container-relative media px. |
+| `crosshair:move` | `{ time, index, price, bar, point, paneIndex, pressed, modifiers, pointerType, pressure, samples? }` | The pointer moves over the plot (all-null when it leaves). `pressed` is true while a pointer is held: the only way to observe a drag in progress, since placement mode suppresses panning. `samples` is present only then and lists every coalesced position since the last move. |
+| `click` | `{ id, price, time, paneIndex, point, modifiers, pointerType, pressure }` | The plot was clicked. `id` is the hit primitive's `externalId`, or **`null`** for a click on empty chart space. `point` is container-relative media px. `pressure` is the press pressure, since a release always reads 0. |
 | `hover` | `{ id }` | The pointer enters (`id` = `externalId`) or leaves (`id` = `null`) a hit-testable primitive. |
 | `dblclick` | `{}` | The plot is double-clicked. The chart also resets the scale on this, *unless* a drawing tool is armed. There a double-click finishes the shape instead. |
 | `contextmenu` | `{ paneIndex, point, price, time, index, target, preventDefault }` | The plot is right-clicked. `target` classifies what is under the pointer, so an app can raise its own menu. See below. |
-| `drag` | `{ id, price, time, paneIndex, fromPrice, fromTime }` | A draggable primitive is being moved. `from*` is the grab origin, so a delta starts at the press rather than the first move. |
-| `drag:end` | `{ id, price, time, paneIndex }` | The drag gesture finished. Pair with `drag` to snapshot once per gesture (undo wants the pre-drag state, not an intermediate frame). |
+| `drag` | `{ id, price, time, paneIndex, fromPrice, fromTime, point, samples, modifiers, pointerType, pressure }` | A draggable primitive is being moved. `from*` is the grab origin, so a delta starts at the press rather than the first move. `point` is container x with pane-local y; `samples` lists every coalesced position since the last move in that space, the last equal to `point`. |
+| `drag:end` | `{ id, price, time, paneIndex, point, modifiers, pointerType, pressure }` | The drag gesture finished. Pair with `drag` to snapshot once per gesture (undo wants the pre-drag state, not an intermediate frame). |
 | `pan` | `{ from, to, logicalFrom, logicalTo }` | The user pans (drag, two-finger, kinetic glide). |
 | `zoom` | `{ from, to, logicalFrom, logicalTo }` | The user zooms (wheel or pinch). |
 | `resize` | `{ width, height }` | The container size changes (CSS px). |
@@ -122,6 +122,14 @@ chart.on('crosshair:move', ({ time, price, bar, point }) => {
 
 The typed helper `chart.subscribeCrosshairMove(cb)` delivers the same
 `CrosshairMoveEvent` if you prefer a single dedicated callback.
+
+Every move also reports the pointer itself: `modifiers` (`{ shift, alt, ctrl, meta }`),
+`pointerType` (`'mouse' | 'touch' | 'pen'`) and `pressure` (0..1 as the pointer events
+spec defines it: what the hardware measured, else 0.5 while a button is held, else 0).
+While `pressed`, `samples` carries every position the pointer passed through since the
+last move, with its pressure, so a freehand stroke inks a fast gesture whole rather than
+one point per frame. `click`, `drag` and `drag:end` carry the same three pointer facts;
+`drag` adds `point` and `samples`.
 
 ### click
 

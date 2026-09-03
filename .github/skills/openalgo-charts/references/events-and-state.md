@@ -29,13 +29,13 @@ Every name emitted by the engine, verified against the `emit(` call sites in `sr
 | Event | Payload | Fires when |
 |---|---|---|
 | `ready` | `{}` | Once, on a microtask after the constructor — a subscription on the next line still receives it. |
-| `crosshair:move` | `{ time, index, price, bar, point: { x, y }, paneIndex, pressed }` | Pointer moves over the plot. `time`/`bar` are `null` off the data. `pressed` is true while a pointer is down. |
+| `crosshair:move` | `{ time, index, price, bar, point: { x, y }, paneIndex, pressed, modifiers, pointerType, pressure, samples? }` | Pointer moves over the plot. `time`/`bar` are `null` off the data. `pressed` is true while a pointer is down; `samples` (container x, pane-local y, pressure per coalesced position) is present only then, which is how a freehand stroke reads its trail in placement mode. |
 | `crosshair:move` (leave) | `{ time: null, index: null, price: null, bar: null, point: null, paneIndex: null }` | Pointer leaves the plot. Note: no `pressed` key on this payload. |
-| `click` | `{ id, price, time, paneIndex, point: { x, y }, viaDrag? }` | A clean click anywhere in the plot. `id` is the hit primitive's `externalId`, or `null` on empty plot. |
+| `click` | `{ id, price, time, paneIndex, point: { x, y }, shiftKey, ctrlKey, metaKey, modifiers, pointerType, pressure, viaDrag? }` | A clean click anywhere in the plot. `id` is the hit primitive's `externalId`, or `null` on empty plot. `pressure` is the press pressure (a release always reads 0). |
 | `dblclick` | `{}` | Plot double-clicked. Also resets the scale unless a drawing tool is armed. |
 | `hover` | `{ id }` | Pointer enters (`id` = `externalId`) or leaves (`id` = `null`) a hit-testable primitive. State-change rate, not pointer rate. |
-| `drag` | `{ id, price, time, paneIndex, fromPrice, fromTime }` | A draggable primitive is being moved. `from*` is the grab origin, so deltas start at the press. |
-| `drag:end` | `{ id, price, time, paneIndex }` | The drag gesture released. |
+| `drag` | `{ id, price, time, paneIndex, fromPrice, fromTime, point, samples, modifiers, pointerType, pressure }` | A draggable primitive is being moved. `from*` is the grab origin, so deltas start at the press. `point` is container x with pane-local y; `samples` lists every coalesced position since the last move in that space, the last one equal to `point`. |
+| `drag:end` | `{ id, price, time, paneIndex, point, modifiers, pointerType, pressure }` | The drag gesture released. |
 | `pan` | `{ from, to, logicalFrom, logicalTo }` | The user pans, **or** a programmatic move that changed the window without changing its span. |
 | `zoom` | `{ from, to, logicalFrom, logicalTo }` | Wheel or pinch zoom, **or** a programmatic move that changed the span. |
 | `resize` | `{ width, height }` | Container size changed (CSS px); also emitted by an explicit `applySize` that actually changes size. |

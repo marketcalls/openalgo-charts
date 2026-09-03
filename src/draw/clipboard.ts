@@ -84,12 +84,18 @@ export function systemClipboard(): ClipboardPort | null {
 export function cloneDrawing(d: Drawing): Drawing {
   const out: Drawing = {
     ...d,
-    points: d.points.map((p) => ({ time: p.time, price: p.price })),
+    points: d.points.map(clonePoint),
     style: cloneStyle(d.style),
   };
   if (d.text !== undefined) out.text = { ...d.text };
   if (d.props !== undefined) out.props = JSON.parse(JSON.stringify(d.props)) as Record<string, unknown>;
   return out;
+}
+
+// Pressure rides with a brush sample; dropping it here would repaint a pen
+// stroke at the configured width after a paste.
+function clonePoint(p: DrawingPoint): DrawingPoint {
+  return p.pressure === undefined ? { time: p.time, price: p.price } : { time: p.time, price: p.price, pressure: p.pressure };
 }
 
 function cloneStyle(style: DrawingStyle): DrawingStyle {
@@ -105,7 +111,7 @@ export function encodeClipboardPayload(drawings: readonly Drawing[]): string {
       version: DRAWING_CLIPBOARD_VERSION,
       drawings: drawings.map((d) => ({
         tool: d.tool,
-        points: d.points.map((p) => ({ time: p.time, price: p.price })),
+        points: d.points.map(clonePoint),
         style: d.style ?? {},
         ...(d.text === undefined ? {} : { text: d.text }),
         ...(d.props === undefined ? {} : { props: d.props }),
@@ -306,7 +312,9 @@ function sanitizePoints(value: unknown): DrawingPoint[] | null {
   const out: DrawingPoint[] = [];
   for (const p of value) {
     if (!isRecord(p) || !isFinite_(p.time) || !isFinite_(p.price)) return null;
-    out.push({ time: p.time, price: p.price });
+    const q: DrawingPoint = { time: p.time, price: p.price };
+    if (isFinite_(p.pressure) && p.pressure >= 0 && p.pressure <= 1) q.pressure = p.pressure;
+    out.push(q);
   }
   return out;
 }

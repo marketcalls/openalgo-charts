@@ -80,12 +80,22 @@ export {
   LEVEL_NEUTRAL, CYCLE_PALETTE, DEFAULT_FIB, DEFAULT_FIB_FAN, DEFAULT_GANN_BOX, DEFAULT_GANN_FAN, DEFAULT_FIB_TIME_ZONE,
 } from './levels';
 
+// Glyphs. Path data for both grids lives in icons.ts; icon-svg.ts derives
+// inline markup, a sprite and a CSS cursor from it, so every surface that
+// shows a tool reads from one source.
 export {
   DRAWING_TOOL_ICONS, drawingToolIcon, drawingToolIconIds,
   ICON_VIEWBOX, ICON_STROKE, ICON_ATTRS,
+  CHROME_ICONS, CHROME_ICON_FILLED, chromeIcon, chromeIconIds,
+  CHROME_ICON_VIEWBOX, CHROME_ICON_STROKE, CHROME_ICON_ATTRS,
+  type IconAttrs,
 } from './icons';
+export {
+  iconSvg, chromeIconSvg, iconSprite, iconUse, toolCursor, ICON_SYMBOL_PREFIX,
+  type IconSvgOptions, type ToolCursorOptions,
+} from './icon-svg';
 
-export { DrawingLayer, sortByZIndex, type DrawingLayerOrder } from './layer';
+export { DrawingLayer, sortByZIndex, type DrawingLayerOrder, type DrawingPointerKind } from './layer';
 export {
   DrawingController,
   type DrawingControllerOptions,
@@ -140,6 +150,9 @@ export type {
   DrawContext,
   HitContext,
   ScreenPoint,
+  // `DrawingControllerOptions.magnet` accepts it; a host with a snap picker
+  // wants the three names as one type.
+  MagnetMode,
   // `DrawingTool.expand` receives this; a custom tool cannot type its own
   // implementation without it.
   ExpandContext,
@@ -155,3 +168,8 @@ export {
   distToSegment, distToLine, distToPolyline,
   distToRect, distToEllipse, rectOf, boundsOf, extendSegment,
 } from './geometry';
+
+// Freehand stroke geometry. Pure and DOM-free: a host or a custom tool that
+// captures its own pointer trail can thin, smooth and weight it the way the
+// brush and highlighter do.
+export { rdpSimplify, catmullRom, pressureWidth } from './freehand';

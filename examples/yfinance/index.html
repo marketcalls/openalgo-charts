@@ -391,7 +391,9 @@
        refuses to shrink below its content and the right pane falls off. */
     .split { display: flex; flex: 1 1 auto; min-height: 0; min-width: 0; }
     .stage { position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; }
-    #chart { position: absolute; inset: 0; cursor: crosshair; }
+    /* An armed tool sets --tool-cursor (see armCursor); the engine's own hover
+       hints are inline and still win while one is up. */
+    #chart { position: absolute; inset: 0; cursor: var(--tool-cursor, crosshair); }
 
     /* ── split view: the linked second chart ────────────────────── */
     .splitbar { flex: none; width: 5px; cursor: col-resize; background: var(--bd-soft);
@@ -410,7 +412,7 @@
     .p2note { margin-left: auto; color: var(--faint); font-size: 11px; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis; }
     .p2plot { position: relative; flex: 1 1 auto; min-height: 0; }
-    #chart2 { position: absolute; inset: 0; cursor: crosshair; }
+    #chart2 { position: absolute; inset: 0; cursor: var(--tool-cursor, crosshair); }
     .p2legend { position: absolute; top: 10px; left: 12px; z-index: 10; pointer-events: none;
       white-space: nowrap; padding: 6px 10px; border-radius: 9px; font: 11px/1.45 system-ui, sans-serif;
       background: rgba(15,18,26,.72); border: 1px solid var(--bd-soft); backdrop-filter: blur(8px); }
@@ -947,7 +949,10 @@
       LineBreakTransform, PointFigureTransform, KagiTransform,
     } from '/dist/openalgo-charts.transform.mjs';
     import '/dist/openalgo-charts.indicators.mjs';
-    import { DrawingController, BUILTIN_DRAWING_TOOLS, drawingShortcuts, matchDrawingShortcut } from '/dist/openalgo-charts.draw.mjs';
+    import {
+      DrawingController, BUILTIN_DRAWING_TOOLS, drawingShortcuts, matchDrawingShortcut, keyToDrawingAction,
+      DRAWING_TOOL_ICONS, iconSvg, toolCursor,
+    } from '/dist/openalgo-charts.draw.mjs';
 
     // A broker-agnostic DataFeed for yfinance: getBars hits this demo's /api/history,
     // which already returns the chart's Bar shape (time in UTC seconds).
@@ -3431,6 +3436,7 @@
       // in-memory clipboard is shared by every controller on the page, which is
       // what makes chart-to-chart paste work with the OS permission refused.
       draw2 = new DrawingController(chart2, { magnet: el('magnet').checked, clipboard: clipboardPort });
+      chart2.on('draw:tool', ({ tool }) => armCursor(el('chart2'), tool));
       chart2.on('draw:add', () => { el('status').textContent = 'chart 2: ' + draw2.drawings().length + ' drawings'; });
       // No properties widget over here (it is glued to the main chart's box),
       // but the chords apply to whichever plot the pointer is over, so the
@@ -4898,6 +4904,17 @@
       forecast: '<path d="M4 18 20 7"/><path d="M20 7v6M20 7h-6"/><circle cx="4" cy="18" r="1.9"/>',
     };
     const svgIcon = (k) => '<svg viewBox="0 0 24 24">' + (ICON[k] || '') + '</svg>';
+    // A tool's glyph comes from the tier, so the rail, its flyouts and the
+    // armed cursor all read one set; the local table is for the chrome only.
+    const toolGlyph = (tool, fallback) => (tool && DRAWING_TOOL_ICONS[tool] ? iconSvg(tool) : svgIcon(fallback));
+    // The armed tool's glyph as the pointer. It goes through a custom property
+    // read by the stylesheet, not the inline cursor: the engine owns that one
+    // for its hover hints (a divider, an order line) and clears it as the
+    // pointer moves, and a hint still wins while it is up.
+    function armCursor(box, tool) {
+      if (tool && DRAWING_TOOL_ICONS[tool]) box.style.setProperty('--tool-cursor', toolCursor(tool));
+      else box.style.removeProperty('--tool-cursor');
+    }
 
     // Rail groups. A group with several tools cycles them on repeat clicks, so a
     // family of 4 line tools stays one button instead of four.
@@ -5011,13 +5028,13 @@
         row.className = 'railmenu__item';
         const chord = SHORTCUTS[it.tool];
         row.innerHTML =
-          svgIcon(it.icon) + '<span>' + it.name + '</span>' +
+          toolGlyph(it.tool, it.icon) + '<span>' + it.name + '</span>' +
           (chord ? '<span class="chord">' + chord.replace('+', ' + ') + '</span>' : '');
         if (draw && draw.activeTool() === it.tool) row.classList.add('is-on');
         row.addEventListener('click', (e) => {
           e.stopPropagation();
           group.last = it.tool;            // the button re-activates this next time
-          btn.innerHTML = svgIcon(it.icon) + caretEl();
+          btn.innerHTML = toolGlyph(it.tool, it.icon) + caretEl();
           closeRailMenu();
           setDrawLock(false);   // a pick from the list is one placement, like a single click
           if (draw) draw.setTool(it.tool);
@@ -5078,7 +5095,7 @@
         const b = document.createElement('button');
         const tools = g.menu ? g.menu.filter((i) => i.tool).map((i) => i.tool) : (g.tools || []);
         if (g.menu) g.last = g.last || tools[0];
-        b.innerHTML = svgIcon(g.icon) + (g.menu ? caretEl() : '');
+        b.innerHTML = (g.menu ? toolGlyph(g.last, g.icon) : svgIcon(g.icon)) + (g.menu ? caretEl() : '');
         b.dataset.tools = tools.join(',');
         // Read at hover time, not here: a group button stands for whichever
         // tool was last picked out of its flyout, so a label frozen at build
@@ -5532,7 +5549,7 @@
         SHORTCUTS = drawingShortcuts();
         buildRail();
       }
-      chart.on('draw:tool', ({ tool }) => syncRail(tool));
+      chart.on('draw:tool', ({ tool }) => { syncRail(tool); armCursor(el('chart'), tool); });
       chart.on('draw:add', ({ drawing }) => { el('status').textContent = `drew ${drawing.tool}`; });
       // Selecting a drawing raises its properties bar; deselecting hides it.
       // The chords go in the status line at the one moment they apply: the
@@ -5595,6 +5612,25 @@
       if (!d || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
+      // While a tool is armed, Escape, Enter and Backspace belong to placement:
+      // leave the tool, close a polyline, drop the last anchor. The tier says
+      // which, so Backspace here can never delete the selection by accident.
+      if (d.activeTool()) {
+        const action = keyToDrawingAction(e, {
+          hasSelection: d.selected() !== null, hasTarget: d.hovered() !== null, editingText: false, placing: true,
+        });
+        if (action && action.type === 'cancel') {
+          d.cancel();
+          if (d.activeTool() === null) setDrawLock(false);
+          e.preventDefault();
+          return;
+        }
+        if (action && (action.type === 'finish' || action.type === 'popAnchor')) {
+          d[action.type]();
+          e.preventDefault();
+          return;
+        }
+      }
       // Copy and cut only claim the chord when there is a drawing under it:
       // with nothing selected, Ctrl+C still belongs to the page's text.
       if (mod && (key === 'c' || key === 'x') && d.selected() && canClip()) {

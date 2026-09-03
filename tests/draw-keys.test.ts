@@ -119,3 +119,37 @@ describe('what is never an action', () => {
     expect(keyToDrawingAction({ key: '' }, selected)).toBeNull();
   });
 });
+
+describe('placement, while a tool is armed', () => {
+  const placing: DrawingKeyContext = { ...selected, placing: true };
+
+  it('Escape cancels, Enter finishes, Backspace drops the last anchor', () => {
+    expect(keyToDrawingAction({ key: 'Escape' }, placing)).toEqual({ type: 'cancel' });
+    expect(keyToDrawingAction({ key: 'Enter' }, placing)).toEqual({ type: 'finish' });
+    expect(keyToDrawingAction({ key: 'Backspace' }, placing)).toEqual({ type: 'popAnchor' });
+  });
+
+  it('Backspace never reaches the delete branch, even with a selection to delete', () => {
+    // The anchor being placed is what the user means; the selection is not.
+    expect(keyToDrawingAction({ key: 'Backspace' }, placing)).toEqual({ type: 'popAnchor' });
+    expect(keyToDrawingAction({ key: 'Delete' }, placing)).toEqual({ type: 'delete' });
+  });
+
+  it('without a tool armed the three keys keep their old meaning', () => {
+    expect(keyToDrawingAction({ key: 'Backspace' }, selected)).toEqual({ type: 'delete' });
+    expect(keyToDrawingAction({ key: 'Backspace' }, hovered)).toEqual({ type: 'delete' });
+    expect(keyToDrawingAction({ key: 'Escape' }, selected)).toBeNull();
+    expect(keyToDrawingAction({ key: 'Enter' }, selected)).toBeNull();
+    expect(keyToDrawingAction({ key: 'Escape' }, { ...selected, placing: false })).toBeNull();
+  });
+
+  it('a chord with a modifier is not a placement key', () => {
+    expect(keyToDrawingAction({ key: 'Enter', shiftKey: true }, placing)).toBeNull();
+    expect(keyToDrawingAction(ctrl('Backspace'), placing)).toBeNull();
+    expect(keyToDrawingAction({ key: 'Escape', altKey: true }, placing)).toBeNull();
+  });
+
+  it('still yields nothing while the user is typing', () => {
+    expect(keyToDrawingAction({ key: 'Escape' }, { ...typing, placing: true })).toBeNull();
+  });
+});

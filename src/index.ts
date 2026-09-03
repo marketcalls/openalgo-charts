@@ -8,6 +8,8 @@ export type {
   ChartOptions, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
   ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState,
   AxisChromeOptions, ZoomAnchor,
+  PointerModifiers, PointerKind, PointerSample, PointerInfo,
+  ChartClickEvent, ChartDragEvent, ChartDragEndEvent,
 } from './core/chart';
 export { Pane } from './core/pane';
 export { darkTheme, lightTheme, DEFAULT_THEME } from './theme';

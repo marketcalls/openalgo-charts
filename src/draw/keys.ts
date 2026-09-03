@@ -30,6 +30,11 @@ export interface DrawingKeyContext {
   hasTarget: boolean;
   /** The user is typing (a text box is open). Every key is theirs. */
   editingText: boolean;
+  /**
+   * A tool is armed. Escape, Enter and Backspace then belong to placement
+   * (cancel, finish, drop the last anchor) rather than to the selection.
+   */
+  placing?: boolean;
 }
 
 export type DrawingKeyAction =
@@ -41,7 +46,11 @@ export type DrawingKeyAction =
   | { type: 'duplicate' }
   | { type: 'delete' }
   /** Move the selection by a screen distance; `dx` right and `dy` down, in px. */
-  | { type: 'nudge'; dx: number; dy: number };
+  | { type: 'nudge'; dx: number; dy: number }
+  /** Placement, while a tool is armed: leave it, close the shape, drop the last anchor. */
+  | { type: 'cancel' }
+  | { type: 'finish' }
+  | { type: 'popAnchor' };
 
 /** How far an arrow key moves the selection, plain and with Shift. */
 export const NUDGE_STEP_PX = 1;
@@ -55,6 +64,13 @@ export function keyToDrawingAction(e: DrawingKeyEvent, ctx: DrawingKeyContext): 
   const shift = e.shiftKey === true;
   // Alt chords arm tools (`matchDrawingShortcut`); they never edit.
   if (e.altKey === true) return null;
+  // Placement owns these three while a tool is armed: Backspace here drops
+  // the last anchor and must never reach the delete branch below.
+  if (ctx.placing === true && !mod && !shift) {
+    if (key === 'Escape') return { type: 'cancel' };
+    if (key === 'Enter') return { type: 'finish' };
+    if (key === 'Backspace') return { type: 'popAnchor' };
+  }
   const target = ctx.hasSelection || ctx.hasTarget;
 
   if (mod) {

@@ -21,12 +21,14 @@
 import type { IPrimitive, DataLayer } from 'openalgo-charts';
 import type {
   Drawing, DrawingInput, DrawingPatch, DrawingPoint, DrawingStyle, DrawingTool, DrawingsDocument,
+  MagnetMode, ScreenPoint,
 } from './types';
 import { DRAWING_STATE_VERSION } from './types';
-import { DrawingLayer } from './layer';
+import { DrawingLayer, type DrawingPointerKind } from './layer';
 import { getDrawingTool, hasDrawingTool } from './tools';
 import { DrawingClipboard, cloneDrawing, type ClipboardPort } from './clipboard';
 import { migrateDrawings } from './migrate';
+import { rdpSimplify } from './freehand';
 
 /**
  * The slice of the chart this controller needs.
@@ -40,6 +42,14 @@ import { migrateDrawings } from './migrate';
  * members is structural, so the real `Chart` satisfies it with nothing to cast.
  */
 export interface DrawingChartHost {
+  /**
+   * The event bus. The controller listens for `click`, `crosshair:move`,
+   * `drag`, `drag:end` and `dblclick`, and for `hover` (`{ id }`, the hit id
+   * under the pointer whenever it changes), which is what drives the hover
+   * state: the chart has already hit-tested the move, so the controller
+   * reads its answer rather than testing a second time. A host that never
+   * emits `hover` has drawings that select and drag but do not light up.
+   */
   on(event: string, handler: (payload: unknown) => void): () => void;
   emit(event: string, payload: unknown): void;
   addPrimitive(primitive: IPrimitive, paneIndex?: number): void;
@@ -75,10 +85,14 @@ export interface DrawingChartHost {
 
 export interface DrawingControllerOptions {
   /**
-   * Snap new anchors to the nearest O/H/L/C of the bar under the cursor.
-   * Default false.
+   * Snap new anchors to the O/H/L/C of the bar under the cursor. `'strong'`
+   * always takes the nearest of the four; `'weak'` only when one sits within
+   * a few pixels of the pointer, so a click on open space stays where it was
+   * made. `true` means `'strong'` and `false` means `'off'`, which is what
+   * the boolean meant before the modes existed. Default `'off'`. While a
+   * tool is armed the layer paints a ring where the next click will land.
    */
-  magnet?: boolean;
+  magnet?: boolean | MagnetMode;
   /** Style merged under every tool's own defaults. */
   defaultStyle?: DrawingStyle;
   /** Stay in the active tool after finishing a drawing. Default false. */
@@ -114,7 +128,26 @@ export interface DrawingControllerOptions {
 /** What `drawing:change` reports happened to the listed ids. */
 export type DrawingChangeKind = 'add' | 'update' | 'remove' | 'reorder';
 
-interface ClickPayload {
+/**
+ * The pointer facts the chart attaches to every gesture payload. Read
+ * defensively throughout: a host built against an older engine, or a
+ * synthetic event in a test, carries none of them, and the fallbacks are a
+ * plain mouse click with nothing held.
+ */
+interface PointerFacts {
+  modifiers?: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean };
+  pointerType?: string;
+  pressure?: number;
+}
+
+/** One coalesced pointer position: container x, pane-local y, pressure. */
+interface PointerSample {
+  x: number;
+  y: number;
+  pressure?: number;
+}
+
+interface ClickPayload extends PointerFacts {
   id: string | null;
   time: number;
   price: number | null;
@@ -128,7 +161,7 @@ interface ClickPayload {
   metaKey?: boolean;
 }
 
-interface DragPayload {
+interface DragPayload extends PointerFacts {
   id: string;
   price: number;
   time: number;
@@ -136,6 +169,22 @@ interface DragPayload {
   /** Where the gesture was grabbed; deltas measure from here, not frame one. */
   fromPrice?: number;
   fromTime?: number;
+}
+
+/**
+ * What a crosshair move carries, beyond the pointer facts: the bar under the
+ * pointer for the magnet, `pressed` for freehand inking, and, while pressed,
+ * every position the pointer passed through since the last move (`samples`),
+ * so a fast stroke keeps its curve rather than its frame-rate corners.
+ */
+interface CrosshairPayload extends PointerFacts {
+  time?: number | null;
+  price?: number | null;
+  paneIndex?: number | null;
+  point?: { x: number; y: number } | null;
+  bar?: { open: number; high: number; low: number; close: number } | null;
+  pressed?: boolean;
+  samples?: PointerSample[];
 }
 
 /** The two layers of one pane: under the series and over it. */
@@ -151,14 +200,52 @@ interface PaneLayers {
  */
 const FALLBACK_BAR_SPACING_PX = 8;
 
+/** How close, in media px, an O/H/L/C must be for the weak magnet to pull. */
+const WEAK_MAGNET_PX = 8;
+
+/** The angle step Shift locks a line to, in radians: 45 degrees. */
+const ANGLE_STEP = Math.PI / 4;
+
+/**
+ * How far a thinned stroke may stray from the pointer's path, in media px.
+ * Under the width of the ink itself, so the thinning is invisible; above the
+ * jitter of a hand, so a stroke stops costing an anchor per pixel.
+ */
+const STROKE_EPSILON_PX = 1.5;
+
+/**
+ * The pressure a mouse reports while its button is held, and what a sample
+ * without a value is taken to be. A sample at exactly this value stores
+ * nothing, so a mouse stroke carries no pressure at all.
+ */
+const REST_PRESSURE = 0.5;
+
 let nextId = 1;
 
 const sameIds = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((id, i) => id === b[i]);
 
+/** The 1.9.x boolean and the 2.0 modes, folded onto one. */
+function magnetModeOf(value: boolean | MagnetMode | undefined): MagnetMode {
+  if (value === true) return 'strong';
+  if (value === 'weak' || value === 'strong') return value;
+  return 'off';
+}
+
+/** Whether Shift is held, from either form the payload carries it in. */
+const shiftOf = (p: PointerFacts & { shiftKey?: boolean }): boolean =>
+  p.modifiers?.shift === true || p.shiftKey === true;
+
+/** The pointer kind behind a payload; anything unnamed is a mouse. */
+const pointerKindOf = (p: PointerFacts): DrawingPointerKind =>
+  p.pointerType === 'touch' || p.pointerType === 'pen' ? p.pointerType : 'mouse';
+
+type ControllerOptions = Required<Omit<DrawingControllerOptions, 'defaultStyle' | 'clipboard' | 'clipboardFallbackToMemory' | 'magnet'>>
+  & { defaultStyle: DrawingStyle; magnet: MagnetMode };
+
 export class DrawingController {
   private readonly _chart: DrawingChartHost;
-  private _opts: Required<Omit<DrawingControllerOptions, 'defaultStyle' | 'clipboard' | 'clipboardFallbackToMemory'>> & { defaultStyle: DrawingStyle };
+  private _opts: ControllerOptions;
   private readonly _clipboard: DrawingClipboard;
   private readonly _layers = new Map<number, PaneLayers>();
   private _drawings: Drawing[] = [];
@@ -167,6 +254,19 @@ export class DrawingController {
   private _pendingPane = 0;
   /** Selected ids, in the order they were picked. The first is the primary. */
   private _selection: string[] = [];
+  /** The drawing under the pointer, from the chart's own hit-test. */
+  private _hovered: string | null = null;
+  /**
+   * Drawings that live under the series but are painted on the top layer for
+   * the length of a drag. The top layer repaints on the cursor tier; the
+   * bottom one costs the series every frame, which is the difference between
+   * a drag that follows the hand and one that stutters through the candles.
+   */
+  private readonly _lifted = new Set<string>();
+  /** Shift as of the last pointer report: what angle lock reads mid-preview. */
+  private _shift = false;
+  /** The device behind the last pointer report, for target sizing. */
+  private _pointerKind: DrawingPointerKind = 'mouse';
   /** Snapshots for undo/redo; each is a full drawing list (they are small). */
   private _undo: string[] = [];
   private _redo: string[] = [];
@@ -183,13 +283,17 @@ export class DrawingController {
   } | null = null;
   private readonly _off: (() => void)[] = [];
   private _lastCursor: { time: number; price: number; paneIndex: number } | null = null;
-  /** Bar under the cursor, carried by the crosshair event; used by magnet. */
-  private _lastBar: { open: number; high: number; low: number; close: number } | null = null;
+  /**
+   * Bar under the cursor, carried by the crosshair event, with the time the
+   * crosshair reported for it: the magnet lands anchors on that bar's values
+   * at that bar's time.
+   */
+  private _lastBar: { time: number; open: number; high: number; low: number; close: number } | null = null;
 
   public constructor(chart: DrawingChartHost, options: DrawingControllerOptions = {}) {
     this._chart = chart;
     this._opts = {
-      magnet: options.magnet ?? false,
+      magnet: magnetModeOf(options.magnet),
       stayInDrawingMode: options.stayInDrawingMode ?? false,
       historyLimit: options.historyLimit ?? 50,
       pasteOffsetBars: options.pasteOffsetBars ?? 2,
@@ -203,7 +307,8 @@ export class DrawingController {
         : { fallbackToMemory: options.clipboardFallbackToMemory }),
     });
     this._off.push(chart.on('click', (p) => this._onClick(p as ClickPayload)));
-    this._off.push(chart.on('crosshair:move', (p) => this._onCrosshair(p as Record<string, unknown>)));
+    this._off.push(chart.on('crosshair:move', (p) => this._onCrosshair(p as CrosshairPayload)));
+    this._off.push(chart.on('hover', (p) => this._onHover(p as { id?: string | null })));
     this._off.push(chart.on('drag', (p) => this._onDrag(p as DragPayload)));
     this._off.push(chart.on('drag:end', () => this._onDragEnd()));
     this._off.push(chart.on('dblclick', () => { this.finish(); }));
@@ -225,6 +330,7 @@ export class DrawingController {
     this._pending = [];
     this._setPlacementMode(toolId !== null);
     this._syncPreview();
+    this._syncSnapRing();
     this._chart.emit('draw:tool', { tool: toolId });
   }
 
@@ -244,9 +350,28 @@ export class DrawingController {
   public setOptions(patch: DrawingControllerOptions): void {
     // `clipboard` is a port, not a stored option: it is applied to the live
     // clipboard so a host can hand one over after the user grants permission.
-    const { clipboard, ...rest } = patch;
-    this._opts = { ...this._opts, ...rest, defaultStyle: patch.defaultStyle ?? this._opts.defaultStyle };
+    const { clipboard, magnet, ...rest } = patch;
+    this._opts = {
+      ...this._opts, ...rest,
+      defaultStyle: patch.defaultStyle ?? this._opts.defaultStyle,
+      magnet: magnet === undefined ? this._opts.magnet : magnetModeOf(magnet),
+    };
     if (clipboard !== undefined) this._clipboard.setPort(clipboard);
+    this._syncSnapRing();
+  }
+
+  /** The snap mode in force, after the boolean form has been folded. */
+  public magnetMode(): MagnetMode {
+    return this._opts.magnet;
+  }
+
+  /**
+   * The drawing under the pointer, selected or not, as the chart's hit-test
+   * last reported it. What a host passes as `hasTarget` to the key mapping,
+   * and what a context menu opens on.
+   */
+  public hovered(): string | null {
+    return this._hovered;
   }
 
   /** The clipboard behind copy / cut / paste, for a host reporting failures. */
@@ -734,22 +859,94 @@ export class DrawingController {
 
   // ── interaction ─────────────────────────────────────────────────────────
 
-  private _onCrosshair(p: Record<string, unknown>): void {
-    const time = p.time as number | null;
-    const price = p.price as number | null;
-    const paneIndex = (p.paneIndex as number | null) ?? null;
+  private _onCrosshair(p: CrosshairPayload): void {
+    const time = p.time ?? null;
+    const price = p.price ?? null;
+    const paneIndex = p.paneIndex ?? null;
     this._lastCursor = time === null || price === null || paneIndex === null
       ? null : { time, price, paneIndex };
-    this._lastBar = (p.bar as { open: number; high: number; low: number; close: number } | null) ?? null;
+    const bar = p.bar ?? null;
+    this._lastBar = bar === null || time === null ? null : { time, ...bar };
+    this._shift = shiftOf(p);
+    this._notePointer(p);
+    // The pointer left the plot: nothing is under it any more.
+    if (time === null && price === null) this._setHovered(null);
     // Freehand tools ink while the pointer is held rather than on clicks.
     if (this._tool !== null && p.pressed === true && this._isFreehand()
       && time !== null && price !== null && paneIndex !== null
       && Number.isFinite(time) && Number.isFinite(price)) {
-      this._inkPoint({ time, price }, paneIndex);
+      for (const q of this._coalesced(p, { time, price }, paneIndex)) this._inkPoint(q, paneIndex);
       return;
     }
+    this._syncSnapRing();
     // A tool mid-placement previews against the live cursor.
     if (this._tool !== null && this._pending.length > 0) this._syncPreview();
+  }
+
+  /** The chart's hit-test answer for the pointer position, whenever it changes. */
+  private _onHover(p: { id?: string | null }): void {
+    const id = p.id ?? null;
+    this._setHovered(id !== null && id.startsWith('draw:') ? id.slice('draw:'.length).split('#')[0] : null);
+  }
+
+  private _setHovered(id: string | null): void {
+    if (id === this._hovered) return;
+    this._hovered = id;
+    for (const l of this._layers.values()) {
+      l.bottom.setHovered(id);
+      l.top.setHovered(id);
+    }
+    this._chart.emit('drawing:hover', { id });
+  }
+
+  /** Remember the device behind a report and size the layers' targets for it. */
+  private _notePointer(p: PointerFacts): void {
+    const kind = pointerKindOf(p);
+    if (kind === this._pointerKind) return;
+    this._pointerKind = kind;
+    for (const l of this._layers.values()) {
+      l.bottom.setPointerType(kind);
+      l.top.setPointerType(kind);
+    }
+  }
+
+  /**
+   * The positions a pressed move passed through, as anchors, ending on the
+   * move's own point. The samples carry pixels (container x, pane-local y);
+   * the payload's point is the same position in its own space, so the gap
+   * between the two is the pane's offset, and each sample maps back through
+   * the host's converters. A host without them, or a payload without
+   * samples, inks the one point the move reports.
+   */
+  private _coalesced(p: CrosshairPayload, last: DrawingPoint, paneIndex: number): DrawingPoint[] {
+    const samples = p.samples;
+    const end = { ...last, ...this._pressureOf(p.pressure) };
+    const toTime = this._chart.coordinateToTime;
+    const toPrice = this._chart.coordinateToPrice;
+    if (!Array.isArray(samples) || samples.length < 2 || toTime === undefined || toPrice === undefined
+      || p.point === null || p.point === undefined) {
+      return [end];
+    }
+    const tail = samples[samples.length - 1];
+    const shift = p.point.y - tail.y;
+    if (!Number.isFinite(shift)) return [end];
+    const out: DrawingPoint[] = [];
+    for (let i = 0; i < samples.length - 1; i++) {
+      const s = samples[i];
+      const time = toTime.call(this._chart, s.x);
+      const price = toPrice.call(this._chart, s.y + shift, paneIndex);
+      if (price === null || !Number.isFinite(time) || !Number.isFinite(price)) continue;
+      out.push({ time, price, ...this._pressureOf(s.pressure) });
+    }
+    out.push({ ...end, ...this._pressureOf(tail.pressure ?? p.pressure) });
+    return out;
+  }
+
+  /** A pressure worth storing: finite, and not the mouse's stand-in. */
+  private _pressureOf(pressure: number | undefined): { pressure?: number } {
+    return typeof pressure === 'number' && Number.isFinite(pressure) && pressure !== REST_PRESSURE
+      ? { pressure: Math.min(1, Math.max(0, pressure)) }
+      : {};
   }
 
   /**
@@ -809,11 +1006,19 @@ export class DrawingController {
       this._setPlacementMode(false);   // hand panning back to the chart
     }
     this._syncPreview();
+    this._syncSnapRing();
     this.select(created.id);
     this._chart.emit('draw:tool', { tool: this._tool });
   }
 
-  /** Commit the stroke a freehand gesture built, if it has any extent. */
+  /**
+   * Commit the stroke a freehand gesture built, if it has any extent. The
+   * samples are thinned first: a pointer reports every few px, and a stroke
+   * kept whole costs a time and price conversion per sample on every frame
+   * and a row per sample in every save, for a curve the eye cannot tell from
+   * the thinned one. Thinning happens in screen space, since the tolerance is
+   * a pixel one; a host that cannot map to pixels keeps every sample.
+   */
   private _finishFreehand(): void {
     const pts = this._pending;
     this._pending = [];
@@ -821,7 +1026,28 @@ export class DrawingController {
       this._syncPreview();
       return;
     }
-    this._commit(pts);
+    this._commit(this._thinStroke(pts, this._pendingPane));
+  }
+
+  private _thinStroke(pts: DrawingPoint[], paneIndex: number): DrawingPoint[] {
+    const px: ScreenPoint[] = [];
+    for (const p of pts) {
+      const at = this._toPixel(p, paneIndex);
+      if (at === null) return pts;
+      px.push(at);
+    }
+    const kept = rdpSimplify(px, STROKE_EPSILON_PX);
+    // Kept points come back at their exact input coordinates, in order, so
+    // walking the input once pairs each with the sample it came from.
+    const out: DrawingPoint[] = [];
+    let j = 0;
+    for (const k of kept) {
+      while (j < px.length && (px[j].x !== k.x || px[j].y !== k.y)) j++;
+      if (j >= px.length) return pts;   // cannot happen; keep everything rather than lose a sample
+      out.push(pts[j]);
+      j++;
+    }
+    return out;
   }
 
   /**
@@ -845,7 +1071,48 @@ export class DrawingController {
     return true;
   }
 
+  /**
+   * Abandon whatever is being placed: the anchors so far are dropped and,
+   * unless the controller stays in drawing mode, the tool is disarmed too, so
+   * one Escape returns the chart to the cursor the way a finished shape
+   * would. With nothing pending, an armed tool is simply disarmed. Returns
+   * whether anything changed, so a host can let the key fall through when it
+   * did nothing.
+   */
+  public cancel(): boolean {
+    if (this._tool === null) return false;
+    const hadPending = this._pending.length > 0;
+    this._pending = [];
+    if (!hadPending || !this._opts.stayInDrawingMode) {
+      this._tool = null;
+      this._setPlacementMode(false);
+      this._syncPreview();
+      this._syncSnapRing();
+      this._chart.emit('draw:tool', { tool: null });
+      return true;
+    }
+    this._syncPreview();
+    return true;
+  }
+
+  /**
+   * Remove the last anchor placed on a variable-anchor tool (polyline, path)
+   * still being drawn: the Backspace of placement. A fixed-anchor tool has
+   * nothing to pop, since its anchors commit the moment the last one lands,
+   * and a freehand stroke is one gesture rather than a list. Returns whether
+   * an anchor went.
+   */
+  public popAnchor(): boolean {
+    if (this._tool === null || this._pending.length === 0) return false;
+    const tool = getDrawingTool(this._tool);
+    if (tool.points !== 0 || tool.freehand === true) return false;
+    this._pending.pop();
+    this._syncPreview();
+    return true;
+  }
+
   private _onClick(p: ClickPayload): void {
+    this._notePointer(p);
     // Placement takes precedence: while a tool is armed, a click is an anchor.
     if (this._tool !== null) {
       // A freehand stroke was already collected move-by-move; the click pair a
@@ -862,7 +1129,8 @@ export class DrawingController {
       // Reject an unmappable click outright: a NaN anchor serialises as null
       // and produces a drawing that can never be rendered or hit-tested.
       if (p.price === null || !Number.isFinite(p.price) || !Number.isFinite(p.time)) return;
-      this._placePoint({ time: p.time, price: this._snap(p.price, p.paneIndex) }, p.paneIndex);
+      this._shift = shiftOf(p);
+      this._placePoint(this._aimPoint({ time: p.time, price: p.price }, p.paneIndex), p.paneIndex);
       return;
     }
     const additive = p.shiftKey === true || p.ctrlKey === true || p.metaKey === true;
@@ -886,18 +1154,66 @@ export class DrawingController {
     }
   }
 
-  /** Snap to the nearest O/H/L/C of the hovered bar when magnet is on. */
-  private _snap(price: number, paneIndex: number): number {
-    if (!this._opts.magnet || paneIndex !== 0) return price;
+  /**
+   * Where a click at `point` actually lands for the armed tool: on the 45
+   * degree lock while Shift holds the free end of a line, else on the magnet
+   * when it pulls, else where it was. The lock wins over the magnet because a
+   * snapped price would bend the exact angle the lock exists to give.
+   */
+  private _aimPoint(point: DrawingPoint, paneIndex: number): DrawingPoint {
+    const locked = this._lockedPoint(point, paneIndex);
+    if (locked !== null) return locked;
+    return this._snapPoint(point, paneIndex) ?? point;
+  }
+
+  /**
+   * The free end of a two-anchor line under angle lock, or null when the lock
+   * does not apply: no Shift, a tool without the flag, no anchor yet to
+   * measure from, or a host that cannot map pixels (the lock is a screen
+   * angle, so there is nothing to lock to in data space).
+   */
+  private _lockedPoint(point: DrawingPoint, paneIndex: number): DrawingPoint | null {
+    if (!this._shift || this._tool === null || this._pending.length !== 1) return null;
+    if (getDrawingTool(this._tool).angleLock !== true || paneIndex !== this._pendingPane) return null;
+    return this._lockAngle(this._pending[0], point, paneIndex);
+  }
+
+  /**
+   * The nearest O/H/L/C of the hovered bar, at that bar's time, when the
+   * magnet pulls; null when it does not. `strong` always pulls; `weak` only
+   * within a few pixels, measured on screen so the pull is the same reach at
+   * every zoom. Price panes only: an indicator pane's values are not prices.
+   */
+  private _snapPoint(point: DrawingPoint, paneIndex: number): DrawingPoint | null {
+    const mode = this._opts.magnet;
+    if (mode === 'off' || paneIndex !== 0) return null;
     const bar = this._lastBar;
-    if (bar === null) return price;
-    let best = price;
-    let bestD = Infinity;
-    for (const v of [bar.open, bar.high, bar.low, bar.close]) {
-      const d = Math.abs(v - price);
-      if (d < bestD) { bestD = d; best = v; }
+    if (bar === null) return null;
+    const values = [bar.open, bar.high, bar.low, bar.close];
+    if (mode === 'strong') {
+      let best = values[0];
+      let bestD = Infinity;
+      for (const v of values) {
+        const d = Math.abs(v - point.price);
+        if (d < bestD) { bestD = d; best = v; }
+      }
+      return { time: bar.time, price: best };
     }
-    return best;
+    // Weak: the nearest value by screen distance, and only when it is close.
+    // Without a pixel mapping there is no "close", so nothing pulls.
+    const toY = this._chart.priceToCoordinate;
+    if (toY === undefined) return null;
+    const y = toY.call(this._chart, point.price, paneIndex);
+    if (y === null || !Number.isFinite(y)) return null;
+    let best: number | null = null;
+    let bestD = WEAK_MAGNET_PX;
+    for (const v of values) {
+      const vy = toY.call(this._chart, v, paneIndex);
+      if (vy === null || !Number.isFinite(vy)) continue;
+      const d = Math.abs(vy - y);
+      if (d <= bestD) { bestD = d; best = v; }
+    }
+    return best === null ? null : { time: bar.time, price: best };
   }
 
   private _onDrag(p: DragPayload): void {
@@ -907,6 +1223,8 @@ export class DrawingController {
     if (d === undefined || d.locked === true) return;
     const handle = handleStr === undefined ? null : Number(handleStr);
 
+    this._notePointer(p);
+    this._shift = shiftOf(p);
     if (this._dragStart === null || this._dragStart.id !== rawId || this._dragStart.handle !== handle) {
       // Grabbing the body of an unselected shape selects it first, on its own:
       // the selection is what moves, and a drag that moved something other than
@@ -923,8 +1241,26 @@ export class DrawingController {
         from: { time: p.fromTime ?? p.time, price: p.fromPrice ?? p.price },
         items: moving.map((m) => ({ id: m.id, paneIndex: m.paneIndex, points: m.points.map((q) => ({ ...q })) })),
       };
+      // Anything under the series rides on the top layer for the gesture, so
+      // the frames that follow repaint the overlay alone. Lifting re-lists the
+      // bottom layer once, which is the one series repaint a lifted drag
+      // costs; a drag with nothing to lift never touches it.
+      let lifted = false;
+      for (const m of moving) {
+        if (m.zIndex < 0) { this._lifted.add(m.id); lifted = true; }
+      }
+      this._moveDrag(p, d, handle);
+      if (lifted) this._sync();
+      else this._syncDrag();
+      return;
     }
-    const start = this._dragStart;
+    this._moveDrag(p, d, handle);
+    this._syncDrag();
+  }
+
+  /** Apply one drag frame to the model, from the gesture's snapshot. */
+  private _moveDrag(p: DragPayload, d: Drawing, handle: number | null): void {
+    const start = this._dragStart as NonNullable<typeof this._dragStart>;
     if (handle === null) {
       // Whole shape: translate every anchor of every selected shape by the
       // cursor delta. A shape on another pane cannot take the price delta (its
@@ -937,15 +1273,22 @@ export class DrawingController {
         if (m === undefined) continue;
         const samePane = item.paneIndex === p.paneIndex;
         m.points = item.points.map((q) => ({
+          ...q,
           time: q.time + dt,
           price: samePane ? q.price + dp : this._offsetPrice(q.price, item.paneIndex, dy),
         }));
       }
     } else if (handle >= 0 && handle < d.points.length) {
       const item = start.items[0];
-      d.points = item.points.map((q, i) => (i === handle ? { time: p.time, price: p.price } : { ...q }));
+      let target: DrawingPoint = { time: p.time, price: p.price };
+      // Shift on the handle of a two-anchor line locks it to the 45 degree
+      // step about the other anchor, the same way placement does.
+      if (this._shift && item.points.length === 2 && hasDrawingTool(d.tool)
+        && getDrawingTool(d.tool).angleLock === true) {
+        target = this._lockAngle(item.points[1 - handle], target, d.paneIndex) ?? target;
+      }
+      d.points = item.points.map((q, i) => (i === handle ? { ...q, ...target } : { ...q }));
     }
-    this._sync();
   }
 
   /** How far down the screen `to` is from `from` on one pane, in media px. */
@@ -957,10 +1300,57 @@ export class DrawingController {
     return y0 === null || y1 === null || !Number.isFinite(y0) || !Number.isFinite(y1) ? 0 : y1 - y0;
   }
 
+  /** An anchor in container media px, or null on a host without the mapping. */
+  private _toPixel(p: DrawingPoint, paneIndex: number): ScreenPoint | null {
+    const toX = this._chart.timeToCoordinate;
+    const toY = this._chart.priceToCoordinate;
+    if (toX === undefined || toY === undefined) return null;
+    const x = toX.call(this._chart, p.time);
+    const y = toY.call(this._chart, p.price, paneIndex);
+    return y === null || !Number.isFinite(x) || !Number.isFinite(y) ? null : { x, y };
+  }
+
+  /** The inverse of `_toPixel`. */
+  private _fromPixel(at: ScreenPoint, paneIndex: number): DrawingPoint | null {
+    const toTime = this._chart.coordinateToTime;
+    const toPrice = this._chart.coordinateToPrice;
+    if (toTime === undefined || toPrice === undefined) return null;
+    const time = toTime.call(this._chart, at.x);
+    const price = toPrice.call(this._chart, at.y, paneIndex);
+    return price === null || !Number.isFinite(time) || !Number.isFinite(price) ? null : { time, price };
+  }
+
+  /**
+   * `free` projected onto the nearest 45 degree ray from `anchor`, all in
+   * screen space: the angle the eye reads is the one on the canvas, and a log
+   * scale or a tall pane would make a data-space angle anything but. The
+   * projection rather than a rotation, so a level line still ends under the
+   * pointer's x and a vertical one under its y; only the stray axis is
+   * dropped. Null when the host cannot map pixels, or the two coincide.
+   */
+  private _lockAngle(anchor: DrawingPoint, free: DrawingPoint, paneIndex: number): DrawingPoint | null {
+    const a = this._toPixel(anchor, paneIndex);
+    const b = this._toPixel(free, paneIndex);
+    if (a === null || b === null) return null;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (dx === 0 && dy === 0) return null;
+    const angle = Math.round(Math.atan2(dy, dx) / ANGLE_STEP) * ANGLE_STEP;
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    const along = dx * ux + dy * uy;
+    return this._fromPixel({ x: a.x + along * ux, y: a.y + along * uy }, paneIndex);
+  }
+
   private _onDragEnd(): void {
     if (this._dragStart === null) return;
     const moved = this._dragStart.items.map((i) => this.get(i.id)).filter((m): m is Drawing => m !== undefined);
     this._dragStart = null;
+    // Whatever was lifted for the gesture goes back under the series.
+    if (this._lifted.size > 0) {
+      this._lifted.clear();
+      this._sync();
+    }
     for (const m of moved) this._chart.emit('draw:update', { drawing: m });
     if (moved.length > 0) this._emitChange(moved.map((m) => m.id), 'update');
   }
@@ -986,6 +1376,11 @@ export class DrawingController {
     return pair;
   }
 
+  /** Whether a drawing paints on the top layer: over the series, or lifted for a drag. */
+  private _onTop(d: Drawing): boolean {
+    return d.zIndex >= 0 || this._lifted.has(d.id);
+  }
+
   /** Push the current list into each pane's layers and into the chart state. */
   private _sync(): void {
     const byPane = new Map<number, { below: Drawing[]; above: Drawing[] }>();
@@ -995,7 +1390,7 @@ export class DrawingController {
         lists = { below: [], above: [] };
         byPane.set(d.paneIndex, lists);
       }
-      (d.zIndex < 0 ? lists.below : lists.above).push(d);
+      (this._onTop(d) ? lists.above : lists.below).push(d);
     }
     for (const [pane, lists] of byPane) {
       const l = this._layerFor(pane);
@@ -1011,21 +1406,69 @@ export class DrawingController {
       l.bottom.setSelected(this._selection);
       l.top.setSelected(this._selection);
     }
+    // A hover on a drawing that has just gone would otherwise outlive it
+    // until the pointer next moves.
+    if (this._hovered !== null && this.get(this._hovered) === undefined) this._setHovered(null);
     this._chart.setDrawingState(this.toJSON());
   }
 
-  /** Mirror the in-progress anchors (plus the cursor) into the preview slot. */
+  /**
+   * The per-frame half of a drag: only the top layers of the panes the
+   * gesture touches are re-listed, so the repaint stays on the cursor tier.
+   * Everything moving is on a top layer by then (anything under the series
+   * was lifted when the gesture began), and the bottom layers have not
+   * changed since, so re-listing them would cost a series repaint for
+   * nothing.
+   */
+  private _syncDrag(): void {
+    const start = this._dragStart;
+    if (start === null) return;
+    const panes = new Set(start.items.map((i) => i.paneIndex));
+    for (const pane of panes) {
+      const l = this._layers.get(pane);
+      if (l === undefined) continue;
+      l.top.setDrawings(this._drawings.filter((d) => d.paneIndex === pane && this._onTop(d)));
+    }
+    this._chart.setDrawingState(this.toJSON());
+  }
+
+  /**
+   * Mirror the in-progress anchors (plus the cursor) into the preview slot.
+   * The cursor point goes through the same aim as a click would, so the
+   * preview shows the locked angle or the snapped anchor before it lands.
+   */
   private _syncPreview(): void {
     for (const l of this._layers.values()) l.top.setPreview(null);
     if (this._tool === null || this._pending.length === 0) return;
     const cursor = this._lastCursor;
-    const points = cursor === null
+    const points = cursor === null || cursor.paneIndex !== this._pendingPane
       ? this._pending
-      : [...this._pending, { time: cursor.time, price: cursor.price }];
+      : [...this._pending, this._aimPoint({ time: cursor.time, price: cursor.price }, cursor.paneIndex)];
     this._layerFor(this._pendingPane).top.setPreview({
       id: '__preview', tool: this._tool, points, style: this._opts.defaultStyle,
       paneIndex: this._pendingPane, zIndex: 0,
     });
+  }
+
+  /**
+   * Show where the magnet will land the next click, or nothing. A ring only
+   * while a click would place an anchor: a tool armed, not a brush (which
+   * inks where the pointer is), and the pull actually applying at the cursor.
+   * Angle lock bypasses the magnet, so it hides the ring too.
+   */
+  private _syncSnapRing(): void {
+    const cursor = this._lastCursor;
+    let ring: DrawingPoint | null = null;
+    let pane = cursor?.paneIndex ?? this._pendingPane;
+    if (cursor !== null && this._tool !== null && !this._isFreehand()
+      && this._lockedPoint({ time: cursor.time, price: cursor.price }, cursor.paneIndex) === null) {
+      ring = this._snapPoint({ time: cursor.time, price: cursor.price }, cursor.paneIndex);
+      pane = cursor.paneIndex;
+    }
+    for (const [index, l] of this._layers) l.top.setSnapPoint(index === pane ? ring : null);
+    // The ring's pane may not have layers yet (no drawing there so far); make
+    // them only when there is a ring to paint, since a pair costs a pane repaint.
+    if (ring !== null && !this._layers.has(pane)) this._layerFor(pane).top.setSnapPoint(ring);
   }
 
   private _pushUndo(): void {

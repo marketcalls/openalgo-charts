@@ -33,6 +33,7 @@ import {
   DEFAULT_FIB, DEFAULT_FIB_FAN, DEFAULT_GANN_FAN, DEFAULT_GANN_BOX, DEFAULT_FIB_TIME_ZONE,
   cloneLevels, cycleColor, levelColor, formatRatio, gannLabel,
 } from './levels';
+import { catmullRom, pressureWidth } from './freehand';
 
 const registry = new Map<string, DrawingTool>();
 
@@ -136,6 +137,12 @@ const OPACITY_FIELD: SettingsField = {
 /** `showLabels` on a horizontal line toggles exactly one thing: the price tag. */
 const PRICE_TAG_FIELD: SettingsField = { ...SHOW_LABELS_FIELD, label: 'Show price' };
 
+/** The midpoint readout of a two-anchor line: change, percent, bars, angle. */
+const STATS_FIELD: SettingsField = { path: 'style.showStats', label: 'Show stats', kind: 'boolean', group: 'behavior' };
+
+/** Let pen pressure swell and thin a freehand stroke. */
+const PRESSURE_FIELD: SettingsField = { path: 'style.pressure', label: 'Pen pressure', kind: 'boolean', group: 'line' };
+
 const POSITION_FIELDS: readonly SettingsField[] = [
   { path: 'style.accountSize', label: 'Account size', kind: 'number', min: 0, step: 1000, group: 'behavior' },
   { path: 'style.risk', label: 'Risk %', kind: 'number', min: 0, max: 100, step: 0.1, group: 'behavior' },
@@ -206,9 +213,14 @@ function contentOf(d: Drawing, fallback: string): string {
 /**
  * A readout on a plate of the pane background. `color` is the mark the text
  * belongs to (a level's colour); the text block's own colour wins over it,
- * and the drawing's colour is the last resort.
+ * and the drawing's colour is the last resort. `tint` washes the plate with a
+ * direction colour, and `center` puts the plate about `x` instead of to its
+ * right; both are for readouts that sit on the shape rather than beside it.
  */
-function label(c: DrawContext, text: string, x: number, y: number, color?: string): void {
+function label(
+  c: DrawContext, text: string, x: number, y: number, color?: string,
+  opts: { tint?: string; center?: boolean } = {},
+): void {
   const { ctx, rc, style } = c;
   const t = textOf(c.drawing);
   const size = (t.fontSize ?? 11) * rc.dpr;
@@ -218,12 +230,18 @@ function label(c: DrawContext, text: string, x: number, y: number, color?: strin
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   const w = ctx.measureText(text).width;
+  const left = opts.center === true ? x - w / 2 : x;
   ctx.globalAlpha = 0.85;
   ctx.fillStyle = rc.theme.background;
-  ctx.fillRect(x - 2 * rc.dpr, y - size * 0.75, w + 4 * rc.dpr, size * 1.5);
+  ctx.fillRect(left - 2 * rc.dpr, y - size * 0.75, w + 4 * rc.dpr, size * 1.5);
+  if (opts.tint !== undefined) {
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = opts.tint;
+    ctx.fillRect(left - 2 * rc.dpr, y - size * 0.75, w + 4 * rc.dpr, size * 1.5);
+  }
   ctx.globalAlpha = 1;
   ctx.fillStyle = t.color ?? color ?? style.color;
-  ctx.fillText(text, x, y);
+  ctx.fillText(text, left, y);
   ctx.restore();
 }
 
@@ -322,6 +340,84 @@ function compactNumber(n: number): string {
 const UP_TINT = '#26a69a';
 const DOWN_TINT = '#ef5350';
 
+/**
+ * The midpoint readout of a two-anchor line, when `showStats` asks for it:
+ * signed change and percent, bars between the anchors, and the angle the
+ * line makes on screen. Bars come from logical indices so the count matches
+ * the gapless axis; the angle is measured in device px because a slope in
+ * price-per-second means nothing to the eye, and it is what the eye sees
+ * that the readout describes. Off by default, so a line paints exactly as it
+ * did before the readout existed.
+ */
+function lineStats(c: DrawContext): void {
+  if (c.style.showStats !== true) return;
+  const [a, b] = c.pts;
+  const [p0, p1] = c.drawing.points;
+  const chg = p1.price - p0.price;
+  const pct = p0.price !== 0 ? (chg / p0.price) * 100 : 0;
+  const up = chg >= 0;
+  const sign = up ? '+' : '';
+  const i0 = c.rc.dataLayer.timeToIndexFloat(p0.time);
+  const i1 = c.rc.dataLayer.timeToIndexFloat(p1.time);
+  const bars = Math.abs(Math.round(i1 - i0));
+  // Screen y grows downward, so it is negated to read as a rising angle.
+  const angle = (Math.atan2(a.y - b.y, b.x - a.x) * 180) / Math.PI;
+  const text = `${sign}${c.formatPrice(chg)} (${sign}${pct.toFixed(2)}%)  ${grouped(bars)} bars  ${angle.toFixed(1)} deg`;
+  label(c, text, (a.x + b.x) / 2, (a.y + b.y) / 2 - 10 * c.rc.dpr, c.style.color, {
+    tint: up ? UP_TINT : DOWN_TINT, center: true,
+  });
+}
+
+/**
+ * Freehand ink through the spline. A constant-width stroke is one path; with
+ * `pressure` on it becomes a filled ribbon whose edges run the spline offset
+ * by half the pressure width at each sample, which is the only way a single
+ * fill can be fat where the pen pressed and thin where it lifted. `alpha`
+ * is the highlighter's translucency; the brush passes 1.
+ */
+function ink(c: DrawContext, width: number, alpha: number): void {
+  const { ctx, style } = c;
+  const pts = c.pts;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (style.pressure !== true) {
+    ctx.strokeStyle = style.color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    catmullRom(ctx, pts);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  const n = pts.length;
+  const left: ScreenPoint[] = [];
+  const right: ScreenPoint[] = [];
+  for (let i = 0; i < n; i++) {
+    // The tangent at a sample runs from its previous neighbour to its next
+    // one; the ends use the one segment they have.
+    const prev = pts[i === 0 ? 0 : i - 1];
+    const next = pts[i === n - 1 ? n - 1 : i + 1];
+    const len = Math.hypot(next.x - prev.x, next.y - prev.y) || 1;
+    const nx = -(next.y - prev.y) / len;
+    const ny = (next.x - prev.x) / len;
+    const pressure = c.drawing.points[i]?.pressure;
+    const half = pressureWidth(width, pressure ?? 0.5) / 2;
+    left.push({ x: pts[i].x + nx * half, y: pts[i].y + ny * half });
+    right.push({ x: pts[i].x - nx * half, y: pts[i].y - ny * half });
+  }
+  // One loop: out along the left edge, back along the right, so the spline
+  // rounds the ends on its own and the fill is a single closed region.
+  right.reverse();
+  ctx.fillStyle = style.color;
+  ctx.beginPath();
+  catmullRom(ctx, left.concat(right));
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 // ── levels ────────────────────────────────────────────────────────────────
 
 /**
@@ -348,9 +444,9 @@ function fibText(lv: FibLevel): string {
 /** Trend line, ray, and extended line differ only in which ends extend. */
 function lineTool(id: string, name: string, left: boolean, right: boolean): DrawingTool {
   return {
-    id, name, points: 2,
+    id, name, points: 2, angleLock: true,
     defaultStyle: { extendLeft: left, extendRight: right },
-    settings: composeSettings([LINE_FIELDS, EXTEND_FIELDS]),
+    settings: composeSettings([LINE_FIELDS, EXTEND_FIELDS, STATS_FIELD]),
     draw: (c) => {
       const [a, b] = extendSegment(
         c.pts[0], c.pts[1], c.rc.plotWidth * c.rc.dpr,
@@ -362,6 +458,7 @@ function lineTool(id: string, name: string, left: boolean, right: boolean): Draw
       c.ctx.lineTo(b.x, b.y);
       c.ctx.stroke();
       c.ctx.setLineDash([]);
+      lineStats(c);
     },
     distance: (x, y, h) => {
       const el = h.drawing.style.extendLeft ?? left;
@@ -378,8 +475,8 @@ export const RAY = lineTool('ray', 'Ray', false, true);
 export const EXTENDED_LINE = lineTool('extended-line', 'Extended Line', true, true);
 
 export const ARROW: DrawingTool = {
-  id: 'arrow', name: 'Arrow', points: 2,
-  settings: LINE_SETTINGS,
+  id: 'arrow', name: 'Arrow', points: 2, angleLock: true,
+  settings: composeSettings([LINE_FIELDS, STATS_FIELD]),
   draw: (c) => {
     const [a, b] = c.pts;
     applyStroke(c);
@@ -390,6 +487,7 @@ export const ARROW: DrawingTool = {
     // Head at the far anchor, sized off the line width so it scales with style.
     arrowHead(c, a, b);
     c.ctx.setLineDash([]);
+    lineStats(c);
   },
   distance: (x, y, h) => distToSegment(x, y, h.pts[0], h.pts[1]),
 };
@@ -993,20 +1091,20 @@ export const PATH: DrawingTool = {
   distance: (x, y, h) => (h.pts.length < 2 ? null : distToPolyline(x, y, h.pts)),
 };
 
-/** Brush: freehand ink. Press, drag, release. */
+/**
+ * Brush: freehand ink. Press, drag, release. The anchors are the thinned
+ * samples of the gesture and the spline between them is what is stroked, so
+ * the ink stays a curve after the thinning that keeps a stroke small.
+ */
 export const BRUSH: DrawingTool = {
   id: 'brush', name: 'Brush', points: 0, freehand: true,
   defaultStyle: { lineWidth: 2 },
-  settings: LINE_SETTINGS,
+  settings: composeSettings([LINE_FIELDS, PRESSURE_FIELD]),
   draw: (c) => {
     if (c.pts.length < 2) return;
+    // The dash comes from the style; the width and cap from the ink helper.
     applyStroke(c);
-    c.ctx.lineCap = 'round';
-    c.ctx.lineJoin = 'round';
-    c.ctx.beginPath();
-    c.ctx.moveTo(c.pts[0].x, c.pts[0].y);
-    for (let i = 1; i < c.pts.length; i++) c.ctx.lineTo(c.pts[i].x, c.pts[i].y);
-    c.ctx.stroke();
+    ink(c, Math.max(1, Math.round(c.style.lineWidth * c.rc.dpr)), 1);
     c.ctx.setLineDash([]);
   },
   distance: (x, y, h) => (h.pts.length < 2 ? null : distToPolyline(x, y, h.pts)),
@@ -2183,21 +2281,11 @@ export const ARROW_RIGHT = arrowMarker('arrow-right', 'Arrow Right', true, 'righ
 export const HIGHLIGHTER: DrawingTool = {
   id: 'highlighter', name: 'Highlighter', points: 0, freehand: true,
   defaultStyle: { lineWidth: 12, fillOpacity: 0.28 },
-  settings: composeSettings([COLOR_FIELD, LINE_WIDTH_FIELD, OPACITY_FIELD]),
+  settings: composeSettings([COLOR_FIELD, LINE_WIDTH_FIELD, OPACITY_FIELD, PRESSURE_FIELD]),
   draw: (c) => {
     if (c.pts.length < 2) return;
-    const d = c.rc.dpr;
-    c.ctx.save();
-    c.ctx.globalAlpha = c.style.fillOpacity ?? 0.28;
-    c.ctx.strokeStyle = c.style.color;
-    c.ctx.lineWidth = Math.max(2, (c.style.lineWidth || 12) * d);
-    c.ctx.lineCap = 'round';
-    c.ctx.lineJoin = 'round';
-    c.ctx.beginPath();
-    c.ctx.moveTo(c.pts[0].x, c.pts[0].y);
-    for (let i = 1; i < c.pts.length; i++) c.ctx.lineTo(c.pts[i].x, c.pts[i].y);
-    c.ctx.stroke();
-    c.ctx.restore();
+    c.ctx.setLineDash([]);
+    ink(c, Math.max(2, (c.style.lineWidth || 12) * c.rc.dpr), c.style.fillOpacity ?? 0.28);
   },
   distance: (x, y, h) => {
     const d = distToPolyline(x, y, h.pts);
