@@ -71,6 +71,12 @@ export interface PaneRenderContext {
   hoverId?: string | null;
   /** externalId of the line currently being dragged (active visual state). */
   dragId?: string | null;
+  /**
+   * Fill the pane with the theme background before anything else. Absent means
+   * yes, which is every on-screen frame; the vector export turns it off for a
+   * document that is meant to sit on the host's own page.
+   */
+  paintBackground?: boolean;
 }
 
 /**
@@ -368,6 +374,17 @@ export class Pane {
   }
 
   /**
+   * Lay the pane out at a size without touching its canvases. The vector
+   * export paints at a size of the caller's choosing and then puts the live
+   * size back; resizing a canvas clears it, so going through `resize` would
+   * blank the screen until the next frame.
+   */
+  public setLayoutSize(width: number, height: number): void {
+    this._width = width;
+    this._height = height;
+  }
+
+  /**
    * Give every scale on this pane its plot height. Height is a *layout*
    * property, but it used to be set only inside the autoscale pass — so any
    * y↔price conversion before the first paint divided by zero and returned
@@ -501,17 +518,23 @@ export class Pane {
     return null;
   }
 
-  /** Paint background + grid + series + axes on the base canvas. */
-  public paintBase(ctx: PaneRenderContext): void {
+  /**
+   * Paint background + grid + series + axes on the base canvas, or into
+   * `target` when given: the vector export runs this exact pass into a
+   * serialising context, so what it produces is the frame and not a
+   * re-description of it. Only the pane's own canvas is cleared first; a
+   * target starts empty by construction.
+   */
+  public paintBase(ctx: PaneRenderContext, target?: CanvasRenderingContext2D): void {
     const layout = this._layout(ctx);
     const dpr = ctx.dpr;
-    const g = this.base.ctx;
-    this.base.clearBitmap();
+    const g = target ?? this.base.ctx;
+    if (target === undefined) this.base.clearBitmap();
 
     const axisStyle = resolveScaleStyle(ctx.theme, ctx.canvasOptions?.scales);
 
-    // background (full pane) — skip when transparent so the page shows through
-    if (ctx.theme.background !== 'transparent') {
+    // background (full pane), skipped when transparent so the page shows through
+    if (ctx.paintBackground !== false && ctx.theme.background !== 'transparent') {
       g.fillStyle = ctx.theme.background;
       g.fillRect(0, 0, Math.round(this._width * dpr), Math.round(this._height * dpr));
     }
@@ -719,10 +742,11 @@ export class Pane {
   public paintTop(
     cross: { x: number; yLocal: number | null; showTimeTag: boolean } | null,
     ctx: PaneRenderContext,
+    target?: CanvasRenderingContext2D,
   ): void {
-    this.top.clearBitmap();
+    if (target === undefined) this.top.clearBitmap();
     const layout = this._layout(ctx);
-    const g = this.top.ctx;
+    const g = target ?? this.top.ctx;
     const dpr = ctx.dpr;
     // Shift top-layer primitives + crosshair by the reserved left-axis width.
     g.save();

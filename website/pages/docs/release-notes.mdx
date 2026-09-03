@@ -51,6 +51,9 @@ a per-tool settings schema, and an upgrade path for every 1.9.x layout and clipb
   `pointerType` and `pressure`; `drag` carries `point` and coalesced `samples`, and so does
   `crosshair:move` while pressed. No existing field changed.
 - Named descriptors for every built-in tool, `boundsOf`, `cloneDrawing`.
+- `chart.exportSVG(options?)`: the chart as a standalone SVG string with the labels as
+  text and no crosshair or hover state, at the live size or one of the caller's choosing.
+  The serialising `SvgContext` behind it is exported for hosts.
 
 **Fixed**
 

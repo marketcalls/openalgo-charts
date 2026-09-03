@@ -13,6 +13,7 @@ import type { LogicalRange } from '../scale/time-scale';
 import type { PriceScaleOptions, PriceScaleMode, PriceScale } from '../scale/price-scale';
 import { medianBarInterval, type TickMarkType, type SessionClockOptions, type BarCountdownOptions } from '../render/axis';
 import { resolvePlotMargins, type CanvasOptions, type GridOptions } from '../render/grid';
+import { SvgContext } from '../render/svg-export';
 import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type SeriesRecord, type PriceScaleId } from '../model/series';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
@@ -125,6 +126,32 @@ export interface AxisChromeOptions {
    * honest about what time its data thinks it is.
    */
   clock?: () => number;
+}
+
+/** Options for `Chart.exportSVG`. */
+export interface ExportSvgOptions {
+  /**
+   * Document width in media px. Absent means the live chart width. A different
+   * size lays the chart out afresh for the export (the same bar spacing over a
+   * wider or narrower plot, every scale re-measured for its new height) and
+   * puts the live layout back before returning.
+   */
+  width?: number;
+  /** Document height in media px. Absent means the live chart height. */
+  height?: number;
+  /**
+   * Paint the theme background under the chart. Default true. Off, the
+   * document has no ground of its own and takes the colour of whatever page
+   * it is placed on, which is what an embedded figure usually wants.
+   */
+  background?: boolean;
+  /**
+   * The pixel ratio the paint runs at. Only 1 is accepted: SVG has no device
+   * pixels, and a renderer asked for 2 would snap its hairlines to half-media-
+   * pixel edges that scale as a blur. Named so the option reads the same as
+   * the PNG path and a future scaled export has a place to land.
+   */
+  dpr?: 1;
 }
 
 export interface ChartOptions {
@@ -1895,6 +1922,94 @@ export class Chart {
     return out;
   }
 
+  /**
+   * The chart as a standalone SVG document: every pane's base and overlay
+   * paint, in the order the DOM stacks them, run once into a serialising
+   * context at pixel ratio 1. Text stays text (selectable, searchable) and
+   * lines stay lines, so the file scales without the blur a PNG picks up.
+   *
+   * Nothing transient is in it: no crosshair, no hover state, no drag. What is
+   * in it is exactly what the renderers, primitives and drawing tools draw,
+   * because it is the same code drawing. A primitive that paints through a
+   * call with no vector form (a bitmap logo, a shadow) is simply thinner in
+   * the export; see `SvgContext` for the list.
+   *
+   * Returns the string only. Saving it is the host's job, the way
+   * `downloadScreenshot` is the host-facing half of `takeScreenshot`:
+   * `new Blob([svg], { type: 'image/svg+xml' })` and an anchor is all it takes.
+   */
+  public exportSVG(options: ExportSvgOptions = {}): string {
+    // The type already says 1; an untyped caller asking for 2 gets told why
+    // rather than a document that looks the same and is not.
+    if (options.dpr !== undefined && options.dpr !== 1) {
+      throw new RangeError('exportSVG: dpr must be 1, SVG has no device pixels');
+    }
+    const width = Math.max(1, Math.round(options.width ?? this._width));
+    const height = Math.max(1, Math.round(options.height ?? this._height));
+    const background = options.background !== false;
+    const svg = new SvgContext(width, height, { background: background ? this._theme.background : undefined });
+    const g = svg.asCanvasContext();
+    // The same order as a frame: indicator recomputes land before anything is
+    // measured, so a study whose inputs changed this tick exports as it will
+    // next paint, not as it last did.
+    this._flushIndicators();
+    const liveWidth = this._width;
+    const liveHeight = this._height;
+    const resized = width !== liveWidth || height !== liveHeight;
+    if (resized) {
+      this._width = width;
+      this._height = height;
+      this._relayout(true);
+    }
+    try {
+      if (background && this._theme.background !== 'transparent') {
+        svg.fillStyle = this._theme.background;
+        svg.fillRect(0, 0, width, height);
+      }
+      const layout = this._paneLayout();
+      const topPane = this._topPaneIndex();
+      const bottomPane = this._bottomPaneIndex();
+      for (let i = 0; i < this._panes.length; i++) {
+        if (this._layoutWeight(i) <= 0) continue; // hidden behind a maximized pane
+        const pane = this._panes[i];
+        const ctx: PaneRenderContext = {
+          ...this._renderContext(i === bottomPane),
+          dpr: 1, hoverId: null, dragId: null, paintBackground: background,
+        };
+        // The DOM draws the separator as a 1px border on the pane box and lets
+        // the canvas start below it, its last row hidden by the overflow clip.
+        // The export reproduces that box exactly, or the second pane would sit
+        // one pixel higher than it does on screen.
+        const first = i === topPane;
+        const top = layout[i].top + (first ? 0 : 1);
+        const paneHeight = layout[i].height - (first ? 0 : 1);
+        if (!first) {
+          svg.fillStyle = this._theme.paneSeparator;
+          svg.fillRect(0, layout[i].top, width, 1);
+        }
+        svg.pushGroup(
+          { 'data-pane': i },
+          { translate: { x: 0, y: top }, clip: { x: 0, y: 0, width, height: paneHeight } },
+        );
+        // A Full frame's sequence for one pane, minus the crosshair.
+        pane.autoscale(ctx);
+        pane.paintBase(ctx, g);
+        pane.paintTop(null, ctx, g);
+        svg.popGroup();
+      }
+    } finally {
+      if (resized) {
+        this._width = liveWidth;
+        this._height = liveHeight;
+        this._relayout(true);
+        // Every auto scale was just measured against the export geometry; a
+        // Full frame measures it back against the screen's.
+        this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      }
+    }
+    return svg.toString();
+  }
+
   /** Chart-anchored primitives, re-homed by `_rehomeAnchored`. */
   private readonly _anchored: { primitive: IPrimitive; anchor: PrimitiveAnchor }[] = [];
 
@@ -2442,8 +2557,27 @@ export class Chart {
     this.emit('resize', { width, height });
   }
 
-  /** Distribute height across panes by weight; sync the shared time-scale width. */
-  private _relayout(): void {
+  /**
+   * Distribute height across panes by weight; sync the shared time-scale width.
+   *
+   * `geometryOnly` sizes the layout arithmetic (pane boxes, scale heights, the
+   * time-scale width) and leaves the DOM and the canvases alone. The vector
+   * export uses it to paint at a size that is not the screen's and then to put
+   * the screen's back, without clearing a canvas or moving a flex box on the
+   * way through.
+   */
+  private _relayout(geometryOnly = false): void {
+    if (geometryOnly) {
+      const total = this._weightTotal();
+      const bottomPane = this._bottomPaneIndex();
+      this._panes.forEach((pane, paneIndex) => {
+        const h = (this._height * this._layoutWeight(paneIndex)) / total;
+        pane.setLayoutSize(this._width, h);
+        pane.setScaleHeights(Math.max(0, h - (paneIndex === bottomPane ? this._timeAxisHeight : 0)));
+      });
+      this._timeScale.setWidth(Math.max(0, this._width - this._rightAxisWidth - this._leftAxisWidth));
+      return;
+    }
     this._syncTimeNavPane();
     // Weights just changed, so the pane at the chart's top may have too.
     this._syncLegendOffsets();

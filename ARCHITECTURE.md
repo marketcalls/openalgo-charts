@@ -132,7 +132,7 @@ src/
 
 > **Methodology (point of record):** numbers are **Brotli-compressed**. Since we have zero runtime dependencies, nothing is excluded from the measurement. Raw-minified ≈ 3–3.5× the Brotli figure; gzip ≈ 1.1–1.15× Brotli. **All figures below are pre-implementation estimates** and the first deliverable of Phase 1 is to wire `size-limit` and replace them with measured values.
 
-We split the package into **six loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 61.46 KB Brotli while supporting 102 indicators, 51 drawing tools, and footprint/TPO/orderflow. Measured sizes for every tier are in the README size budget.
+We split the package into **six loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 65.52 KB Brotli while supporting 102 indicators, 51 drawing tools, and footprint/TPO/orderflow. Measured sizes for every tier are in the README size budget.
 
 **Tier 1 — Base bundle (always loaded):**
 
@@ -280,6 +280,17 @@ main sustained-session budgets.
   - A volume bar is guaranteed under its candle because they share the same logical index, even with whitespace/holidays (gapless, §5.3).
 
 There is no "sync the panes" code path that could drift — alignment falls out of the single shared index space.
+
+### 3.4 Vector export (`render/svg-export.ts`)
+
+`chart.exportSVG()` is the frame above run once more, into a context that writes SVG instead of pixels. `SvgContext` implements the subset of the 2D canvas API the renderers, primitives and drawing tools call and serialises each call: paths become `<path>`, text stays `<text>`, and `save`, `translate` and `clip` open nested `<g>` elements that `restore` closes. The export therefore has no renderer of its own to drift from the canvas one. `Pane.paintBase` and `Pane.paintTop` take an optional target, and the export hands them the serialiser with the same `PaneRenderContext` a Full frame builds, minus the crosshair and with hover and drag cleared, so nothing transient reaches the file. Each pane is wrapped in a translated, clipped group that reproduces the DOM box (separator row included), which is why a second pane sits where the screen shows it and not one pixel higher.
+
+Two decisions worth recording:
+
+- **It is synchronous and returns a string**, the way `takeScreenshot` returns a canvas, so the serialiser ships in the base tier rather than behind a lazy import. That cost 3.7 KB Brotli on the base engine and on the chart-only shake reading, and both budgets moved with it. A lazy tier would have made the call async for a document a host almost always wants on a click.
+- **A different export size never touches the DOM.** Width and height go through a geometry-only relayout (pane layout size, scale heights, time-scale width) that leaves canvases and flex boxes alone, is put back in `finally`, and is followed by a Full invalidation so every auto scale re-measures against the screen. Resizing a canvas clears it, so the ordinary path would blank the chart for a frame.
+
+Calls with no vector form (`setTransform`, radial gradients, `Path2D`, image data) throw under `strict` (how the tests run, so a renderer that grows a new call fails loudly) and are otherwise recorded in `unsupported` and skipped: a missing logo is a better export than a thrown one. `measureText` is a per-character width table, close enough for the tag boxes and label culling that read it. The e2e spec rasterises the document back through an `<img>` and diffs it against the composited pane canvases, because a string test cannot see an arc flag the wrong way round.
 
 ---
 

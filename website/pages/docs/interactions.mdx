@@ -123,8 +123,18 @@ const chart = createChart(el, { ariaLabel: 'RELIANCE 5-minute candlestick chart'
 ```ts
 const canvas = chart.takeScreenshot();           // composites all panes + overlays → canvas
 chart.downloadScreenshot('reliance-5m.png');     // same composite, downloaded as a PNG
+const svg = chart.exportSVG();                   // the same frame as a standalone SVG string
 chart.setGridOptions({ vertLines: false });      // toggle grid lines at runtime
 ```
+
+<Callout type="info">
+`exportSVG(options?)` writes the chart as a vector document: axis labels and tags stay
+text, lines stay lines, and the file scales without blur. It carries no crosshair, hover or
+drag state. `width` and `height` export at a size other than the live one (the live
+layout is put back before the call returns), and `background: false` leaves the document
+transparent for an embedded figure. Saving it is the host's job: wrap the string in a
+`Blob` of type `image/svg+xml` and hand it to an anchor.
+</Callout>
 
 <Callout type="info">
 `takeScreenshot()` composites every pane and overlay layer into a single image, so the

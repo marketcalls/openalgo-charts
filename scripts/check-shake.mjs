@@ -30,7 +30,13 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // 2.0 change; the three modifier flags the click payload now carries for
 // additive drawing selection land inside the same 39.05 kB reading. Both are
 // core input behaviour a host that only wanted a chart still gets.
-const LIMIT_BYTES = 40 * 1024;
+//
+// Raised from 40 to 44 kB for the vector export (2.0). chart.exportSVG runs
+// the ordinary paint into a serialising context (src/render/svg-export.ts),
+// and because the call is synchronous and returns a string, the serialiser
+// ships with the chart rather than behind a lazy import. Measured cost 3.75 kB
+// brotli: 39.34 kB before, 43.09 kB after, on the same build.
+const LIMIT_BYTES = 44 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

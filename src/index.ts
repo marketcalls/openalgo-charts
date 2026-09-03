@@ -7,10 +7,14 @@ export { createChart, Chart, compactVolume, PRICE_SCALE_MODES } from './core/cha
 export type {
   ChartOptions, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
   ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState,
-  AxisChromeOptions, ZoomAnchor,
+  AxisChromeOptions, ZoomAnchor, ExportSvgOptions,
   PointerModifiers, PointerKind, PointerSample, PointerInfo,
   ChartClickEvent, ChartDragEvent, ChartDragEndEvent,
 } from './core/chart';
+// vector export: the serialising context behind `chart.exportSVG`, exported so
+// a host can run its own primitives or a bare renderer into one.
+export { SvgContext, SvgLinearGradient } from './render/svg-export';
+export type { SvgContextOptions } from './render/svg-export';
 export { Pane } from './core/pane';
 export { darkTheme, lightTheme, DEFAULT_THEME } from './theme';
 export type { ChartTheme } from './theme';

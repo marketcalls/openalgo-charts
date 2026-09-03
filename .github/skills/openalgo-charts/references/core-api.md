@@ -142,9 +142,13 @@ Per-series formatting goes through `addSeries({ priceFormat })` or `series.price
 
 **`setTimezone` is not only a relabelling.** It also recomputes every calendar-anchored indicator (VWAP, TWAP, CPR, Seasonality), because moving the calendar moves where a session, week or month starts. It throws on a name the runtime does not recognise, so validate with `isValidTimezone(zone)` first if the name comes from user input. The default is `'Asia/Kolkata'`; a chart that sets no zone labels exactly as it always did. See [data-and-time](data-and-time.md).
 
-## Screenshots
+## Screenshots and vector export
 
 `chart.takeScreenshot(): HTMLCanvasElement` composites every pane's base + top canvas onto one opaque canvas at device resolution. `chart.downloadScreenshot(filename = 'chart.png')` does that and triggers a PNG download. Use these instead of the browser's native "Save image", which only captures the transparent overlay layer.
+
+`chart.exportSVG(options?: ExportSvgOptions): string` is the same frame written as a standalone SVG document: every pane's base and top paint in DOM order, at pixel ratio 1, with axis labels and tags as `<text>` and no crosshair, hover or drag state. `ExportSvgOptions` takes `width` and `height` (media px; absent means the live size, and a different size lays the chart out for the export and puts the live layout back without a blank frame), `background` (default `true`; `false` leaves the document transparent for an embedded figure) and `dpr`, which only accepts `1` and throws on anything else. Saving is the host's job: `new Blob([svg], { type: 'image/svg+xml' })` and an anchor.
+
+The serialiser behind it, `SvgContext`, is exported (with `SvgLinearGradient` and `SvgContextOptions`) so a host can run its own primitive or a bare renderer into one: construct it at the document size, pass `asCanvasContext()` to whatever paints, read `toString()`. Calls with no vector form (`setTransform`, radial gradients, `Path2D`, image data) throw with `strict: true` and are otherwise listed in `unsupported` and skipped; `measureText` is approximate (a per-character width table), which the tag boxes and label culling tolerate.
 
 ## Events
 

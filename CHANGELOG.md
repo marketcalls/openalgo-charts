@@ -123,6 +123,17 @@ time. Saved 1.9.x layouts and clipboard bodies are upgraded on the way in.
   `TIME_CYCLES`, `SINE_LINE`; `boundsOf` from the geometry helpers;
   `cloneDrawing` from the clipboard.
 
+- **Vector export.** `chart.exportSVG(options?)` returns the chart as a
+  standalone SVG string: the ordinary paint of every pane, run once into a
+  serialising 2D context at pixel ratio 1, so axis labels and tags stay text
+  and lines stay lines. Nothing transient is in it (no crosshair, hover or
+  drag). `ExportSvgOptions` takes `width` and `height` (a different size
+  lays the chart out for the export and puts the live layout back without a
+  blank frame), `background` and `dpr` (only `1`). The context itself,
+  `SvgContext`, is exported with `SvgLinearGradient` and
+  `SvgContextOptions` for a host that wants to run its own primitive into
+  one. Base engine 61.81 KB to 65.52 KB Brotli.
+
 ### Fixed
 
 - Fib retracement and extension stroke their anchor leg in `style.color`, so
