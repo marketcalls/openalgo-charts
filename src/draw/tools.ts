@@ -16,7 +16,9 @@
  * schema is a contract, not a wish list. A field is declared only when this
  * file reads it, because a control with nothing behind it is a defect.
  */
-import type { DrawContext, Drawing, DrawingText, DrawingTool, FibLevel, ScreenPoint } from './types';
+import type {
+  DrawContext, Drawing, DrawingPoint, DrawingText, DrawingTool, ExpandContext, FibLevel, ScreenPoint,
+} from './types';
 import {
   distToSegment, distToLine, distToHorizontal, distToVertical,
   distToRect, distToEllipse, distToPolyline, rectOf, boundsOf, extendSegment,
@@ -143,9 +145,21 @@ const STATS_FIELD: SettingsField = { path: 'style.showStats', label: 'Show stats
 /** Let pen pressure swell and thin a freehand stroke. */
 const PRESSURE_FIELD: SettingsField = { path: 'style.pressure', label: 'Pen pressure', kind: 'boolean', group: 'line' };
 
+/**
+ * The position tools' own controls. Sizing inputs live in the style bag as
+ * they did in 1.9.x; the readout toggles and zone colours are per-tool extras
+ * and sit in `props`, so the base style stays closed.
+ */
 const POSITION_FIELDS: readonly SettingsField[] = [
   { path: 'style.accountSize', label: 'Account size', kind: 'number', min: 0, step: 1000, group: 'behavior' },
   { path: 'style.risk', label: 'Risk %', kind: 'number', min: 0, max: 100, step: 0.1, group: 'behavior' },
+  { path: 'props.showHeader', label: 'Show direction and ratio', kind: 'boolean', group: 'behavior' },
+  { path: 'props.showLossSize', label: 'Show loss and size', kind: 'boolean', group: 'behavior' },
+  { path: 'props.showTargetLabel', label: 'Show target label', kind: 'boolean', group: 'behavior' },
+  { path: 'props.showStopLabel', label: 'Show stop label', kind: 'boolean', group: 'behavior' },
+  { path: 'props.showPrices', label: 'Show level prices', kind: 'boolean', group: 'behavior' },
+  { path: 'props.profitColor', label: 'Profit zone', kind: 'color', group: 'fill' },
+  { path: 'props.lossColor', label: 'Loss zone', kind: 'color', group: 'fill' },
 ];
 
 // ── shared drawing helpers ────────────────────────────────────────────────
@@ -795,40 +809,122 @@ export const MEASURE: DrawingTool = {
 };
 
 /**
- * Long / short position calculator: entry, target, stop.
+ * Long / short position calculator: entry, target, stop, anchored in that
+ * order (the order 1.9.x saved, so an old layout loads unchanged).
  *
- * One click places the whole thing at a 1:1 reward:risk and every anchor stays
- * draggable, so the tool opens with something to adjust rather than asking for
- * three clicks before it shows anything.
+ * Placed in two clicks: the entry, then the target. The second click is also
+ * the profit direction: release above the entry and the trade is a long,
+ * below and it is a short, whichever tool was armed. The armed tool only
+ * decides which way a bare click faces. The stop lands opposite the entry at
+ * one part risk to {@link POSITION_RR} parts reward, and all three levels
+ * stay handles; a level dragged through the entry flips the other side across
+ * it rather than piling both on one side, so a long turns into a short in
+ * place with its ratio intact.
+ *
+ * A bare click's box is sized on screen, not as a fraction of price. One
+ * percent of a 2.87 stock and one percent of a 24,000 index are the same
+ * fraction and very different boxes, and either turns into a hairline or a
+ * pane-filler with the zoom; 64 px of risk and 150 px of width read the same
+ * everywhere. A host with no pixel mapping falls back to chart units.
  */
+/** Reward per unit of risk for a default box and a derived stop. */
+const POSITION_RR = 2;
+/** A bare click's stop distance on screen, in media px. */
+const POSITION_RISK_PX = 64;
+/** A bare click's box width on screen, in media px. */
+const POSITION_WIDTH_PX = 150;
+/** The narrowest a placed box may be: below this the handles overlap. */
+const POSITION_MIN_WIDTH_PX = 48;
+/** Under this much vertical travel the second click is a bare click. */
+const POSITION_MIN_DRAG_PX = 6;
+
+/**
+ * The full anchor set from the two placed: entry and target as clicked (or a
+ * default target for a bare click), the stop derived opposite at the ratio.
+ */
+function positionAnchors(clicked: readonly DrawingPoint[], ctx: ExpandContext, long: boolean): DrawingPoint[] {
+  const entry = clicked[0];
+  const second = clicked[1] ?? entry;
+  const face = long ? 1 : -1;
+  if (ctx.toPixel !== undefined && ctx.fromPixel !== undefined) {
+    const e = ctx.toPixel(entry);
+    const t = ctx.toPixel(second);
+    if (e !== null && t !== null) {
+      const dragged = Math.abs(t.y - e.y) >= POSITION_MIN_DRAG_PX;
+      // Screen y grows downward, so a long's target sits at a smaller y.
+      const targetY = dragged ? t.y : e.y - face * POSITION_RISK_PX * POSITION_RR;
+      const endX = e.x + (dragged ? Math.max(Math.abs(t.x - e.x), POSITION_MIN_WIDTH_PX) : POSITION_WIDTH_PX);
+      const stopY = e.y - (targetY - e.y) / POSITION_RR;
+      const target = ctx.fromPixel({ x: endX, y: targetY });
+      const stop = ctx.fromPixel({ x: endX, y: stopY });
+      if (target !== null && stop !== null) return [{ ...entry }, target, stop];
+    }
+  }
+  // Chart units: the second click's price if it moved, else two percent of
+  // price (one of risk, two of reward), and a width of a few visible bars.
+  const dragged = second.price !== entry.price;
+  const reward = dragged ? second.price - entry.price : face * (Math.abs(entry.price) * 0.02 || 2);
+  const bars = Math.max(5, Math.round(ctx.visibleBars * 0.08));
+  const span = Math.max(1, ctx.barSeconds) * bars;
+  const far = dragged && second.time > entry.time ? second.time : entry.time + span;
+  return [
+    { ...entry },
+    { time: far, price: entry.price + reward },
+    { time: far, price: entry.price - reward / POSITION_RR },
+  ];
+}
+
+/**
+ * Keep the stop and the target on opposite sides of the entry. When a move
+ * puts them on the same side, the level that was NOT moved is reflected
+ * across the entry, so the one under the hand stays where it was put and the
+ * trade turns around with each side's distance, and so the ratio, preserved.
+ */
+function opposeLevels(points: readonly DrawingPoint[], handle: number | null): DrawingPoint[] {
+  const out = points.map((p) => ({ ...p }));
+  if (out.length < 3) return out;
+  const [entry, target, stop] = out;
+  const targetSide = Math.sign(target.price - entry.price);
+  const stopSide = Math.sign(stop.price - entry.price);
+  if (targetSide === 0 || stopSide === 0 || targetSide !== stopSide) return out;
+  if (handle === 1) stop.price = 2 * entry.price - stop.price;
+  else target.price = 2 * entry.price - target.price;
+  return out;
+}
+
+/** A position size the way a trader reads one: whole above a hundred, else to the cent. */
+function sizeText(qty: number): string {
+  if (!Number.isFinite(qty) || qty <= 0) return '0';
+  if (qty >= 100) return grouped(qty);
+  if (qty >= 1) return grouped(qty, 2).replace(/\.?0+$/, '');
+  return qty.toPrecision(3).replace(/\.?0+$/, '');
+}
+
 function positionTool(id: string, name: string, long: boolean): DrawingTool {
   return {
-    id, name, points: 1,
+    id, name, points: 2,
     defaultStyle: { showLabels: true, fillOpacity: 0.13, accountSize: 100000, risk: 1 },
     settings: composeSettings([LINE_FIELDS, OPACITY_FIELD, SHOW_LABELS_FIELD, POSITION_FIELDS, FONT_FIELDS]),
-    expand: (clicked, ctx) => {
-      const p = clicked[0];
-      // 1% of price gives a 1:1 box that reads sensibly on any instrument; the
-      // fallback covers a zero/near-zero price where a ratio has no meaning.
-      const off = Math.abs(p.price) * 0.01 || 1;
-      // ~8% of what is on screen, so the box is grabbable at any zoom instead
-      // of a hairline when zoomed out or pane-filling when zoomed in.
-      const bars = Math.max(5, Math.round(ctx.visibleBars * 0.08));
-      const far = p.time + Math.max(1, ctx.barSeconds) * bars;
-      return long
-        ? [p, { time: far, price: p.price + off }, { time: far, price: p.price - off }]
-        : [p, { time: far, price: p.price - off }, { time: far, price: p.price + off }];
-    },
+    expand: (clicked, ctx) => positionAnchors(clicked, ctx, long),
+    constrain: (points, handle) => opposeLevels(points, handle),
     draw: (c) => {
-      // A single-anchor preview exists between the click and `expand`.
-      if (c.drawing.points.length < 3 || c.pts.length < 3) return;
-      const [entry, target, stop] = c.drawing.points;
+      const pts = c.drawing.points;
+      if (pts.length < 2 || c.pts.length < 2) return;
+      const [entry, target] = pts;
+      // Between the first click and the second the drawing has two anchors
+      // and previews against the cursor: the stop is derived for the frame,
+      // exactly where `expand` will put it.
+      const stop = pts.length >= 3 ? pts[2] : { time: target.time, price: entry.price - (target.price - entry.price) / POSITION_RR };
       const d = c.rc.dpr;
-      const x0 = Math.min(c.pts[0].x, c.pts[1].x, c.pts[2].x);
-      const x1 = Math.max(c.pts[0].x, c.pts[1].x, c.pts[2].x);
+      const xs = c.pts.map((p) => p.x);
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
       const yE = c.rc.priceScale.priceToY(entry.price) * d;
       const yT = c.rc.priceScale.priceToY(target.price) * d;
       const yS = c.rc.priceScale.priceToY(stop.price) * d;
+      const props = c.drawing.props ?? {};
+      const profitColor = typeof props.profitColor === 'string' ? props.profitColor : UP_TINT;
+      const lossColor = typeof props.lossColor === 'string' ? props.lossColor : DOWN_TINT;
       const band = (yA: number, yB: number, color: string): void => {
         c.ctx.save();
         c.ctx.globalAlpha = c.style.fillOpacity ?? 0.13;
@@ -836,11 +932,13 @@ function positionTool(id: string, name: string, long: boolean): DrawingTool {
         c.ctx.fillRect(x0, Math.min(yA, yB), x1 - x0, Math.abs(yB - yA));
         c.ctx.restore();
       };
-      band(yE, yT, UP_TINT);
-      band(yE, yS, DOWN_TINT);
+      band(yE, yT, profitColor);
+      band(yE, yS, lossColor);
       applyStroke(c);
-      for (const y of [yE, yT, yS]) {
+      // Each level in its zone's colour; the entry keeps the tool's accent.
+      for (const [y, color] of [[yT, profitColor], [yS, lossColor], [yE, c.style.color]] as const) {
         const yy = Math.round(y) + 0.5;
+        c.ctx.strokeStyle = color;
         c.ctx.beginPath();
         c.ctx.moveTo(x0, yy);
         c.ctx.lineTo(x1, yy);
@@ -851,33 +949,47 @@ function positionTool(id: string, name: string, long: boolean): DrawingTool {
       const risk = Math.abs(entry.price - stop.price);
       const reward = Math.abs(target.price - entry.price);
       const rr = risk > 0 ? reward / risk : 0;
-      // Position size from risk budget over stop distance: the number a trader
-      // actually wants off this tool.
-      const account = c.style.accountSize ?? 0;
-      const riskPct = c.style.risk ?? 0;
-      const qty = risk > 0 && account > 0 ? Math.floor((account * riskPct / 100) / risk) : 0;
       const pctOf = (delta: number): string =>
-        (entry.price !== 0 ? (delta / entry.price) * 100 : 0).toFixed(3);
-      const cash = (delta: number): string => (qty > 0 ? `, Amount: ${grouped(qty * delta)}` : '');
+        (entry.price !== 0 ? (delta / entry.price) * 100 : 0).toFixed(2);
+      // The direction is read off the geometry so it flips live as a drag
+      // crosses the entry; only a box with no height yet takes the tool's.
+      const direction = target.price === entry.price ? (long ? 'Long' : 'Short')
+        : target.price > entry.price ? 'Long' : 'Short';
+      // Money at risk is what the account and risk percent say; size is what
+      // that buys at the stop distance. Neither exists without an account.
+      const account = c.style.accountSize ?? 0;
+      const loss = account > 0 ? account * (c.style.risk ?? 0) / 100 : 0;
+      const qty = risk > 0 ? loss / risk : 0;
       const cx = (x0 + x1) / 2;
-      // Each readout hugs its own line, on the outside of the box: the target
-      // chip sits past the target line whichever side of entry it landed on, so
-      // it reads the same for a long and an inverted-drag short.
-      chip(c, [`Target: ${c.formatPrice(reward)} (${pctOf(reward)}%)${cash(reward)}`],
-        cx, yT, UP_TINT, { align: 'center', place: yT <= yE ? 'above' : 'below' });
-      chip(c, [`Stop: ${c.formatPrice(risk)} (${pctOf(risk)}%)${cash(risk)}`],
-        cx, yS, DOWN_TINT, { align: 'center', place: yS >= yE ? 'below' : 'above' });
-      chip(c, [
-        `${long ? 'Long' : 'Short'}, Qty: ${qty > 0 ? grouped(qty) : '-'}`,
-        `Risk/reward ratio: ${rr.toFixed(2)}`,
-      ], cx, yE, c.rc.theme.background, { align: 'center', place: 'middle' });
+      const top = Math.min(yE, yT, yS);
+      const at = (price: number): string => (props.showPrices === true ? `  @ ${c.formatPrice(price)}` : '');
+      // The header and the loss/size line stack above the box, out of the way
+      // of the candles; each zone carries its own reading at its centre.
+      let above = top;
+      if (props.showLossSize !== false && loss > 0) {
+        above -= chip(c, [`Loss ${grouped(loss, 2)}  Size ${sizeText(qty)}`], cx, above, c.rc.theme.background,
+          { align: 'center', place: 'above' }) + 4 * d;
+      }
+      if (props.showHeader !== false) {
+        chip(c, [`${direction}  R:R ${rr.toFixed(2)}`], cx, above, c.rc.theme.background, { align: 'center', place: 'above' });
+      }
+      if (props.showTargetLabel !== false && reward > 0) {
+        chip(c, [`Target +${pctOf(reward)}%${at(target.price)}`], cx, (yE + yT) / 2, profitColor, { align: 'center', place: 'middle' });
+      }
+      if (props.showStopLabel !== false && risk > 0) {
+        chip(c, [`Stop -${pctOf(risk)}%${at(stop.price)}`], cx, (yE + yS) / 2, lossColor, { align: 'center', place: 'middle' });
+      }
     },
     distance: (x, y, h) => {
-      if (h.pts.length < 3) return null;
-      const x0 = Math.min(h.pts[0].x, h.pts[1].x, h.pts[2].x);
-      const x1 = Math.max(h.pts[0].x, h.pts[1].x, h.pts[2].x);
+      const pts = h.drawing.points;
+      if (h.pts.length < 2 || pts.length < 2) return null;
+      const xs = h.pts.map((p) => p.x);
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
       if (x < x0 - 4 || x > x1 + 4) return null;
-      const ys = h.drawing.points.map((p) => h.rc.priceScale.priceToY(p.price));
+      const [entry, target] = pts;
+      const stopPrice = pts.length >= 3 ? pts[2].price : entry.price - (target.price - entry.price) / POSITION_RR;
+      const ys = [entry.price, target.price, stopPrice].map((p) => h.rc.priceScale.priceToY(p));
       const lo = Math.min(...ys);
       const hi = Math.max(...ys);
       return y >= lo && y <= hi ? 0 : Math.min(Math.abs(y - lo), Math.abs(y - hi));
