@@ -78,6 +78,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "baseline": "node scripts/build-baseline.mjs",
     "size": "size-limit",
     "bench": "node scripts/bench-indicators.mjs",
     "soak": "node --expose-gc scripts/soak.mjs",

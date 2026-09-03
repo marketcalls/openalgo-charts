@@ -36,8 +36,8 @@ export type {
 export { resolveCrosshairStyle } from './render/crosshair';
 export type { CrosshairOptions, CrosshairStyle } from './render/crosshair';
 
-export { DEFAULT_CANDLE_STYLE, optimalBarWidth } from './render/candles';
-export type { CandleStyle } from './render/candles';
+export { DEFAULT_CANDLE_STYLE, optimalBarWidth, candleTier } from './render/candles';
+export type { CandleStyle, CandleTier } from './render/candles';
 export { DEFAULT_HISTOGRAM_STYLE } from './render/histogram';
 export type { HistogramStyle } from './render/histogram';
 export type { SeriesStyle } from './render/series-style';

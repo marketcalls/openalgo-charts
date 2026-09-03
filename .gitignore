@@ -17,3 +17,6 @@ artifacts/
 
 # Never let an npm auth token reach the repository.
 .npmrc
+
+# baseline build for e2e render-parity checks (scripts/build-baseline.mjs)
+dist-baseline/
