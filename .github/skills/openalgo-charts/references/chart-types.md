@@ -77,6 +77,7 @@ A whitespace item `{ time }` becomes a NaN bar: it claims a logical index, is sk
 
 - Body/column width is `optimalBarWidth(barSpacing, dpr)` — `floor(barSpacing * dpr * 0.8)`, minimum 1 device px, parity-matched to the 1px wick so the body stays centred. Exported if a custom renderer needs to line up with it.
 - A **filled** candle body takes its border only when `borderVisible` is on and the body is at least 3 device px wide, so `borderUpColor` has no visible effect zoomed right out (a 1px inset stroke would swallow the body). In hollow mode the up candle's outline *is* the body, so it always draws: `borderUpColor` when borders are on, `upColor` when they are off. Down candles are ordinary filled bodies in hollow mode and take `borderDownColor` the same way.
+- `candleGeometry(x, barSpacing, dpr, widthScale = 1)` returns `{ cx, bodyX, bodyW, wickX, wickW }` in device px (every field an integer; `widthScale` clamped to `0.05..1`, `bodyW` never below 1). It is the single source of candle snapping: `drawCandles` reads it per bar, and a custom or GPU renderer that rasterises candles with its own primitives lands on the same pixels by reading it too.
 - Line strokes are not rounded to whole device px, and use round caps and joins; `lineWidth` is honoured fractionally.
 - `volume-candle` scales the body by `volume / maxVisibleVolume` **of the currently visible bars**, clamped to `[0.05, 1]`, so the same bar changes width as you pan.
 

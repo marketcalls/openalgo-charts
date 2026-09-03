@@ -132,7 +132,7 @@ src/
 
 > **Methodology (point of record):** numbers are **Brotli-compressed**. Since we have zero runtime dependencies, nothing is excluded from the measurement. Raw-minified ≈ 3–3.5× the Brotli figure; gzip ≈ 1.1–1.15× Brotli. **All figures below are pre-implementation estimates** and the first deliverable of Phase 1 is to wire `size-limit` and replace them with measured values.
 
-We split the package into **six loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 65.52 KB Brotli while supporting 102 indicators, 51 drawing tools, and footprint/TPO/orderflow. Measured sizes for every tier are in the README size budget.
+We split the package into **six loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 66.10 KB Brotli while supporting 102 indicators, 51 drawing tools, and footprint/TPO/orderflow. Measured sizes for every tier are in the README size budget.
 
 **Tier 1 — Base bundle (always loaded):**
 
@@ -281,7 +281,13 @@ main sustained-session budgets.
 
 There is no "sync the panes" code path that could drift — alignment falls out of the single shared index space.
 
-### 3.4 Vector export (`render/svg-export.ts`)
+### 3.4 The render backend port (`render/backend.ts`)
+
+The series pass in `Pane.paintBase` goes through an `IRenderBackend`: `beginFrame` clears the base bitmap, `drawSeries` is called once per series with the same arguments `RendererEntry.draw` takes minus the context, and `endFrame` flushes whatever the backend batched, still inside the plot clip and before the normal-layer primitives so batched series land under the price lines and markers rather than over them. Everything else on the base canvas (background, grid, axes, primitives) the pane draws itself on the 2D context `overlay2d()` returns. The port is that narrow on purpose: the per-frame series pass is the one hot path a GPU can take over, and text, dashed lines, gradients and the drawing tools are things the 2D context already does well.
+
+`Canvas2dBackend` is the shipped backend and the reference the others are held to. It is handed the pane's existing 2D context at `mount` (the base `CanvasLayer` already owns one, and a second `getContext` would split a frame across two op streams) and calls each renderer on it as is, so its op stream is the one every chart drew before the port existed; `tests/e2e/render-parity.spec.ts` diffs it against a frozen pre-port build at zero differing pixels. Which backend a chart gets is decided once, at construction, from the `renderer` option (`'canvas2d'`, `'webgl2'`, or `'auto'`) or an injected `renderBackend` factory, one instance per pane. A factory may decline at run time (no WebGL2 on this device) and the 2D backend stands in, which is why `chart.renderer` reports the kind in use rather than the kind asked for. A `webgl2` tier only has to call `registerRenderBackend`. The vector export bypasses the port and calls the renderers directly on the serialising context: a document has no pixels to take from a GPU.
+
+### 3.5 Vector export (`render/svg-export.ts`)
 
 `chart.exportSVG()` is the frame above run once more, into a context that writes SVG instead of pixels. `SvgContext` implements the subset of the 2D canvas API the renderers, primitives and drawing tools call and serialises each call: paths become `<path>`, text stays `<text>`, and `save`, `translate` and `clip` open nested `<g>` elements that `restore` closes. The export therefore has no renderer of its own to drift from the canvas one. `Pane.paintBase` and `Pane.paintTop` take an optional target, and the export hands them the serialiser with the same `PaneRenderContext` a Full frame builds, minus the crosshair and with hover and drag cleared, so nothing transient reaches the file. Each pane is wrapped in a translated, clipped group that reproduces the DOM box (separator row included), which is why a second pane sits where the screen shows it and not one pixel higher.
 

@@ -14,6 +14,9 @@ import type { PriceScaleOptions, PriceScaleMode, PriceScale } from '../scale/pri
 import { medianBarInterval, type TickMarkType, type SessionClockOptions, type BarCountdownOptions } from '../render/axis';
 import { resolvePlotMargins, type CanvasOptions, type GridOptions } from '../render/grid';
 import { SvgContext } from '../render/svg-export';
+import {
+  resolveRenderBackend, type IRenderBackend, type RenderBackendFactory, type RenderBackendKind, type RendererChoice,
+} from '../render/backend';
 import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type SeriesRecord, type PriceScaleId } from '../model/series';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
@@ -210,6 +213,22 @@ export interface ChartOptions {
   conflate?: boolean;
   /** Conflation aggressiveness (default 1). */
   conflationFactor?: number;
+  /**
+   * Which backend paints the series. `'canvas2d'` (the default) is the 2D
+   * path every chart has always drawn with. `'webgl2'` asks for the GPU
+   * backend and throws when the tier that registers it has not been imported.
+   * `'auto'` takes `webgl2` when it is registered and available on this device
+   * and `canvas2d` otherwise, so a chart that opts in keeps painting on a
+   * machine without it. Decided once, at construction.
+   */
+  renderer?: RendererChoice;
+  /**
+   * Build the backend directly, one call per pane, bypassing `renderer` and
+   * the registry. For a host bringing its own backend, and for tests that
+   * want to see what the pane asks a backend to paint. A factory that returns
+   * null gets the 2D backend for that pane.
+   */
+  renderBackend?: RenderBackendFactory;
   /**
    * Grid lines: visibility (both default to true) plus per-axis colour, dash,
    * width and spacing. Unset colours/dashes fall through to the theme.
@@ -590,6 +609,13 @@ export class Chart {
   private readonly _now: () => number;
   private readonly _conflate: boolean;
   private readonly _conflationFactor: number;
+  /** One backend per pane; see `ChartOptions.renderer` and `renderBackend`. */
+  private readonly _backendFactory: RenderBackendFactory;
+  /**
+   * The kind the first pane got. A factory may decline per pane, so this is
+   * what the chart actually paints with rather than what was asked for.
+   */
+  private _rendererKind: RenderBackendKind | null = null;
   private _gridVert = true;
   private _gridHorz = true;
   /** The Canvas option block: overrides of the theme, never a copy of it. */
@@ -757,6 +783,9 @@ export class Chart {
     this._zoomAnchor = options.zoomAnchor ?? 'cursor';
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
+    // Resolved here, before the first pane, so an unregistered explicit choice
+    // fails at construction rather than on the first frame.
+    this._backendFactory = options.renderBackend ?? resolveRenderBackend(options.renderer ?? 'canvas2d');
     this._priceFormatter = options.priceFormatter ?? null;
     this._priceScaleOptions = options.priceScale ?? null;
     this._timeFormatter = options.timeFormatter;
@@ -2191,8 +2220,25 @@ export class Chart {
     this._updateAccessibleSummary();
   }
 
+  /**
+   * The render backend the chart paints series with: what the first pane was
+   * given, which is the `renderer` option unless its factory declined (no
+   * WebGL2 on this device) and the 2D backend stood in.
+   */
+  public get renderer(): RenderBackendKind {
+    return this._rendererKind ?? 'canvas2d';
+  }
+
+  /** A backend for one more pane, with the 2D one standing in for a refusal. */
+  private _newBackend(): IRenderBackend {
+    const backend = this._backendFactory() ?? resolveRenderBackend('canvas2d')();
+    if (backend === null) throw new Error('openalgo-charts: the canvas2d render backend factory returned null');
+    this._rendererKind ??= backend.kind;
+    return backend;
+  }
+
   private _addPane(weight = 1): Pane {
-    const pane = new Pane(this._doc);
+    const pane = new Pane(this._doc, this._newBackend());
     pane.weight = weight;
     // Pane 0 quotes the instrument by construction: it is where `addSeries`
     // puts a series that names no pane, and it exists before any host has said

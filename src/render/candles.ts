@@ -104,6 +104,44 @@ export function candleTier(bodyW: number, wickW: number, style: CandleStyle): Ca
   return 'wick';
 }
 
+/** Where one candle lands, in device px. Every field is an integer. */
+export interface CandleGeometry {
+  /** Bar centre. */
+  cx: number;
+  /** Left edge of the body. */
+  bodyX: number;
+  /** Body width after any per-bar scale, never below 1. */
+  bodyW: number;
+  /** Left edge of the wick. */
+  wickX: number;
+  /** Wick width: 1 device px per whole unit of `dpr`. */
+  wickW: number;
+}
+
+/**
+ * Pure: the device-pixel rectangle geometry of one candle. This is the single
+ * source of the snapping and parity rules, so a second backend rasterising
+ * candles with its own primitives lands on the same pixels as `drawCandles`.
+ *
+ * `widthScale` is the per-bar body scale a volume candle applies (1 = the
+ * full `optimalBarWidth`). It is clamped to 0.05..1: a zero-volume bar still
+ * has to show a sliver of body, and nothing may grow past the gap.
+ */
+export function candleGeometry(x: number, barSpacing: number, dpr: number, widthScale = 1): CandleGeometry {
+  const fullW = optimalBarWidth(barSpacing, dpr);
+  const wickW = Math.max(1, Math.floor(dpr));
+  const cx = Math.round(x * dpr);
+  const scale = Math.max(0.05, Math.min(1, widthScale));
+  const bodyW = scale === 1 ? fullW : Math.max(1, Math.round(fullW * scale));
+  return {
+    cx,
+    bodyX: cx - Math.floor(bodyW / 2),
+    bodyW,
+    wickX: cx - Math.floor(wickW / 2),
+    wickW,
+  };
+}
+
 export interface CandleDrawItem {
   /** Bar center x, media px. */
   x: number;
@@ -147,16 +185,16 @@ export function drawCandles(
     const up = style.colorByPreviousClose === true && ref !== undefined && Number.isFinite(ref)
       ? bar.close >= ref
       : bar.close >= bar.open;
-    const cx = Math.round(x * dpr);
     const yOpen = Math.round(priceToY(bar.open) * dpr);
     const yClose = Math.round(priceToY(bar.close) * dpr);
     const yHigh = Math.round(priceToY(bar.high) * dpr);
     const yLow = Math.round(priceToY(bar.low) * dpr);
 
     // Per-bar width (volume candles scale the body by relative volume).
-    const scale = style.widthScale ? Math.max(0.05, Math.min(1, style.widthScale(bar))) : 1;
-    const w = scale === 1 ? bodyW : Math.max(1, Math.round(bodyW * scale));
-    const halfW = Math.floor(w / 2);
+    const geo = candleGeometry(x, barSpacing, dpr, style.widthScale ? style.widthScale(bar) : 1);
+    const cx = geo.cx;
+    const w = geo.bodyW;
+    const halfW = cx - geo.bodyX;
 
     // A per-bar colour override replaces the whole up/down verdict
     // for this bar: body, border and wick together, or a recoloured candle would
@@ -165,7 +203,7 @@ export function drawCandles(
 
     if (style.wickVisible) {
       ctx.fillStyle = over ?? (up ? style.wickUpColor : style.wickDownColor);
-      ctx.fillRect(cx - Math.floor(wickW / 2), yHigh, wickW, Math.max(1, yLow - yHigh));
+      ctx.fillRect(geo.wickX, yHigh, geo.wickW, Math.max(1, yLow - yHigh));
     }
 
     // At the `wick` tier the body would repaint the pixels the wick just

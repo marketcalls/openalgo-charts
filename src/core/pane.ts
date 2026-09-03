@@ -20,6 +20,8 @@ import {
 } from '../render/axis';
 import { drawCrosshair, drawCrosshairTag, resolveCrosshairStyle } from '../render/crosshair';
 import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
+import type { IRenderBackend } from '../render/backend';
+import { Canvas2dBackend } from '../render/canvas2d-backend';
 import type { ChartTheme } from '../theme';
 import { DEFAULT_TIMEZONE, formatZonedCrosshairLabel } from '../feed/time';
 
@@ -99,6 +101,13 @@ export class Pane {
   public readonly element: HTMLElement;
   public readonly base: CanvasLayer;
   public readonly top: CanvasLayer;
+  /**
+   * What paints this pane's series onto `base`. Everything else on that canvas
+   * (background, grid, axes, primitives) the pane draws itself on the 2D
+   * context the backend hands back, so a GPU backend only has to own the one
+   * pass that is worth moving.
+   */
+  public readonly backend: IRenderBackend;
   private _rightScale = new PriceScale();
   /** Extra scales created on demand: left axis and a hidden overlay (volume). */
   private _leftScale: PriceScale | null = null;
@@ -119,7 +128,12 @@ export class Pane {
   private _width = 0;
   private _height = 0;
 
-  public constructor(doc: Document) {
+  /**
+   * `backend` defaults to the 2D one so a pane built on its own (tests, a host
+   * composing panes by hand) paints the way it always has; the chart passes
+   * whatever its `renderer` option resolved to.
+   */
+  public constructor(doc: Document, backend: IRenderBackend = new Canvas2dBackend()) {
     this.element = doc.createElement('div');
     this.element.style.position = 'relative';
     this.element.style.width = '100%';
@@ -135,6 +149,12 @@ export class Pane {
     this.top = new CanvasLayer(doc, 1);
     this.element.appendChild(this.base.element);
     this.element.appendChild(this.top.element);
+    this.backend = backend;
+    // The base canvas already holds a 2D context (CanvasLayer asks for it on
+    // construction), so the backend is handed that one rather than left to ask
+    // for another: a frame is then one context's op stream, which is what the
+    // recording-context tests and the parity gate both compare.
+    backend.mount(this.base.element, this.base.ctx);
   }
 
   /**
@@ -335,6 +355,7 @@ export class Pane {
   public destroy(): void {
     for (const p of this._primitives) p.detached?.();
     this._primitives.length = 0;
+    this.backend.destroy();
     this.element.remove();
   }
 
@@ -371,6 +392,9 @@ export class Pane {
     this._height = height;
     this.base.resize(width, height, dpr);
     this.top.resize(width, height, dpr);
+    // After the layer, which owns the backing store: a backend that keeps its
+    // own buffers (a GL viewport) sizes them to what the canvas now is.
+    this.backend.resize(width, height, dpr);
   }
 
   /**
@@ -528,8 +552,12 @@ export class Pane {
   public paintBase(ctx: PaneRenderContext, target?: CanvasRenderingContext2D): void {
     const layout = this._layout(ctx);
     const dpr = ctx.dpr;
-    const g = target ?? this.base.ctx;
-    if (target === undefined) this.base.clearBitmap();
+    // On screen, the chrome goes on whatever 2D context the backend offers
+    // (the base canvas's own, for the 2D backend). A serialising target takes
+    // the whole frame, series included: the export is a document, and the
+    // backend has no pixels to put in one.
+    const g = target ?? this.backend.overlay2d() ?? this.base.ctx;
+    if (target === undefined) this.backend.beginFrame(true);
 
     const axisStyle = resolveScaleStyle(ctx.theme, ctx.canvasOptions?.scales);
 
@@ -614,7 +642,8 @@ export class Pane {
       let maxVolume = 0;
       for (const it of items) if ((it.bar.volume ?? 0) > maxVolume) maxVolume = it.bar.volume ?? 0;
       const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume, theme: ctx.theme };
-      entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
+      if (target === undefined) this.backend.drawSeries(entry, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
+      else entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
       // Only the readout scale has a strip to write into. A volume overlay
       // sitting on its own hidden scale is excluded by that alone, while a
       // volume study on a pane of its own is on the readout scale and does get
@@ -642,6 +671,10 @@ export class Pane {
         }
       }
     }
+    // Still inside the clip and before the normal-layer primitives: a backend
+    // that batched the series has to land them under the price lines and
+    // markers, not over them.
+    if (target === undefined) this.backend.endFrame();
 
     // End of the plot clip. Everything below draws into the axis strip on
     // purpose: the ladder, the last-price tag, the trading pills. Restoring here

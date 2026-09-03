@@ -45,8 +45,18 @@ export type {
 export { resolveCrosshairStyle } from './render/crosshair';
 export type { CrosshairOptions, CrosshairStyle } from './render/crosshair';
 
-export { DEFAULT_CANDLE_STYLE, optimalBarWidth, candleTier } from './render/candles';
-export type { CandleStyle, CandleTier } from './render/candles';
+export { DEFAULT_CANDLE_STYLE, optimalBarWidth, candleTier, candleGeometry } from './render/candles';
+export type { CandleStyle, CandleTier, CandleGeometry } from './render/candles';
+
+// render backend port: the 2D backend ships here and registers itself; a GPU
+// backend registers under 'webgl2' from its own tier and `renderer: 'auto'`
+// picks it up.
+export {
+  registerRenderBackend, unregisterRenderBackend, registeredRenderBackends,
+  resolveRenderBackend, createRenderBackend,
+} from './render/backend';
+export type { IRenderBackend, RenderBackendKind, RendererChoice, RenderBackendFactory } from './render/backend';
+export { Canvas2dBackend } from './render/canvas2d-backend';
 export { DEFAULT_HISTOGRAM_STYLE } from './render/histogram';
 export type { HistogramStyle } from './render/histogram';
 export type { SeriesStyle } from './render/series-style';

@@ -41,6 +41,8 @@ chart.fitContent();
 | `now` | `() => number` | `performance.now` | Time source for kinetic pan / navigator fade. |
 | `conflate` | `boolean` | `false` | OHLC-preserving downsampling when bars fall under ~0.5 device px. |
 | `conflationFactor` | `number` | `1` | Conflation aggressiveness. |
+| `renderer` | `'canvas2d' \| 'webgl2' \| 'auto'` | `'canvas2d'` | Which backend paints the series. `'webgl2'` throws until a tier registers that backend; `'auto'` takes `webgl2` when it is registered and works on this device, else `canvas2d`. Decided once, at construction. See [Render backends](#render-backends). |
+| `renderBackend` | `RenderBackendFactory` | from `renderer` | Build the backend yourself, one call per pane, bypassing `renderer` and the registry. A factory that returns `null` gets the 2D backend for that pane. |
 | `grid` | `Partial<GridOptions>` | `vertLines`/`horzLines` `true` | Visibility plus per-axis colour, dash, width and spacing. Unset colours fall through to the theme. |
 | `canvas` | `CanvasOptions` | `{}` | Grid, crosshair, scale text/lines, plot margins in one block. See [settings-and-menus](settings-and-menus.md). |
 | `statusLine` | `LegendStatusLineOptions` | all on | Per-field status-line switches applied to every pane legend. |
@@ -209,6 +211,37 @@ Each pane owns two stacked canvases: `pane.base` (z-index 0: background, grid, s
 The effective level per pane is `max(globalLevel, paneLevel)`. Crosshair moves raise `Cursor` globally; hover changes raise `Light` globally; a primitive's `requestUpdate` raises `Light` on its pane only; data mutations, pan, zoom, resize, theme and grid changes raise `Full` globally.
 
 **Every `series.update()` schedules a `Full` repaint.** A high-frequency feed therefore re-autoscales each frame; batch ticks upstream (see [feeds-and-live](feeds-and-live.md)) rather than calling `update` per tick.
+
+## Render backends
+
+The per-frame series pass on each pane goes through an `IRenderBackend` (`src/render/backend.ts`). The pane paints everything else (background, grid, axes, primitives) on the 2D context the backend hands back from `overlay2d()`, so a backend only has to own the one pass a GPU can speed up. `Canvas2dBackend` ships in the base tier, registers itself under `'canvas2d'`, and draws through the very same 2D context the pane already holds, so its op stream is byte for byte the one every chart drew before the port existed (`tests/e2e/render-parity.spec.ts` holds it to zero differing pixels).
+
+```ts
+interface IRenderBackend {
+  readonly kind: RenderBackendKind;                       // 'canvas2d' | 'webgl2'
+  mount(canvas: HTMLCanvasElement, ctx2d: CanvasRenderingContext2D | null): void;
+  resize(widthPx: number, heightPx: number, dpr: number): void;
+  beginFrame(clear: boolean): void;
+  drawSeries(entry, items, priceToY, barSpacing, dpr, style, rc): void;  // RendererEntry.draw minus the context
+  endFrame(): void;
+  overlay2d(): CanvasRenderingContext2D | null;
+  destroy(): void;
+}
+```
+
+`mount` takes the pane's existing 2D context as its second argument (the pane's base `CanvasLayer` already asked the canvas for one; a second `getContext` would split a frame across two contexts). A backend that owns its canvas ignores it.
+
+Choosing one: `chart.renderer` (a `RenderBackendKind`) reports what the chart actually paints with, which differs from the `renderer` option only when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in. The registry behind the option is exported for a tier or host that brings a backend:
+
+| Export | What it does |
+|---|---|
+| `registerRenderBackend(kind, factory)` | Register or replace the factory for a `RenderBackendKind`. `RenderBackendFactory` is `() => IRenderBackend \| null`; returning `null` declines at run time. |
+| `unregisterRenderBackend(kind)` | Drop a registered backend. Refuses `'canvas2d'`, the fallback every other choice lands on. |
+| `registeredRenderBackends()` | The kinds currently registered. |
+| `resolveRenderBackend(choice?: RendererChoice)` | Turn the option into a factory: an unregistered explicit kind throws, a factory that declines falls back to `canvas2d`. |
+| `createRenderBackend(choice?)` | One backend instance for the choice, via `resolveRenderBackend`. |
+
+The export path bypasses the backend: `exportSVG` calls each renderer's `draw` directly on the serialising context, because a document has no pixels to take from a GPU. `candleGeometry` in [chart-types](chart-types.md#renderer-geometry) is the shared snapping source a second backend must reproduce.
 
 ## The rest of the base surface
 
