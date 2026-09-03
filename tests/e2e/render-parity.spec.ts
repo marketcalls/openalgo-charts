@@ -30,7 +30,14 @@ import { test, expect } from '@playwright/test';
 const W = 900;
 const H = 520;
 
-/** Bar spacings that straddle the candle LOD tier boundary. */
+/**
+ * Bar spacings that straddle the candle LOD tier boundary.
+ *
+ * 1 is the floor: `TimeScale` clamps to `minBarSpacing`, which defaults to 1,
+ * so a chart never draws more than one bar per pixel column and anything below
+ * this lands on the same render. Sub-pixel spacings are therefore not worth
+ * enumerating here.
+ */
 const SPACINGS = [1, 1.5, 2, 3, 6, 12, 24];
 
 /** Distinct colours a real chart paints; a blank one is far below this. */
