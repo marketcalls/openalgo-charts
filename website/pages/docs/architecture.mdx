@@ -60,7 +60,7 @@ feature you do not load costs nothing.
 
 | Tier | Brotli | Contents |
 |---|--:|---|
-| `openalgo-charts` | 66.42 KB | Engine, 13 chart types, panes and scales, primitives, registries, chart state, linking, bar cache, trading overlay, SVG export, render backend port, feeds |
+| `openalgo-charts` | 66.45 KB | Engine, 13 chart types, panes and scales, primitives, registries, chart state, linking, bar cache, trading overlay, SVG export, render backend port, feeds |
 | `openalgo-charts/widget` | 35.56 KB | The chart with its chrome in one `createWidget` call: top bar, drawing rail, status line, dialogs, right-click menu, keymap, persistence. The only tier that ships DOM |
 | `openalgo-charts/indicators` | 27.27 KB | 102 built-ins, the `registerIndicator` contract, and the Tier-2 external-data contract |
 | `openalgo-charts/draw` | 25.82 KB | 51 drawing tools, headless controller, clipboard, settings schema |
@@ -69,8 +69,8 @@ feature you do not load costs nothing.
 | `openalgo-charts/webgl` | 6.38 KB | WebGL2 series backend, composited into the pane's canvas, 2D fallback for the session on context loss |
 | `openalgo-charts/transform` | 2.66 KB | Heikin Ashi, Renko, Range, Line Break, Point and Figure, Kagi |
 
-**182.37 KB Brotli** for every tier at once; a widget terminal (base + draw +
-indicators + widget, what one `createWidget` call loads) is 155.06 KB. Figures are
+**182.39 KB Brotli** for every tier at once; a widget terminal (base + draw +
+indicators + widget, what one `createWidget` call loads) is 155.09 KB. Figures are
 the measured `size-limit` output and are enforced in CI, so a change that grows a
 bundle past its budget fails the build.
 

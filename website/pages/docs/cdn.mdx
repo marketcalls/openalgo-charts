@@ -22,7 +22,7 @@ Save this as `chart.html` and open it. No npm, no bundler, no server.
     <div id="chart" style="width:100vw;height:100vh"></div>
 
     <script type="module">
-      import { createChart } from 'https://unpkg.com/openalgo-charts@2.0.1/dist/openalgo-charts.mjs';
+      import { createChart } from 'https://unpkg.com/openalgo-charts@2.0.2/dist/openalgo-charts.mjs';
 
       const chart = createChart(document.getElementById('chart'), {
         timezone: 'Asia/Kolkata',
@@ -47,7 +47,7 @@ so the library needs no build step to be used.
 Use an exact version in anything you leave running:
 
 ```html
-https://unpkg.com/openalgo-charts@2.0.1/dist/openalgo-charts.mjs
+https://unpkg.com/openalgo-charts@2.0.2/dist/openalgo-charts.mjs
 ```
 
 The unversioned URL always resolves to the newest release. That is convenient for
@@ -57,7 +57,7 @@ release changes what your page loads without you touching it.
 jsDelivr serves the identical files if you prefer it:
 
 ```html
-https://cdn.jsdelivr.net/npm/openalgo-charts@2.0.1/dist/openalgo-charts.mjs
+https://cdn.jsdelivr.net/npm/openalgo-charts@2.0.2/dist/openalgo-charts.mjs
 ```
 
 ## Adding indicators and drawing tools
@@ -69,7 +69,7 @@ registers itself into the engine you already loaded.
 
 ```html
 <script type="module">
-  const CDN = 'https://unpkg.com/openalgo-charts@2.0.1/dist';
+  const CDN = 'https://unpkg.com/openalgo-charts@2.0.2/dist';
 
   const { createChart, registeredIndicators } = await import(`${CDN}/openalgo-charts.mjs`);
   const { registerBuiltinIndicators } = await import(`${CDN}/openalgo-charts.indicators.mjs`);
@@ -109,7 +109,7 @@ terminal is still one file:
 
 ```html
 <script type="module">
-  const CDN = 'https://unpkg.com/openalgo-charts@2.0.1/dist';
+  const CDN = 'https://unpkg.com/openalgo-charts@2.0.2/dist';
   const { createChart, OpenAlgoRestFeed } = await import(`${CDN}/openalgo-charts.mjs`);
   const { registerBuiltinIndicators } = await import(`${CDN}/openalgo-charts.indicators.mjs`);
   registerBuiltinIndicators();
@@ -143,7 +143,7 @@ If you cannot use `<script type="module">` at all, there is a classic script tha
 defines a `OpenAlgoCharts` global:
 
 ```html
-<script src="https://unpkg.com/openalgo-charts@2.0.1/dist/openalgo-charts.standalone.js"></script>
+<script src="https://unpkg.com/openalgo-charts@2.0.2/dist/openalgo-charts.standalone.js"></script>
 <script>
   const chart = OpenAlgoCharts.createChart(document.getElementById('chart'));
   chart.addSeries('candlestick').setData(bars);
@@ -171,9 +171,9 @@ steps that do not apply here:
 ## Checking a version is live
 
 ```sh
-curl -sI https://unpkg.com/openalgo-charts@2.0.1/dist/openalgo-charts.mjs | head -1
+curl -sI https://unpkg.com/openalgo-charts@2.0.2/dist/openalgo-charts.mjs | head -1
 npm view openalgo-charts version
 ```
 
 Browse everything a release contains at
-[`unpkg.com/openalgo-charts@2.0.1/dist/`](https://unpkg.com/browse/openalgo-charts@2.0.1/dist/).
+[`unpkg.com/openalgo-charts@2.0.2/dist/`](https://unpkg.com/browse/openalgo-charts@2.0.2/dist/).

@@ -8,7 +8,7 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
-## 2.0.2 (unreleased)
+## 2.0.2
 
 **Added**
 
@@ -16,6 +16,10 @@ The full, authoritative changelog lives in
   history loader), `'maximize'` (toggles the pane under the pointer to the whole stack) or
   `'none'`. The `dblclick` event carries `paneIndex`, `x`, `y` and a `handled` flag a listener
   can set to keep the chart's own action from running.
+
+
+Measured on the 2.0.2 build: base engine 66.45 KB, base + trade 74.06 KB, widget terminal
+155.09 KB, everything 182.39 KB; the other six tiers did not move.
 
 ## 2.0.1
 

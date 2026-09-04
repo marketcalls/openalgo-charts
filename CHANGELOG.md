@@ -2,7 +2,7 @@
 
 All notable changes to OpenAlgo Charts.
 
-## 2.0.2 (unreleased)
+## 2.0.2
 
 ### Added
 
@@ -16,6 +16,14 @@ All notable changes to OpenAlgo Charts.
   and a `handled` flag: a listener that acts on the press itself sets it and
   the chart's own action is skipped. A double-click during placement still
   finishes the shape whatever the option says.
+
+
+### Sizes
+
+Measured with `npm run size` (Brotli) on the 2.0.2 build: base engine 66.45 KB
+against 67 kB, base + trade 74.06 KB against 75 kB, widget terminal 155.09 KB
+against 156 kB, everything 182.39 KB against 183 kB. The other six rows did not
+move.
 
 ## 2.0.1
 
