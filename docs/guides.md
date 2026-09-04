@@ -154,6 +154,8 @@ chart.addSeries('area', { style: { areaTopColor: 'rgba(79,140,255,0.5)', areaBot
 - **Wheel**: zoom both axes around the cursor. The zoom is eased in log space over a
   few frames (`animZoom`, on by default; `false` restores the single-frame step), and
   `zoomAnchor: 'right'` pins the latest bar instead of the cursor.
+- **Double-click**: reset view by default; `doubleClick: 'maximize'` toggles the pane under
+  the pointer to the whole stack, `'none'` leaves it to the host's `dblclick` listener.
 - **Drag the price (Y) axis** vertically: up expands, down compresses the price scale
   (switches that pane to manual scale).
 - **Drag the time (X) axis** horizontally: right expands (wider bars), left compresses.

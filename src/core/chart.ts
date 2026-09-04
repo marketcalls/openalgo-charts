@@ -51,6 +51,20 @@ const ZOOM_GLIDE_MAX_FRAMES = 600;
 
 /** What a wheel zoom holds still. */
 export type ZoomAnchor = 'cursor' | 'right';
+/** What a double-click on a pane does. See {@link ChartOptions.doubleClick}. */
+export type DoubleClickAction = 'reset' | 'maximize' | 'none';
+/**
+ * The `dblclick` event. `paneIndex` is the pane under the pointer. A listener
+ * that acts on the double-click itself (opening a text editor for the selected
+ * drawing, say) sets `handled` to true, and the chart's own action is skipped
+ * for that press.
+ */
+export interface DoubleClickEvent {
+  paneIndex: number;
+  x: number;
+  y: number;
+  handled: boolean;
+}
 
 const INSTANCE_PALETTE: readonly string[] = [
   '#f5a623', '#26a69a', '#ab47bc', '#ef5350',
@@ -210,6 +224,16 @@ export interface ChartOptions {
    * away from it, which is what a live chart usually wants.
    */
   zoomAnchor?: ZoomAnchor;
+  /**
+   * What a double-click on a pane does. `'reset'` (the default, and what the
+   * chart has always done) fits every loaded bar on screen and autoscales,
+   * which also lands the viewport on the oldest bar and so wakes a history
+   * loader. `'maximize'` gives the pane the whole stack, and a second
+   * double-click puts the stack back, which is what a multi-pane terminal
+   * usually wants from the gesture. `'none'` only emits the event. While a
+   * tool is being placed a double-click finishes the shape whatever this says.
+   */
+  doubleClick?: DoubleClickAction;
   /** Enable OHLC-preserving conflation when zoomed out (§4.4). Default false. */
   conflate?: boolean;
   /** Conflation aggressiveness (default 1). */
@@ -698,6 +722,7 @@ export class Chart {
   private _zoomGlideX = 0;
   private readonly _animZoom: boolean;
   private readonly _zoomAnchor: ZoomAnchor;
+  private readonly _doubleClick: DoubleClickAction;
   private readonly _firstDataId: { value: number | null } = { value: null };
   /** Handle + record of the primary price series (see `primarySeries`). */
   private _primary: { api: SeriesApi; record: SeriesRecord } | null = null;
@@ -806,6 +831,7 @@ export class Chart {
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
     this._animZoom = options.animZoom ?? true;
     this._zoomAnchor = options.zoomAnchor ?? 'cursor';
+    this._doubleClick = options.doubleClick ?? 'reset';
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
     // Resolved here, before the first pane, so an unregistered explicit choice
@@ -3783,12 +3809,17 @@ export class Chart {
     this._emitViewportIfMoved(before);
   }
 
-  private readonly _onDblClick = (): void => {
-    this.emit('dblclick', {});
+  private readonly _onDblClick = (e: { clientX: number; clientY: number }): void => {
+    const p = this._localPoint(e);
+    const ev: DoubleClickEvent = { paneIndex: p.pane, x: p.x, y: p.y, handled: false };
+    this.emit('dblclick', ev);
     // While a tool is armed a double-click means "finish this shape" — a
     // variable-anchor tool has no other way to end — so it must not also throw
-    // the view back to its default mid-placement.
-    if (!this._placementMode) this.resetScale();
+    // the view back to its default mid-placement. A listener that took the
+    // press for itself has said so on the event.
+    if (this._placementMode || ev.handled) return;
+    if (this._doubleClick === 'reset') this.resetScale();
+    else if (this._doubleClick === 'maximize') this.maximizePane(p.pane);
   };
 
   // ── multi-touch pinch (zoom + two-finger pan) ─────────────────────────────

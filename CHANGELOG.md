@@ -2,6 +2,21 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.0.2 (unreleased)
+
+### Added
+
+- **`doubleClick`, a `ChartOptions` key for what a double-click on a pane
+  does.** `'reset'` is the default and what the chart has always done: fit
+  every loaded bar and autoscale, which also lands the viewport on the oldest
+  bar and wakes a history loader, so on a live terminal a double-click fetched
+  another page. `'maximize'` toggles the pane under the pointer to the whole
+  stack, which is what a multi-pane terminal usually wants from the gesture;
+  `'none'` only emits. The `dblclick` event now carries `paneIndex`, `x`, `y`
+  and a `handled` flag: a listener that acts on the press itself sets it and
+  the chart's own action is skipped. A double-click during placement still
+  finishes the shape whatever the option says.
+
 ## 2.0.1
 
 ### Fixed

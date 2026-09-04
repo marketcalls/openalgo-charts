@@ -7,7 +7,7 @@ export { createChart, Chart, compactVolume, PRICE_SCALE_MODES } from './core/cha
 export type {
   ChartOptions, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
   ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState,
-  AxisChromeOptions, ZoomAnchor, ExportSvgOptions,
+  AxisChromeOptions, ZoomAnchor, DoubleClickAction, DoubleClickEvent, ExportSvgOptions,
   PointerModifiers, PointerKind, PointerSample, PointerInfo,
   ChartClickEvent, ChartDragEvent, ChartDragEndEvent, RendererFallbackEvent,
 } from './core/chart';

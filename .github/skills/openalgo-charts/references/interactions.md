@@ -15,7 +15,7 @@ Everything is built on Pointer Events, so mouse, touch and pen share one code pa
 | Drag the price axis (right strip) | rescale price | `exp(dy * 0.005)` about the range centre, then `setAutoScale(false)` |
 | Drag the time axis (bottom strip of the last pane) | rescale bar spacing | `barSpacing * exp(dx * 0.005)` |
 | Drag a pane divider | redistribute height between the two adjacent panes | grab tolerance 4 px, cursor `row-resize`, summed weight preserved, neither side below `min(24, total/4)` px; emits `paneResized` on release |
-| Double-click | `resetScale()`, fit content plus autoscale on every pane | suppressed while placement mode is on; the `dblclick` event still fires |
+| Double-click | `doubleClick` option: `'reset'` (default) is `resetScale()`, fit content plus autoscale on every pane; `'maximize'` toggles `maximizePane` for the pane under the pointer; `'none'` only emits | suppressed while placement mode is on, or when a `dblclick` listener set `handled` on the event; the event carries `paneIndex`, `x`, `y` |
 | Press on a draggable primitive | drags the line instead of panning | arms when `hit.draggable` is true, or `hit.cursor === 'ns-resize'` and `subscribeDrag` is registered |
 | Flick and release | kinetic scroll | see below |
 | Two pointers | pinch | see below |

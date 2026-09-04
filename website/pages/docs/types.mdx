@@ -97,6 +97,8 @@ interface ChartOptions {
   animZoom?: boolean;
   /** What a wheel zoom holds still: the bar under the cursor, or the latest bar. Default 'cursor'. */
   zoomAnchor?: 'cursor' | 'right';
+  /** What a double-click on a pane does. Default 'reset'; 'maximize' toggles that pane to the whole stack. */
+  doubleClick?: 'reset' | 'maximize' | 'none';
   conflate?: boolean;
   conflationFactor?: number;
   /** Which backend paints the series. Default 'canvas2d'; 'webgl2' needs the webgl tier. */
