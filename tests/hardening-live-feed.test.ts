@@ -152,7 +152,7 @@ describe('subscription ownership is reference counted', () => {
     // The shallow consumer must not shrink the book under the deep one.
     const subs = actions(s, 'subscribe');
     expect(subs).toHaveLength(1);
-    expect(subs[0].depth_level).toBe(20);
+    expect(subs[0].depth).toBe(20);
   });
 
   it('upgrades the wire when a later consumer needs a deeper book', () => {
@@ -164,7 +164,7 @@ describe('subscription ownership is reference counted', () => {
 
     const subs = actions(s, 'subscribe');
     expect(subs).toHaveLength(2);
-    expect(subs[1].depth_level).toBe(50);
+    expect(subs[1].depth).toBe(50);
   });
 });
 
@@ -233,18 +233,25 @@ describe('volumeMode day-delta has a wire path', () => {
 describe('depth level reaches the wire', () => {
   // Compatibility guard, not a regression test: a caller that names no level
   // must still get exactly the frame this feed has always sent.
-  it('sends no depth_level when nothing asked for one', () => {
+  it('sends no depth key when nothing asked for one', () => {
     const { feed, sock } = makeFeed();
     feed.subscribeDepth({ symbol: 'X', exchange: 'NSE', interval: '1m', from: 0 }, () => {});
     const sub = actions(sock(), 'subscribe')[0];
     expect(sub.mode).toBe(3);
+    expect(sub.depth).toBeUndefined();
     expect(sub.depth_level).toBeUndefined();
   });
 
-  it('sends the per-call level', () => {
+  // `depth` is what the proxy reads (docs/prompt/websockets-format.md in the
+  // platform). 1.x sent only `depth_level`, which nothing read, so a 20-level
+  // request was served at five with no error. The old key stays beside the
+  // new one for consumers that copied it from this library.
+  it('sends the per-call level under the key the proxy reads, and the old one', () => {
     const { feed, sock } = makeFeed();
     feed.subscribeDepth({ symbol: 'X', exchange: 'NSE', interval: '1m', from: 0 }, () => {}, { depthLevel: 30 });
-    expect(actions(sock(), 'subscribe')[0].depth_level).toBe(30);
+    const sub = actions(sock(), 'subscribe')[0];
+    expect(sub.depth).toBe(30);
+    expect(sub.depth_level).toBe(30);
   });
 
   it('falls back to the configured default, and the per-call level overrides it', () => {
@@ -252,7 +259,7 @@ describe('depth level reaches the wire', () => {
     feed.subscribeDepth({ symbol: 'A', exchange: 'NSE', interval: '1m', from: 0 }, () => {});
     feed.subscribeDepth({ symbol: 'B', exchange: 'NSE', interval: '1m', from: 0 }, () => {}, { depthLevel: 50 });
     const subs = actions(sock(), 'subscribe');
-    expect(subs[0].depth_level).toBe(20);
-    expect(subs[1].depth_level).toBe(50);
+    expect(subs[0].depth).toBe(20);
+    expect(subs[1].depth).toBe(50);
   });
 });

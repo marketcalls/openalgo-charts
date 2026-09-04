@@ -88,7 +88,7 @@ Wire format (pure formatters, exported where noted):
 | Step | Frame |
 |---|---|
 | auth (sent automatically on open, before anything else) | `{ action: 'authenticate', api_key }` |
-| subscribe (`formatSubscribe`) | `{ action: 'subscribe', symbol, exchange, mode }`, plus `depth_level` for `Depth` |
+| subscribe (`formatSubscribe`) | `{ action: 'subscribe', symbol, exchange, mode }`, plus `depth` (and `depth_level`, the 1.x name) for `Depth` |
 | unsubscribe (`formatUnsubscribe`) | `{ action: 'unsubscribe', symbol, exchange, mode }` |
 | order stream | `{ action: 'subscribe_orders' }` / `{ action: 'unsubscribe_orders' }` |
 | heartbeat | inbound `'ping'` or `{ type: 'ping' }` -> replies `{ action: 'pong' }` |

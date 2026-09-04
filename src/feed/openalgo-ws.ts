@@ -201,11 +201,19 @@ export function parseOrderUpdate(raw: unknown): OrderUpdateEvent | null {
 /**
  * Pure: build a subscribe message — `{ action, symbol, exchange, mode }`, where
  * `mode` is the numeric OpenAlgo data mode. Depth subscriptions may request a
- * `depth_level` (broker-dependent: 5/20/30/50).
+ * book depth (broker-dependent: 5/20/30/50).
+ *
+ * The wire key the proxy reads is `depth`; 1.x sent `depth_level`, which the
+ * proxy never read, so every request above the default was silently served
+ * at five levels. Both keys go out: `depth` for the proxy, `depth_level` for
+ * any consumer that learned the old name from this library.
  */
 export function formatSubscribe(mode: WsMode, symbol: string, exchange: string, depthLevel?: number): string {
   const msg: Record<string, unknown> = { action: 'subscribe', symbol, exchange, mode: MODE_NUMBER[mode] };
-  if (mode === 'Depth' && depthLevel !== undefined) msg.depth_level = depthLevel;
+  if (mode === 'Depth' && depthLevel !== undefined) {
+    msg.depth = depthLevel;
+    msg.depth_level = depthLevel;
+  }
   return JSON.stringify(msg);
 }
 

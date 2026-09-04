@@ -2,6 +2,20 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.0.1 (unreleased)
+
+### Fixed
+
+- **A depth subscription asks for its depth under the key the proxy reads.**
+  `formatSubscribe` sent the requested book depth as `depth_level`; the
+  OpenAlgo websocket proxy reads `depth`, and the platform's protocol
+  reference names `depth`. Every request above the default was therefore
+  served at five levels with no error, since five is also the proxy's
+  fallback. The frame now carries `depth`, and keeps `depth_level` beside it
+  for any consumer that learned the old name from this library. Found while
+  wiring the 2.0.0 depth ladder into a host; the ladder was the first caller
+  to ask for more than five.
+
 ## 2.0.0
 
 The drawing model, rebuilt, and the chrome as a package. A `Drawing` now
