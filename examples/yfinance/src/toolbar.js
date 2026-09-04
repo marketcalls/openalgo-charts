@@ -288,9 +288,11 @@ export function renderToolbar() {
 
   // view + layout icons
   bar.appendChild(iconBtn('fit', 'Reset view', () => app.chart && app.chart.resetScale()));
-  bar.appendChild(iconBtn('grid', 'Grid', () => {
+  // Anchor on the button that was clicked: by the time the handler runs,
+  // bar.lastChild is whatever the toolbar appended last, not this button.
+  bar.appendChild(iconBtn('grid', 'Grid', (ev) => {
     const v = el('vgrid'), h = el('hgrid');
-    popupMenu(bar.lastChild, [
+    popupMenu(ev.currentTarget, [
       { label: 'Both', on: v.checked && h.checked, onSelect: () => { v.checked = h.checked = true; v.dispatchEvent(new Event('change')); h.dispatchEvent(new Event('change')); } },
       { label: 'Horizontal', on: !v.checked && h.checked, onSelect: () => { v.checked = false; h.checked = true; v.dispatchEvent(new Event('change')); h.dispatchEvent(new Event('change')); } },
       { label: 'Vertical', on: v.checked && !h.checked, onSelect: () => { v.checked = true; h.checked = false; v.dispatchEvent(new Event('change')); h.dispatchEvent(new Event('change')); } },
