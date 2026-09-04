@@ -82,7 +82,7 @@ longer writes them. A 1.9.x host has a step-by-step guide in
   `Keymap`, `mountRail`, `mountTopbar`, `mountStatusline`, `mountToasts`,
   `renderForm`, the token helpers, `WIDGET_TIER`. 35.56 KB Brotli against a
   36 kB budget; base + draw + indicators + widget, what one `createWidget`
-  call loads, 154.34 KB against 155 kB.
+  call loads, 155.03 KB against 156 kB.
 
 - **A render backend port, and a WebGL2 backend behind it.** The series pass
   on each pane goes through an `IRenderBackend` (`beginFrame`, `drawSeries`,
@@ -173,6 +173,21 @@ longer writes them. A 1.9.x host has a step-by-step guide in
   `extended-line` and `arrow` adds a midpoint readout: signed change and
   percent, bars between the anchors, and the angle on screen. Off by default.
 
+- **Position tools that place a trade.** `long-position` and `short-position`
+  take the entry click and the target click; the second click is also the
+  direction, so a release above the entry is a long and below it a short,
+  whichever tool was armed. The stop lands opposite the entry at 1:2, sized on
+  screen (64 px of risk, 150 px wide) rather than as a fraction of price.
+  `DrawingTool.constrain(points, handle)` is new: the anchors to keep after
+  one moved, which the position tools use to hold the stop and the target on
+  opposite sides of the entry (drag one through the entry and the other
+  reflects, so the trade flips with its ratio intact). `ExpandContext` gained
+  optional `toPixel` / `fromPixel`, present when the host can map
+  coordinates, so an `expand` default can be sized in pixels and fall back to
+  chart units. The readouts are direction and R:R, money at risk and size,
+  and each zone's move in percent, with `props.showHeader`, `showLossSize`,
+  `showTargetLabel`, `showStopLabel`, `showPrices`, `profitColor` and
+  `lossColor` as the toggles.
 - **Freehand strokes.** The brush and highlighter ink every coalesced pointer
   sample a pressed move carries, thin the trail on release to the corners its
   shape needs, and paint it as a spline, so a fast stroke is a curve rather
@@ -227,6 +242,10 @@ longer writes them. A 1.9.x host has a step-by-step guide in
   single-frame step. Section 8 of
   [`docs/migrating-to-2.md`](docs/migrating-to-2.md).
 
+- **A position box is two clicks, not one.** In 1.9.x one click dropped a
+  1:1 box at 1% of price either way. New placements take the entry and the
+  target and derive the stop; a 1.9.x box that was saved loads unchanged, with
+  the same `[entry, target, stop]` anchor order.
 - **The yfinance demo is a native-ESM host on the 2.0 drawing tier.** One
   5,677-line page became markup, one stylesheet and thirty modules that import
   `/dist/openalgo-charts.mjs` and its tier files by the URL a page would use,
@@ -316,15 +335,15 @@ longer writes them. A 1.9.x host has a step-by-step guide in
 Measured with `npm run size` (Brotli) on the 2.0.0 build: base engine
 66.39 KB against 67 kB (a 62 kB budget in 1.9.2, raised for the zoom glide,
 the pointer payloads, the SVG serialiser and the render backend port);
-base + trade 74.00 KB against 75 kB; draw tier 25.12 KB against 26 kB
+base + trade 74.00 KB against 75 kB; draw tier 25.82 KB against 26 kB
 (15.39 KB against 16 kB in 1.9.2, grown for the schema, the level palette, the
 migration, the key map, the multi-select controller, the interaction feel,
-the freehand geometry and the icon builders); webgl tier 6.38 KB against
+the freehand geometry, the icon builders and the two-click position tool); webgl tier 6.38 KB against
 7 kB; widget tier 35.56 KB against 36 kB; a widget terminal (base + draw +
-indicators + widget) 154.34 KB against 155 kB; everything 181.65 KB against
-182 kB (a 126 kB budget in 1.9.2). The indicator, transform and
+indicators + widget) 155.03 KB against 156 kB; everything 182.34 KB against
+183 kB (a 126 kB budget in 1.9.2). The indicator, transform and
 profile tiers did not move. Chart-only shake 43.84 kB against 44 kB. Tool
-count is unchanged at 51; 3990 tests across 170 files.
+count is unchanged at 51; 3999 tests across 170 files.
 
 ## 1.9.2
 

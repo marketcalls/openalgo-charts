@@ -43,7 +43,7 @@ load unchanged.
   level editor, in-place text editing, a right-click menu with order entry, a keymap with
   a `?` panel, theme tokens and optional persistence. The eighth tier and the only one that
   ships DOM; the engine underneath still ships none. 35.56 KB Brotli; a widget terminal
-  (base + draw + indicators + widget) is 154.34 KB.
+  (base + draw + indicators + widget) is 155.03 KB.
 - A render backend port with `renderer: 'canvas2d' | 'webgl2' | 'auto'` and
   `chart.rendererKind`, and a new `openalgo-charts/webgl` tier (6.38 KB Brotli) that
   draws every standard chart type on the GPU in one draw call per frame into the pane's
@@ -71,6 +71,11 @@ load unchanged.
 - Freehand strokes ink every coalesced pointer sample, thin on release and paint as a spline;
   a pen's `DrawingPoint.pressure` can drive the width (`style.pressure`). `rdpSimplify`,
   `catmullRom` and `pressureWidth` are exported.
+- Position tools that place a trade: `long-position` and `short-position` take the entry
+  click and the target click, the second click sets the direction, and the stop lands
+  opposite the entry at 1:2, sized on screen. `DrawingTool.constrain(points, handle)` holds
+  the stop and the target on opposite sides of the entry; `ExpandContext` gained optional
+  `toPixel` / `fromPixel` so an `expand` default can be sized in pixels.
 - Icons as markup: a chrome set (`CHROME_ICONS` and friends), `iconSvg`, `chromeIconSvg`,
   `iconSprite`, `iconUse` and `toolCursor`, all derived from one registry.
 - Pointer payloads: `crosshair:move`, `click`, `drag` and `drag:end` report `modifiers`,
@@ -86,6 +91,8 @@ load unchanged.
 - A wheel zoom eases over a few frames by default. The bar spacing it lands on is
   unchanged and still moves on the event itself; `animZoom: false` restores the 1.9.2
   single-frame step.
+- A position box is two clicks, not one: the entry and the target, with the stop derived. A
+  saved 1.9.x box loads unchanged.
 - The yfinance demo is a native-ESM host on the 2.0 drawing tier: thirty modules that
   import `/dist` by URL, a rail and properties bar generated from the tier's sprite and
   settings schema, toasts, an overlay stack, a light theme, a typed feed and a versioned
@@ -115,9 +122,9 @@ load unchanged.
   widget out of a chart-only bundle.
 
 Measured with `npm run size` (Brotli) on the 2.0.0 build: base engine 66.39 KB against
-67 KB, base + trade 74.00 KB against 75 KB, draw tier 25.12 KB against 26 KB, webgl
-6.38 KB against 7 KB, widget 35.56 KB against 36 KB, everything 181.65 KB against 182 KB.
-3990 tests across 170 files.
+67 KB, base + trade 74.00 KB against 75 KB, draw tier 25.82 KB against 26 KB, webgl
+6.38 KB against 7 KB, widget 35.56 KB against 36 KB, everything 182.34 KB against 183 KB.
+3999 tests across 170 files.
 
 ## 1.9.2
 

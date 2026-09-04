@@ -7,7 +7,7 @@ Written 2026-08-28 against openalgo-charts 1.8.2.
 > record of what was wrong, what the measured figures were, and why each change
 > was made, so the next redraw starts from evidence rather than memory.
 >
-> **Current source of truth, 2.0.0:** the SVG reports 66.39 KB base, 181.65 KB
+> **Current source of truth, 2.0.0:** the SVG reports 66.39 KB base, 182.34 KB
 > for every tier, eight tier chips, 102 built-in indicators and 51 drawing
 > tools. The figures below record the 1.8.2 redraw unless an appendix says
 > otherwise; the 2.0.0 appendices at the end record each later pass.
@@ -383,3 +383,18 @@ webgl 6.38 KB, transform 2.66 KB. The subtitle's rounded "66 KB base, 182 KB
 everything" still rounds correctly. Counts from the registry at runtime on the
 same build: 102 indicators, 15 chart types, 51 drawing tools; the three
 strings that carry them did not change. Eight tier chips, seven layers.
+
+## Position tool merge: three chips re-measured
+
+The two-click position tool merged after the release pass and lives in the
+draw tier, so three figures moved and the rest did not. `npm run size` on the
+merged build reads draw 25.82 KB (was 25.12), widget terminal 155.03 KB (was
+154.34, budget raised from 155 to 156 kB) and everything 182.34 KB (was 181.65,
+budget raised from 182 to 183 kB). The draw chip and the everything chip
+changed, again by matching the text of the chip rather than the number, and
+the `<desc>` carries the same two values. The subtitle's rounded "66 KB base,
+182 KB everything" still rounds correctly. Base 66.39 KB, base + trade 74.00
+KB, indicators 27.27 KB, profile 10.66 KB, webgl 6.38 KB, widget 35.56 KB and
+transform 2.66 KB were confirmed unchanged on the same build.
+`website/public/architecture-diagram.svg` is a byte copy of the docs file,
+refreshed by `website/scripts/sync-lib.mjs` on every website build.

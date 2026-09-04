@@ -421,9 +421,10 @@ Three optional descriptor fields change *placement*, not rendering:
 |---|---|
 | `freehand: true` | Sample the cursor while held, commit on release. Requires `points: 0`. Only the end anchors get handles. |
 | `angleLock: true` | Shift snaps the free end of a two-anchor tool to 45 degree steps on screen, while placing and while dragging a handle. The line family sets it; a rectangle's opposite corner is not a line end, so shapes leave it off. |
-| `expand(clicked, { barSeconds, visibleBars })` | Turn the clicked anchors into the full anchor set, so one click can drop a complete editable default. Every returned point stays a draggable handle. |
+| `expand(clicked, { barSeconds, visibleBars, toPixel?, fromPixel? })` | Turn the clicked anchors into the full anchor set, so fewer clicks can drop a complete editable default. Every returned point stays a draggable handle. `toPixel` / `fromPixel` are present only when the host can map coordinates; a tool that sizes in pixels falls back to chart units without them. |
+| `constrain(points, handle)` | The anchors to keep after one moved: `handle` is the dragged index, or `null` for a `points` patch. Pure. The position tools reflect the level that was NOT moved across the entry when both land on one side, so the one under the hand stays put. |
 
-Size an `expand` default against `visibleBars`, not a fixed bar count, a fixed count is a hairline zoomed out and pane-filling zoomed in. The position tools use `Math.max(5, round(visibleBars * 0.08))` bars and `±1%` of price.
+Size an `expand` default against `visibleBars`, not a fixed bar count, a fixed count is a hairline zoomed out and pane-filling zoomed in. The position tools size on screen instead, through `toPixel` / `fromPixel`: 64 px of risk and 150 px of width read the same on every instrument and at every zoom, where 1% of a 2.87 stock and 1% of an index are the same fraction and very different boxes.
 
 **A non-finite `distance` must be a miss.** The layer treats `null`, `NaN`, and `Infinity` as misses; returning `NaN` from a degenerate shape would otherwise swallow every click on the pane.
 

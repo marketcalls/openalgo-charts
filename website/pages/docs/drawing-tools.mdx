@@ -7,7 +7,7 @@ import { Callout } from 'nextra/components'
 
 # Drawing Tools
 
-`openalgo-charts/draw` is a lazy tier (**25.12 KB** Brotli) with 51 tools and a headless
+`openalgo-charts/draw` is a lazy tier (**25.82 KB** Brotli) with 51 tools and a headless
 controller. It ships **no UI**: no toolbar, no dialogs. It owns the model and the
 interactions; your app supplies the buttons.
 
@@ -42,10 +42,18 @@ draw.setTool('trend-line');   // the next two clicks place it
 | Text and notes | `text`, `price-label`, `flag-mark` (1), `callout` (2) | 1-2 |
 | Brushes | `brush`, `highlighter` (both freehand) | n |
 
-`long-position` and `short-position` place a complete **1:1** box from a single click,
-sized to about 8% of the visible range, with all three anchors draggable. They report the
-target and stop moves with percentages and cash amounts, plus **risk/reward** and a
-risk-based position size from `accountSize` and `risk` in their style bag.
+`long-position` and `short-position` place in two clicks: the entry, then the target.
+The second click is also the direction: release above the entry and the trade is a long,
+below it and it is a short, whichever tool was armed (the armed tool only decides which
+way a bare click faces). The stop lands opposite the entry at one part risk to two parts
+reward, sized on screen (64 px of risk, 150 px wide) rather than as a fraction of price,
+so the box reads the same on a 3 rupee stock and a 24,000 point index. Every level stays a
+handle, and the stop and target are held on opposite sides of the entry: drag one through
+the entry and the other reflects, so the trade turns around with its ratio intact. The
+readouts are a header of direction and R:R, money at risk and position size (from
+`accountSize` and `risk` in the style bag), and each zone's move in percent, with the level
+price on request; `props.showHeader`, `showLossSize`, `showTargetLabel`, `showStopLabel`,
+`showPrices`, `profitColor` and `lossColor` are the toggles.
 
 Anchor counts of `n` mean the tool collects anchors until you end it. **Freehand** tools
 (`brush`, `highlighter`) sample the cursor while the pointer is held and finish on release:
@@ -382,9 +390,10 @@ Two optional fields change how a tool is *placed*:
 | Field | Effect |
 |---|---|
 | `freehand: true` | Sample the cursor while the pointer is held and commit on release: one press-drag-release is one stroke. Only the first and last anchors get grab handles. Requires `points: 0`. |
-| `expand(clicked, ctx)` | Turn the anchors actually clicked into the tool's full anchor set, so it can place a complete, editable default from fewer clicks. `ctx` carries `barSeconds` and `visibleBars`. |
+| `expand(clicked, ctx)` | Turn the anchors actually clicked into the tool's full anchor set, so it can place a complete, editable default from fewer clicks. `ctx` carries `barSeconds` and `visibleBars`, and `toPixel` / `fromPixel` when the host can map coordinates, so a default can be sized in pixels and fall back to chart units when it cannot. |
+| `constrain(points, handle)` | Keep the anchors consistent after one moves: a handle drag (`handle` is its index) or a `points` patch (`handle` is `null`). Returns the anchors to store. Pure. The position tools use it to hold the stop and the target on opposite sides of the entry. |
 
-`expand` is how the position tools drop a ready 1:1 box from one click:
+`expand` is how a tool drops a ready default from fewer clicks than its anchor count; the position tools derive the stop from the entry and target clicks this way. A one-click box:
 
 ```ts
 registerDrawingTool({

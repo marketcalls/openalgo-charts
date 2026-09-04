@@ -243,7 +243,7 @@ Budgets from `.size-limit.json`, Brotli, enforced by `npm run size`:
 | Row | Files | Budget |
 |---|---|---|
 | Widget tier | `openalgo-charts.widget.mjs` | 36 kB |
-| Widget terminal | base + draw + indicators + widget | 155 kB |
+| Widget terminal | base + draw + indicators + widget | 156 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged. Measure, do not

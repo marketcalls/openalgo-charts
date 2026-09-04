@@ -254,7 +254,7 @@ One `<style>` element per document (`WIDGET_STYLE_ID`), every rule scoped under 
 
 - `package.json` `exports['./widget']`: `types: ./dist/widget/index.d.ts`, `import: ./dist/openalgo-charts.widget.mjs`. Listed in `sideEffects` (importing registers the dialogs).
 - `rollup.config.js`: `openalgo-charts` and every `openalgo-charts/<tier>` are external for tier builds and emitted as sibling paths (`./openalgo-charts.mjs`, `./openalgo-charts.draw.mjs`), so `dist/` serves with no import map. The widget must never inline the base or the draw tier; `check-dts.mjs` fails a build whose `dist/widget/index.d.ts` declares `Chart` or `DrawingController`.
-- `.size-limit.json`: `Widget tier` row (the bundle alone, 36 kB budget) and `Widget terminal` row (base + draw + indicators + widget, 155 kB budget); `Everything` includes the widget. Measure with `npm run size`; never quote from memory.
+- `.size-limit.json`: `Widget tier` row (the bundle alone, 36 kB budget) and `Widget terminal` row (base + draw + indicators + widget, 156 kB budget); `Everything` includes the widget. Measure with `npm run size`; never quote from memory.
 - The standalone IIFE is base-only and cannot host the widget. Use native ESM from `dist/`.
 
 ## Pitfalls

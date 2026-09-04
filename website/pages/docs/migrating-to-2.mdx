@@ -327,9 +327,20 @@ optional fields are new on `DrawingTool`, and one read has moved:
   (`drawingSettingsSchema(toolId)` returns it). Declare only fields your
   `draw` reads; a tool without one gets the plain line fields.
 - `angleLock?: boolean` opts a two-point tool into the Shift 45 degree lock.
+- `constrain?(points, handle)` returns the anchors to keep after one moved
+  (`handle` is the dragged index, `null` for a `points` patch). The position
+  tools use it to hold the stop and the target on opposite sides of the entry.
+- `ExpandContext` gained optional `toPixel` / `fromPixel`, present when the
+  host can map coordinates, so an `expand` default can be sized in pixels and
+  fall back to chart units without them.
 - A `draw` that read `style.text` reads `drawing.text?.value`; one that read
   `style.levels` as numbers reads `level.ratio`, and should skip a level whose
   `enabled` is `false`.
+
+The position tools themselves changed how they place: two clicks (entry,
+then target) instead of one, with the stop derived at 1:2 and the direction
+read from where the target landed. A 1.9.x position box loads unchanged; only
+new placements take the new defaults.
 
 ## 10. Things that did not change
 

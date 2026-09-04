@@ -140,13 +140,13 @@ Enforced by `npm run size` (`size-limit`, Brotli, `@size-limit/file`), from `.si
 | Base engine | `openalgo-charts.mjs` | 67 KB | 66.39 KB |
 | Base + trade layer | base + `trade.mjs` | 75 KB | 74.00 KB |
 | Indicator tier | `indicators.mjs` | 30 KB | 27.27 KB |
-| Draw tier | `draw.mjs` | 26 KB | 25.12 KB |
+| Draw tier | `draw.mjs` | 26 KB | 25.82 KB |
 | Transform tier | `transform.mjs` | 5 KB | 2.66 KB |
 | Profile tier | `profile.mjs` | 11 KB | 10.66 KB |
 | WebGL2 tier | `webgl.mjs` | 7 KB | 6.38 KB |
 | Widget tier | `widget.mjs` | 36 KB | 35.56 KB |
-| Widget terminal | base + `draw.mjs` + `indicators.mjs` + `widget.mjs` | 155 KB | 154.34 KB |
-| Everything | all eight bundles | 182 KB | 181.65 KB |
+| Widget terminal | base + `draw.mjs` + `indicators.mjs` + `widget.mjs` | 156 KB | 155.03 KB |
+| Everything | all eight bundles | 183 KB | 182.34 KB |
 
 The indicator tier and the `Everything` row were both raised in 1.8.3, from 27 KB and 120 KB, to carry that release's eleven new indicators. They move together by necessity: `Everything` contains the tier, so an aggregate below all-other-tiers plus the tier's ceiling would fail while the tier itself passed. The limits in `.size-limit.json` are the budget of record: measure, do not quote these figures from memory.
 
