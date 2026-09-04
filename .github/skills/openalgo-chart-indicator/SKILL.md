@@ -61,7 +61,7 @@ Use `registerIndicator` when the value is computed from the chart's own OHLCV. A
 
 Since 1.7.1 a descriptor can also return free-standing geometry from `draws(ctx)` (lines, boxes, labels and polylines anchored to `{ time, price }`, with ray extension and multi-line text), derive its `levels` from `ctx.bars` / `ctx.values` rather than settings alone, and send a single plot to the price pane with `overlay: true` while the rest of the study keeps its own pane. `colorBy` now reaches line, area and step, not just histogram and column. The `./calc` helpers are all exported, including `pivotHigh`, `pivotLow` and `smaSeededEma`, so a ported study composes them instead of re-deriving them.
 
-Unreleased, and the reason to reach past a plot before hand-rolling something:
+Since 1.8.1, and the reason to reach past a plot before hand-rolling something:
 
 - **`calc` takes an optional fourth argument**, `IndicatorCalcContext`: `barState` (`isNew`, `isConfirmed`, `isRealtime`, `lastIndex`), plus `symbol`, `interval`, `timezone` and `now()`. `calcTail` takes it sixth. Optional and trailing, so an existing descriptor is untouched. `isConfirmed` is inferred from the last bar's gap against the chart clock, so a holiday or a session break widens it: it means "this bar's span has elapsed", not "the exchange is closed".
 - **`alerts`** declares conditions the runtime watches, emitted as `'indicator:alert'` on the chart bus. They fire **only on a live tail change**, so adding the indicator to a loaded chart, changing a setting, paging history or switching symbol announces nothing.

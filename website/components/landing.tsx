@@ -15,9 +15,9 @@ return chart;`;
 
 const STATS: Array<[string, string]> = [
   ['0', 'runtime dependencies'],
-  ['124.47 KB', 'Brotli, every tier'],
+  ['182.34 KB', 'Brotli, every tier'],
   ['15', 'chart types'],
-  ['2898', 'tests, green'],
+  ['3990', 'tests, green'],
 ];
 
 export function Hero() {
@@ -70,7 +70,10 @@ const FEATURES: Feature[] = [
   { title: 'Indicators & profiles', body: '102 built-in indicators across trend, momentum, volatility, and volume, with EMA/RSI/ATR/Supertrend matching openalgo.ta - and you can register your own with the same descriptor contract. Plus Volume Profile, Market Profile (TPO), and Footprint / order flow.' },
   { title: 'OpenAlgo-native data', body: 'REST history + WebSocket live + candle builder adapters speak the OpenAlgo protocol. Any broker fits behind a small DataFeed.' },
   { title: 'Production operations', body: 'Keep long-running charts bounded with rolling history, explicit feed cleanup, cache limits, and a measurable browser memory budget.' },
-  { title: 'Loadable tiers', body: 'Ship only what you use - /indicators, /draw, /profile, /trade and /transform are separate entry points on top of a 59 KB base, each independently sized.' },
+  { title: 'Loadable tiers', body: 'Ship only what you use - /indicators, /draw, /profile, /trade, /transform, /webgl and /widget are separate entry points on top of a 66 KB base, each independently sized.' },
+  { title: 'The terminal in one call', body: 'createWidget from the widget tier adds the top bar, drawing rail, status line, settings and indicator dialogs, right-click menu and shortcuts, all generated from schemas the engine already ships. The only tier that builds DOM; the engine underneath still ships none.' },
+  { title: '51 drawing tools, 2.0 model', body: 'Paint order, multi-select, a text block per drawing, per-level fib colours, a settings schema per tool, hover handles, angle lock, a magnet ring and freehand splines. Saved 1.9.x layouts are upgraded on load.' },
+  { title: 'Vector export and WebGL2', body: 'exportSVG returns the chart as text-stays-text SVG at any size; renderer: \'auto\' moves the series pass to a batched WebGL2 backend that falls back to the 2D path for the session if the context is lost.' },
   { title: 'Plugin / primitive API', body: 'The same API markers, trading, and profiles are built on is open to you: implement IPrimitive and draw anything on the chart.' },
 ];
 

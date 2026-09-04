@@ -197,7 +197,7 @@ describe('a 5-minute bar over 1-minute data takes five steps', () => {
     const events: string[] = [];
     const h = host();
     h.emit = (e: string) => { events.push(e); };
-    let tick: { fn: (() => void) | null } = { fn: null };
+    const tick: { fn: (() => void) | null } = { fn: null };
     let clock = 0;
     const r = new ReplayController(h, {
       series, bars: display, subBars: sub, startIndex: 2, barMs: 10,

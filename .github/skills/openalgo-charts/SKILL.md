@@ -13,14 +13,14 @@ description: >-
   price scales, the chart timezone, reference price levels (previous close,
   session high/low, bid/ask), axis chrome (session clock, bar-close countdown),
   the settings schema with its paired up/down colour control, and context menus
-  including one raised on a price axis. Covers the six-tier bundle model, the UI
-  standard for host chrome, and the time, scale, registry, indicator, drawing,
+  including one raised on a price axis. Covers the eight-tier bundle model, the one-call
+  widget tier, the UI standard for host chrome, and the time, scale, registry, indicator, drawing,
   linking, caching, trading and bundling foot-guns.
 ---
 
 # OpenAlgo Charts skill
 
-`openalgo-charts` is a from-scratch, dependency-free HTML5-canvas charting engine: one canvas pipeline, no SVG, no DOM per bar, six lazy-loaded bundle tiers, zero runtime dependencies.
+`openalgo-charts` is a from-scratch, dependency-free HTML5-canvas charting engine: one canvas pipeline, no SVG, no DOM per bar, eight lazy-loaded bundle tiers, zero runtime dependencies.
 
 Works the same whether the project is a downstream npm consumer app or an upstream `openalgo-charts` source checkout. Detect which one you are in and resolve every API name from whatever typings are locally available.
 
@@ -30,7 +30,7 @@ Do not assume you are inside the upstream source repository.
 
 1. In a consumer app, inspect the installed package first:
    - `node_modules/openalgo-charts/package.json` for the actual version.
-   - `node_modules/openalgo-charts/dist/index.d.ts` for the base API surface, and `dist/{trade,draw,indicators,transform,profile}/index.d.ts` for each tier.
+   - `node_modules/openalgo-charts/dist/index.d.ts` for the base API surface, and `dist/{trade,draw,indicators,transform,profile,webgl,widget}/index.d.ts` for each tier.
 2. In the upstream repo, inspect `dist/index.d.ts` first, then `src/` if generated output is unavailable.
 3. `ARCHITECTURE.md` and `website/pages/docs/*.mdx` are supporting evidence, but local typings win when they disagree.
 
@@ -58,7 +58,7 @@ Eight layers, in dependency order. Most bugs come from confusing one for another
 5. **Series** - `chart.addSeries(type, options)` returns a `SeriesApi`. The type names an entry in the chart-type **registry**; the core never switches on type.
 6. **Registries** - chart types, indicators, and drawing tools are all descriptors in a Map. Adding one is a registration, never a core change.
 7. **Primitives** - the extension point. Anything that draws but is not a series: price lines, markers, legends, profiles, trading pills, drawings.
-8. **Tiers** - `indicators`, `draw`, `transform`, `profile`, `trade` are separate bundles that register into the base engine's registries on import.
+8. **Tiers** - `indicators`, `draw`, `transform`, `profile`, `trade`, `webgl` are separate bundles that register into the base engine's registries on import; `widget` sits above them all and is the one tier that builds DOM.
 
 ## Install and tiers
 
@@ -70,14 +70,16 @@ Import only what you use. Each tier is a separate entry point that registers int
 
 | Import | Contents | Brotli limit |
 |---|---|---|
-| `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators | 62 KB |
+| `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators, vector SVG export, the render backend port | 67 KB |
 | `openalgo-charts/indicators` | 102 built-in indicators + the Tier-2 external-data contract | 30 KB |
-| `openalgo-charts/draw` | 51 drawing tools + a headless `DrawingController` and its clipboard | 16 KB |
+| `openalgo-charts/draw` | 51 drawing tools + a headless `DrawingController` with multi-select, z-order, a per-tool settings schema, the 1.9.x migration, the clipboard and the icon builders | 26 KB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point and Figure, Kagi | 5 KB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 11 KB |
-| `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 68 KB with base |
+| `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 75 KB with base |
+| `openalgo-charts/webgl` | The WebGL2 series backend behind `renderer: 'auto' \| 'webgl2'`; composites into the pane's canvas, falls back to 2D for the session on context loss | 7 KB |
+| `openalgo-charts/widget` | `createWidget`: the chart with a top bar, drawing rail, status line, settings and indicator dialogs, drawing properties, right-click menu, keymap and optional persistence. The only tier that ships DOM; imports the draw tier itself | 36 KB |
 
-Limits are the CI-enforced budgets in `.size-limit.json`; the whole package measures 124.47 KB Brotli against a 126 KB budget, and the indicator tier 27.27 KB against 30 KB. Both budgets were raised in 1.8.3 to carry that release's eleven new indicators, and the aggregate was raised to stay consistent with the tier: every other tier sums to 93.11 KB, so 93.11 plus the tier's 30 KB ceiling is 123.11 KB and the aggregate has to sit above that or it would fail while the tier it contains passes. Nothing is excluded from these figures because there are no runtime dependencies to exclude.
+Limits are the CI-enforced budgets in `.size-limit.json`. Measured on the 2.0.0 build: base engine 66.39 KB against 67 KB, draw tier 25.82 KB against 26 KB, indicator tier 27.27 KB against 30 KB, widget tier 35.56 KB against 36 KB, a widget terminal (base + draw + indicators + widget, what one `createWidget` call loads) 155.03 KB against 156 KB, and the whole package 182.34 KB against 183 KB. The aggregate budget always sits above the sum of the tier ceilings it contains, or it would fail while every tier it contains passes. Nothing is excluded from these figures because there are no runtime dependencies to exclude; the exact table is in [bundling-and-tiers](references/bundling-and-tiers.md).
 
 The clipboard lives in the **draw** tier, not the base one, because it needs the drawing-tool registry. `DrawingClipboard` and friends come from `openalgo-charts/draw`.
 
@@ -112,7 +114,7 @@ chart.fitContent();
 9. **Drawing anchors are `{ time, price }`, never pixels.** Pixel anchors slide the moment a gap collapses or the user zooms.
 10. **Canvas drawing happens in bitmap pixels.** Multiply media px by `dpr` in any custom primitive, or it blurs and misaligns on HiDPI.
 11. **`chart.trading` renders trade state; it does not place orders.** The host pushes exchange state in and turns the emitted `trading:*` events into broker calls. The transactional path is `openalgo-charts/trade`.
-12. **The library ships no DOM chrome.** No toolbar, no dialogs, no settings forms, no command palette. Drawing tools, indicator settings, replay transports and order menus are the host's UI, driven by descriptors and events. Do not look for a built-in one. What it does ship is the *description* of that UI: `chartSettingsSchema(chart)` for a settings dialog, the `contextmenu` event for a right-click menu, and `chart.priceAxisState(...)` for a menu raised on a price axis. Chrome you write is held to the UI standard in [themes-and-styling](references/themes-and-styling.md#host-chrome-the-ui-standard): styled scrollbars, small square swatches, paired up/down colours on one row, themed form controls, and no control with nothing behind it.
+12. **The engine ships no DOM chrome; `openalgo-charts/widget` is the one tier that does.** The base and the six engine tiers have no toolbar, no dialogs, no settings forms, no command palette. Drawing tools, indicator settings, replay transports and order menus are the host's UI, driven by descriptors and events. A host that does not want to write that chrome imports the widget tier and calls `createWidget` (see [widget](references/widget.md)); a host that does gets the *description* of that UI: `chartSettingsSchema(chart)` for a settings dialog, the `contextmenu` event for a right-click menu, and `chart.priceAxisState(...)` for a menu raised on a price axis. Chrome you write is held to the UI standard in [themes-and-styling](references/themes-and-styling.md#host-chrome-the-ui-standard): styled scrollbars, small square swatches, paired up/down colours on one row, themed form controls, and no control with nothing behind it.
 13. **A control with no data in the current context is rendered disabled, not hidden.** `PriceLevels.available(kind)` and `PriceAxisState.active` / `scaled` / `movable` exist to be read for exactly this. Hiding it loses the information that the state is off.
 14. **Never use emojis or icons in code, comments, logs, or generated UI text.** Project rule.
 
@@ -141,6 +143,7 @@ Detailed reference for each topic is in `references/`. Read the one that matches
 | [profiles-and-orderflow](references/profiles-and-orderflow.md) | Volume Profile, Market Profile (TPO), Footprint, cumulative delta, the trade-data dependency |
 | [react-integration](references/react-integration.md) | React and Next.js lifecycle, keeping orchestration out of React, SSR, resize |
 | [bundling-and-tiers](references/bundling-and-tiers.md) | Entry points, registry identity, tree-shaking, script/ESM/import-map loading, size budget |
+| [widget](references/widget.md) | `createWidget` and the widget tier: options, the handle, events, the context every dialog is handed, the keymap scopes, the tokens, every exported mount and helper, packaging |
 | [interactions](references/interactions.md) | Pan/zoom/pinch, crosshair modes, the keyboard system, touch, accessibility |
 | [pitfalls](references/pitfalls.md) | The verified foot-gun list. Read this when something behaves unexpectedly |
 
@@ -156,8 +159,8 @@ Detailed reference for each topic is in `references/`. Read the one that matches
 | Loading older history | `setHistoryLoader` | `prependData` + `historyLoadComplete` | rebuilding and re-fitting |
 | Indicator not found | is the tier imported | `import 'openalgo-charts/indicators'` | registering it by hand |
 | Which indicator id to use | the catalogue in [indicators](references/indicators.md) | the exact id from the 102-row table, guarded with `hasIndicator(id)` | guessing an id from the display name |
-| Indicator settings UI | descriptor `inputs` + generated style keys | build the form from the descriptor, apply with `setSettings` | expecting a built-in dialog |
-| Drawing tools | `DrawingController` | headless controller + host toolbar | expecting a built-in toolbar |
+| Indicator settings UI | descriptor `inputs` + generated style keys | build the form from the descriptor, apply with `setSettings`; or `openalgo-charts/widget` (`mountIndicatorSettings`, or the whole terminal via `createWidget`) for a host that does not want to write chrome | expecting the engine itself to have a dialog |
+| Drawing tools | `DrawingController` | headless controller + host toolbar; or `createWidget` from `openalgo-charts/widget`, which ships the rail | expecting the engine itself to have a toolbar |
 | Volume in its own pane | `paneIndex` and `priceScaleId` | `addSeries('histogram', { paneIndex: 1 })` | a second chart |
 | Volume inside the price pane | overlay scale | `priceScaleId: ''` plus scale margins | manual y math |
 | Placing real orders | which layer | `openalgo-charts/trade` `OrderEngine` | `chart.trading` (visualization only) |
@@ -173,7 +176,7 @@ Detailed reference for each topic is in `references/`. Read the one that matches
 | A monthly / tick / volume timeframe | `registerInterval` | a `Bucketing` rule (`calendar`, `ticks`, `volume`), then `bucketStartOf` | `intervalToSeconds` on a code that has no fixed length |
 | Unknown interval code | `isKnownInterval(code)` | validate the picker; `resolveInterval` throws `UnknownIntervalError` | catching the throw and defaulting to 60 seconds |
 | Percent / rebased axis | `priceScale.mode` | `'percentage'` or `'indexed-to-100'` plus a baseline | recomputing the data into percentages |
-| Settings dialog | `chartSettingsSchema(chart)` | render the tabs, round-trip with `read`/`applyChartSettings` | hardcoding a control list |
+| Settings dialog | `chartSettingsSchema(chart)` | render the tabs, round-trip with `read`/`applyChartSettings`; or `mountSettingsDialog` / `createWidget` from `openalgo-charts/widget` | hardcoding a control list |
 | Right-click menu | `contextmenu` event | `preventDefault()` + `target.kind` | hit-testing the pointer yourself |
 | Menu on a price axis | `target.side` / `target.scaleId` | `chart.priceAxisState(pane, scaleId)`, acted on by the `setPriceAxis*` calls | assuming pane 0's right scale |
 | Previous close, session high/low, bid/ask lines | `PriceLevels` | one primitive, one options group per level, `line` and `label` together | a `PriceLine` per level with its own tag bookkeeping |

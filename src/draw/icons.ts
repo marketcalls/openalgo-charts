@@ -1,15 +1,28 @@
 /**
- * Glyphs for the drawing tools, as path data.
+ * Glyphs for the drawing tools and for host chrome, as path data.
  *
  * The engine ships no DOM, and this does not change that: an icon here is a
  * string of SVG path commands, not an element. The host still builds its own
- * toolbar, flyouts and rail; what it no longer has to do is draw fifty-one
- * glyphs before it can show them.
+ * toolbar, flyouts and rail; what it no longer has to do is draw every glyph
+ * before it can show them. `icon-svg.ts` turns these into markup strings for a
+ * host that wants the convenience; this file is the single source both of them
+ * and every other surface read from.
  *
  * That was the real cost of leaving them out. Every adopter drew their own set,
  * each drifted on stroke weight, grid and visual density independently, and the
- * result read as fifty-one icons rather than as one set, however carefully any
+ * result read as sixty icons rather than as one set, however carefully any
  * single glyph was made. A shipped set is worth more than a better glyph.
+ *
+ * # Two tiers, one weight
+ *
+ * Tool glyphs live on a 24-unit grid and are shown at 24px in the rail. Host
+ * chrome (undo, close, the settings tab rail) is shown at 16px beside them, and
+ * a 24-grid glyph scaled to 16 lands its 2-unit stroke on 1.33 pixels, blurred
+ * across two rows on every edge. So chrome has its own registry drawn on a
+ * 16-unit grid with a 1.5 stroke. The two strokes are deliberately not in exact
+ * proportion: a small glyph needs a slightly heavier relative stroke than a
+ * large one to read as the same weight, and `tests/draw-icons.test.ts` holds
+ * the chrome tier inside that band rather than at parity.
  *
  * # The grid
  *
@@ -17,23 +30,26 @@
  * enforces all of them mechanically, because a set of this size cannot be kept
  * consistent by review:
  *
- *  - **24 by 24 viewBox.** One box for every glyph, so a host sets the size once.
- *  - **Live area 2 to 22.** A two-unit margin on all sides. Without it, glyphs
- *    that happen to reach the edge look larger than their neighbours and the rail
- *    reads as ragged.
+ *  - **One viewBox per tier.** 24 by 24 for tools, 16 by 16 for chrome, so a
+ *    host sets the size once per surface.
+ *  - **A margin all round.** Live area 2 to 22 on the tool grid, 1 to 15 on the
+ *    chrome grid. Without it, glyphs that happen to reach the edge look larger
+ *    than their neighbours and the rail reads as ragged.
  *  - **Integer coordinates.** With `STROKE` of 2, an orthogonal edge centred on
  *    an integer covers exactly two device pixels at 1:1, which is what makes it
  *    crisp. Half-unit coordinates were the previous set's crispness bug: at a
  *    1.5 stroke on integers, nothing landed on a pixel boundary at any size.
- *  - **One stroke weight.** Three different weights across identically sized
- *    boxes is the single most visible tell of a set assembled rather than drawn.
+ *  - **One stroke weight per tier.** Three different weights across identically
+ *    sized boxes is the single most visible tell of a set assembled rather than
+ *    drawn.
  *
  * # Rendering
  *
- * Crispest at 24px, and at any integer multiple of it. At 18px the 0.75 scale
- * puts a 2-unit stroke on 1.5 device pixels and every edge is anti-aliased
- * across two rows: that is a host sizing choice, not something the path data can
- * fix. Prefer 24, or 12 with a heavier weight.
+ * Tool glyphs are crispest at 24px, and at any integer multiple of it. At 18px
+ * the 0.75 scale puts a 2-unit stroke on 1.5 device pixels and every edge is
+ * anti-aliased across two rows: that is a host sizing choice, not something the
+ * path data can fix. Prefer 24, or 12 with a heavier weight. Chrome glyphs are
+ * drawn for 16px and its multiples.
  */
 
 /** The viewBox every glyph is authored in. */
@@ -45,6 +61,19 @@ export const ICON_VIEWBOX = '0 0 24 24';
  */
 export const ICON_STROKE = 2;
 
+/**
+ * The attribute bag a tier hands its host. Structural, so the markup builders
+ * in `icon-svg.ts` take either tier's bag through one signature.
+ */
+export interface IconAttrs {
+  readonly viewBox: string;
+  readonly fill: 'none';
+  readonly stroke: 'currentColor';
+  readonly strokeWidth: number;
+  readonly strokeLinecap: 'round';
+  readonly strokeLinejoin: 'round';
+}
+
 /** Attributes a host should apply to the `<svg>`, so every set matches. */
 export const ICON_ATTRS = {
   viewBox: ICON_VIEWBOX,
@@ -53,7 +82,7 @@ export const ICON_ATTRS = {
   strokeWidth: ICON_STROKE,
   strokeLinecap: 'round',
   strokeLinejoin: 'round',
-} as const;
+} as const satisfies IconAttrs;
 
 /**
  * Path data by tool id, plus a few keys a host toolbar needs that are not
@@ -161,4 +190,97 @@ export function drawingToolIcon(toolId: string): string | undefined {
 /** Every id this set covers, for a host building a palette from it. */
 export function drawingToolIconIds(): string[] {
   return Object.keys(DRAWING_TOOL_ICONS);
+}
+
+// ── the chrome tier ─────────────────────────────────────────────────────────
+
+/** The viewBox every chrome glyph is authored in. */
+export const CHROME_ICON_VIEWBOX = '0 0 16 16';
+
+/**
+ * Chrome stroke width in viewBox units. Not the tool stroke scaled (that would
+ * be 1.33): at 16px a glyph needs a touch more relative weight than at 24px to
+ * read as the same line, and 1.5 is where the two rails match by eye.
+ */
+export const CHROME_ICON_STROKE = 1.5;
+
+/** Attributes a host should apply to the `<svg>` around a chrome glyph. */
+export const CHROME_ICON_ATTRS = {
+  viewBox: CHROME_ICON_VIEWBOX,
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: CHROME_ICON_STROKE,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+} as const satisfies IconAttrs;
+
+/**
+ * Path data for host chrome: the buttons around the chart rather than the
+ * tools in it. Same rules as the tool tier (one path per glyph, no presentation
+ * attributes, integer coordinates) on the 16 grid with a 1..15 live area.
+ *
+ * The pair `cursor` / `magnet` / `text` also exist in the tool registry, at 24.
+ * They are drawn twice on purpose: a rail button and a toolbar button are
+ * different sizes, and the whole point of a second grid is not scaling one
+ * drawing to both.
+ */
+export const CHROME_ICONS: Readonly<Record<string, string>> = {
+  // ── pointer and snapping ────────────────────────────────────────────────
+  cursor: 'M8 2v4M8 10v4M2 8h4M10 8h4',
+  magnet: 'M3 2v6a5 5 0 0 0 10 0V2M3 5h3M10 5h3',
+
+  // ── state ───────────────────────────────────────────────────────────────
+  lock: 'M3 7h10v7H3zM5 7V5a3 3 0 0 1 6 0v2',
+  unlock: 'M3 7h10v7H3zM5 7V5a3 3 0 0 1 6 0',
+  eye: 'M1 8c2-4 4-6 7-6s5 2 7 6c-2 4-4 6-7 6s-5-2-7-6zM10 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0',
+  'eye-off': 'M1 8c2-4 4-6 7-6s5 2 7 6c-2 4-4 6-7 6s-5-2-7-6zM2 2l12 12',
+  star: 'M8 1l2 5h5l-4 3 1 5-4-3-4 3 1-5-4-3h5z',
+  // A pentagram rather than the outline: filled with the default nonzero rule
+  // its centre has a winding of two and fills solid, so one path is both a
+  // star and its filled state. See CHROME_ICON_FILLED.
+  'star-filled': 'M8 1 12 14 1 6h14L4 14z',
+
+  // ── editing ─────────────────────────────────────────────────────────────
+  trash: 'M2 4h12M6 4V2h4v2M3 4l1 10h8l1-10',
+  settings: 'M2 4h12M2 8h12M2 12h12M5 2v4M11 6v4M7 10v4',
+  undo: 'M3 6h7a4 4 0 0 1 0 8H6M6 3 3 6l3 3',
+  redo: 'M13 6H6a4 4 0 0 0 0 8h4M10 3l3 3-3 3',
+  copy: 'M6 6h8v8H6zM10 6V2H2v8h4',
+  paste: 'M4 3H3v11h10V3h-1M6 2h4v2H6z',
+  duplicate: 'M6 6h8v8H6zM10 6V2H2v8h4M10 8v4M8 10h4',
+  front: 'M2 9h6v5H2zM11 14V2M8 5l3-3 3 3',
+  back: 'M2 2h6v5H2zM11 2v12M8 11l3 3 3-3',
+  text: 'M3 3h10M8 3v10M6 13h4',
+
+  // ── navigation ──────────────────────────────────────────────────────────
+  'chevron-down': 'M3 6l5 5 5-5',
+  'chevron-right': 'M6 3l5 5-5 5',
+  close: 'M3 3l10 10M13 3 3 13',
+  plus: 'M8 2v12M2 8h12',
+  minus: 'M2 8h12',
+  search: 'M7 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 11l3 3',
+  grid: 'M2 2h12v12H2zM2 8h12M8 2v12',
+  link: 'M6 10l4-4M7 4l1-1a3 3 0 0 1 4 4l-1 1M9 12l-1 1a3 3 0 0 1-4-4l1-1',
+  unlink: 'M7 4l1-1a3 3 0 0 1 4 4l-1 1M9 12l-1 1a3 3 0 0 1-4-4l1-1M4 4l8 8',
+
+  // ── capture ─────────────────────────────────────────────────────────────
+  camera: 'M2 5h3l1-2h4l1 2h3v8H2zM8 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  download: 'M8 2v9M4 7l4 4 4-4M2 14h12',
+};
+
+/**
+ * Chrome glyphs meant to be painted solid. Paths carry no presentation
+ * attributes, so the fill is applied by the wrapper (`chromeIconSvg` does it,
+ * a host with its own wrapper reads this set) and the registry stays pure.
+ */
+export const CHROME_ICON_FILLED: ReadonlySet<string> = new Set(['star-filled']);
+
+/** The chrome glyph for an id, or `undefined` when there is none. */
+export function chromeIcon(id: string): string | undefined {
+  return CHROME_ICONS[id];
+}
+
+/** Every id the chrome tier covers. */
+export function chromeIconIds(): string[] {
+  return Object.keys(CHROME_ICONS);
 }

@@ -7,7 +7,7 @@ import { Callout } from 'nextra/components'
 
 # Drawing Tools
 
-`openalgo-charts/draw` is a lazy tier (**15.39 KB** Brotli) with 51 tools and a headless
+`openalgo-charts/draw` is a lazy tier (**25.82 KB** Brotli) with 51 tools and a headless
 controller. It ships **no UI**: no toolbar, no dialogs. It owns the model and the
 interactions; your app supplies the buttons.
 
@@ -42,10 +42,18 @@ draw.setTool('trend-line');   // the next two clicks place it
 | Text and notes | `text`, `price-label`, `flag-mark` (1), `callout` (2) | 1-2 |
 | Brushes | `brush`, `highlighter` (both freehand) | n |
 
-`long-position` and `short-position` place a complete **1:1** box from a single click,
-sized to about 8% of the visible range, with all three anchors draggable. They report the
-target and stop moves with percentages and cash amounts, plus **risk/reward** and a
-risk-based position size from `accountSize` and `risk` in their style bag.
+`long-position` and `short-position` place in two clicks: the entry, then the target.
+The second click is also the direction: release above the entry and the trade is a long,
+below it and it is a short, whichever tool was armed (the armed tool only decides which
+way a bare click faces). The stop lands opposite the entry at one part risk to two parts
+reward, sized on screen (64 px of risk, 150 px wide) rather than as a fraction of price,
+so the box reads the same on a 3 rupee stock and a 24,000 point index. Every level stays a
+handle, and the stop and target are held on opposite sides of the entry: drag one through
+the entry and the other reflects, so the trade turns around with its ratio intact. The
+readouts are a header of direction and R:R, money at risk and position size (from
+`accountSize` and `risk` in the style bag), and each zone's move in percent, with the level
+price on request; `props.showHeader`, `showLossSize`, `showTargetLabel`, `showStopLabel`,
+`showPrices`, `profitColor` and `lossColor` are the toggles.
 
 Anchor counts of `n` mean the tool collects anchors until you end it. **Freehand** tools
 (`brush`, `highlighter`) sample the cursor while the pointer is held and finish on release:
@@ -145,23 +153,31 @@ chart has a different interval loaded.
 |---|---|
 | `setTool(id \| null)` | Arm a tool for placement, or return to the cursor. |
 | `activeTool()` | The armed tool id, or null. |
-| `drawings()` / `get(id)` | The model. |
-| `add(drawing)` | Add one directly (import, or host-authored). |
-| `update(id, patch)` | Patch `points`, `style`, `locked`, or `visible`. |
-| `remove(id)` / `clear()` | Delete one, or all. |
+| `drawings()` / `get(id)` | The model, in paint order. |
+| `add(drawing)` | Add one directly (import, or host-authored). `zIndex`, `createdAt` and `id` are filled in. |
+| `update(id, patch)` / `updateMany(patches)` | Patch `points`, `style`, `text`, `props`, `locked`, `visible` or `zIndex`. `updateMany` is one undo step. |
+| `remove(id)` / `removeMany(ids)` / `clear()` | Delete one, several (one undo step), or all. |
 | `finish()` | End a variable-anchor shape (`path`, `polyline`) at the anchors placed so far. Returns whether it committed. Double-click already calls it. |
-| `select(id \| null)` / `selected()` | Selection. |
+| `select(id \| ids \| null, additive?)` / `selected()` / `selection()` | Selection. `additive` toggles each id; `selected()` is the primary id, `selection()` the list in pick order. |
+| `duplicate(ids)` / `nudge(ids, dx, dy)` | Clone with the paste offset and select the clones; move by a screen distance. One undo step each. |
+| `setZIndex(id, z)` / `bringToFront(id)` / `sendToBack(id)` | Paint order within the drawing's own side of the series. |
+| `sendBehindSeries(id)` / `bringAboveSeries(id)` | Cross the series: below zero paints under the candles. |
 | `copy(target?)` / `cut(target?)` / `paste()` | Clipboard, all async. See [Drawing Clipboard](/docs/drawing-clipboard). |
 | `clipboard()` | The `DrawingClipboard` behind those three, for reporting why a copy did not reach the OS clipboard. |
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A paste of several drawings is one step. |
-| `toJSON()` / `fromJSON(data)` | Explicit serialisation. |
+| `toJSON()` / `fromJSON(data)` | Explicit serialisation: a `{ version: 2, drawings }` document out; a document or a 1.9.x bare array in, upgraded by `migrateDrawings`. |
 | `setOptions(patch)` | `magnet`, `stayInDrawingMode`, `historyLimit`, `defaultStyle`, `pasteOffsetBars`, `pasteOffsetPixels`, `clipboard`. |
+| `cancel()` / `popAnchor()` | Drop the anchors placed so far (the tool disarms unless `stayInDrawingMode` keeps it); remove the last anchor of a variable-anchor shape still being placed. Escape and Backspace, once the host wires them. |
+| `hovered()` / `magnetMode()` | The unselected drawing under the pointer, or `null` (`drawing:hover { id }` fires when it changes); the resolved `'off' \| 'weak' \| 'strong'`. |
 | `destroy()` | Detach layers and listeners. |
 
 ### Events
 
 `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select`, `draw:copy`,
-`draw:cut` and `draw:paste` all fire on `chart.on(...)`.
+`draw:cut` and `draw:paste` all fire on `chart.on(...)`. The 2.0 pair `drawing:select`
+(`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind }`, one per mutation)
+fire alongside them for a host that tracks a multi-selection, and `drawing:hover`
+(`{ id }`) when the unselected drawing under the pointer changes.
 
 <Callout type="info">
 The controller listens on the **event bus** (`click`, `crosshair:move`, `drag`, `drag:end`),
@@ -175,7 +191,15 @@ those for its own order lines without the two fighting over one channel.
   in one gesture. A live preview follows the cursor between clicks.
 - **Select**: click a drawing; click empty space to deselect.
 - **Move**: drag the body to translate every anchor, or drag a handle to move one.
-- **Magnet**: `{ magnet: true }` snaps new anchors to the nearest O/H/L/C of the hovered bar.
+- **Magnet**: `{ magnet: 'strong' }` (or `true`) snaps new anchors to the nearest O/H/L/C
+  of the hovered bar; `'weak'` snaps only when one of the four is within a few pixels, so a
+  click on open space lands where it was made. A ring shows where the next click will land.
+- **Shift**: locks the free end of a line to 45 degree steps on screen, while placing and
+  while dragging a handle.
+- **Hover**: the drawing under the pointer shows its handles faintly before it is picked.
+- **Freehand**: the brush and highlighter ink every coalesced pointer sample, thin the trail
+  on release and paint it as a spline; a pen's pressure can drive the width
+  (`style.pressure`).
 - **Undo**: a whole drag is **one** undo step, not one per frame.
 - **Lock**: a locked drawing renders but cannot be selected or dragged.
 
@@ -253,21 +277,23 @@ payload format, the validation rules and the failure modes.
 
 ## Text and labels
 
-The `text` tool draws a standalone text box, but **shapes carry labels too**: set
-`style.text` on a rectangle, ellipse, or parallel channel and it renders inside the outline.
-That is one shape with two colours: `color` strokes the outline, `fontColor` paints the label.
+The `text` tool draws a standalone text box, but **shapes carry labels too**: give a
+rectangle, ellipse, or parallel channel a `text` block and it renders inside the outline.
+That is one shape with two colours: `style.color` strokes the outline, `text.color` paints
+the label. Text is its own block on the drawing, `drawing.text` (a `DrawingText`), not a
+set of keys on `style`, so a host can tell a label colour from a stroke colour without
+knowing the tool.
 
-| Style key | Applies to | Notes |
+| `text` key | Applies to | Notes |
 | --- | --- | --- |
-| `text` | text tool, shapes | `\n` starts a new line |
-| `fontSize` | both | media px |
+| `value` | text tool, shapes | `\n` starts a new line |
+| `color` | both | falls back to `style.color` |
+| `fontSize` | both | media px, default 12 (the `text` tool's `defaultText` sets 14) |
 | `fontFamily` | both | defaults to the UI sans stack |
-| `fontWeight` | both | `'normal'` \| `'bold'` |
-| `fontStyle` | both | `'normal'` \| `'italic'` |
-| `fontColor` | both | falls back to `color` |
-| `textAlign` | both | `'left'` \| `'center'` \| `'right'` |
-| `textVAlign` | both | `'top'` \| `'middle'` \| `'bottom'` |
-| `textPosition` | shapes only | `'inside'` the outline or `'outside'` just above it |
+| `bold`, `italic` | both | booleans |
+| `align` | both | `'left'` \| `'center'` \| `'right'` |
+| `valign` | both | `'top'` \| `'middle'` \| `'bottom'` |
+| `position` | shapes only | `'inside'` the outline or `'outside'` just above it |
 | `background`, `backgroundColor`, `backgroundOpacity` | text tool | filled plate behind the text |
 | `border`, `borderColor` | text tool | stroked plate border |
 | `wrap`, `wrapWidth` | both | soft-wrap instead of running off the pane |
@@ -278,23 +304,37 @@ draw.add({
   tool: 'rectangle',
   points: [a, b],
   paneIndex: 0,
-  style: {
-    color: '#8b5cf6',
-    text: 'Supply zone',
-    fontColor: '#ffffff',
+  style: { color: '#8b5cf6' },
+  text: {
+    value: 'Supply zone',
+    color: '#ffffff',
     fontSize: 13,
-    fontWeight: 'bold',
-    textPosition: 'inside',
-    textVAlign: 'top',
-    textAlign: 'center',
+    bold: true,
+    position: 'inside',
+    valign: 'top',
+    align: 'center',
   },
 });
+
+// Later edits patch the block: `text` merges, so send only the key that changed.
+draw.update(id, { text: { value: 'Supply zone (tested)' } });
 ```
 
 <Callout>
-With `textPosition: 'inside'`, `textVAlign` x `textAlign` give the nine placements a
-shape-text properties panel exposes. `'outside'` parks the block above the shape and ignores
-`textVAlign`. `examples/yfinance/index.html` wires all of it to a properties bar.
+With `position: 'inside'`, `valign` x `align` give the nine placements a shape-text
+properties panel exposes. `'outside'` parks the block above the shape and ignores
+`valign`. A tool merges its `defaultText` under the caller's block the way `defaultStyle`
+merges under `style` (`text` and `callout` ship one), and
+`drawingSettingsSchema(toolId).textIsContent` is true for the tools that *are* their text,
+so a host can ask for the content on placement. The yfinance example wires all of it to a
+properties bar.
+</Callout>
+
+<Callout type="info">
+Coming from 1.9.x, where these lived on `style` as `text`, `fontColor`, `fontWeight`,
+`fontStyle`, `textAlign`, `textVAlign` and `textPosition`: a saved layout is upgraded on
+load by `migrateDrawings`, and the key-by-key mapping is in
+[Migrating to 2.0](https://github.com/marketcalls/openalgo-charts/blob/master/docs/migrating-to-2.md).
 </Callout>
 
 ## Persistence
@@ -350,9 +390,10 @@ Two optional fields change how a tool is *placed*:
 | Field | Effect |
 |---|---|
 | `freehand: true` | Sample the cursor while the pointer is held and commit on release: one press-drag-release is one stroke. Only the first and last anchors get grab handles. Requires `points: 0`. |
-| `expand(clicked, ctx)` | Turn the anchors actually clicked into the tool's full anchor set, so it can place a complete, editable default from fewer clicks. `ctx` carries `barSeconds` and `visibleBars`. |
+| `expand(clicked, ctx)` | Turn the anchors actually clicked into the tool's full anchor set, so it can place a complete, editable default from fewer clicks. `ctx` carries `barSeconds` and `visibleBars`, and `toPixel` / `fromPixel` when the host can map coordinates, so a default can be sized in pixels and fall back to chart units when it cannot. |
+| `constrain(points, handle)` | Keep the anchors consistent after one moves: a handle drag (`handle` is its index) or a `points` patch (`handle` is `null`). Returns the anchors to store. Pure. The position tools use it to hold the stop and the target on opposite sides of the entry. |
 
-`expand` is how the position tools drop a ready 1:1 box from one click:
+`expand` is how a tool drops a ready default from fewer clicks than its anchor count; the position tools derive the stop from the entry and target clicks this way. A one-click box:
 
 ```ts
 registerDrawingTool({

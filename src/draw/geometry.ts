@@ -55,6 +55,25 @@ export function rectOf(a: ScreenPoint, b: ScreenPoint): { x0: number; y0: number
 }
 
 /**
+ * The axis-aligned box around any number of points. What a shape's label is
+ * laid out against when the shape itself is not a rectangle (a triangle, a
+ * rotated rectangle, a circle's centre plus radius).
+ */
+export function boundsOf(pts: readonly ScreenPoint[]): { x0: number; y0: number; x1: number; y1: number } {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const p of pts) {
+    if (p.x < x0) x0 = p.x;
+    if (p.y < y0) y0 = p.y;
+    if (p.x > x1) x1 = p.x;
+    if (p.y > y1) y1 = p.y;
+  }
+  return { x0, y0, x1, y1 };
+}
+
+/**
  * Distance to a rectangle: 0 anywhere inside when `filled`, otherwise the
  * distance to the nearest edge. An unfilled rect must stay grabbable only by
  * its outline, or it would swallow every click in its interior.
@@ -77,7 +96,7 @@ export function distToRect(px: number, py: number, a: ScreenPoint, b: ScreenPoin
 
 /**
  * Distance to an axis-aligned ellipse inscribed in the box `a`..`b`. Uses the
- * normalised radius, scaled back by the smaller semi-axis — exact enough for a
+ * normalised radius, scaled back by the smaller semi-axis: exact enough for a
  * grab tolerance and far cheaper than the true closest-point solve.
  */
 export function distToEllipse(px: number, py: number, a: ScreenPoint, b: ScreenPoint, filled: boolean): number {

@@ -7,9 +7,10 @@ Written 2026-08-28 against openalgo-charts 1.8.2.
 > record of what was wrong, what the measured figures were, and why each change
 > was made, so the next redraw starts from evidence rather than memory.
 >
-> **Current source of truth, 1.9.2:** the SVG now reports 60.88 KB base, 124.47
-> KB for every tier, and 51 drawing tools. The figures below record the 1.8.2
-> redraw unless an appendix says otherwise.
+> **Current source of truth, 2.0.0:** the SVG reports 66.39 KB base, 182.34 KB
+> for every tier, eight tier chips, 102 built-in indicators and 51 drawing
+> tools. The figures below record the 1.8.2 redraw unless an appendix says
+> otherwise; the 2.0.0 appendices at the end record each later pass.
 
 Build brief for the replacement of `docs/architecture-diagram.png` in
 `openalgo-charts`, shown in `README.md` at 920 px wide.
@@ -326,3 +327,74 @@ The six tier chips, the seven rows, the transform list of six, the profile list
 of five, the session row, the IANA timezone wording, `registerIndicator` in the
 public API row and the drawing tool count of 43 are all unchanged from 1.8.2 and
 were checked by eye against section 6 rather than remeasured.
+
+## 2.0.0: a seventh tier chip
+
+The WebGL2 render backend ships as its own tier, `openalgo-charts/webgl`, so the
+legend row gained a chip. Seven tier chips plus "Everything" do not fit at the
+170 px width the six were drawn at, so the row was re-spaced rather than
+extended past the frame: every tier chip is 146 px wide on a 162 px pitch from
+x=248, the Everything chip is 186 px, and the row still ends at x=1568 where it
+did. The size figure dropped from 26 to 24 px and the caption from 13 to 12 px
+so "102 built-in indicators", still the widest caption, sits inside the
+narrower chip. Chips stay in descending size order, which puts `/webgl`
+(6.38 KB, green, a hue the legend had not used) between `/trade` and
+`/transform`. The `/webgl` caption reads "WebGL2 series backend".
+
+Every figure in the legend, the `<desc>` and the subtitle was re-measured from
+`npm run size` on the 2.0.0 build (base 66.41 KB, everything 146.11 KB); the
+1.8.x figures the diagram had carried through several releases were replaced
+in the same pass, which is the drift this file exists to record.
+
+## 2.0.0: an eighth tier chip
+
+The widget tier, `openalgo-charts/widget`, is the eighth bundle and the first
+that is not an engine feature: it is the chrome (rail, top bar, status line,
+dialogs, keymap) as a package. Eight tier chips plus "Everything" on the 162 px
+pitch would run 144 px past the frame, so the row was re-spaced once more:
+every tier chip is 136 px wide on a 144 px pitch from x=248, the Everything
+chip is 168 px, and the row still ends at x=1568. The label dropped to 15 px,
+the size figure from 24 to 22 px and the caption from 12 to 11 px so
+"102 built-in indicators" still sits inside the chip. Descending size order
+puts `/widget` (35.56 KB, rose, a hue the legend had not used) second, between
+`base` and `/indicators`; its caption reads "Rail, top bar, dialogs, keys".
+
+Every figure was re-measured from `npm run size` on the build that added the
+tier: base 66.41 KB unchanged (the widget is a separate bundle and the base
+row did not move), everything 146.11 KB to 181.67 KB, the subtitle 146 KB to
+182 KB. The `<desc>` names the eighth chip. The layer count in the `<desc>` and
+the README alt text stays at seven: the widget is a bundle, not a layer of the
+engine, and the stack above the legend did not change.
+
+## 2.0.0 release: every figure re-measured on the shipping build
+
+The release pass changed two numbers and confirmed the rest. `npm run size` on
+the 2.0.0 build (with the version string that ships) reads base 66.39 KB and
+everything 181.65 KB, two hundredths under the 66.41 KB and 181.67 KB the
+diagram carried from the widget pass, because the version string itself moves
+the bundle. Both figures were substituted by matching the text of the chip
+they sit in, not by searching for the old number, which is the failure mode
+CLAUDE.md records for the README. The `<desc>` carries the same two values.
+
+Confirmed unchanged by measurement on the same build: widget 35.56 KB,
+indicators 27.27 KB, draw 25.12 KB, profile 10.66 KB, trade 7.61 KB (the
+base + trade row reads 74.00 KB, so the delta over the base is unchanged),
+webgl 6.38 KB, transform 2.66 KB. The subtitle's rounded "66 KB base, 182 KB
+everything" still rounds correctly. Counts from the registry at runtime on the
+same build: 102 indicators, 15 chart types, 51 drawing tools; the three
+strings that carry them did not change. Eight tier chips, seven layers.
+
+## Position tool merge: three chips re-measured
+
+The two-click position tool merged after the release pass and lives in the
+draw tier, so three figures moved and the rest did not. `npm run size` on the
+merged build reads draw 25.82 KB (was 25.12), widget terminal 155.03 KB (was
+154.34, budget raised from 155 to 156 kB) and everything 182.34 KB (was 181.65,
+budget raised from 182 to 183 kB). The draw chip and the everything chip
+changed, again by matching the text of the chip rather than the number, and
+the `<desc>` carries the same two values. The subtitle's rounded "66 KB base,
+182 KB everything" still rounds correctly. Base 66.39 KB, base + trade 74.00
+KB, indicators 27.27 KB, profile 10.66 KB, webgl 6.38 KB, widget 35.56 KB and
+transform 2.66 KB were confirmed unchanged on the same build.
+`website/public/architecture-diagram.svg` is a byte copy of the docs file,
+refreshed by `website/scripts/sync-lib.mjs` on every website build.

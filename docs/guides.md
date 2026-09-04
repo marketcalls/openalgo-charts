@@ -2,14 +2,14 @@
 
 ## Chart types
 
-Every chart type is a registry descriptor — `addSeries(type)` selects it:
+Every chart type is a registry descriptor; `addSeries(type)` selects it:
 
 ```ts
 chart.addSeries('candlestick'); // or: hollow-candle, volume-candle, bar, high-low,
                                 // line, line-markers, step, area, hlc-area, baseline, column
 ```
 
-Family-B (price-driven) types come from the transform tier — run a transform,
+Family-B (price-driven) types come from the transform tier: run a transform,
 then plot the result:
 
 ```ts
@@ -53,7 +53,7 @@ and return plottable bars (warmup slots carry NaN, which the line renderer skips
 ```ts
 import { rsiSeries, supertrendSeries } from 'openalgo-charts';
 
-// Supertrend overlay — green uptrend / red downtrend (direction -1 = up, +1 = down)
+// Supertrend overlay: green uptrend / red downtrend (direction -1 = up, +1 = down)
 const { up, down } = supertrendSeries(bars, 10, 3);
 chart.addSeries('line', { style: { color: '#26a69a', lineWidth: 2 } }).setData(up);
 chart.addSeries('line', { style: { color: '#ef5350', lineWidth: 2 } }).setData(down);
@@ -94,7 +94,7 @@ chart.subscribeDrag((id, price) => eng.requestModify(clientId(id), price),
 ```
 
 The engine enforces tick-size snapping, price-band/freeze validation,
-client-token idempotency, OCO (one fill cancels the peer), reconnect→stale, and
+client-token idempotency, OCO (one fill cancels the peer), reconnect to stale, and
 an arm/confirm gate. Use `analyzer` mode to route to a sandbox.
 
 ## Profiles &amp; order flow
@@ -105,7 +105,7 @@ const vp = computeVolumeProfile(bars, 0.05, 0.7);
 chart.addPrimitive(new HorizontalProfile({ buckets: vp.buckets, poc: vp.poc, vah: vp.vah, val: vp.val, width: 140, side: 'right', barColor: '#345', vaColor: '#456' }));
 ```
 
-Footprint / order flow need classified trade data (bid vs ask) — see the
+Footprint / order flow need classified trade data (bid vs ask); see the
 data-dependency note in `footprint.ts`.
 
 ## Writing a custom chart style
@@ -115,7 +115,7 @@ import { registerChartType } from 'openalgo-charts';
 registerChartType('my-style', {
   defaultStyle: { color: '#fff' },
   isPriceSeries: true,
-  draw: (ctx, items, toY, barSpacing, dpr, style) => { /* … */ },
+  draw: (ctx, items, toY, barSpacing, dpr, style) => { /* ... */ },
   extents: (bar) => ({ min: bar.low, max: bar.high }),
 });
 ```
@@ -128,7 +128,7 @@ is the same API the trade layer, markers, and profiles are built on.
 
 ## Themes
 
-Pass a full palette — `darkTheme` (default), `lightTheme`, or your own `ChartTheme`:
+Pass a full palette: `darkTheme` (default), `lightTheme`, or your own `ChartTheme`:
 
 ```ts
 import { createChart, lightTheme } from 'openalgo-charts';
@@ -151,11 +151,13 @@ chart.addSeries('area', { style: { areaTopColor: 'rgba(79,140,255,0.5)', areaBot
 
 ## Axis-drag rescale
 
-- **Wheel** — zoom both axes around the cursor.
-- **Drag the price (Y) axis** ↕ — up expands, down compresses the price scale
+- **Wheel**: zoom both axes around the cursor. The zoom is eased in log space over a
+  few frames (`animZoom`, on by default; `false` restores the single-frame step), and
+  `zoomAnchor: 'right'` pins the latest bar instead of the cursor.
+- **Drag the price (Y) axis** vertically: up expands, down compresses the price scale
   (switches that pane to manual scale).
-- **Drag the time (X) axis** ↔ — right expands (wider bars), left compresses.
-- **Double-click** — reset: fit content + re-enable price autoscale.
+- **Drag the time (X) axis** horizontally: right expands (wider bars), left compresses.
+- **Double-click**: reset, fit content and re-enable price autoscale.
 
 ## Tick aggregation &amp; live orderflow
 
@@ -177,7 +179,7 @@ ws.onTrade(t => { const u = fa.onTick({ time: t.timeSec, price: t.price, qty: t.
   footprint.setBars(/* accumulate u.bar */); });
 ```
 
-Tick-count and volume bars (and footprint) require real trade ticks — OHLCV
+Tick-count and volume bars (and footprint) require real trade ticks: OHLCV
 alone can't produce them, and bid/ask classification needs a live feed or a
 tick-recorder backend.
 
@@ -202,7 +204,7 @@ single-finger drag pans, **two-finger pinch zooms**, and a two-finger drag pans
 both axes.
 
 The chart container is focusable (`role="application"`, `tabindex=0`, an
-`aria-label` — override via `createChart(el, { ariaLabel })`) with a polite
+`aria-label`, override via `createChart(el, { ariaLabel })`) with a polite
 `aria-live` summary (bar count + latest price) that updates on data changes.
-Keyboard when focused: **←/→** pan time, **↑/↓** pan price, **+/−** zoom,
+Keyboard when focused: **Left/Right** pan time, **Up/Down** pan price, **+/-** zoom,
 **Home/0** reset (`chart.resetScale()`).

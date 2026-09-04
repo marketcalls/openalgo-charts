@@ -86,6 +86,7 @@ describe('the draw tier entry exposes the clipboard its own options are typed on
       points: [{ time: T0, price: 100 }, { time: T0 + 3 * DAY, price: 110 }],
       style: { color: '#ff0000', lineWidth: 2 },
       paneIndex: 0,
+      zIndex: 0,
     };
     expect(await clip.write([drawing])).toBe(true);
     // The copy reached memory but not the OS clipboard, and the host can find
@@ -99,11 +100,12 @@ describe('the draw tier entry exposes the clipboard its own options are typed on
 
   it('exports the encode / decode / sanitize trio and the payload key', () => {
     expect(DRAWING_CLIPBOARD_KEY).toBe('openalgo-charts/drawings');
-    expect(DRAWING_CLIPBOARD_VERSION).toBe(1);
+    // Tracks DRAWING_STATE_VERSION: the 2.0 model changed the on-wire shape.
+    expect(DRAWING_CLIPBOARD_VERSION).toBe(2);
     const text = encodeClipboardPayload([{
       id: 'x', tool: 'rectangle',
       points: [{ time: T0, price: 1 }, { time: T0 + DAY, price: 2 }],
-      style: {}, paneIndex: 0,
+      style: {}, paneIndex: 0, zIndex: 0,
     }]);
     expect(JSON.parse(text)).toHaveProperty(DRAWING_CLIPBOARD_KEY);
     expect(decodeClipboardPayload(text)).toHaveLength(1);

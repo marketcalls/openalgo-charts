@@ -8,6 +8,124 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.0.0
+
+The drawing model, rebuilt, and the chrome as a package: paint order, a text block,
+per-level colours, multi-select, a per-tool settings schema and an upgrade path for every
+1.9.x layout; a render backend port with a WebGL2 backend behind it; vector SVG export;
+and `openalgo-charts/widget`, the toolbar, rail, dialogs and shortcuts in one call.
+Coming from 1.9.x? Read
+[Migrating to 2.0](https://github.com/marketcalls/openalgo-charts/blob/master/docs/migrating-to-2.md):
+every breaking change with the before and after, and the fact that stored 1.9.x drawings
+load unchanged.
+
+**Breaking changes**
+
+- `DrawingStyle` no longer carries text. The seven text keys moved into `drawing.text`
+  (a `DrawingText`), so a host can tell a label from a stroke colour without knowing the
+  tool. Tools merge a `defaultText` under the caller's text.
+- `style.levels` is `FibLevel[]` (`{ ratio, color?, enabled?, label? }`), not `number[]`,
+  with `levelColor(ratio)` as the one statement of the conventional colour per ratio.
+- `toJSON()` returns `{ version: 2, drawings }`, and so does `chart.getState().drawings`;
+  `fromJSON` still accepts a 1.9.x array. `DRAWING_CLIPBOARD_VERSION` is 2; version 1
+  bodies are upgraded.
+- `drawings()` is paint order, and `Drawing.zIndex` is required on the type (`add()`
+  fills in 0).
+- `select(id | ids | null, additive)` takes a selection; `selected()` is the primary id and
+  `selection()` the whole list. A host that called `select(id)` and read `selected()`
+  sees no change.
+- `chart.renderer` is `chart.rendererKind`; the old name stays as the same value.
+
+**Added**
+
+- `openalgo-charts/widget`: the chart with its chrome in one `createWidget` call. Top bar,
+  drawing rail, status line, the settings and indicator dialogs, drawing properties, a
+  level editor, in-place text editing, a right-click menu with order entry, a keymap with
+  a `?` panel, theme tokens and optional persistence. The eighth tier and the only one that
+  ships DOM; the engine underneath still ships none. 35.56 KB Brotli; a widget terminal
+  (base + draw + indicators + widget) is 155.03 KB.
+- A render backend port with `renderer: 'canvas2d' | 'webgl2' | 'auto'` and
+  `chart.rendererKind`, and a new `openalgo-charts/webgl` tier (6.38 KB Brotli) that
+  draws every standard chart type on the GPU in one draw call per frame into the pane's
+  own canvas, so screenshots and the SVG export are unchanged. A lost context falls back
+  to the 2D path for the session and emits `renderer:fallback`.
+- `chart.exportSVG(options?)`: the chart as a standalone SVG string with the labels as
+  text and no crosshair or hover state, at the live size or one of the caller's choosing.
+  The serialising `SvgContext` behind it is exported for hosts.
+- `zIndex` with `setZIndex`, `bringToFront`, `sendToBack`, `sendBehindSeries` and
+  `bringAboveSeries`. The default paints exactly where 1.9.2 painted.
+- Multi-select: `selection()`, `updateMany`, `removeMany`, `duplicate`, `nudge`; shift,
+  ctrl or meta click is additive; a body drag moves the whole selection as one undo
+  entry. New events `drawing:select` and `drawing:change`.
+- `drawingSettingsSchema(toolId)` with `readDrawingSettings`, `applyDrawingSettings` and
+  `composeSettings`: a tool declares only fields its renderer reads.
+- `migrateDrawings(input)`, the pure 1.9.x to 2.0 upgrade, exported for hosts.
+- `keyToDrawingAction(e, ctx)`: undo, redo, copy, cut, paste, duplicate, delete and
+  arrow-key nudge as a pure mapping; with `placing: true`, Escape, Enter and Backspace map
+  to `cancel`, `finish` and `popAnchor`.
+- Drawing feel: hover handles (`hovered()`, `drawing:hover`), Shift angle lock on the line
+  family (`DrawingTool.angleLock`), `magnet: 'off' | 'weak' | 'strong'` with a ring where
+  the next click lands, `cancel()` and `popAnchor()`, touch-sized grab targets, and an
+  under-series drawing lifted to the top layer for the length of a drag.
+- `style.showStats` on the line family: a midpoint readout of change, percent, bars and angle.
+- Freehand strokes ink every coalesced pointer sample, thin on release and paint as a spline;
+  a pen's `DrawingPoint.pressure` can drive the width (`style.pressure`). `rdpSimplify`,
+  `catmullRom` and `pressureWidth` are exported.
+- Position tools that place a trade: `long-position` and `short-position` take the entry
+  click and the target click, the second click sets the direction, and the stop lands
+  opposite the entry at 1:2, sized on screen. `DrawingTool.constrain(points, handle)` holds
+  the stop and the target on opposite sides of the entry; `ExpandContext` gained optional
+  `toPixel` / `fromPixel` so an `expand` default can be sized in pixels.
+- Icons as markup: a chrome set (`CHROME_ICONS` and friends), `iconSvg`, `chromeIconSvg`,
+  `iconSprite`, `iconUse` and `toolCursor`, all derived from one registry.
+- Pointer payloads: `crosshair:move`, `click`, `drag` and `drag:end` report `modifiers`,
+  `pointerType` and `pressure`; `drag` carries `point` and coalesced `samples`, and so does
+  `crosshair:move` while pressed. No existing field changed.
+- An eased wheel zoom (`ZoomGlide`, in log space, no input latency), on by default and
+  switched off with `animZoom: false`, and `zoomAnchor: 'cursor' | 'right'` to pin the
+  latest bar.
+- Named descriptors for every built-in tool, `boundsOf`, `cloneDrawing`.
+
+**Changed**
+
+- A wheel zoom eases over a few frames by default. The bar spacing it lands on is
+  unchanged and still moves on the event itself; `animZoom: false` restores the 1.9.2
+  single-frame step.
+- A position box is two clicks, not one: the entry and the target, with the stop derived. A
+  saved 1.9.x box loads unchanged.
+- The yfinance demo is a native-ESM host on the 2.0 drawing tier: thirty modules that
+  import `/dist` by URL, a rail and properties bar generated from the tier's sprite and
+  settings schema, toasts, an overlay stack, a light theme, a typed feed and a versioned
+  layout document. Its own vitest config runs inside `npm run verify`.
+
+**Fixed**
+
+- Fib retracement and extension stroke their anchor leg and tint bands per level;
+  `extendLeft` is honoured. `price-range` and `date-range` honour `showLabels`. Flag mark
+  and arrow markers honour `fill: false`. Circle, triangle and rotated rectangle carry a
+  shape label.
+
+**Performance**
+
+- Candles skip the body fill once the wick already covers it: one `fillRect` per candle
+  instead of two at tight zoom, zero differing pixels.
+- Hovering a drawing costs the overlay tier only; dragging an under-series drawing lifts it
+  to the top layer so the base tier is not repainted per frame.
+- The WebGL2 backend batches a pane's series into one draw call and never opens more than
+  one GL context however many panes are on the page.
+
+**Internal**
+
+- ESLint with a tier ACL that fails the build on a base-to-tier import, a pixel-level
+  render-parity harness against a baseline build, a WebGL parity spec that asserts a real
+  GPU draw call, a widget e2e spec, and `check-dts` / `check-shake` guards that keep the
+  widget out of a chart-only bundle.
+
+Measured with `npm run size` (Brotli) on the 2.0.0 build: base engine 66.39 KB against
+67 KB, base + trade 74.00 KB against 75 KB, draw tier 25.82 KB against 26 KB, webgl
+6.38 KB against 7 KB, widget 35.56 KB against 36 KB, everything 182.34 KB against 183 KB.
+3999 tests across 170 files.
+
 ## 1.9.2
 
 Eight annotation tools, and the icon set that was missing for all of them.
@@ -1062,7 +1180,7 @@ were already producing the wrong answer.
 
 **Changed**
 
-- Base tier budget 35 → 36 KB, base+trade 41.5 → 42.5 KB, full 72 → 73 KB: the
+- Base tier budget 35 to 36 KB, base+trade 41.5 to 42.5 KB, full 72 to 73 KB: the
   fill primitive sits in the base bundle because `IndicatorInstance` does.
 
 ## 1.0.16
@@ -1451,7 +1569,7 @@ were already producing the wrong answer.
 - `PointFigureColumn` carries `boxSize` and `boxes`, and the renderer reads the
   box size from the column, so `style: { boxSize }` is no longer needed, and
   the transform and style can no longer disagree. See
-  [Transforms → Point & Figure](/docs/transforms#point--figure).
+  [Transforms: Point & Figure](/docs/transforms#point--figure).
 
 ## 1.0.7
 
@@ -1501,7 +1619,7 @@ theme-aware visual pass plus real interaction feedback.
 - Drag ghost: `PriceLine.setDragGhost(price | null)` draws a dimmed reference
   line at the pre-drag price while modifying (automatic via `chart.trading`).
 - Broker-style segmented pill groups on order and position lines:
-  `[badge][qty][label][✕]` with new `badge` / `qty` price-line options and
+  `[badge][qty][label][x]` with new `badge` / `qty` price-line options and
   auto-contrast text; bracket chips with prices (`SL 2,850.00`) and
   theme-derived risk/reward zones; fill progress (`3/10`) and dimmed pending
   state on working-order lines; fully theme-aware DOM ladder with a

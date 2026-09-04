@@ -2,11 +2,29 @@
  * A pane is one vertically-stacked drawing region (price pane, volume pane,
  * indicator pane). It owns a base + top canvas (ARCHITECTURE.md §3.1) and a
  * price scale, and renders its series against the shared time scale + DataLayer.
+ *
+ * The canvas pile, bottom to top, and what lands on each:
+ *
+ *   base canvas (2D context, z 0): background, grid, the series pass, the
+ *     normal-layer primitives, the axis strip (ladder, last-price tag, value
+ *     tags, trading pills). Repainted on Light and Full.
+ *   top canvas (2D context, z 1): crosshair, hover highlights, primitives
+ *     being dragged. Repainted on Cursor.
+ *
+ * A GPU backend adds no canvas to the pile. It rasterises the series pass on
+ * one page-wide offscreen surface shared by every pane of every chart and
+ * blits the result into the base canvas at `endFrame`, between the grid and
+ * the normal-layer primitives, exactly where the 2D backend would have
+ * painted them. That is why the grid, the primitives, the axes and the
+ * overlay keep painting on 2D contexts whatever the backend is, why
+ * `takeScreenshot` and the export still read `base.element`, and why a
+ * browser's cap on live WebGL contexts never limits how many panes a page
+ * can show.
  */
 import { CanvasLayer } from './canvas';
 import { PriceScale } from '../scale/price-scale';
-import { TimeScale } from '../scale/time-scale';
-import { DataLayer } from '../model/data-layer';
+import { type TimeScale } from '../scale/time-scale';
+import { type DataLayer } from '../model/data-layer';
 import type { SeriesRecord, PriceScaleId } from '../model/series';
 import { computeGridLines, drawGrid, resolveGridStyle, resolveScaleStyle, type CanvasOptions } from '../render/grid';
 import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
@@ -20,6 +38,8 @@ import {
 } from '../render/axis';
 import { drawCrosshair, drawCrosshairTag, resolveCrosshairStyle } from '../render/crosshair';
 import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
+import { backendDegradation, type IRenderBackend, type RendererFallbackReason } from '../render/backend';
+import { Canvas2dBackend } from '../render/canvas2d-backend';
 import type { ChartTheme } from '../theme';
 import { DEFAULT_TIMEZONE, formatZonedCrosshairLabel } from '../feed/time';
 
@@ -71,6 +91,12 @@ export interface PaneRenderContext {
   hoverId?: string | null;
   /** externalId of the line currently being dragged (active visual state). */
   dragId?: string | null;
+  /**
+   * Fill the pane with the theme background before anything else. Absent means
+   * yes, which is every on-screen frame; the vector export turns it off for a
+   * document that is meant to sit on the host's own page.
+   */
+  paintBackground?: boolean;
 }
 
 /**
@@ -93,6 +119,14 @@ export class Pane {
   public readonly element: HTMLElement;
   public readonly base: CanvasLayer;
   public readonly top: CanvasLayer;
+  /**
+   * What paints this pane's series onto `base`. Everything else on that canvas
+   * (background, grid, axes, primitives) the pane draws itself on the 2D
+   * context the backend hands back, so a GPU backend only has to own the one
+   * pass that is worth moving. Replaced through `setBackend` when the chart
+   * falls back to 2D for the session.
+   */
+  private _backend: IRenderBackend;
   private _rightScale = new PriceScale();
   /** Extra scales created on demand: left axis and a hidden overlay (volume). */
   private _leftScale: PriceScale | null = null;
@@ -113,7 +147,12 @@ export class Pane {
   private _width = 0;
   private _height = 0;
 
-  public constructor(doc: Document) {
+  /**
+   * `backend` defaults to the 2D one so a pane built on its own (tests, a host
+   * composing panes by hand) paints the way it always has; the chart passes
+   * whatever its `renderer` option resolved to.
+   */
+  public constructor(doc: Document, backend: IRenderBackend = new Canvas2dBackend()) {
     this.element = doc.createElement('div');
     this.element.style.position = 'relative';
     this.element.style.width = '100%';
@@ -129,6 +168,41 @@ export class Pane {
     this.top = new CanvasLayer(doc, 1);
     this.element.appendChild(this.base.element);
     this.element.appendChild(this.top.element);
+    this._backend = backend;
+    // The base canvas already holds a 2D context (CanvasLayer asks for it on
+    // construction), so the backend is handed that one rather than left to ask
+    // for another: a frame is then one context's op stream, which is what the
+    // recording-context tests and the parity gate both compare.
+    backend.mount(this.base.element, this.base.ctx);
+  }
+
+  public get backend(): IRenderBackend {
+    return this._backend;
+  }
+
+  /**
+   * Swap the backend for the rest of the session: the old one releases its
+   * resources, the new one takes the base canvas and its context and is told
+   * the current size, so it is ready for the very next frame. The chart calls
+   * this for every pane at once when a GPU backend degrades, so a chart never
+   * paints half its panes one way and half the other.
+   */
+  public setBackend(next: IRenderBackend): void {
+    if (next === this._backend) return;
+    this._backend.destroy();
+    this._backend = next;
+    next.mount(this.base.element, this.base.ctx);
+    if (this._width > 0 && this._height > 0) next.resize(this._width, this._height, this.base.pixelRatio);
+  }
+
+  /**
+   * Why the backend is painting through its 2D fallback rather than the path
+   * it was chosen for, or null. Read by the chart after each frame; the
+   * answer is a property of the device, so it is the same for every pane
+   * sharing it.
+   */
+  public get backendDegradation(): RendererFallbackReason | null {
+    return backendDegradation(this._backend);
   }
 
   /**
@@ -329,6 +403,7 @@ export class Pane {
   public destroy(): void {
     for (const p of this._primitives) p.detached?.();
     this._primitives.length = 0;
+    this._backend.destroy();
     this.element.remove();
   }
 
@@ -365,6 +440,20 @@ export class Pane {
     this._height = height;
     this.base.resize(width, height, dpr);
     this.top.resize(width, height, dpr);
+    // After the layer, which owns the backing store: a backend that keeps its
+    // own buffers (a GL viewport) sizes them to what the canvas now is.
+    this._backend.resize(width, height, dpr);
+  }
+
+  /**
+   * Lay the pane out at a size without touching its canvases. The vector
+   * export paints at a size of the caller's choosing and then puts the live
+   * size back; resizing a canvas clears it, so going through `resize` would
+   * blank the screen until the next frame.
+   */
+  public setLayoutSize(width: number, height: number): void {
+    this._width = width;
+    this._height = height;
   }
 
   /**
@@ -501,17 +590,27 @@ export class Pane {
     return null;
   }
 
-  /** Paint background + grid + series + axes on the base canvas. */
-  public paintBase(ctx: PaneRenderContext): void {
+  /**
+   * Paint background + grid + series + axes on the base canvas, or into
+   * `target` when given: the vector export runs this exact pass into a
+   * serialising context, so what it produces is the frame and not a
+   * re-description of it. Only the pane's own canvas is cleared first; a
+   * target starts empty by construction.
+   */
+  public paintBase(ctx: PaneRenderContext, target?: CanvasRenderingContext2D): void {
     const layout = this._layout(ctx);
     const dpr = ctx.dpr;
-    const g = this.base.ctx;
-    this.base.clearBitmap();
+    // On screen, the chrome goes on whatever 2D context the backend offers
+    // (the base canvas's own, for the 2D backend). A serialising target takes
+    // the whole frame, series included: the export is a document, and the
+    // backend has no pixels to put in one.
+    const g = target ?? this._backend.overlay2d() ?? this.base.ctx;
+    if (target === undefined) this._backend.beginFrame(true);
 
     const axisStyle = resolveScaleStyle(ctx.theme, ctx.canvasOptions?.scales);
 
-    // background (full pane) — skip when transparent so the page shows through
-    if (ctx.theme.background !== 'transparent') {
+    // background (full pane), skipped when transparent so the page shows through
+    if (ctx.paintBackground !== false && ctx.theme.background !== 'transparent') {
       g.fillStyle = ctx.theme.background;
       g.fillRect(0, 0, Math.round(this._width * dpr), Math.round(this._height * dpr));
     }
@@ -591,7 +690,8 @@ export class Pane {
       let maxVolume = 0;
       for (const it of items) if ((it.bar.volume ?? 0) > maxVolume) maxVolume = it.bar.volume ?? 0;
       const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume, theme: ctx.theme };
-      entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
+      if (target === undefined) this._backend.drawSeries(entry, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
+      else entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
       // Only the readout scale has a strip to write into. A volume overlay
       // sitting on its own hidden scale is excluded by that alone, while a
       // volume study on a pane of its own is on the readout scale and does get
@@ -619,6 +719,10 @@ export class Pane {
         }
       }
     }
+    // Still inside the clip and before the normal-layer primitives: a backend
+    // that batched the series has to land them under the price lines and
+    // markers, not over them.
+    if (target === undefined) this._backend.endFrame();
 
     // End of the plot clip. Everything below draws into the axis strip on
     // purpose: the ladder, the last-price tag, the trading pills. Restoring here
@@ -719,10 +823,11 @@ export class Pane {
   public paintTop(
     cross: { x: number; yLocal: number | null; showTimeTag: boolean } | null,
     ctx: PaneRenderContext,
+    target?: CanvasRenderingContext2D,
   ): void {
-    this.top.clearBitmap();
+    if (target === undefined) this.top.clearBitmap();
     const layout = this._layout(ctx);
-    const g = this.top.ctx;
+    const g = target ?? this.top.ctx;
     const dpr = ctx.dpr;
     // Shift top-layer primitives + crosshair by the reserved left-axis width.
     g.save();

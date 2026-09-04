@@ -19,7 +19,14 @@
     "useDefineForClassFields": true,
     "sourceMap": true,
     "paths": {
-      "openalgo-charts": ["./src/index.ts"]
+      "openalgo-charts": ["./src/index.ts"],
+      "openalgo-charts/trade": ["./src/trade/index.ts"],
+      "openalgo-charts/transform": ["./src/transform/index.ts"],
+      "openalgo-charts/profile": ["./src/profile/index.ts"],
+      "openalgo-charts/indicators": ["./src/indicators/index.ts"],
+      "openalgo-charts/draw": ["./src/draw/index.ts"],
+      "openalgo-charts/webgl": ["./src/webgl/index.ts"],
+      "openalgo-charts/widget": ["./src/widget/index.ts"]
     }
   },
   "include": ["src", "tests"],

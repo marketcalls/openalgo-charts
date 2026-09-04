@@ -1,6 +1,7 @@
 node_modules/
 dist/
 docs/api/
+__pycache__/
 website/public/api/
 *.log
 .DS_Store
@@ -17,3 +18,6 @@ artifacts/
 
 # Never let an npm auth token reach the repository.
 .npmrc
+
+# baseline build for e2e render-parity checks (scripts/build-baseline.mjs)
+dist-baseline/

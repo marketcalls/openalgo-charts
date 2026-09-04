@@ -16,7 +16,6 @@
  */
 import { rollup } from 'rollup';
 import { brotliCompressSync } from 'node:zlib';
-import { readFileSync } from 'node:fs';
 
 const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 // Raised from 38 to 39 kB in 1.8.6, for the per-series axis value tags: the
@@ -25,13 +24,35 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // baseline. Raise this only with the same kind of note, and never to get a
 // build green: the point of the number is that a feature has to be worth its
 // bytes to a host that only wanted a chart.
-const LIMIT_BYTES = 39 * 1024;
+//
+// Raised from 39 to 40 kB for 2.0. The wheel zoom glide (398e813) took the
+// chart-only import to 39.05 kB on its own, measured by building without the
+// 2.0 change; the three modifier flags the click payload now carries for
+// additive drawing selection land inside the same 39.05 kB reading. Both are
+// core input behaviour a host that only wanted a chart still gets.
+//
+// Raised from 40 to 44 kB for the vector export (2.0). chart.exportSVG runs
+// the ordinary paint into a serialising context (src/render/svg-export.ts),
+// and because the call is synchronous and returns a string, the serialiser
+// ships with the chart rather than behind a lazy import. Measured cost 3.75 kB
+// brotli: 39.34 kB before, 43.09 kB after, on the same build.
+const LIMIT_BYTES = 44 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.
 const MUST_BE_SHAKEN = [
   ['WebSocket adapter', 'authenticate'],
   ['order decoder', 'placeorder'],
+  // The GPU backend lives in its own tier (src/render/webgl, shipped as
+  // openalgo-charts.webgl.mjs) and nothing in the base entry imports it. The
+  // string is the context-loss listener that only that backend installs.
+  ['WebGL2 backend', 'webglcontextlost'],
+  // The widget is the one tier that ships DOM (src/widget, shipped as
+  // openalgo-charts.widget.mjs). The ESLint ACL forbids the base from importing
+  // it; this is the check on the built output, so that a host which only
+  // wanted a chart can never receive a toolbar. The string is the CSS scope
+  // every widget rule is written under, and nothing in the engine paints HTML.
+  ['widget tier', 'oac-widget'],
 ];
 
 const virtual = {

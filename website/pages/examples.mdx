@@ -42,6 +42,36 @@ Data-driven positions, orders, TP/SL brackets, and fill markers via
 <TradeMarkersCard />
 </div>
 
+## The terminal in one call
+
+`createWidget` from `openalgo-charts/widget` builds the chart with its chrome: a top bar
+(symbol, interval, chart type, indicators, capture, settings, theme), the drawing rail, a
+status line, dialogs generated from the settings schemas the engine already ships, a
+right-click menu and a keymap with a `?` panel. The engine underneath still ships no DOM;
+the widget is a packaged host driving the same public API your own would. Pick a tool
+from the rail, open Indicators, change the chart type, press `?`.
+
+<RunnableExample height={480} tiers={['widget']} caption="No feed is wired here, so the bars go straight on widget.series; with a feed the interval pills and the symbol box reload through it. Persistence is off unless asked for." code={`const widget = lib.createWidget(el, {
+  symbol: 'DEMO',
+  exchange: 'NSE',
+  interval: '1h',
+  intervals: ['5m', '15m', '1h', '1d'],
+});
+
+// Without a feed the host puts bars on the primary series itself. A feed
+// would make setSymbol, setInterval and reload() fetch through it.
+const bars = lib.generateBars(1700000000, 240, 3600);
+widget.series.setData(bars);
+widget.chart.timeScale.fitContent(160);
+
+// The chrome's own facts arrive as events; the chart's bus is still there on widget.chart.
+widget.on('interval', function (e) {
+  widget.context.status('Interval ' + e.interval + ' (no feed wired, so the bars stay)');
+});
+return widget;`} />
+
+Every option, event and theming token is on [The Widget Tier](/docs/widget).
+
 ## Custom indicators
 
 The 102 built-ins are not special-cased. Each is a descriptor - inputs, plots and a
@@ -116,6 +146,73 @@ A descriptor can also supply `draws` for free-standing lines, boxes and labels,
 `levels` for data-derived horizontals, `fills` between plots, `table` for an on-chart
 grid, and `alerts` the chart evaluates for you. See
 [Indicators](/docs/indicators) for the full contract.
+
+## Render backends and vector export
+
+The series pass goes through a render backend port. `renderer: 'auto'` takes the WebGL2
+backend from `openalgo-charts/webgl` where the device has WebGL2 and the 2D path
+otherwise, decided once at construction; `chart.rendererKind` reports which one is
+painting. Pan and zoom: the candles are batched into one GPU draw call per frame and
+composited into the pane's own canvas, so screenshots, drawings, axes and text are
+unchanged.
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el, { renderer: 'auto' });
+const bars = lib.generateBars(1700000000, 600, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(240);
+
+// Decided once, at construction: 'webgl2' where WebGL2 works, else 'canvas2d'.
+el.style.position = 'relative';
+const tag = document.createElement('div');
+tag.style.cssText = 'position:absolute;right:64px;bottom:30px;z-index:5;font:12px ui-monospace,monospace;background:rgba(0,0,0,.55);color:#e6edf3;padding:4px 8px;border-radius:6px;pointer-events:none';
+function show(note) { tag.textContent = 'rendererKind: ' + chart.rendererKind + (note ? '  ' + note : ''); }
+show(lib.isWebGL2Supported() ? '' : '(no WebGL2 on this device)');
+// A lost context moves the chart to the 2D path for the session and says so once.
+chart.on('renderer:fallback', function (e) { show('(fell back: ' + e.reason + ')'); });
+el.appendChild(tag);
+return chart;`} />
+
+`chart.exportSVG()` writes the same frame as a standalone vector document: axis labels
+and tags stay text, lines stay lines, and nothing transient (crosshair, hover, drag) is in
+it. The right half below is the string the left half returned, inlined as markup and
+re-exported as you pan or zoom the live chart.
+
+<RunnableExample height={360} code={`el.style.display = 'flex';
+el.style.gap = '10px';
+const live = document.createElement('div');
+live.style.cssText = 'flex:1 1 0;min-width:0;height:100%;position:relative';
+const out = document.createElement('div');
+out.style.cssText = 'flex:1 1 0;min-width:0;height:100%;overflow:hidden;border:1px dashed #5b6478;border-radius:6px;line-height:0';
+el.appendChild(live);
+el.appendChild(out);
+
+const chart = lib.createChart(live);
+const bars = lib.generateBars(1700000000, 120, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addPriceLine({ price: bars[bars.length - 1].close, color: '#f5a623', lineWidth: 1, dashed: true, id: 'last' });
+chart.timeScale.fitContent(120);
+
+// One export per frame at most: the string is the whole paint, so exporting
+// on every zoom event during a wheel glide would repeat the work.
+let queued = false;
+function exportNow() {
+  // Sized to the target panel rather than the live chart: the chart lays
+  // itself out for the export and puts the live layout back before returning.
+  // queued stays set until the export is done, so nothing the export itself
+  // does can schedule the next one: an export that re-queued on its own
+  // relayout would run once per frame for as long as the page is open.
+  try { out.innerHTML = chart.exportSVG({ width: out.clientWidth, height: out.clientHeight }); }
+  finally { queued = false; }
+}
+function queueExport() { if (!queued) { queued = true; requestAnimationFrame(exportNow); } }
+chart.on('resize', queueExport);   // the first measured layout, and any later one
+chart.on('zoom', queueExport);
+chart.on('pan', queueExport);
+requestAnimationFrame(function () { requestAnimationFrame(queueExport); });
+return chart;`} />
+
+The options, the fallback rules and the serialising context behind the export are on
+[Render Backends & SVG Export](/docs/rendering).
 
 ## Copy-paste snippets
 

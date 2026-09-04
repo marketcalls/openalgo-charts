@@ -4,7 +4,7 @@
 
 Source of truth: `src/core/chart.ts` (constructor and `destroy`), `website/pages/docs/frameworks.mdx`.
 
-Every pattern below is taken from a real production consumer — a React + TypeScript trading terminal that lives in the **OpenAlgo application repo, not in this package**: `openalgo/frontend/src/components/trading/ChartPane.tsx` (774 lines, the lifecycle component), `openalgo/frontend/src/lib/trading/terminal.ts` (1840 lines, the orchestration layer), and the simpler `openalgo/frontend/src/components/portfolio/PortfolioLineChart.tsx`.
+Every pattern below is taken from a real production consumer, a React + TypeScript trading terminal that lives in the **OpenAlgo application repo, not in this package**: `openalgo/frontend/src/components/trading/ChartPane.tsx` (774 lines, the lifecycle component), `openalgo/frontend/src/lib/trading/terminal.ts` (1840 lines, the orchestration layer), and the simpler `openalgo/frontend/src/components/portfolio/PortfolioLineChart.tsx`.
 
 ## The lifecycle rule
 
@@ -27,13 +27,13 @@ useEffect(() => {
 
 **Never hold the chart in `useState`.** `createChart` returns a mutable object graph with a running rAF loop; storing it in state schedules a re-render on every swap and gives React a value it will try to compare. A ref is the correct box.
 
-**Never call `createChart` in the component body, in `useMemo`, or in `useLayoutEffect` before the ref is attached.** The constructor reads `container.clientWidth/clientHeight`, calls `getComputedStyle`, writes inline styles, appends a live region, and installs a `ResizeObserver` — it needs a mounted element.
+**Never call `createChart` in the component body, in `useMemo`, or in `useLayoutEffect` before the ref is attached.** The constructor reads `container.clientWidth/clientHeight`, calls `getComputedStyle`, writes inline styles, appends a live region, and installs a `ResizeObserver`, it needs a mounted element.
 
 **`destroy()` does not reset the container's inline styles or ARIA attributes.** It stops the loop, disconnects the `ResizeObserver`, removes every input listener, removes the live region, and detaches each pane element. `position`, `display: flex`, `background` and `touch-action: none` stay on the element; re-creating into the same node is safe. The production terminal still clears `container.innerHTML = ''` before a rebuild, which is a cheap guard against anything a host appended.
 
 ## Keep chart orchestration outside React
 
-This is the headline lesson from the production consumer. `terminal.ts` is a plain class — no React import. It owns the chart, the feeds, the tick path, the order lines, the drawing controller and the indicator list. React owns only the toolbar, the dialogs and the menu. The class exposes a constructor, `init(): Promise<void>`, `destroy()`, and imperative setters (`setInterval`, `setChartType`, `setProduct`, `setQty`, `loadSymbol`).
+This is the headline lesson from the production consumer. `terminal.ts` is a plain class, no React import. It owns the chart, the feeds, the tick path, the order lines, the drawing controller and the indicator list. React owns only the toolbar, the dialogs and the menu. The class exposes a constructor, `init(): Promise<void>`, `destroy()`, and imperative setters (`setInterval`, `setChartType`, `setProduct`, `setQty`, `loadSymbol`).
 
 The React side is then a fixed shape regardless of how much the class does:
 
@@ -53,7 +53,7 @@ Why this shape wins:
 
 - A 60 fps tick stream never enters React state. The terminal writes the OHLC legend with `legendEl.innerHTML` and repaints the canvas; no component re-renders.
 - Callbacks are a bag passed once at construction (`onReady`, `onToast`, `onWsState`, `onSymbolLoaded`, `onDrawChange`, `onIndicatorsChange`, `onIndicatorSettings`, `onDrawSelect`, `onDrawTextEdit`). Only low-frequency, UI-shaped events reach `setState`.
-- Unmount is one `destroy()` call — no per-subscription cleanup list to keep in sync.
+- Unmount is one `destroy()` call, no per-subscription cleanup list to keep in sync.
 - The chart can be rebuilt (theme change, chart-type change) without React knowing: `buildChart()` snapshots drawings to JSON, destroys the chart, creates a new one, and re-applies indicators, grid, drawings and price lines.
 
 **Callbacks that read the instance must go through the ref, not a closure variable.** In the production effect the callback bag is built before `new TradingTerminal(...)` assigns `terminal`, so a callback body that referenced the local would read `undefined`. It reads `terminalRef.current` instead.
@@ -72,11 +72,11 @@ useEffect(() => {
 
 | Call | Use when | Cost |
 |---|---|---|
-| `series.setData(items)` | the whole array changed — new symbol, new interval, a recomputed transform | replaces all rows |
-| `series.update(item)` | one tick arrived — updates the last item in place, or appends when the time advances | O(1) |
+| `series.setData(items)` | the whole array changed, new symbol, new interval, a recomputed transform | replaces all rows |
+| `series.update(item)` | one tick arrived, updates the last item in place, or appends when the time advances | O(1) |
 | `series.prependData(items)` | history paging pulled older bars | merges at the left edge |
 
-The production terminal calls `setData` on every tick rather than `update`, because a transform (Renko, Range) can turn one new raw bar into a different number of elements — the transformed array is recomputed wholesale. Use `update` only when the series maps 1:1 to raw bars.
+The production terminal calls `setData` on every tick rather than `update`, because a transform (Renko, Range) can turn one new raw bar into a different number of elements, the transformed array is recomputed wholesale. Use `update` only when the series maps 1:1 to raw bars.
 
 **Preserve the viewport across a data reload.** `setData` does not move the scales, but a prepend shifts every logical index:
 
@@ -114,7 +114,7 @@ const off = chart.on('indicatorSettings', (p) => {
 | Chart hook | Host UI it drives |
 |---|---|
 | `chart.on('indicatorSettings', cb)` | the indicator settings dialog; payload is `{ instanceId, indicatorId, paneIndex }` |
-| `chart.on('indicatorRemoved', cb)` | re-read `chart.indicators()` — the legend's own x can remove one behind your back |
+| `chart.on('indicatorRemoved', cb)` | re-read `chart.indicators()`, the legend's own x can remove one behind your back |
 | `chart.on('draw:tool' \| 'draw:select' \| 'draw:add' \| 'draw:remove' \| 'draw:update', cb)` | the drawing rail's enabled state and the style popover |
 | `chart.subscribeCrosshairMove(cb)` | an OHLC legend or tooltip; `e.bar`, `e.index`, `e.point` |
 | `chart.subscribeClick(cb)` / `chart.subscribeDrag(move, end)` | order-line cancel and drag-to-modify |
@@ -124,19 +124,19 @@ Build the settings form from the descriptor, not per indicator. `registeredIndic
 
 Drawing tools: import `openalgo-charts/draw` lazily on first use, construct one `DrawingController` per chart, and re-attach it after any rebuild by round-tripping `toJSON()` / `fromJSON()`. See [drawing-tools](drawing-tools.md).
 
-Symbol and interval switching are plain imperative setters on the orchestration class — `setInterval(iv)`, `setChartType(v)`, `loadSymbol(row)`. React sets its own display state and forwards the call; it never diffs chart internals.
+Symbol and interval switching are plain imperative setters on the orchestration class, `setInterval(iv)`, `setChartType(v)`, `loadSymbol(row)`. React sets its own display state and forwards the call; it never diffs chart internals.
 
 ## Strict Mode
 
-React 18 Strict Mode mounts, unmounts and remounts every effect in development. The chart survives because `destroy()` is complete and `createChart` is idempotent against an already-used container. To keep it clean: put the create/destroy pair in one effect with a returned cleanup (never split them across two effects); null the ref in the cleanup so the second mount cannot see a destroyed instance; guard async work with a liveness flag captured per effect run; and do not try to memoize the chart across the double invoke — building a second chart and throwing it away is the intended behaviour.
+React 18 Strict Mode mounts, unmounts and remounts every effect in development. The chart survives because `destroy()` is complete and `createChart` is idempotent against an already-used container. To keep it clean: put the create/destroy pair in one effect with a returned cleanup (never split them across two effects); null the ref in the cleanup so the second mount cannot see a destroyed instance; guard async work with a liveness flag captured per effect run; and do not try to memoize the chart across the double invoke, building a second chart and throwing it away is the intended behaviour.
 
 ## Next.js and SSR
 
 `createChart` touches `document` and `window` at construction. It must never run on the server.
 
-Option 1 — `useEffect` alone. Effects do not run during SSR, so the component above works unchanged in the App Router (mark the file `'use client'`).
+Option 1, `useEffect` alone. Effects do not run during SSR, so the component above works unchanged in the App Router (mark the file `'use client'`).
 
-Option 2 — dynamic import when you also want a separate chunk or want to silence a hydration warning:
+Option 2, dynamic import when you also want a separate chunk or want to silence a hydration warning:
 
 ```tsx
 const Chart = dynamic(() => import('../components/Chart'), { ssr: false });
@@ -169,7 +169,7 @@ export function ChartPane({ bars, seriesType = 'candlestick', ariaLabel, onHover
   hoverRef.current = onHover;
 
   // Create once. seriesType is in the deps because a series type cannot change
-  // in place — see chart-types.md.
+  // in place, see chart-types.md.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -206,7 +206,7 @@ The container needs a resolved height. A parent with `position: absolute; inset:
 
 ## Vue and plain JS hosts
 
-Same two-step contract, different hook names. Vue 3: `createChart` in `onMounted` with a template ref, `chart.destroy()` in `onUnmounted`, chart held in a plain `let` — **not** in `ref()` or `reactive()`, which would deep-proxy the instance. Svelte: `onMount` returning the destroy function. Angular: `ngAfterViewInit` / `ngOnDestroy` with `@ViewChild`. Plain JS: call `createChart(el)` once and `chart.destroy()` when you remove the node. Full snippets in `website/pages/docs/frameworks.mdx`.
+Same two-step contract, different hook names. Vue 3: `createChart` in `onMounted` with a template ref, `chart.destroy()` in `onUnmounted`, chart held in a plain `let`, **not** in `ref()` or `reactive()`, which would deep-proxy the instance. Svelte: `onMount` returning the destroy function. Angular: `ngAfterViewInit` / `ngOnDestroy` with `@ViewChild`. Plain JS: call `createChart(el)` once and `chart.destroy()` when you remove the node. Full snippets in `website/pages/docs/frameworks.mdx`.
 
 The orchestration-class pattern is framework-independent and is the recommended shape for any host beyond a single static series.
 

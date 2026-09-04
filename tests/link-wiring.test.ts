@@ -26,7 +26,7 @@ import {
   registerInterval, unregisterInterval, registeredIntervals, resolveInterval,
   tryResolveInterval, isKnownInterval, bucketStartOf, nextBucketStart,
   isTimeBucketed, UnknownIntervalError,
-  InvalidationLevel, ShortcutManager, BUILTIN_COMMANDS, isReservedCombo,
+  type InvalidationLevel, ShortcutManager, BUILTIN_COMMANDS, isReservedCombo,
 } from '../src/index';
 import type {
   LinkChart, LinkOptions, LinkMemberOptions, ResolvedLinkOptions,

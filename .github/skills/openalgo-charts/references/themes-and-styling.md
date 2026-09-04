@@ -46,11 +46,11 @@ One plain object drives chrome, series defaults and the trade layer. All fields 
 | Key | Notes |
 |---|---|
 | `lastPriceUp` / `lastPriceDown` | Last-price tag background by direction. |
-| `lastPriceText` | Tag text colour — **also the crosshair tag text colour**. |
+| `lastPriceText` | Tag text colour, **also the crosshair tag text colour**. |
 
 **Trade layer**
 
-`buy`, `sell`, `profit`, `loss` — consumed by the trading controller and its primitives, see [trading](trading.md).
+`buy`, `sell`, `profit`, `loss`, consumed by the trading controller and its primitives, see [trading](trading.md).
 
 ## darkTheme vs lightTheme
 
@@ -88,7 +88,7 @@ chart.setTheme(lightTheme);                            // live swap, no recreate
 chart.applyOptions({ theme: darkTheme, grid: { vertLines: false } });
 ```
 
-A theme is a plain object — spread a built-in and override:
+A theme is a plain object, spread a built-in and override:
 
 ```ts
 const custom = { ...darkTheme, background: '#0b0f17', upColor: '#00b386', grid: '#161b27' };
@@ -106,7 +106,7 @@ import { verticalGradient } from 'openalgo-charts';
 const fill = verticalGradient(ctx, plotHeightDevicePx, 'rgba(41,98,255,0.3)', 'rgba(41,98,255,0)');
 ```
 
-Returns a top-to-bottom `CanvasGradient` for a custom renderer or primitive. Cached in a `WeakMap` keyed by the 2D context, then by rounded height plus both colour strings — a `CanvasGradient` belongs to the context that created it, so never share one across canvases.
+Returns a top-to-bottom `CanvasGradient` for a custom renderer or primitive. Cached in a `WeakMap` keyed by the 2D context, then by rounded height plus both colour strings, a `CanvasGradient` belongs to the context that created it, so never share one across canvases.
 
 ## Series style overrides
 
@@ -117,17 +117,17 @@ Returns a top-to-bottom `CanvasGradient` for a custom renderer or primitive. Cac
 | `upColor` / `downColor` | `upColor` / `downColor` | candle family, `bar`, `high-low`, `column` |
 | `borderUpColor` / `borderDownColor` | `upColor` / `downColor` | candle family |
 | `wickUpColor` / `wickDownColor` | `wickUpColor` / `wickDownColor` | candle family |
-| `borderVisible` / `wickVisible` | — (both default `true`) | candle family |
+| `borderVisible` / `wickVisible` | none (both default `true`) | candle family |
 | `color` | `lineColor` | `line`, `line-markers`, `step`, `area` |
 | `closeColor` | `lineColor` | `hlc-area` |
 | `areaTopColor` / `areaBottomColor` | `areaTopColor` / `areaBottomColor` | `area` |
 | `topColor` / `bottomColor` | `baselineTopLine` / `baselineBottomLine` | `baseline` |
 | `areaTopColor` / `areaBottomColor` | `baselineTopFill` / `baselineBottomFill` | `baseline` |
-| `color` | **none** — hardcoded `#3a4666` | `histogram` |
-| `lineWidth` | — (default `1.5`) | line family |
-| `lineStyle` | — (default `'solid'`) | `line`, `line-markers`, `step` |
-| `markers`, `markersOnly`, `markerRadius` | — (radius default `2`) | line family |
-| `visible`, `title`, `priceLineVisible`, `lastValueVisible` | — (all default on/true) | every type |
+| `color` | **none**: hardcoded `#3a4666` | `histogram` |
+| `lineWidth` | none (default `1.5`) | line family |
+| `lineStyle` | none (default `'solid'`) | `line`, `line-markers`, `step` |
+| `markers`, `markersOnly`, `markerRadius` | none (radius default `2`) | line family |
+| `visible`, `title`, `priceLineVisible`, `lastValueVisible` | none (all default on/true) | every type |
 
 `lastValueVisible` tags every series on the readout scale, each in its own plot colour, not just the instrument. A series currently plotting a non-number draws no tag, so a study that is `na` says nothing rather than repeating a stale reading. Tags resolve against the ladder and each other by priority: the last price wins, a series value beats a plain tick, and two series values a tag-height apart resolve by series order rather than flickering.
 
@@ -141,7 +141,7 @@ series.applyOptions({ visible: false });          // hides it and drops it from 
 
 **`histogram` is the one series colour the theme cannot reach.** Its `color` falls back to `#3a4666` regardless of palette, so a themed volume overlay must set `style.color` (or per-item `bar.color`) itself.
 
-**`priceLineVisible: false` and `lastValueVisible: false` only take effect on the first `isPriceSeries` series mapped to the pane's right scale** — that is the only series the last-price line and tag follow.
+**`priceLineVisible: false` and `lastValueVisible: false` only take effect on the first `isPriceSeries` series mapped to the pane's right scale**: that is the only series the last-price line and tag follow.
 
 ## legendOffset
 
@@ -162,11 +162,11 @@ chart.addSeries('histogram', { priceScaleId: '', priceFormat: { type: 'volume' }
 chart.addSeries('area',      { priceFormat: { type: 'custom', formatter: (v) => 'Rs ' + v.toFixed(2) } });
 ```
 
-- `'price'` — sets `minMove` on the scale. `precision: n` is converted to `minMove = 10^-n`. With neither key the option does nothing.
-- `'volume'` — installs `compactVolume` (exported): `1.20K` / `3.40M` / `5.60B`, and `Math.round` below 1000.
-- `'custom'` — installs `formatter` directly. The variant accepts **only** `type` and `formatter`; to also change tick precision call `series.priceScale().setOptions({ minMove })`.
+- `'price'`: sets `minMove` on the scale. `precision: n` is converted to `minMove = 10^-n`. With neither key the option does nothing.
+- `'volume'`: installs `compactVolume` (exported): `1.20K` / `3.40M` / `5.60B`, and `Math.round` below 1000.
+- `'custom'`: installs `formatter` directly. The variant accepts **only** `type` and `formatter`; to also change tick precision call `series.priceScale().setOptions({ minMove })`.
 
-Chart-wide formatting is `ChartOptions.priceFormatter` / `chart.setPriceFormatter(fn | null)`, which overrides every pane's right-scale formatter — see [core-api](core-api.md).
+Chart-wide formatting is `ChartOptions.priceFormatter` / `chart.setPriceFormatter(fn | null)`, which overrides every pane's right-scale formatter, see [core-api](core-api.md).
 
 ## Host chrome: the UI standard
 

@@ -2,7 +2,7 @@
   {
     "name": "Base engine (chart types + indicator registry + watermark + shortcuts + trading API)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "62 kB",
+    "limit": "67 kB",
     "brotli": true
   },
   {
@@ -11,7 +11,7 @@
       "dist/openalgo-charts.mjs",
       "dist/openalgo-charts.trade.mjs"
     ],
-    "limit": "70 kB",
+    "limit": "75 kB",
     "brotli": true
   },
   {
@@ -23,7 +23,7 @@
   {
     "name": "Draw tier (51 drawing tools + controller)",
     "path": "dist/openalgo-charts.draw.mjs",
-    "limit": "16 KB",
+    "limit": "26 KB",
     "brotli": true
   },
   {
@@ -39,6 +39,29 @@
     "brotli": true
   },
   {
+    "name": "WebGL2 tier (GPU series backend)",
+    "path": "dist/openalgo-charts.webgl.mjs",
+    "limit": "7 kB",
+    "brotli": true
+  },
+  {
+    "name": "Widget tier (shell, top bar, drawing rail, status line, dialogs, keymap, styles)",
+    "path": "dist/openalgo-charts.widget.mjs",
+    "limit": "36 kB",
+    "brotli": true
+  },
+  {
+    "name": "Widget terminal (base + draw + indicators + widget: what one createWidget call loads)",
+    "path": [
+      "dist/openalgo-charts.mjs",
+      "dist/openalgo-charts.draw.mjs",
+      "dist/openalgo-charts.indicators.mjs",
+      "dist/openalgo-charts.widget.mjs"
+    ],
+    "limit": "156 kB",
+    "brotli": true
+  },
+  {
     "name": "Everything (all tiers, full package)",
     "path": [
       "dist/openalgo-charts.mjs",
@@ -46,9 +69,11 @@
       "dist/openalgo-charts.transform.mjs",
       "dist/openalgo-charts.profile.mjs",
       "dist/openalgo-charts.indicators.mjs",
-      "dist/openalgo-charts.draw.mjs"
+      "dist/openalgo-charts.draw.mjs",
+      "dist/openalgo-charts.webgl.mjs",
+      "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "126 kB",
+    "limit": "183 kB",
     "brotli": true
   }
 ]

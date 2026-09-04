@@ -50,6 +50,12 @@ export interface RendererEntry {
   defaultStyle: SeriesStyle;
   /** True for the price series whose last close drives the last-price line. */
   isPriceSeries: boolean;
+  /**
+   * Paint the visible items on a bitmap-scope 2D context. On screen the pane
+   * reaches this through its render backend (src/render/backend.ts); the 2D
+   * backend calls it as is, and the vector export calls it directly on the
+   * serialising target.
+   */
   draw(
     ctx: CanvasRenderingContext2D,
     items: readonly DrawItem[],

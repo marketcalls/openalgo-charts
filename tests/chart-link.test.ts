@@ -17,7 +17,7 @@ import { darkTheme } from '../src/theme';
 import { TimeScale } from '../src/scale/time-scale';
 import { PriceScale } from '../src/scale/price-scale';
 import {
-  LinkGroup, createLinkGroup, followerIndex, followerRange,
+  type LinkGroup, createLinkGroup, followerIndex, followerRange,
   LinkCrosshair, LINK_CROSSHAIR_ALPHA,
   type LinkChart, type LinkDataLayer,
 } from '../src/link/index';

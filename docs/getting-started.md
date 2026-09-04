@@ -1,7 +1,7 @@
 # Getting started
 
 OpenAlgo Charts is a dependency-free, canvas-based financial charting engine.
-The base engine is about **~60.88 KB Brotli**; the full package (all tiers) is about **~124.47 KB Brotli**.
+The base engine is **66.39 KB Brotli**; the full package (all eight tiers) is **182.34 KB Brotli**, measured with `size-limit` on the 2.0.0 build.
 
 ## Install
 
@@ -19,12 +19,12 @@ const series = chart.addSeries('candlestick');
 series.setData([
   { time: 1705286700, open: 100, high: 101, low: 99.5, close: 100.6, volume: 1200 },
   { time: 1705286760, open: 100.6, high: 101.4, low: 100.2, close: 101.1, volume: 900 },
-  // …
+  // ...
 ]);
 ```
 
 Time is **UTC seconds** internally. Feed adapters convert broker formats at the
-edge (IST date strings, epoch milliseconds) — see the OpenAlgo adapter below.
+edge (IST date strings, epoch milliseconds); see the OpenAlgo adapter below.
 
 ## Live updates
 
@@ -42,7 +42,7 @@ ws.onTick(({ price, ltq, timeSec }) => {
 
 ## Loadable tiers
 
-Only pay for what you use — each tier is a separate entry point:
+Only pay for what you use: each tier is a separate entry point.
 
 | Import | Contents |
 |---|---|
@@ -52,6 +52,8 @@ Only pay for what you use — each tier is a separate entry point:
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow |
 | `openalgo-charts/indicators` | 102 built-in indicators (SMA/EMA/MACD/Bollinger/RSI/ADX/...) + the Tier-2 contract |
 | `openalgo-charts/draw` | 51 drawing tools + a headless drawing controller |
+| `openalgo-charts/webgl` | the WebGL2 series backend behind `renderer: 'auto'` |
+| `openalgo-charts/widget` | the chart with its chrome in one `createWidget` call: top bar, drawing rail, status line, dialogs, shortcuts, persistence. The only tier that ships DOM |
 
 ## OpenAlgo data
 
@@ -68,7 +70,7 @@ const bars = await feed.getBars({
 series.setData(bars);
 ```
 
-Live LTP / Quote / Depth come from the WS adapter — feed its LTP ticks through a
+Live LTP / Quote / Depth come from the WS adapter. Feed its LTP ticks through a
 `CandleBuilder` and call `series.update()`:
 
 ```ts
@@ -85,4 +87,6 @@ can be wired with a small adapter. Verify the exact REST paths against your
 running OpenAlgo build before production use.
 
 See [guides.md](./guides.md) for chart types, trading, profiles, and writing
-custom chart styles / primitives. Runnable demos live in [`../examples`](../examples/index.html).
+custom chart styles / primitives, [widget.md](./widget.md) for the one-call terminal,
+and [migrating-to-2.md](./migrating-to-2.md) if you are coming from 1.9.x. Runnable
+demos live in [`../examples`](../examples/index.html).

@@ -13,6 +13,11 @@ import type { LogicalRange } from '../scale/time-scale';
 import type { PriceScaleOptions, PriceScaleMode, PriceScale } from '../scale/price-scale';
 import { medianBarInterval, type TickMarkType, type SessionClockOptions, type BarCountdownOptions } from '../render/axis';
 import { resolvePlotMargins, type CanvasOptions, type GridOptions } from '../render/grid';
+import { SvgContext } from '../render/svg-export';
+import {
+  resolveRenderBackend, type IRenderBackend, type RenderBackendFactory, type RenderBackendKind, type RendererChoice,
+  type RendererFallbackReason,
+} from '../render/backend';
 import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type SeriesRecord, type PriceScaleId } from '../model/series';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
@@ -41,6 +46,11 @@ const KINETIC_VELOCITY_HALFLIFE_MS = 50;
 
 /** Hard ceiling on glide frames, about ten seconds at 60fps. See `_startKinetic`. */
 const KINETIC_MAX_FRAMES = 600;
+/** Same ceiling, same reason, for the zoom glide (see `_startKinetic`). */
+const ZOOM_GLIDE_MAX_FRAMES = 600;
+
+/** What a wheel zoom holds still. */
+export type ZoomAnchor = 'cursor' | 'right';
 
 const INSTANCE_PALETTE: readonly string[] = [
   '#f5a623', '#26a69a', '#ab47bc', '#ef5350',
@@ -58,6 +68,7 @@ import type { SeriesStyle } from '../render/series-style';
 import type { Bar, SeriesDataItem } from '../model/bar';
 import { toBar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
+import { ZoomGlide } from '../input/zoom-glide';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
 import { ShortcutManager } from '../input/shortcuts';
 import type { ShortcutManagerOptions } from '../input/shortcuts';
@@ -121,6 +132,32 @@ export interface AxisChromeOptions {
   clock?: () => number;
 }
 
+/** Options for `Chart.exportSVG`. */
+export interface ExportSvgOptions {
+  /**
+   * Document width in media px. Absent means the live chart width. A different
+   * size lays the chart out afresh for the export (the same bar spacing over a
+   * wider or narrower plot, every scale re-measured for its new height) and
+   * puts the live layout back before returning.
+   */
+  width?: number;
+  /** Document height in media px. Absent means the live chart height. */
+  height?: number;
+  /**
+   * Paint the theme background under the chart. Default true. Off, the
+   * document has no ground of its own and takes the colour of whatever page
+   * it is placed on, which is what an embedded figure usually wants.
+   */
+  background?: boolean;
+  /**
+   * The pixel ratio the paint runs at. Only 1 is accepted: SVG has no device
+   * pixels, and a renderer asked for 2 would snap its hairlines to half-media-
+   * pixel edges that scale as a blur. Named so the option reads the same as
+   * the PNG path and a future scaled export has a place to land.
+   */
+  dpr?: 1;
+}
+
 export interface ChartOptions {
   document?: Document;
   pixelRatio?: () => number;
@@ -159,10 +196,45 @@ export interface ChartOptions {
   axisChrome?: AxisChromeOptions;
   /** Time source for kinetic animation (defaults to performance.now). */
   now?: () => number;
+  /**
+   * Ease a wheel zoom over a few frames instead of landing the whole step on
+   * one. Default true, matching the inertial pan a flick already gets: a chart
+   * that glides when panned and jumps when zoomed reads as two different
+   * instruments. Off restores the single-frame step.
+   */
+  animZoom?: boolean;
+  /**
+   * What a wheel zoom holds still: the bar under the cursor, or the right edge
+   * (the latest bar). Default `'cursor'`, which is what the chart has always
+   * done. `'right'` keeps the most recent bar pinned while history stretches
+   * away from it, which is what a live chart usually wants.
+   */
+  zoomAnchor?: ZoomAnchor;
   /** Enable OHLC-preserving conflation when zoomed out (§4.4). Default false. */
   conflate?: boolean;
   /** Conflation aggressiveness (default 1). */
   conflationFactor?: number;
+  /**
+   * Which backend paints the series. `'canvas2d'` (the default) is the 2D
+   * path every chart has always drawn with. `'webgl2'` asks for the GPU
+   * backend: it throws when the tier that registers it has not been imported
+   * (a missing import is a mistake in the code), and on a device where that
+   * tier finds no WebGL2 it falls back to `canvas2d` with one console warning
+   * (a property of the machine the host should still hear about). `'auto'`
+   * takes `webgl2` when it is registered and available on this device and
+   * `canvas2d` otherwise, silently. Decided once, at construction; read what
+   * was actually chosen from `rendererKind`. A GPU backend that loses its
+   * context later moves the chart to `canvas2d` for the rest of the session
+   * and emits 'renderer:fallback'.
+   */
+  renderer?: RendererChoice;
+  /**
+   * Build the backend directly, one call per pane, bypassing `renderer` and
+   * the registry. For a host bringing its own backend, and for tests that
+   * want to see what the pane asks a backend to paint. A factory that returns
+   * null gets the 2D backend for that pane.
+   */
+  renderBackend?: RenderBackendFactory;
   /**
    * Grid lines: visibility (both default to true) plus per-axis colour, dash,
    * width and spacing. Unset colours/dashes fall through to the theme.
@@ -275,6 +347,141 @@ export interface CrosshairMoveEvent {
   point: { x: number; y: number } | null;
   /** Pane under the cursor, or null on leave. */
   paneIndex?: number | null;
+  /**
+   * True while a pointer is held. Placement mode swallows the pan path, so
+   * this is the only way to tell a hover from a drag while it is still
+   * happening. Absent on the all-null leave payload.
+   */
+  pressed?: boolean;
+  /** Modifier keys held during the move. Absent on the leave payload. */
+  modifiers?: PointerModifiers;
+  /** Device behind the move. Absent on the leave payload. */
+  pointerType?: PointerKind;
+  /** Pressure as reported for the move (see `PointerSample`). Absent on the leave payload. */
+  pressure?: number;
+  /**
+   * Every position the pointer passed through since the last move, in the
+   * drag payload's space (container x, pane-local y), present only while
+   * `pressed`. Placement mode never arms a drag, so a freehand stroke reads
+   * its coalesced samples here.
+   */
+  samples?: PointerSample[];
+}
+
+/** Modifier keys held during a pointer gesture. */
+export interface PointerModifiers {
+  shift: boolean;
+  alt: boolean;
+  ctrl: boolean;
+  meta: boolean;
+}
+
+/** Device behind a pointer gesture. Anything the browser does not name reports as a mouse. */
+export type PointerKind = 'mouse' | 'touch' | 'pen';
+
+/**
+ * One position a pointer passed through during a drag, in the same media px
+ * space as the payload's `point` (container x, pane-local y). `pressure` is
+ * the pointer events convention: 0..1 from hardware that measures it, 0.5
+ * while a button that cannot is held, 0 when nothing is known.
+ */
+export interface PointerSample {
+  x: number;
+  y: number;
+  pressure: number;
+}
+
+/**
+ * What the engine reports about the physical pointer behind a gesture.
+ * `crosshair:move`, `click`, `drag` and `drag:end` all carry these keys.
+ */
+export interface PointerInfo {
+  modifiers: PointerModifiers;
+  pointerType: PointerKind;
+  pressure: number;
+}
+
+/** Payload of the `click` event (`chart.on('click', ...)`). */
+export interface ChartClickEvent extends PointerInfo {
+  /** `externalId` of the hit primitive, or null on empty plot. */
+  id: string | null;
+  /** Price under the press on that pane, or null off the plot. */
+  price: number | null;
+  /** UTC seconds under the press, interpolated between bars and past the right edge. */
+  time: number;
+  paneIndex: number;
+  /** Press position: container media x, pane-local media y. */
+  point: { x: number; y: number };
+  /** Set on the release half of a press-drag-release while a host is placing a shape. */
+  viaDrag?: boolean;
+  /**
+   * The same state as `modifiers`, in the flat form the draw tier has read
+   * since it shipped. `pressure` here is the pressure at the press, not the
+   * release, which always reads 0.
+   */
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}
+
+/** Payload of the `drag` event: a draggable primitive being moved. */
+export interface ChartDragEvent extends PointerInfo {
+  id: string;
+  price: number;
+  time: number;
+  paneIndex: number;
+  /** Where the gesture was grabbed, so a delta starts at the press rather than the first move. */
+  fromPrice: number;
+  fromTime: number;
+  /** Current pointer position: container media x, pane-local media y. */
+  point: { x: number; y: number };
+  /**
+   * Every position the pointer passed through since the previous `drag`,
+   * oldest first, the last one at `point`. Browsers deliver moves at frame
+   * rate and fold the positions between frames into the event; a freehand
+   * stroke drawn from `point` alone is a polyline of frame-rate corners.
+   */
+  samples: PointerSample[];
+}
+
+/** Payload of the `drag:end` event: the release that finished a primitive drag. */
+export interface ChartDragEndEvent extends PointerInfo {
+  id: string;
+  price: number;
+  time: number;
+  paneIndex: number;
+  /** Release position: container media x, pane-local media y. */
+  point: { x: number; y: number };
+}
+
+/**
+ * The slice of a pointer event the payload builders read. Structural so the
+ * same builders serve a coalesced sample, and so a field a browser omits
+ * degrades to the spec fallback instead of an `undefined` in a host's hands.
+ */
+type PointerLike = Partial<Pick<PointerEvent,
+  'shiftKey' | 'altKey' | 'ctrlKey' | 'metaKey' | 'pointerType' | 'pressure' | 'buttons'>>;
+
+/** The three pointer facts every gesture payload carries. */
+function pointerInfo(e: PointerLike): PointerInfo {
+  const kind = e.pointerType;
+  return {
+    modifiers: { shift: e.shiftKey === true, alt: e.altKey === true, ctrl: e.ctrlKey === true, meta: e.metaKey === true },
+    pointerType: kind === 'touch' || kind === 'pen' ? kind : 'mouse',
+    pressure: pointerPressure(e),
+  };
+}
+
+/**
+ * Pressure as the pointer events spec defines it: what the hardware measured,
+ * else 0.5 while a button is held and 0 otherwise. Browsers already report
+ * that stand-in for a mouse; the fallback covers an event that omits the
+ * field, so a host never reads `undefined` or a value outside 0..1.
+ */
+function pointerPressure(e: PointerLike): number {
+  const p = e.pressure;
+  if (typeof p === 'number' && Number.isFinite(p)) return Math.min(1, Math.max(0, p));
+  return (e.buttons ?? 0) !== 0 ? 0.5 : 0;
 }
 
 /**
@@ -348,6 +555,19 @@ export interface ContextMenuEvent {
   preventDefault(): void;
 }
 
+/**
+ * Payload of the 'renderer:fallback' event: the chart has moved every pane
+ * from a GPU backend to `canvas2d` for the rest of the session, because the
+ * device's context was lost or turned out unusable. The frame that noticed
+ * was already painted through 2D by the backend itself, so nothing went
+ * blank; this is the host's cue to update anything that shows the renderer.
+ */
+export interface RendererFallbackEvent {
+  from: RenderBackendKind;
+  to: 'canvas2d';
+  reason: RendererFallbackReason;
+}
+
 function defaultPixelRatio(): number {
   return typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
 }
@@ -408,6 +628,19 @@ export class Chart {
   private readonly _now: () => number;
   private readonly _conflate: boolean;
   private readonly _conflationFactor: number;
+  /**
+   * One backend per pane; see `ChartOptions.renderer` and `renderBackend`.
+   * Replaced by the 2D factory after a session fallback, so a pane added
+   * later matches the ones already on screen.
+   */
+  private _backendFactory: RenderBackendFactory;
+  /**
+   * The kind the first pane got. A factory may decline per pane, so this is
+   * what the chart actually paints with rather than what was asked for.
+   */
+  private _rendererKind: RenderBackendKind | null = null;
+  /** What the `renderer` option asked for, so a decline can be reported once. */
+  private readonly _requestedRenderer: RendererChoice | null;
   private _gridVert = true;
   private _gridHorz = true;
   /** The Canvas option block: overrides of the theme, never a copy of it. */
@@ -457,6 +690,14 @@ export class Chart {
   private _lastDragT = 0;
   private _dragVelocity = 0;
   private _kineticHandle: number | null = null;
+  private _zoomHandle: number | null = null;
+  /** The glide in flight, so a second wheel tick folds into it (see ZoomGlide.add). */
+  private _zoomGlide: ZoomGlide | null = null;
+  private _zoomGlideStart = 0;
+  private _zoomGlideApplied = 0;
+  private _zoomGlideX = 0;
+  private readonly _animZoom: boolean;
+  private readonly _zoomAnchor: ZoomAnchor;
   private readonly _firstDataId: { value: number | null } = { value: null };
   /** Handle + record of the primary price series (see `primarySeries`). */
   private _primary: { api: SeriesApi; record: SeriesRecord } | null = null;
@@ -495,8 +736,12 @@ export class Chart {
   private _downPane = 0;
   private _downX = 0;
   private _downLocalY = 0;
+  /** Pressure at the press; a click reports this, since its release always reads 0. */
+  private _downPressure = 0;
   private _dragId: string | null = null; // externalId of the primitive being dragged
   private _hoverId: string | null = null; // externalId of the primitive under the pointer
+  /** Whether that primitive draws below the overlay, so leaving it must repaint the base. */
+  private _hoverOnBase = false;
   private _overlayFrozen = false; // native context menu open: keep the save-image snapshot
   private _dragCb: ((externalId: string, price: number, time: number) => void) | null = null;
   private _dragEndCb: ((externalId: string, price: number, time: number) => void) | null = null;
@@ -559,8 +804,14 @@ export class Chart {
     const sc = options.shortcuts;
     this._shortcuts = sc === false ? null : (sc instanceof ShortcutManager ? sc : new ShortcutManager(sc ?? {}));
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
+    this._animZoom = options.animZoom ?? true;
+    this._zoomAnchor = options.zoomAnchor ?? 'cursor';
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
+    // Resolved here, before the first pane, so an unregistered explicit choice
+    // fails at construction rather than on the first frame.
+    this._backendFactory = options.renderBackend ?? resolveRenderBackend(options.renderer ?? 'canvas2d');
+    this._requestedRenderer = options.renderBackend === undefined ? (options.renderer ?? 'canvas2d') : null;
     this._priceFormatter = options.priceFormatter ?? null;
     this._priceScaleOptions = options.priceScale ?? null;
     this._timeFormatter = options.timeFormatter;
@@ -1256,9 +1507,11 @@ export class Chart {
   // `subscribe*` helpers. Names emitted by the core: 'ready', 'crosshair:move',
   // 'click', 'dblclick', 'hover', 'drag', 'drag:end', 'pan', 'zoom', 'resize',
   // 'lazy-load', 'paneAdded', 'paneRemoved', 'paneMoved', 'paneMaximized', 'paneResized',
-  // 'priceAxisMoved', 'indicatorRemoved', 'indicatorSettings', 'destroy'. The
+  // 'priceAxisMoved', 'indicatorRemoved', 'indicatorSettings', 'renderer:fallback',
+  // 'destroy'. The
   // trading layer routes its 'trading:*' events through here too, and the draw
-  // tier emits 'draw:*'.
+  // tier emits 'draw:*' plus the 2.0 pair 'drawing:select' and 'drawing:change'
+  // (the legacy names carry one id; the new ones carry the whole selection).
   //
   // 'symbol' is a name the *host* emits on this bus, not the core: the engine
   // has no instrument concept, and a link group listens for it to slave a grid
@@ -1725,6 +1978,94 @@ export class Chart {
     return out;
   }
 
+  /**
+   * The chart as a standalone SVG document: every pane's base and overlay
+   * paint, in the order the DOM stacks them, run once into a serialising
+   * context at pixel ratio 1. Text stays text (selectable, searchable) and
+   * lines stay lines, so the file scales without the blur a PNG picks up.
+   *
+   * Nothing transient is in it: no crosshair, no hover state, no drag. What is
+   * in it is exactly what the renderers, primitives and drawing tools draw,
+   * because it is the same code drawing. A primitive that paints through a
+   * call with no vector form (a bitmap logo, a shadow) is simply thinner in
+   * the export; see `SvgContext` for the list.
+   *
+   * Returns the string only. Saving it is the host's job, the way
+   * `downloadScreenshot` is the host-facing half of `takeScreenshot`:
+   * `new Blob([svg], { type: 'image/svg+xml' })` and an anchor is all it takes.
+   */
+  public exportSVG(options: ExportSvgOptions = {}): string {
+    // The type already says 1; an untyped caller asking for 2 gets told why
+    // rather than a document that looks the same and is not.
+    if (options.dpr !== undefined && options.dpr !== 1) {
+      throw new RangeError('exportSVG: dpr must be 1, SVG has no device pixels');
+    }
+    const width = Math.max(1, Math.round(options.width ?? this._width));
+    const height = Math.max(1, Math.round(options.height ?? this._height));
+    const background = options.background !== false;
+    const svg = new SvgContext(width, height, { background: background ? this._theme.background : undefined });
+    const g = svg.asCanvasContext();
+    // The same order as a frame: indicator recomputes land before anything is
+    // measured, so a study whose inputs changed this tick exports as it will
+    // next paint, not as it last did.
+    this._flushIndicators();
+    const liveWidth = this._width;
+    const liveHeight = this._height;
+    const resized = width !== liveWidth || height !== liveHeight;
+    if (resized) {
+      this._width = width;
+      this._height = height;
+      this._relayout(true);
+    }
+    try {
+      if (background && this._theme.background !== 'transparent') {
+        svg.fillStyle = this._theme.background;
+        svg.fillRect(0, 0, width, height);
+      }
+      const layout = this._paneLayout();
+      const topPane = this._topPaneIndex();
+      const bottomPane = this._bottomPaneIndex();
+      for (let i = 0; i < this._panes.length; i++) {
+        if (this._layoutWeight(i) <= 0) continue; // hidden behind a maximized pane
+        const pane = this._panes[i];
+        const ctx: PaneRenderContext = {
+          ...this._renderContext(i === bottomPane),
+          dpr: 1, hoverId: null, dragId: null, paintBackground: background,
+        };
+        // The DOM draws the separator as a 1px border on the pane box and lets
+        // the canvas start below it, its last row hidden by the overflow clip.
+        // The export reproduces that box exactly, or the second pane would sit
+        // one pixel higher than it does on screen.
+        const first = i === topPane;
+        const top = layout[i].top + (first ? 0 : 1);
+        const paneHeight = layout[i].height - (first ? 0 : 1);
+        if (!first) {
+          svg.fillStyle = this._theme.paneSeparator;
+          svg.fillRect(0, layout[i].top, width, 1);
+        }
+        svg.pushGroup(
+          { 'data-pane': i },
+          { translate: { x: 0, y: top }, clip: { x: 0, y: 0, width, height: paneHeight } },
+        );
+        // A Full frame's sequence for one pane, minus the crosshair.
+        pane.autoscale(ctx);
+        pane.paintBase(ctx, g);
+        pane.paintTop(null, ctx, g);
+        svg.popGroup();
+      }
+    } finally {
+      if (resized) {
+        this._width = liveWidth;
+        this._height = liveHeight;
+        this._relayout(true);
+        // Every auto scale was just measured against the export geometry; a
+        // Full frame measures it back against the screen's.
+        this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      }
+    }
+    return svg.toString();
+  }
+
   /** Chart-anchored primitives, re-homed by `_rehomeAnchored`. */
   private readonly _anchored: { primitive: IPrimitive; anchor: PrimitiveAnchor }[] = [];
 
@@ -1906,8 +2247,56 @@ export class Chart {
     this._updateAccessibleSummary();
   }
 
+  /**
+   * The render backend the chart is painting series with right now: what the
+   * first pane was given, which is the `renderer` option unless its factory
+   * declined (no WebGL2 on this device) and the 2D backend stood in, and
+   * `canvas2d` from the moment a GPU backend degrades ('renderer:fallback').
+   */
+  public get rendererKind(): RenderBackendKind {
+    return this._rendererKind ?? 'canvas2d';
+  }
+
+  /** The name `rendererKind` shipped under; the same value. */
+  public get renderer(): RenderBackendKind {
+    return this.rendererKind;
+  }
+
+  /** A backend for one more pane, with the 2D one standing in for a refusal. */
+  private _newBackend(): IRenderBackend {
+    const backend = this._backendFactory() ?? resolveRenderBackend('canvas2d')();
+    if (backend === null) throw new Error('openalgo-charts: the canvas2d render backend factory returned null');
+    if (this._rendererKind === null) {
+      this._rendererKind = backend.kind;
+      // An explicit ask that the device could not honour. Once, at the first
+      // pane, and only for an explicit kind: 'auto' promised nothing.
+      if (this._requestedRenderer !== null && this._requestedRenderer !== 'auto' && backend.kind !== this._requestedRenderer) {
+        // eslint-disable-next-line no-console
+        console.warn(`openalgo-charts: render backend "${this._requestedRenderer}" is unavailable on this device; using "${backend.kind}"`);
+      }
+    }
+    return backend;
+  }
+
+  /**
+   * Leave the GPU backend for good. Every pane is switched in the same call
+   * so the chart never paints half its panes on each path, later panes get
+   * the 2D factory, and the frame that noticed is repainted on the new
+   * backends (the one just painted went through the old backend's own 2D
+   * path, so nothing was blank in between).
+   */
+  private _fallbackToCanvas2d(reason: RendererFallbackReason): void {
+    const from = this.rendererKind;
+    this._backendFactory = resolveRenderBackend('canvas2d');
+    for (const pane of this._panes) pane.setBackend(this._newBackend());
+    this._rendererKind = 'canvas2d';
+    const event: RendererFallbackEvent = { from, to: 'canvas2d', reason };
+    this.emit('renderer:fallback', event);
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+  }
+
   private _addPane(weight = 1): Pane {
-    const pane = new Pane(this._doc);
+    const pane = new Pane(this._doc, this._newBackend());
     pane.weight = weight;
     // Pane 0 quotes the instrument by construction: it is where `addSeries`
     // puts a series that names no pane, and it exists before any host has said
@@ -2272,8 +2661,27 @@ export class Chart {
     this.emit('resize', { width, height });
   }
 
-  /** Distribute height across panes by weight; sync the shared time-scale width. */
-  private _relayout(): void {
+  /**
+   * Distribute height across panes by weight; sync the shared time-scale width.
+   *
+   * `geometryOnly` sizes the layout arithmetic (pane boxes, scale heights, the
+   * time-scale width) and leaves the DOM and the canvases alone. The vector
+   * export uses it to paint at a size that is not the screen's and then to put
+   * the screen's back, without clearing a canvas or moving a flex box on the
+   * way through.
+   */
+  private _relayout(geometryOnly = false): void {
+    if (geometryOnly) {
+      const total = this._weightTotal();
+      const bottomPane = this._bottomPaneIndex();
+      this._panes.forEach((pane, paneIndex) => {
+        const h = (this._height * this._layoutWeight(paneIndex)) / total;
+        pane.setLayoutSize(this._width, h);
+        pane.setScaleHeights(Math.max(0, h - (paneIndex === bottomPane ? this._timeAxisHeight : 0)));
+      });
+      this._timeScale.setWidth(Math.max(0, this._width - this._rightAxisWidth - this._leftAxisWidth));
+      return;
+    }
     this._syncTimeNavPane();
     // Weights just changed, so the pane at the chart's top may have too.
     this._syncLegendOffsets();
@@ -2682,6 +3090,16 @@ export class Chart {
         pane.paintTop(cross, ctx);
       }
     }
+    // After the loop, not inside it: swapping a pane's backend while its
+    // frame is half painted would hand the rest of that frame to a backend
+    // that never began one. The device is shared, so one pane's answer is
+    // every pane's.
+    if (this._rendererKind !== null && this._rendererKind !== 'canvas2d') {
+      for (const pane of this._panes) {
+        const reason = pane.backendDegradation;
+        if (reason !== null) { this._fallbackToCanvas2d(reason); break; }
+      }
+    }
   }
 
   // ── input handling ──────────────────────────────────────────────────────
@@ -2858,14 +3276,48 @@ export class Chart {
 
   private _localPoint(e: { clientX: number; clientY: number }): { x: number; y: number; pane: number; localY: number; paneHeight: number } {
     const rect = this._container.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    // Map Y to a pane by cumulative *weighted* heights — matches the DOM/canvas layout.
-    const layout = this._paneLayout();
+    return this._project(e.clientX - rect.left, e.clientY - rect.top, this._paneLayout());
+  }
+
+  /** Container media px to the pane under it and that pane's local y. */
+  private _project(x: number, y: number, layout: { top: number; height: number }[]): { x: number; y: number; pane: number; localY: number; paneHeight: number } {
+    // Map Y to a pane by cumulative weighted heights, matching the DOM/canvas layout.
     let pane = 0;
     for (let i = 0; i < layout.length; i++) if (y >= layout[i].top) pane = i;
     const pl = layout[pane] ?? { top: 0, height: this._height };
     return { x, y, pane, localY: y - pl.top, paneHeight: pl.height };
+  }
+
+  /**
+   * Every position a drag passed through since the previous move event, in
+   * the same space as the payload's `point`. The rect and layout are read once
+   * for the batch: a fast stroke coalesces several positions per frame, and
+   * each one going back to the DOM is layout work on the pointer path.
+   */
+  private _dragSamples(e: PointerEvent): PointerSample[] {
+    const coalesced = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+    const events: readonly PointerEvent[] = coalesced.length > 0 ? coalesced : [e];
+    const rect = this._container.getBoundingClientRect();
+    const layout = this._paneLayout();
+    const out: PointerSample[] = [];
+    for (const s of events) {
+      const p = this._project(s.clientX - rect.left, s.clientY - rect.top, layout);
+      out.push({ x: p.x, y: p.localY, pressure: pointerPressure(s) });
+    }
+    return out;
+  }
+
+  /**
+   * Pointer facts for a click. Modifiers and device come from the release,
+   * pressure from the press: a release always reads 0, which would leave the
+   * field carrying nothing on any device.
+   */
+  private _clickInfo(e: PointerLike): PointerInfo & { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean } {
+    const info = pointerInfo(e);
+    info.pressure = this._downPressure;
+    // The flat flags predate `modifiers` and the draw tier reads them; both
+    // stay so a host typed against either keeps working.
+    return { ...info, shiftKey: info.modifiers.shift, ctrlKey: info.modifiers.ctrl, metaKey: info.modifiers.meta };
   }
 
   private readonly _onPointerDown = (e: PointerEvent): void => {
@@ -2875,6 +3327,9 @@ export class Chart {
     // menu — arming the drag state then makes the chart pan with no button held.
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     this._stopKinetic();
+    // Taking hold of the chart ends a zoom glide too: the viewport is the
+    // user's again the moment they touch it.
+    this._stopZoomGlide();
     const p = this._localPoint(e);
     this._pointers.set(e.pointerId, { x: p.x, y: p.y, pane: p.pane });
     // `setPointerCapture` throws NotFoundError when the pointer id is not
@@ -2887,6 +3342,7 @@ export class Chart {
     this._downPane = p.pane;
     this._downX = p.x;
     this._downLocalY = p.localY;
+    this._downPressure = pointerPressure(e);
 
     // Pane divider: pressing within a few px of the boundary between two panes
     // starts a resize, redistributing weight between them.
@@ -3039,12 +3495,16 @@ export class Chart {
       const price = this._panes[this._downPane].yToPrice(p.localY);
       const time = this._xToTime(p.x);
       this._dragCb?.(this._dragId, price, time);
-      this.emit('drag', {
+      const drag: ChartDragEvent = {
         id: this._dragId, price, time, paneIndex: this._downPane,
         // The grab origin, so a consumer's delta starts at the press instead of
         // the first move — otherwise the shape lags the cursor by one event.
         fromPrice: this._dragFrom.price, fromTime: this._dragFrom.time,
-      });
+        point: { x: p.x, y: p.localY },
+        samples: this._dragSamples(e),
+        ...pointerInfo(e),
+      };
+      this.emit('drag', drag);
       return;
     }
     if (this._dragging) {
@@ -3074,7 +3534,7 @@ export class Chart {
       this._emitViewport('pan');
       return;
     }
-    this._updateCursor(p.pane, p.x, p.localY, p.y);
+    this._updateCursor(p.pane, p.x, p.localY, p.y, e);
   };
 
   private readonly _onPointerUp = (e: PointerEvent): void => {
@@ -3108,7 +3568,12 @@ export class Chart {
       const price = this._panes[this._downPane].yToPrice(p.localY);
       const time = this._xToTime(p.x);
       this._dragEndCb?.(this._dragId, price, time);
-      this.emit('drag:end', { id: this._dragId, price, time, paneIndex: this._downPane });
+      const end: ChartDragEndEvent = {
+        id: this._dragId, price, time, paneIndex: this._downPane,
+        point: { x: p.x, y: p.localY },
+        ...pointerInfo(e),
+      };
+      this.emit('drag:end', end);
       // A press on a draggable primitive arms a drag, so this branch used to
       // swallow the release — and a plain click on a drawing never reached the
       // click path, leaving it unselectable. A gesture that never moved is a
@@ -3116,11 +3581,13 @@ export class Chart {
       if (!this._dragMoved) {
         const id = this._dragId;
         this._clickCb?.(id);
-        this.emit('click', {
+        const click: ChartClickEvent = {
           id, price, time,
           paneIndex: this._downPane,
           point: { x: this._downX, y: this._downLocalY },
-        });
+          ...this._clickInfo(e),
+        };
+        this.emit('click', click);
       }
       this._dragId = null;
       // Re-evaluate hover at the release point (mouse keeps hovering the line;
@@ -3141,21 +3608,26 @@ export class Chart {
     if (this._placementMode && this._pointerMoved) {
       const p = this._localPoint(e);
       this._ensureScaled(this._downPane);
-      this.emit('click', {
+      const info = this._clickInfo(e);
+      const press: ChartClickEvent = {
         id: null,
         price: this._panes[this._downPane]?.yToPrice(this._downLocalY) ?? null,
         time: this._xToTime(this._downX),
         paneIndex: this._downPane,
         point: { x: this._downX, y: this._downLocalY },
-      });
-      this.emit('click', {
+        ...info,
+      };
+      this.emit('click', press);
+      const release: ChartClickEvent = {
         id: null,
         price: this._panes[this._downPane]?.yToPrice(p.localY) ?? null,
         time: this._xToTime(p.x),
         paneIndex: this._downPane,
         point: { x: p.x, y: p.localY },
         viaDrag: true,
-      });
+        ...info,
+      };
+      this.emit('click', release);
       return;
     }
     // Always hit-test a clean click: the chart's own chrome (pane-legend
@@ -3171,13 +3643,17 @@ export class Chart {
       // tool that *places* something (a drawing, an alert) needs; `id` is null
       // there. `subscribeClick` stays hit-only for back-compat.
       this._ensureScaled(this._downPane);
-      this.emit('click', {
+      const click: ChartClickEvent = {
         id: hit?.externalId ?? null,
         price: this._panes[this._downPane]?.yToPrice(this._downLocalY) ?? null,
         time: this._xToTime(this._downX),
         paneIndex: this._downPane,
         point: { x: this._downX, y: this._downLocalY },
-      });
+        // Modifier flags ride along so the draw tier can make a shift or
+        // ctrl click additive to the selection; the payload carries no event.
+        ...this._clickInfo(e),
+      };
+      this.emit('click', click);
       return;
     }
     if (KineticAnimation.shouldAnimate(this._dragVelocity)) this._startKinetic(this._dragVelocity);
@@ -3220,13 +3696,74 @@ export class Chart {
   private readonly _onWheel = (e: WheelEvent): void => {
     this._unfreezeOverlay();
     e.preventDefault();
-    const p = this._localPoint(e);
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    this._timeScale.zoomAtX(p.x, factor);
+    const logFactor = e.deltaY < 0 ? Math.log(1.1) : -Math.log(1.1);
+    // 'right' pins the latest bar: zoom about the right edge of the plot, so
+    // history stretches away from it instead of the cursor's bar staying put.
+    const focusX = this._zoomAnchor === 'right' ? this._timeScale.width : this._localPoint(e).x;
+
+    if (!this._animZoom || !ZoomGlide.shouldAnimate(logFactor)) {
+      this._stopZoomGlide();
+      this._applyZoom(focusX, logFactor);
+      return;
+    }
+    // A tick during a glide extends it rather than starting a new one, or a
+    // fast scroll would restart the ease on every notch and barely move.
+    // The lead lands on the event itself, so there is no input latency and a
+    // synchronous read of the viewport after a wheel sees it move.
+    const lead = logFactor * ZoomGlide.leadFraction();
+    this._applyZoom(focusX, lead);
+    const rest = logFactor - lead;
+
+    if (this._zoomGlide !== null && this._zoomGlideX === focusX) {
+      this._zoomGlide.add(rest, this._zoomGlideApplied, this._now() - this._zoomGlideStart);
+      return;
+    }
+    this._stopZoomGlide();
+    this._startZoomGlide(focusX, rest);
+  };
+
+  /** One zoom step, applied now. Shared by the instant path and each glide frame. */
+  private _applyZoom(focusX: number, logFactor: number): void {
+    this._timeScale.zoomAtX(focusX, Math.exp(logFactor));
     this._maybeLoadHistory();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._emitViewport('zoom');
-  };
+  }
+
+  private _startZoomGlide(focusX: number, logFactor: number): void {
+    const glide = new ZoomGlide(logFactor);
+    this._zoomGlide = glide;
+    this._zoomGlideStart = this._now();
+    this._zoomGlideApplied = 0;
+    this._zoomGlideX = focusX;
+    let frames = 0;
+    const step = (): void => {
+      const elapsed = this._now() - this._zoomGlideStart;
+      const applied = glide.appliedAt(elapsed);
+      const delta = applied - this._zoomGlideApplied;
+      this._zoomGlideApplied = applied;
+      // A frame that moved nothing still costs a full-pane repaint, so skip it.
+      if (delta !== 0) this._applyZoom(focusX, delta);
+      if (!glide.finished(elapsed) && ++frames < ZOOM_GLIDE_MAX_FRAMES) {
+        this._zoomHandle = this._raf.schedule(step);
+      } else {
+        // Land exactly on the target: the curve only approaches it.
+        const remainder = glide.totalLogFactor - this._zoomGlideApplied;
+        if (remainder !== 0) this._applyZoom(focusX, remainder);
+        this._zoomHandle = null;
+        this._zoomGlide = null;
+      }
+    };
+    this._zoomHandle = this._raf.schedule(step);
+  }
+
+  private _stopZoomGlide(): void {
+    if (this._zoomHandle !== null) {
+      this._raf.cancel(this._zoomHandle);
+      this._zoomHandle = null;
+    }
+    this._zoomGlide = null;
+  }
 
   /**
    * Restore the default view: fit all bars on the time axis and re-enable
@@ -3380,13 +3917,20 @@ export class Chart {
     const id = hit?.externalId ?? null;
     this._container.style.cursor = hit?.cursor ?? '';
     if (id === this._hoverId) return;
+    // Hover-styled primitives on the base canvas need a light repaint, no
+    // rescale. A change that touches only 'top' primitives (leaving a drawing
+    // for another, or for empty space) is the overlay's alone: the pointer
+    // moves sixty times a second, and repainting the series for a line it
+    // merely passes over is a stutter.
+    const onBase = hit !== null && hit.zOrder !== 'top';
+    const level = onBase || this._hoverOnBase ? InvalidationLevel.Light : InvalidationLevel.Cursor;
     this._hoverId = id;
-    // hover-styled primitives draw on the base canvas → light repaint, no rescale
-    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
+    this._hoverOnBase = onBase;
+    this.invalidate((m) => m.invalidateGlobal(level));
     this.emit('hover', { id });
   }
 
-  private _updateCursor(paneIndex: number, x: number, localY: number, containerY = localY): void {
+  private _updateCursor(paneIndex: number, x: number, localY: number, containerY: number, source: PointerEvent): void {
     // Plot spans [leftAxisWidth, width - priceAxisWidth]; work in plot-relative x.
     const rightEdge = this._width - this._rightAxisWidth;
     const plotX = x - this._leftAxisWidth;
@@ -3431,7 +3975,7 @@ export class Chart {
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
     if (this._crosshairCb !== null || this._listeners.get('crosshair:move') !== undefined) {
       const time = this._dataLayer.indexToTime(index);
-      const move = {
+      const move: CrosshairMoveEvent = {
         time: time ?? null,
         index,
         price: pane.yToPrice(localY),
@@ -3442,6 +3986,10 @@ export class Chart {
         // pan path, so this is the only way a consumer can tell a hover from a
         // drag while it is still happening — what freehand drawing samples.
         pressed: this._pointers.size > 0,
+        ...pointerInfo(source),
+        // Only while pressed: a hover has no trail worth carrying, and the key
+        // set of the hover payload is what hosts and tests pin.
+        ...(this._pointers.size > 0 ? { samples: this._dragSamples(source) } : {}),
       };
       this._crosshairCb?.(move);
       this.emit('crosshair:move', move);
@@ -3529,6 +4077,7 @@ export class Chart {
       this._remeasureHandle = null;
     }
     this._stopKinetic();
+    this._stopZoomGlide();
     for (const indicator of this._indicators) indicator.remove();
     this._indicators.length = 0;
     this._resizeObserver?.disconnect();

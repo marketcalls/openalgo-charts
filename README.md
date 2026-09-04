@@ -4,17 +4,17 @@
 
 **A from-scratch, dependency-free HTML5-canvas charting engine for OpenAlgo.**
 
-Professional interactive charts, 102 built-in indicators plus your own custom ones, drawing tools, order flow, market replay, linked chart grids, and on-chart trading. Six lazy-loaded tiers, zero runtime dependencies, 60.88 KB Brotli for the base engine.
+Professional interactive charts, 102 built-in indicators plus your own custom ones, 51 drawing tools, order flow, market replay, linked chart grids, on-chart trading, vector SVG export and an optional WebGL2 backend. Eight lazy-loaded tiers, zero runtime dependencies, 66.39 KB Brotli for the base engine, and a one-call widget tier that adds the toolbar, drawing rail, dialogs and shortcuts.
 
 [![npm version](https://img.shields.io/npm/v/openalgo-charts.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/openalgo-charts)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![bundle](https://img.shields.io/badge/brotli-61%20KB%20base%20%C2%B7%20124%20KB%20all%20tiers-brightgreen.svg)](#size-budget)
-[![tests](https://img.shields.io/badge/tests-2898%20passing-brightgreen.svg)](#develop)
+[![bundle](https://img.shields.io/badge/brotli-66%20KB%20base%20%C2%B7%20182%20KB%20all%20tiers-brightgreen.svg)](#size-budget)
+[![tests](https://img.shields.io/badge/tests-3999%20passing-brightgreen.svg)](#develop)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](#principles)
 
-[**Documentation**](https://marketcalls.github.io/openalgo-charts/) &nbsp;·&nbsp; [**Live examples**](https://marketcalls.github.io/openalgo-charts/examples) &nbsp;·&nbsp; [**Getting started**](./docs/getting-started.md) &nbsp;·&nbsp; [**Architecture**](./ARCHITECTURE.md)
+[**Documentation**](https://marketcalls.github.io/openalgo-charts/) &nbsp;·&nbsp; [**Live examples**](https://marketcalls.github.io/openalgo-charts/examples) &nbsp;·&nbsp; [**Getting started**](./docs/getting-started.md) &nbsp;·&nbsp; [**Migrating to 2.0**](./docs/migrating-to-2.md) &nbsp;·&nbsp; [**Architecture**](./ARCHITECTURE.md)
 
-<img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts architecture: seven layers from the public API down to feeds and data, with 102 built-in plus custom indicators, 51 drawing tools, and a six-tier bundle legend" width="920" />
+<img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts architecture: seven layers from the public API down to feeds and data, with 102 built-in plus custom indicators, 51 drawing tools, and an eight-tier bundle legend" width="920" />
 
 </div>
 
@@ -62,7 +62,7 @@ in front of npm rather than being places you upload to. A chart is one HTML file
 ```html
 <div id="chart" style="width:100vw;height:100vh"></div>
 <script type="module">
-  import { createChart } from 'https://unpkg.com/openalgo-charts@1.9.2/dist/openalgo-charts.mjs';
+  import { createChart } from 'https://unpkg.com/openalgo-charts@2.0.0/dist/openalgo-charts.mjs';
   const chart = createChart(document.getElementById('chart'), { timezone: 'Asia/Kolkata' });
   chart.addSeries('candlestick').setData(bars);
 </script>
@@ -70,8 +70,30 @@ in front of npm rather than being places you upload to. A chart is one HTML file
 
 Each tier is its own file, so `openalgo-charts.indicators.mjs` next to it registers
 all 102 built-ins. Pin the version in anything you leave running. There is no
-stylesheet to load: the engine ships no DOM. See
+stylesheet to load: the engine ships no DOM, and the one tier that does
+(`openalgo-charts/widget`) injects its own. See
 [Use from a CDN](https://marketcalls.github.io/openalgo-charts/docs/cdn).
+
+## The whole terminal in one call
+
+```ts
+import { createWidget } from 'openalgo-charts/widget';
+import 'openalgo-charts/indicators';
+import { OpenAlgoDataFeed } from 'openalgo-charts';
+
+const widget = createWidget('#terminal', {
+  feed: new OpenAlgoDataFeed({ baseUrl: 'http://127.0.0.1:5000', apiKey: 'YOUR_KEY' }),
+  symbol: 'RELIANCE', exchange: 'NSE', interval: '5m',
+  theme: 'dark',
+  persist: true,
+  onOrder: (order) => broker.place(order),   // the right-click menu offers order entry only when this is set
+});
+
+widget.chart;   // the Chart underneath, every base API available
+widget.draw;    // the DrawingController the rail drives
+```
+
+`openalgo-charts/widget` is the eighth tier and the only one that builds DOM: a top bar (symbol search, interval pills, chart type, Indicators, capture, settings, theme), the drawing rail with pins and flyouts, a status line, toasts, a right-click menu, a keymap with a `?` panel, and optional layout persistence. Every dialog is generated from a schema the engine already ships (`chartSettingsSchema`, the indicator descriptor, `drawingSettingsSchema`), so no control exists without something behind it, and the chrome takes its colours from the active `ChartTheme` through `--oac-` tokens, so `setTheme` recolours canvas and chrome together. It drives the engine only through the public API, and the build proves it: the ESLint tier ACL and `npm run shake` keep it out of every other bundle, and importing the module touches no DOM, so it can sit in code that also runs on a server. The guide is [`docs/widget.md`](./docs/widget.md).
 
 ## Tiers
 
@@ -79,14 +101,16 @@ Import only what you use. Each tier is a separate bundle that registers into the
 
 | Import | Contents | Brotli |
 |---|---|---|
-| `openalgo-charts` | Engine, 13 chart types, panes &amp; scales, primitives, registries, chart state, chart linking, bar cache, interval registry, trading overlay, OpenAlgo feeds | 60.9 KB |
-| `openalgo-charts/indicators` | 102 built-in indicators, the `registerIndicator` contract for your own, and the Tier-2 (external-data) contract | 27.3 KB |
-| `openalgo-charts/draw` | 51 drawing tools + a headless drawing controller and clipboard | 15.4 KB |
-| `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point &amp; Figure, Kagi | 2.7 KB |
-| `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 10.7 KB |
-| `openalgo-charts/trade` | Order / position / bracket tools + DOM ladder | 7.6 KB |
+| `openalgo-charts` | Engine, 13 chart types, panes &amp; scales, primitives, registries, chart state, chart linking, bar cache, interval registry, trading overlay, SVG export, render backend port, OpenAlgo feeds | 66.39 KB |
+| `openalgo-charts/indicators` | 102 built-in indicators, the `registerIndicator` contract for your own, and the Tier-2 (external-data) contract | 27.27 KB |
+| `openalgo-charts/draw` | 51 drawing tools + a headless drawing controller, clipboard, settings schema, level palette, freehand geometry and SVG icons | 25.82 KB |
+| `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point &amp; Figure, Kagi | 2.66 KB |
+| `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 10.66 KB |
+| `openalgo-charts/trade` | Order / position / bracket tools + DOM ladder | 7.61 KB |
+| `openalgo-charts/webgl` | WebGL2 series backend: batched, analytically anti-aliased GPU rendering of the standard chart types behind `renderer: 'auto'`, with a session-long fallback to the 2D path | 6.38 KB |
+| `openalgo-charts/widget` | The chart with its chrome in one call: `createWidget` adds a top bar, the drawing rail, a status line, the settings and indicator dialogs, drawing properties, a right-click menu, a keymap with a `?` panel and optional layout persistence. The only tier that ships DOM | 35.56 KB |
 
-Everything together is **124.47 KB Brotli**. Figures are the measured `size-limit` output. The trade tier is listed as its delta over the base, so loading base + trade costs 68.49 KB.
+Everything together is **182.34 KB Brotli**; a widget terminal (base + draw + indicators + widget, what one `createWidget` call loads) is 155.03 KB. Figures are the measured `size-limit` output. The trade tier is listed as its delta over the base, so loading base + trade costs 74.00 KB.
 
 ## What's built
 
@@ -123,6 +147,28 @@ draw.setTool('trend-line');   // the next two clicks place it
 Headless by design: no toolbar, no dialogs. Placement with live preview, selection, whole-shape and per-anchor dragging, magnet snap to O/H/L/C, undo/redo (a drag is one step), and persistence. Anchors are `{ time, price }`, never pixels, so they survive zoom and resolve inside collapsed session gaps and past the last bar.
 
 `draw.copy()`, `draw.cut()` and `draw.paste()` move drawings through the OS clipboard, including between two charts on the page. The payload is JSON under one namespaced key, so foreign text pastes nothing instead of throwing at your Ctrl+V handler, and every field is validated before it reaches the model. A refused clipboard permission does not lose the copy: every write also lands in a shared in-memory clipboard, and a cut deletes only after the write succeeds. A paste is one undo step of fresh objects, nudged two bars and 16 px so it is visibly a second shape. The key bindings stay yours; the engine installs no listeners.
+
+### Drawing model and feel
+
+```ts
+const draw = new DrawingController(chart, { magnet: 'weak' });   // 'off' | 'weak' | 'strong'
+
+draw.select([a, b], false);           // a selection, not a single id
+draw.nudge(draw.selection(), 0, -1);  // one undo entry for the whole group
+draw.sendBehindSeries(a);             // zIndex below zero paints under the candles
+
+draw.add({ tool: 'text', points: [p], paneIndex: 0,
+  text: { value: 'Breakout', bold: true, align: 'center' } });   // text is its own block
+draw.add({ tool: 'fib-retracement', points: [lo, hi], paneIndex: 0,
+  style: { levels: [{ ratio: 0.5 }, { ratio: 0.618, color: '#f5a623' }, { ratio: 1, enabled: false }] } });
+
+const doc = draw.toJSON();            // { version: 2, drawings }; fromJSON also takes a 1.9.x array
+const fields = drawingSettingsSchema('trend-line');   // what a properties panel may show, and nothing else
+```
+
+A drawing carries a paint order (`zIndex`: below zero paints under the series, at or above zero over it, with `bringToFront`, `sendToBack`, `sendBehindSeries` and `bringAboveSeries`), a text block (`drawing.text`, so a label colour is never confused with a stroke colour) and per-level fib rungs (`FibLevel`: ratio, colour, label, enabled), and the controller holds a selection rather than a single id: shift, ctrl or meta click adds, a body drag moves the whole group as one undo step, and `updateMany`, `removeMany`, `duplicate` and `nudge` act on the list. `drawingSettingsSchema(toolId)` describes a properties panel per tool, declaring only fields that tool's renderer reads, and `readDrawingSettings` / `applyDrawingSettings` are its round trip. `toJSON()` returns a versioned document; `fromJSON` and `migrateDrawings` upgrade any 1.9.x payload, so a layout saved by an older host opens with its text and levels intact. See [Migrating to 2.0](./docs/migrating-to-2.md).
+
+Under the hand: the drawing under the pointer shows its handles faintly before it is grabbed (`hovered()`, `drawing:hover`), at the cost of the overlay tier only; Shift locks a line to 45 degree steps while placing or dragging a handle; the magnet paints a ring on the bar centre where the next click will land, and `'weak'` pulls only when an O/H/L/C is within a few pixels; grab targets grow for a touch pointer; Escape, Enter and Backspace cancel, finish or pop an anchor while placing, through `keyToDrawingAction`, which also maps undo, redo, copy, cut, paste, duplicate, delete and arrow nudge as a pure function you wire yourself. Line tools take a `showStats` readout of change, percent, bars and angle. The brush and highlighter ink every coalesced pointer sample, thin on release and paint as a spline, with pen pressure driving the width when `style.pressure` is on. Every tool icon and a chrome set ship as path data with builders for an inline `<svg>`, a sprite with `<use>` and a CSS cursor (`iconSvg`, `iconSprite`, `iconUse`, `toolCursor`), so a rail, a flyout and the armed cursor derive from one registry.
 
 ### Panes, scales &amp; legends
 Draggable pane dividers, move / maximize / remove, and pane legends showing one reading per plot in that plot's own colour, with inline show-hide / settings / move / delete controls revealed on hover. The status line is switchable field by field (logo, title, market status, OHLC, bar change, volume, last day change, last value) over a host-supplied data source.
@@ -218,6 +264,27 @@ An interval code resolves through a registry whose entry is a **bucketing rule, 
 ### State
 `chart.getState()` / `chart.restoreState()` capture the viewport, grid, panes, price scales, indicator instances, drawings, and the whole settings block (canvas, status line, trading colours, event filters) as one JSON payload: saved layouts and templates with no extra storage plumbing.
 
+### Vector export
+
+```ts
+const svg = chart.exportSVG();                              // a standalone SVG string at the live size
+const print = chart.exportSVG({ width: 1600, height: 900, background: false });   // transparent, for an embedded figure
+```
+
+The ordinary paint of every pane, run once into a serialising 2D context at pixel ratio 1, so axis labels and tags stay text, lines stay lines, and there is no second renderer to drift from the canvas one. Nothing transient is in it: no crosshair, hover or drag. A different size lays the chart out for the export and puts the live layout back without a blank frame. `SvgContext` is exported for a host that wants to run its own primitive into one. `takeScreenshot()` still returns a canvas when a picture is what you want.
+
+### Render backends
+
+```ts
+import 'openalgo-charts/webgl';
+
+const chart = createChart(el, { renderer: 'auto' });   // 'canvas2d' (default) | 'webgl2' | 'auto'
+chart.rendererKind;                                     // what it actually paints with
+chart.on('renderer:fallback', ({ from, to, reason }) => log(reason));
+```
+
+The series pass on each pane goes through a render backend port; the shipped Canvas2D backend is pixel-identical to 1.9.2, and the `openalgo-charts/webgl` tier registers a WebGL2 backend that batches every standard chart type into one shared offscreen surface per page with analytic anti-aliasing and composites it into the pane's own canvas, so screenshots, the SVG export and the DOM are unchanged and a dashboard of panes never opens more than one GL context. `'webgl2'` throws until the tier is imported and falls back to the 2D path with one warning on a device without WebGL2; `'auto'` is the silent form. A lost context moves the chart to `canvas2d` for the session and emits `renderer:fallback`. Text, dashed lines, gradients, drawings and custom types stay on the 2D context, which already does them well.
+
 ### Data
 OpenAlgo REST history + WebSocket ticks with auto-reconnect and resubscribe, live candle aggregation, tick/volume bars, a unified `chart.on(...)` event bus, markers and signals, earnings/dividend/expiry event markers, an IANA chart timezone, and custom price/time formatters.
 
@@ -227,13 +294,16 @@ Enforced in CI by [`size-limit`](./.size-limit.json). Nothing is excluded, becau
 
 | Bundle | Limit | Actual |
 |---|---|---|
-| Base engine | 62 KB | 60.88 KB |
-| Base + trade | 70 KB | 68.49 KB |
+| Base engine | 67 KB | 66.39 KB |
+| Base + trade | 75 KB | 74.00 KB |
 | Indicators tier | 30 KB | 27.27 KB |
-| Draw tier | 16 KB | 15.39 KB |
+| Draw tier | 26 KB | 25.82 KB |
 | Transform tier | 5 KB | 2.66 KB |
 | Profile tier | 11 KB | 10.66 KB |
-| **Everything** | **126 KB** | **124.47 KB** |
+| WebGL2 tier | 7 KB | 6.38 KB |
+| Widget tier | 36 KB | 35.56 KB |
+| Widget terminal (base + draw + indicators + widget) | 156 KB | 155.03 KB |
+| **Everything** | **183 KB** | **182.34 KB** |
 
 ## Documentation
 
@@ -258,7 +328,7 @@ Teach your AI coding assistant this library:
 npx skills add https://github.com/marketcalls/openalgo-charts
 ```
 
-Installs six skills from [`.github/skills/`](./.github/skills) - a reference hub with 21 deep-dive files covering the whole API surface and its foot-guns, plus task skills for scaffolding a chart, adding indicators, building a terminal, writing a plugin, and debugging. Works with Claude Code, Cursor, Codex, Copilot, Gemini CLI and the rest of the `skills` CLI's supported agents.
+Installs six skills from [`.github/skills/`](./.github/skills) - a reference hub with 22 deep-dive files covering the whole API surface and its foot-guns, plus task skills for scaffolding a chart, adding indicators, building a terminal, writing a plugin, and debugging. Works with Claude Code, Cursor, Codex, Copilot, Gemini CLI and the rest of the `skills` CLI's supported agents.
 
 ## Examples
 
@@ -267,7 +337,8 @@ Runnable demos in [`examples/`](./examples), including a full **yfinance termina
 ```bash
 npm run build
 cd examples/yfinance && pip install -r requirements.txt && python server.py
-# → http://127.0.0.1:8000/examples/yfinance/index.html
+# serves http://127.0.0.1:8000/examples/yfinance/index.html
+python server.py --fixture   # no yfinance, no network: deterministic synthetic bars
 ```
 
 ## Develop
@@ -275,11 +346,11 @@ cd examples/yfinance && pip install -r requirements.txt && python server.py
 ```bash
 npm install        # install dev toolchain
 npm run typecheck  # strict TypeScript check
-npm test           # unit tests (vitest) - 2898 across 143 files
+npm test           # unit tests (vitest) - 3999 across 170 files
 npm run build      # Rollup -> dist/ (minified ESM per tier + types)
 npm run size       # size-limit (Brotli) against the budget
 npm run e2e        # Playwright Chromium smoke tests
-npm run verify     # typecheck + test + build + size
+npm run verify     # lint + typecheck + test + build + demo tests + dts + size + shake
 ```
 
 ## Principles
@@ -292,7 +363,7 @@ npm run verify     # typecheck + test + build + size
 
 ## Status &amp; limitations
 
-Version **1.9.2**. All engine build phases are implemented with 2898 unit tests across 143 files.
+Version **2.0.0**. All engine build phases are implemented with 3999 unit tests across 170 files. Upgrading a 1.9.x host: [Migrating to 2.0](./docs/migrating-to-2.md).
 
 Known gaps, stated plainly:
 
@@ -300,7 +371,7 @@ Known gaps, stated plainly:
 - **Only `Footprint` is theme-aware among the profile primitives.** `VolumeProfile`, `MarketProfile` and `HorizontalProfile` never read `rc.theme`; their defaults are dark-tuned, so a light theme needs explicit colours. `HorizontalProfile` also hardcodes its POC / value-area line colours and has no `setOptions`.
 - The OpenAlgo **WS/trade adapter wire schemas** ship with injectable transports and offline tests, but the exact field names should be verified against your running OpenAlgo build.
 - **A pane has exactly one hidden overlay scale**, so every symbol comparison on a pane shares one baseline. That is right for a single comparison, the common case, but a second one on the same pane is quoted against the first instrument's price; put further instruments on their own pane with `paneIndex` until the overlay scales are keyed.
-- An optional **DOM chrome package** (toolbar, dialogs, command palette, objects panel) is the next planned piece; today that UI lives in the examples.
+- **The WebGL2 backend draws the standard chart types.** Kagi, point-and-figure and custom chart types, drawings, text and every primitive stay on the 2D context; `renderer: 'auto'` is a speed-up for the series pass, not a second renderer for everything.
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) §13a for the full deferred list.
 

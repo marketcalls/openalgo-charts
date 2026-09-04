@@ -1,14 +1,17 @@
 export default {
   '-- intro': { type: 'separator', title: 'Introduction' },
   'getting-started': 'Getting Started',
+  'migrating-to-2': 'Migrating to 2.0',
   cdn: 'Use from a CDN',
   'core-concepts': 'Core Concepts',
   architecture: 'Architecture',
+  widget: 'The Widget Tier',
   frameworks: 'Framework Integration',
 
   '-- guides': { type: 'separator', title: 'Guides' },
   'chart-types': 'Chart Types',
   'series-and-styling': 'Series & Styling',
+  rendering: 'Render Backends & SVG Export',
   'timeframes-and-tick-charts': 'Timeframes & Tick Charts',
   timezones: 'Timezones',
   'scales-and-panes': 'Scales & Panes',

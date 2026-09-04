@@ -9,7 +9,7 @@ import { Callout } from 'nextra/components'
 # Getting started
 
 **OpenAlgo Charts** is a dependency-free, canvas-based financial charting engine. The full
-package (every tier) is **124.47 KB Brotli**, the base engine alone is **60.88 KB**, and it
+package (every tier) is **182.34 KB Brotli**, the base engine alone is **66.39 KB**, and it
 has **zero runtime dependencies** - what
 you import is what ships.
 
@@ -91,6 +91,8 @@ Pay only for what you use - each tier is a separate entry point:
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow |
 | `openalgo-charts/indicators` | 102 built-in indicators (SMA/EMA/MACD/Bollinger/RSI/ADX/VWAP/Supertrend/HalfTrend/CPR/...) + the Tier-2 contract |
 | `openalgo-charts/draw` | 51 drawing tools + a headless drawing controller |
+| `openalgo-charts/webgl` | the WebGL2 series backend behind `renderer: 'auto'`, composited into the pane's canvas |
+| `openalgo-charts/widget` | the chart with its chrome in one `createWidget` call: top bar, drawing rail, status line, dialogs, right-click menu, shortcuts, persistence. The only tier that ships DOM |
 
 ```ts
 import { createChart } from 'openalgo-charts';
@@ -101,6 +103,8 @@ import { runTransform, RenkoTransform } from 'openalgo-charts/transform';
 ## Next steps
 
 - [Core Concepts](/docs/core-concepts) - the data model, time/price scales, and panes.
+- [The Widget Tier](/docs/widget) - the chart with its chrome in one `createWidget` call.
+- [Render Backends & SVG Export](/docs/rendering) - `renderer: 'auto'`, the WebGL2 tier and `exportSVG`.
 - [Chart Types](/docs/chart-types) - a live gallery of every built-in style.
 - [On-Chart Trading](/docs/trading) - order lines, drag-to-modify, OCO, and the DOM ladder.
 - [Live Data (OpenAlgo)](/docs/live-data) - REST history + WebSocket realtime.

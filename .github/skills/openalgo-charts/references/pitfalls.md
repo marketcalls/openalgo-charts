@@ -11,11 +11,11 @@ series.setData([{ time: Date.now(), value: 1 }]);                  // wrong
 series.setData([{ time: Math.floor(Date.now() / 1000), value: 1 }]); // right
 ```
 
-**Two bars at the same time do not throw and do not both draw — the last one in your array silently wins.** `sortedUniqueByTime` (`src/model/data-layer.ts:23`) collapses repeats because the shared axis maps times through a `Set`; the sort is stable, so *input order* decides the survivor. This is why an unseeded candle builder used to paint a red candle under a live green one: call `builder.seed(bars[bars.length - 1])` before the first live tick.
+**Two bars at the same time do not throw and do not both draw, the last one in your array silently wins.** `sortedUniqueByTime` (`src/model/data-layer.ts:23`) collapses repeats because the shared axis maps times through a `Set`; the sort is stable, so *input order* decides the survivor. This is why an unseeded candle builder used to paint a red candle under a live green one: call `builder.seed(bars[bars.length - 1])` before the first live tick.
 
 **`setData` accepts unsorted input and sorts it, but a stored `Bar` reference can be mutated under you.** `DataLayer.update` with a matching time replaces the last bar in place (`'replace'`). Treat `dataLayer.seriesBars(id)` as read-only (it is the live array); `SeriesApi.getData()` returns a copy.
 
-**A whitespace item `{ time }` is kept as a NaN OHLC bar, not dropped.** `toBar` gives it `close: NaN` so the line renderer breaks and autoscale skips it — but `getData().length` still counts it. Any length- or reduce-based logic over `getData()` must tolerate `NaN`.
+**A whitespace item `{ time }` is kept as a NaN OHLC bar, not dropped.** `toBar` gives it `close: NaN` so the line renderer breaks and autoscale skips it, but `getData().length` still counts it. Any length- or reduce-based logic over `getData()` must tolerate `NaN`.
 
 **Axis and crosshair labels default to IST (`Asia/Kolkata`), not UTC and not the host locale.** It is a default, not a fixed property: set `timezone` on `createChart` or call `chart.setTimezone('America/New_York')`. An unrecognised name **throws** at the call site (a saved layout's stale zone is skipped instead), so validate with `isValidTimezone` when the name comes from user input.
 
@@ -39,34 +39,34 @@ See [data-and-time](./data-and-time.md), [feeds-and-live](./feeds-and-live.md).
 
 **`chart.fitContent()` runs automatically exactly once, on the first non-empty `setData`.** After that latch (`_hasFitContent`), later `setData` calls deliberately preserve the current zoom. If a symbol switch should re-frame the chart, call `chart.fitContent()` explicitly.
 
-**`update()` returns `'append' | 'replace' | 'insert'`, and only a *global* right-edge append auto-scrolls.** A bar newer than this series' last bar but older than the newest time on the shared axis is an `'insert'` — the chart deliberately does not treat it as a new right-edge bar, so do not infer "new bar" from `update()` being called. An out-of-order `update()` is also O(n): it falls through to a linear `findIndex` plus a full rebuild of the shared axis, so batch late corrections rather than streaming them.
+**`update()` returns `'append' | 'replace' | 'insert'`, and only a *global* right-edge append auto-scrolls.** A bar newer than this series' last bar but older than the newest time on the shared axis is an `'insert'`, the chart deliberately does not treat it as a new right-edge bar, so do not infer "new bar" from `update()` being called. An out-of-order `update()` is also O(n): it falls through to a linear `findIndex` plus a full rebuild of the shared axis, so batch late corrections rather than streaming them.
 
-**`prependData` shifts every logical index, so any logical index you cached is now wrong.** The viewport survives because `baseIndex` is re-read and `rightEdge − index` is invariant — a saved `{ from, to }` logical range is not automatically re-based. This is also why drawing anchors are `{ time, price }` and never pixels or indices.
+**`prependData` shifts every logical index, so any logical index you cached is now wrong.** The viewport survives because `baseIndex` is re-read and `rightEdge − index` is invariant, a saved `{ from, to }` logical range is not automatically re-based. This is also why drawing anchors are `{ time, price }` and never pixels or indices.
 
 **`setVisibleLogicalRange` is a silent no-op before layout and for a non-positive span.** It returns early when `width <= 0` or `to <= from`, and bar spacing is clamped to `[1, 80]`, so an extreme span lands at the nearest legal zoom rather than erroring. Restore viewports *after* data lands.
 
 **`setHistoryLoader` fires once and then latches until you call `chart.historyLoadComplete()`.** Forget the completion call and lazy paging stops after the first page, with no error.
 
-**`chart.restoreState()` never recreates series — it returns a `RestoreReport` for you to rebuild them.** Series *data* belongs to the app. It also never throws: a malformed or newer-versioned state returns `{ applied: false, reason }`, and an indicator whose tier is not imported is skipped, not thrown.
+**`chart.restoreState()` never recreates series, it returns a `RestoreReport` for you to rebuild them.** Series *data* belongs to the app. It also never throws: a malformed or newer-versioned state returns `{ applied: false, reason }`, and an indicator whose tier is not imported is skipped, not thrown.
 
 See [events-and-state](./events-and-state.md).
 
 ## Imports, tiers, and registries
 
-**Never deep-import into `dist/` or `src/` — a deep path inlines a second copy of the registry and your registration disappears.** Each tier is its own bundle with the package entry marked external; a relative or deep import gives the tier a private registry `Map` that `createChart` never reads. This is documented as a correctness bug in `rollup.config.js` and in every tier index.
+**Never deep-import into `dist/` or `src/`, a deep path inlines a second copy of the registry and your registration disappears.** Each tier is its own bundle with the package entry marked external; a relative or deep import gives the tier a private registry `Map` that `createChart` never reads. This is documented as a correctness bug in `rollup.config.js` and in every tier index.
 
 ```ts
 import { registerIndicator } from 'openalgo-charts/dist/index.mjs'; // wrong: second registry
 import { registerIndicator } from 'openalgo-charts';                // right
 ```
 
-For the same reason `dist/openalgo-charts.all.mjs` is a docs-site bundle, excluded from `files` and `exports` — importing it in an app defeats the tiering and can reintroduce the duplicate registry.
+For the same reason `dist/openalgo-charts.all.mjs` is a docs-site bundle, excluded from `files` and `exports`, importing it in an app defeats the tiering and can reintroduce the duplicate registry.
 
-**A missing tier throws a specific, greppable message — read it instead of guessing.** `openalgo-charts: unknown indicator "<id>" — did you import 'openalgo-charts/indicators'?`; `openalgo-charts: series type "point-figure" needs the transform tier — import 'openalgo-charts/transform' first`; `openalgo-charts: unknown series type "<type>"`; `openalgo-charts: unknown drawing tool "<id>"`. Only `point-figure` and `kagi` get the friendly transform message — Heikin Ashi, Renko, Range and Line Break render as `candlestick` and need no new type.
+**A missing tier throws a specific, greppable message: read it instead of guessing.** `openalgo-charts: unknown indicator "<id>", did you import 'openalgo-charts/indicators'?`; `openalgo-charts: series type "point-figure" needs the transform tier, import 'openalgo-charts/transform' first`; `openalgo-charts: unknown series type "<type>"`; `openalgo-charts: unknown drawing tool "<id>"`. Only `point-figure` and `kagi` get the friendly transform message, Heikin Ashi, Renko, Range and Line Break render as `candlestick` and need no new type.
 
-**Tier imports are side effects; an over-aggressive bundler can drop them.** `package.json` `sideEffects` whitelists the tier paths. If a bare `import 'openalgo-charts/indicators'` gets shaken out, call the explicit registrar instead: `registerBuiltinIndicators()`, `registerTransformChartTypes()`, `registerBuiltinDrawingTools()` — all idempotent.
+**Tier imports are side effects; an over-aggressive bundler can drop them.** `package.json` `sideEffects` whitelists the tier paths. If a bare `import 'openalgo-charts/indicators'` gets shaken out, call the explicit registrar instead: `registerBuiltinIndicators()`, `registerTransformChartTypes()`, `registerBuiltinDrawingTools()`, all idempotent.
 
-**Registering an id that already exists overwrites it silently — no warning, last write wins.** True for `registerChartType`, `registerIndicator` and `registerDrawingTool`. Namespace custom ids.
+**Registering an id that already exists overwrites it silently, no warning, last write wins.** True for `registerChartType`, `registerIndicator` and `registerDrawingTool`. Namespace custom ids.
 
 See [bundling-and-tiers](./bundling-and-tiers.md).
 
@@ -123,7 +123,7 @@ See [indicators](./indicators.md).
 
 ## Transforms
 
-**Transform output timestamps are synthetic: colliding times are bumped `+1s` so each element gets its own logical index.** You therefore cannot join a Renko/P&F/Kagi series to a raw-timestamped series (a volume pane) by time — re-bucket the companion series onto the transformed element times. Relatedly, `runTransform` calls `reset()` and is batch-only: for live ticks keep the instance and call `transform.push(bar)`.
+**Transform output timestamps are synthetic: colliding times are bumped `+1s` so each element gets its own logical index.** You therefore cannot join a Renko/P&F/Kagi series to a raw-timestamped series (a volume pane) by time, re-bucket the companion series onto the transformed element times. Relatedly, `runTransform` calls `reset()` and is batch-only: for live ticks keep the instance and call `transform.push(bar)`.
 
 **Point & Figure reads `column.boxSize` from the data, not `style.boxSize`, and defaults to `method: 'hl'`.** A `style.boxSize` that disagrees with the column is ignored (this footgun was removed deliberately). `method: 'close'` can legitimately produce zero columns on flat closes with wide intrabar range.
 
@@ -131,7 +131,7 @@ See [transforms](./transforms.md), [chart-types](./chart-types.md).
 
 ## Profiles and order flow
 
-**Footprint and cumulative delta need trade-by-trade data already classified bid/ask — OHLCV cannot be reconstructed into it.** OpenAlgo does not store classified historical trades by default, so footprint is a live-session feature unless you add a tick recorder (`src/profile/footprint.ts`, `ARCHITECTURE.md` §6A). Volume Profile and Market Profile need only bars and work on history.
+**Footprint and cumulative delta need trade-by-trade data already classified bid/ask, OHLCV cannot be reconstructed into it.** OpenAlgo does not store classified historical trades by default, so footprint is a live-session feature unless you add a tick recorder (`src/profile/footprint.ts`, `ARCHITECTURE.md` §6A). Volume Profile and Market Profile need only bars and work on history.
 
 **`rowTicks` is a multiplier on `tickSize`, not a row height in price.** `computeFootprint(time, trades, 0.1, 20)` and `rowTicksFor(2, 0.1) === 20` both mean "2-point rows on a 0.1 tick". The two stay separate deliberately: imbalance and single-print logic still count in real ticks, so widening rows must not change the reported tick size.
 
@@ -139,13 +139,13 @@ See [profiles-and-orderflow](./profiles-and-orderflow.md).
 
 ## Drawing tools
 
-**Anchors are `{ time, price }` in data space, and a non-finite anchor is rejected outright.** A NaN anchor would serialise to `null` and produce a drawing that can never be rendered or hit-tested. Note that `coordinateToPrice`/`priceToCoordinate` are safe before the first frame — the chart scales on demand.
+**Anchors are `{ time, price }` in data space, and a non-finite anchor is rejected outright.** A NaN anchor would serialise to `null` and produce a drawing that can never be rendered or hit-tested. Note that `coordinateToPrice`/`priceToCoordinate` are safe before the first frame, the chart scales on demand.
 
 **The library installs no keyboard listener for drawing tools.** `Alt+T/H/J/V/C` etc. exist as declared `shortcut` metadata only; the host must wire a listener and call `matchDrawingShortcut(event)`. Modifiers must match exactly and a bare letter never matches, so ordinary typing is unaffected.
 
-**Tools declaring `points: 0` never self-terminate.** `path` and `polyline` collect vertices until `controller.finish()` (double-click, or your own key binding). Freehand tools (`brush`, `highlighter`) declare `freehand: true` and commit on pointer release instead — a freehand tap that never moved is dropped.
+**Tools declaring `points: 0` never self-terminate.** `path` and `polyline` collect vertices until `controller.finish()` (double-click, or your own key binding). Freehand tools (`brush`, `highlighter`) declare `freehand: true` and commit on pointer release instead, a freehand tap that never moved is dropped.
 
-**Drag-to-draw only works because the controller arms `chart.setPlacementMode(true)`.** Without placement mode a press-drag-release pans the chart and emits zero clicks. If you drive placement yourself, arm and release the mode or the chart stays un-pannable — which is also why `DrawingController.destroy()` is mandatory: `chart.destroy()` does not tear down the controller, and a leaked one can strand placement mode on. (A whole drag is a single undo step, not one per frame.)
+**Drag-to-draw only works because the controller arms `chart.setPlacementMode(true)`.** Without placement mode a press-drag-release pans the chart and emits zero clicks. If you drive placement yourself, arm and release the mode or the chart stays un-pannable, which is also why `DrawingController.destroy()` is mandatory: `chart.destroy()` does not tear down the controller, and a leaked one can strand placement mode on. (A whole drag is a single undo step, not one per frame.)
 
 **`copy`, `cut` and `paste` are async, and `cut`'s result is load-bearing.** They return promises because `navigator.clipboard` does. A `cut` deletes only after the write resolves, so a fire-and-forget `draw.cut()` on a page where the permission is refused (and `fallbackToMemory` is off) leaves the drawing in place with no error anywhere; check the boolean, and read `draw.clipboard().lastError()` to tell "copied in this tab only" from "copied everywhere".
 
@@ -165,14 +165,14 @@ removed, moved and maximized. Maximize is the case a host cannot work around by 
 HIDES the other panes, so a mark on pane 0 disappears rather than merely sitting wrong.
 `paneAdded` exists too, if you would rather position your own chrome.
 
-**`draw(ctx, rc)` receives a context in *bitmap* (device) pixels while `hitTest(x, y)` receives *media* (CSS) pixels.** `rc.timeScale.indexToX()` and `rc.priceScale.priceToY()` also return media px, so drawing code must multiply by `rc.dpr`. Forgetting it renders at half size on a retina display while hit-testing stays correct — the classic "clicks work but it looks wrong" bug.
+**`draw(ctx, rc)` receives a context in *bitmap* (device) pixels while `hitTest(x, y)` receives *media* (CSS) pixels.** `rc.timeScale.indexToX()` and `rc.priceScale.priceToY()` also return media px, so drawing code must multiply by `rc.dpr`. Forgetting it renders at half size on a retina display while hit-testing stays correct, the classic "clicks work but it looks wrong" bug.
 
 ```ts
 ctx.fillRect(rc.timeScale.indexToX(i), y, 4, 4);                       // wrong on dpr > 1
 ctx.fillRect(rc.timeScale.indexToX(i) * rc.dpr, y * rc.dpr, 4 * rc.dpr, 4 * rc.dpr); // right
 ```
 
-**`autoscaleInfo()` is called once per primitive on every autoscale pass — that is every pan, zoom, tick and resize.** Keep it O(1) or precompute. Return `null` to opt out entirely (drawings do), and return `null` rather than `{min: 0, max: 0}` when you hold no data.
+**`autoscaleInfo()` is called once per primitive on every autoscale pass, that is every pan, zoom, tick and resize.** Keep it O(1) or precompute. Return `null` to opt out entirely (drawings do), and return `null` rather than `{min: 0, max: 0}` when you hold no data.
 
 **Hit-testing is nearest-distance-first; `zOrder` only breaks exact ties.** A `'bottom'` primitive 1px from the cursor beats a `'top'` one 3px away. Two further overrides sit above all primitives: a pane divider within 4px, and pane-legend button ids the chart consumes before `subscribeClick`.
 
@@ -229,9 +229,9 @@ place when the server disagrees with the caller's expectation.
 
 ## Events and state
 
-**`chart.emit` swallows exceptions thrown by listeners — silently, with no console output.** One bad listener must not break the render loop, so a bug inside your handler leaves no trace. Wrap handler bodies in your own try/catch while debugging.
+**`chart.emit` swallows exceptions thrown by listeners, silently, with no console output.** One bad listener must not break the render loop, so a bug inside your handler leaves no trace. Wrap handler bodies in your own try/catch while debugging.
 
-**`subscribeClick`/`subscribeCrosshairMove`/`subscribeDrag` are single slots — a second call replaces the first — and they are hit-only.** Use `chart.on('click', ...)`, which also fires on empty plot with `id: null` plus `price`, `time` and `point`. Event names are plain strings, so a typo silently never fires; the crosshair-leave payload is all-null and must be handled.
+**`subscribeClick`/`subscribeCrosshairMove`/`subscribeDrag` are single slots (a second call replaces the first) and they are hit-only.** Use `chart.on('click', ...)`, which also fires on empty plot with `id: null` plus `price`, `time` and `point`. Event names are plain strings, so a typo silently never fires; the crosshair-leave payload is all-null and must be handled.
 
 **`chart.off('click')` with no callback removes *every* listener for that event, including the drawing tier's and the trade layer's.** Always pass the callback, or keep the unsubscribe function `on()` returns.
 
@@ -267,13 +267,13 @@ See [chart-linking](./chart-linking.md).
 
 **`chart.trading` is a visualization layer: it draws lines and markers and emits `trading:*` events. It places no orders.** Your app owns the broker call. The order *write* path is `OrderEngine` in the trade tier.
 
-**`TradingTrade.timestamp` is in milliseconds — the only ms-based time in the public API.** Everything else is UTC seconds. A seconds value here snaps every fill marker to the first bar.
+**`TradingTrade.timestamp` is in milliseconds, the only ms-based time in the public API.** Everything else is UTC seconds. A seconds value here snaps every fill marker to the first bar.
 
-**`OrderEngine` defaults to `armed: false` with no gate, so `placeOrder` silently resolves `{ ok: false, reason: 'not confirmed' }`.** Nothing throws and nothing reaches the broker. Supply `gate` (a confirm dialog) or `armed: true`. Separately, `mode` defaults to `'live'` — pass `mode: 'analyzer'` for the sandbox; arming and mode are independent switches.
+**`OrderEngine` defaults to `armed: false` with no gate, so `placeOrder` silently resolves `{ ok: false, reason: 'not confirmed' }`.** Nothing throws and nothing reaches the broker. Supply `gate` (a confirm dialog) or `armed: true`. Separately, `mode` defaults to `'live'`, pass `mode: 'analyzer'` for the sandbox; arming and mode are independent switches.
 
 **`requestModify` drops an invalid price instead of sending it, and reports only through `onValidationError`.** It is fire-and-forget: no throw, no rejected promise. Wire `onValidationError` or a rejected drag looks like a frozen line.
 
-**`OpenAlgoTradeFeed.modify(orderId, ...)` rejects for any order it has not seen this session.** It reconstructs the full OpenAlgo payload from a cached context: `openalgo-charts: cannot modify <id> — unknown order context (place it or load the order book first)`. Also note `product` defaults to `'MIS'` and the wire renames `side->action`, `type->pricetype`, `qty->quantity` — and verify these field names against your running OpenAlgo build, because the adapters are tested offline against injectable transports, not against a pinned schema (README and `ARCHITECTURE.md` §13a are still accurate on this).
+**`OpenAlgoTradeFeed.modify(orderId, ...)` rejects for any order it has not seen this session.** It reconstructs the full OpenAlgo payload from a cached context: `openalgo-charts: cannot modify <id>, unknown order context (place it or load the order book first)`. Also note `product` defaults to `'MIS'` and the wire renames `side->action`, `type->pricetype`, `qty->quantity`, and verify these field names against your running OpenAlgo build, because the adapters are tested offline against injectable transports, not against a pinned schema (README and `ARCHITECTURE.md` §13a are still accurate on this).
 
 See [trading](./trading.md), [trade-tier](./trade-tier.md).
 
@@ -281,13 +281,13 @@ See [trading](./trading.md), [trade-tier](./trade-tier.md).
 
 **`createChart` mutates your container.** It sets `display:flex`, `flexDirection:column`, `background`, `touchAction:none`, `role="application"`, `aria-label`, `tabindex`, forces `position:relative` when the computed position is `static`, and appends a hidden live region. Give the chart its own element rather than a shared layout node.
 
-**`destroy()` removes listeners, panes, indicators and the live region — but does not undo those container style and ARIA mutations.** Under React StrictMode's double mount, or any remount into the same node, create the chart in an effect keyed to a dedicated `<div>` you own.
+**`destroy()` removes listeners, panes, indicators and the live region, but does not undo those container style and ARIA mutations.** Under React StrictMode's double mount, or any remount into the same node, create the chart in an effect keyed to a dedicated `<div>` you own.
 
 **Do not infer destruction from an empty pane list.** `chart.isDestroyed` and the `'destroy'` event say so directly. The event fires last, with the chart already torn down, so a listener is there to let go of the chart rather than to read it; `destroy()` is idempotent, so a second call emits nothing; and every listener is dropped afterwards, so a subscription on a corpse no longer retains its closure.
 
 **The keyboard listener is attached to `document`, not the container, so a chart you forget to destroy keeps intercepting keys page-wide.** Scope defaults to `'hover'` (keys act when the pointer is over the chart or focus is inside it); `ShortcutManager.shouldIgnore` skips `INPUT`/`TEXTAREA`/`SELECT`/`contenteditable`.
 
-**There is no SSR path, and the degradations are silent.** No `window` means no input handlers at all; no `ResizeObserver` means the chart never auto-resizes and you must call `chart.applySize(w, h)`. A missing 2D context throws `openalgo-charts: 2D canvas context is not available`. Construct the chart only in a client-side effect, and give the container explicit dimensions — the initial size is read from `container.clientWidth/clientHeight`, so a height-`auto` flex child renders at height 0 until the observer fires.
+**There is no SSR path, and the degradations are silent.** No `window` means no input handlers at all; no `ResizeObserver` means the chart never auto-resizes and you must call `chart.applySize(w, h)`. A missing 2D context throws `openalgo-charts: 2D canvas context is not available`. Construct the chart only in a client-side effect, and give the container explicit dimensions, the initial size is read from `container.clientWidth/clientHeight`, so a height-`auto` flex child renders at height 0 until the observer fires.
 
 **The library default theme is `lightTheme`, despite the `ChartOptions.theme` JSDoc saying "pass `darkTheme` (default)".** `DEFAULT_THEME = lightTheme` in `src/theme.ts`; the doc comment is stale. Always pass a theme explicitly in a dark UI. A `background` of exactly `'transparent'` skips the fill entirely, which is what layered hosts want.
 
@@ -324,4 +324,4 @@ grep -n "BUILTIN_INDICATORS\|BUILTIN_DRAWING_TOOLS" node_modules/openalgo-charts
 
 On Windows PowerShell substitute `Select-String -Pattern` for `grep` and `Get-ChildItem` for `ls`.
 
-If a symbol is absent from the local `.d.ts`, it does not exist in the installed version — say so and check `CHANGELOG.md` for the release that added it rather than writing code against it.
+If a symbol is absent from the local `.d.ts`, it does not exist in the installed version, say so and check `CHANGELOG.md` for the release that added it rather than writing code against it.

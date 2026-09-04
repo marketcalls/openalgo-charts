@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import { highlight } from './highlight';
 
-type Tier = 'trade' | 'transform' | 'profile' | 'indicators' | 'draw';
+type Tier = 'trade' | 'transform' | 'profile' | 'indicators' | 'draw' | 'webgl' | 'widget';
 
 interface Props {
   /**
@@ -25,12 +25,24 @@ interface Props {
 
 const LOGO_SRC = '/openalgo-charts/openalgo-logo.svg';
 
-// One combined module instance (base + every tier) so tier-registered types
-// (the transform tier's point-figure/kagi renderers and the indicator tier's
-// built-in descriptors) share the registries createChart reads. See src/all.ts.
-async function loadLib(): Promise<Record<string, unknown>> {
+// One combined module instance (base + every engine tier) so tier-registered
+// types (the transform tier's point-figure/kagi renderers, the indicator tier's
+// built-in descriptors, the webgl tier's backend) share the registries
+// createChart reads. See src/all.ts.
+//
+// The widget is not in that bundle: it is the one tier that ships DOM and is
+// kept out of every other bundle, so a widget demo loads the published tier
+// file itself. That file imports its own engine, draw and (here) indicator
+// tiers by sibling path, so the widget runs on a second engine instance; the
+// demo code only ever hands it plain bar data, which belongs to no instance.
+async function loadLib(tiers: readonly Tier[]): Promise<Record<string, unknown>> {
   const lib = await import('../lib/oac/openalgo-charts.all.mjs');
-  return lib as unknown as Record<string, unknown>;
+  if (!tiers.includes('widget')) return lib as unknown as Record<string, unknown>;
+  const [widget] = await Promise.all([
+    import('../lib/oac/openalgo-charts.widget.mjs'),
+    import('../lib/oac/openalgo-charts.indicators.mjs'),
+  ]);
+  return { ...lib, createWidget: widget.createWidget } as unknown as Record<string, unknown>;
 }
 
 export default function RunnableExample({ code, tiers = [], height = 360, hideCode = false, caption, watermark = true }: Props) {
@@ -45,7 +57,7 @@ export default function RunnableExample({ code, tiers = [], height = 360, hideCo
     let cancelled = false;
     (async () => {
       try {
-        const lib = await loadLib();
+        const lib = await loadLib(tiers);
         if (cancelled || !ref.current) return;
         ref.current.innerHTML = '';
         // The library defaults to the light palette, which reads as a white hole
@@ -56,10 +68,20 @@ export default function RunnableExample({ code, tiers = [], height = 360, hideCo
         // exports as getter-only accessors, so an override on a child object
         // throws rather than shadowing.
         const create = lib.createChart as (h: HTMLElement, o: unknown) => unknown;
+        const createW = lib.createWidget as ((h: HTMLElement, o: unknown) => unknown) | undefined;
         const themed = {
           ...lib,
           createChart: (host: HTMLElement, opts?: Record<string, unknown>) =>
             create(host, { theme: dark ? lib.darkTheme : lib.lightTheme, ...opts }),
+          // The widget names its palette rather than taking a theme object, and
+          // defaults to dark where the engine defaults to light; either way a
+          // demo should open in the site's theme.
+          ...(createW
+            ? {
+                createWidget: (host: HTMLElement, opts?: Record<string, unknown>) =>
+                  createW(host, { theme: dark ? 'dark' : 'light', ...opts }),
+              }
+            : {}),
         };
         // eslint-disable-next-line @typescript-eslint/no-implied-eval
         const fn = new Function('el', 'lib', code) as (el: HTMLElement, lib: unknown) => { destroy?: () => void };
