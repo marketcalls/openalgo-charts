@@ -15,7 +15,7 @@ return chart;`;
 
 const STATS: Array<[string, string]> = [
   ['0', 'runtime dependencies'],
-  ['146.11 KB', 'Brotli, every tier'],
+  ['181.67 KB', 'Brotli, every tier'],
   ['15', 'chart types'],
   ['2898', 'tests, green'],
 ];
@@ -70,7 +70,7 @@ const FEATURES: Feature[] = [
   { title: 'Indicators & profiles', body: '102 built-in indicators across trend, momentum, volatility, and volume, with EMA/RSI/ATR/Supertrend matching openalgo.ta - and you can register your own with the same descriptor contract. Plus Volume Profile, Market Profile (TPO), and Footprint / order flow.' },
   { title: 'OpenAlgo-native data', body: 'REST history + WebSocket live + candle builder adapters speak the OpenAlgo protocol. Any broker fits behind a small DataFeed.' },
   { title: 'Production operations', body: 'Keep long-running charts bounded with rolling history, explicit feed cleanup, cache limits, and a measurable browser memory budget.' },
-  { title: 'Loadable tiers', body: 'Ship only what you use - /indicators, /draw, /profile, /trade, /transform and /webgl are separate entry points on top of a 66 KB base, each independently sized.' },
+  { title: 'Loadable tiers', body: 'Ship only what you use - /indicators, /draw, /profile, /trade, /transform, /webgl and /widget are separate entry points on top of a 66 KB base, each independently sized.' },
   { title: 'Plugin / primitive API', body: 'The same API markers, trading, and profiles are built on is open to you: implement IPrimitive and draw anything on the chart.' },
 ];
 

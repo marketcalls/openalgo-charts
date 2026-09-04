@@ -3,7 +3,7 @@
  * Lint config. Two jobs, and the second is the one that earns its keep.
  *
  * 1. Ordinary correctness rules over TypeScript.
- * 2. The TIER ACL. This package's whole shape is seven lazily-loaded ESM bundles
+ * 2. The TIER ACL. This package's whole shape is eight lazily-loaded ESM bundles
  *    with enforced Brotli budgets, which only works while the base tier never
  *    reaches into a lazy one. ARCHITECTURE.md says so in prose; prose does not
  *    fail CI, and a single stray import is enough to pull a 27 KB tier into the
@@ -17,8 +17,12 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
-/** Lazy tiers: each is its own bundle and its own size budget. */
-const LAZY_TIERS = ['indicators', 'draw', 'transform', 'profile', 'trade', 'webgl'];
+/**
+ * Lazy tiers: each is its own bundle and its own size budget. The widget is the
+ * one tier allowed to build DOM (a toolbar, a rail, dialogs); everything else
+ * under src/ touches the document only to own its canvases.
+ */
+const LAZY_TIERS = ['indicators', 'draw', 'transform', 'profile', 'trade', 'webgl', 'widget'];
 
 /**
  * Base-tier directories. Everything here lands in `openalgo-charts.mjs`, so an
@@ -71,6 +75,52 @@ export default tseslint.config(
           'Base tier must not import a lazy tier: it pulls that whole bundle into openalgo-charts.mjs. ' +
             'Invert the dependency (register into a base registry from the tier) instead.',
         ),
+      ],
+    },
+  },
+
+  // The widget sits above every other tier, and nothing below it may know it
+  // exists: a draw or indicator module that imported a dialog would carry the
+  // DOM tier into a bundle whose whole promise is that it ships none.
+  {
+    files: LAZY_TIERS.filter((t) => t !== 'widget').map((t) => `src/${t}/**/*.ts`),
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        crossTier(
+          ['widget'],
+          'Only a host imports the widget tier. A tier that needs UI describes it (a settings schema, an event) and lets the widget render it.',
+        ),
+      ],
+    },
+  },
+
+  // The widget builds on the base and on the draw tier, and must reach both
+  // through their package specifiers. A relative import of `../core/chart` or
+  // `../draw/index` is inlined into the widget bundle as a second, private copy:
+  // a second `Chart` class the base never constructs, a second tool registry
+  // `createChart` never reads, and `.d.ts` output that check-dts.mjs rejects.
+  // `openalgo-charts` and `openalgo-charts/<tier>` are external in
+  // rollup.config.js and resolve to src/ through tsconfig `paths`, so the
+  // package form costs nothing in development. Pure helpers (`../helpers/*`,
+  // `../render/pill`) stay importable by path, as they are from every tier.
+  {
+    files: ['src/widget/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...LAZY_TIERS.filter((t) => t !== 'widget').map((t) => ({
+              group: [`**/${t}/**`, `../${t}/*`, `../../${t}/*`],
+              message: `Import the ${t} tier as 'openalgo-charts/${t}': a relative path inlines a second copy of it into the widget bundle.`,
+            })),
+            {
+              group: ['**/core/**', '../core/*', '../../core/*', '../index', '../index.ts', '../all', '../all.ts'],
+              message: "Import Chart, createChart and the option types from 'openalgo-charts': a relative path inlines a second Chart class into the widget bundle.",
+            },
+          ],
+        },
       ],
     },
   },

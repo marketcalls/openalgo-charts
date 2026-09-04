@@ -1,7 +1,7 @@
 {
   "name": "openalgo-charts",
   "version": "1.9.2",
-  "description": "From-scratch, dependency-free canvas charting engine for OpenAlgo: professional-grade interactive rendering plus advanced on-chart trading.",
+  "description": "From-scratch, dependency-free canvas charting engine for OpenAlgo: professional-grade interactive rendering, advanced on-chart trading, and a one-call widget tier that adds the toolbar, drawing rail, dialogs and shortcuts.",
   "license": "Apache-2.0",
   "author": "marketcalls",
   "homepage": "https://github.com/marketcalls/openalgo-charts#readme",
@@ -21,9 +21,13 @@
     "canvas",
     "openalgo",
     "technical-analysis",
+    "indicators",
+    "drawing-tools",
     "footprint",
     "renko",
-    "heikin-ashi"
+    "heikin-ashi",
+    "widget",
+    "trading-terminal"
   ],
   "type": "module",
   "module": "dist/openalgo-charts.mjs",
@@ -58,6 +62,10 @@
     "./webgl": {
       "types": "./dist/webgl/index.d.ts",
       "import": "./dist/openalgo-charts.webgl.mjs"
+    },
+    "./widget": {
+      "types": "./dist/widget/index.d.ts",
+      "import": "./dist/openalgo-charts.widget.mjs"
     }
   },
   "files": [
@@ -71,10 +79,12 @@
     "**/indicators/**",
     "**/draw/**",
     "**/webgl/**",
+    "**/widget/**",
     "./dist/openalgo-charts.transform.mjs",
     "./dist/openalgo-charts.indicators.mjs",
     "./dist/openalgo-charts.draw.mjs",
-    "./dist/openalgo-charts.webgl.mjs"
+    "./dist/openalgo-charts.webgl.mjs",
+    "./dist/openalgo-charts.widget.mjs"
   ],
   "scripts": {
     "clean": "rimraf dist",

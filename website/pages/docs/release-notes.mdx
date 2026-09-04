@@ -26,6 +26,11 @@ a per-tool settings schema, and an upgrade path for every 1.9.x layout and clipb
 
 **Added**
 
+- `openalgo-charts/widget`: the chart with its chrome in one `createWidget` call. Top bar,
+  drawing rail, status line, the settings and indicator dialogs, drawing properties, a
+  level editor, in-place text editing, a right-click menu with order entry, a keymap with
+  a `?` panel, theme tokens and optional persistence. The eighth tier and the only one that
+  ships DOM; the engine underneath still ships none. 35.56 KB Brotli.
 - `zIndex` with `setZIndex`, `bringToFront`, `sendToBack`, `sendBehindSeries` and
   `bringAboveSeries`. The default paints exactly where 1.9.2 painted.
 - Multi-select: `select(ids, additive)`, `selection()`, `updateMany`, `removeMany`,

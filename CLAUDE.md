@@ -7,14 +7,17 @@ the repo.
 
 ## What this project is
 
-A from-scratch, dependency-free HTML5 canvas charting engine. Seven lazy ESM tiers (base,
-trade, transform, profile, indicators, draw, webgl), zero runtime dependencies, enforced
-Brotli budgets. It is a **general library that ships an Indian default**, not an Indian library:
+A from-scratch, dependency-free HTML5 canvas charting engine. Eight lazy ESM tiers (base,
+trade, transform, profile, indicators, draw, webgl, widget), zero runtime dependencies,
+enforced Brotli budgets. It is a **general library that ships an Indian default**, not an Indian library:
 IST is the default timezone, never an assumption baked into behaviour.
 
-**The engine ships no DOM.** Toolbars, dialogs, menus and pickers live in the host. The
-yfinance demo (`examples/yfinance/index.html`) is the reference host and the place to
-prove a feature is usable, not just present.
+**The engine ships no DOM.** The base and the seven engine tiers contain no toolbar,
+dialog, menu or picker; those live in the host. `openalgo-charts/widget` is the one tier
+that does ship them: a packaged host that drives the engine only through its public API,
+kept out of every other bundle by the ESLint tier ACL and `npm run shake`. The yfinance
+demo (`examples/yfinance/index.html`) is the reference host and the place to prove a
+feature is usable, not just present.
 
 ## Writing rules
 

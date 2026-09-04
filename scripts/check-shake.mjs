@@ -47,6 +47,12 @@ const MUST_BE_SHAKEN = [
   // openalgo-charts.webgl.mjs) and nothing in the base entry imports it. The
   // string is the context-loss listener that only that backend installs.
   ['WebGL2 backend', 'webglcontextlost'],
+  // The widget is the one tier that ships DOM (src/widget, shipped as
+  // openalgo-charts.widget.mjs). The ESLint ACL forbids the base from importing
+  // it; this is the check on the built output, so that a host which only
+  // wanted a chart can never receive a toolbar. The string is the CSS scope
+  // every widget rule is written under, and nothing in the engine paints HTML.
+  ['widget tier', 'oac-widget'],
 ];
 
 const virtual = {

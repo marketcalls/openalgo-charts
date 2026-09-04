@@ -4,17 +4,17 @@
 
 **A from-scratch, dependency-free HTML5-canvas charting engine for OpenAlgo.**
 
-Professional interactive charts, 102 built-in indicators plus your own custom ones, drawing tools, order flow, market replay, linked chart grids, and on-chart trading. Seven lazy-loaded tiers, zero runtime dependencies, 66.41 KB Brotli for the base engine.
+Professional interactive charts, 102 built-in indicators plus your own custom ones, drawing tools, order flow, market replay, linked chart grids, and on-chart trading. Eight lazy-loaded tiers, zero runtime dependencies, 66.41 KB Brotli for the base engine, and a one-call widget tier that adds the toolbar, drawing rail, dialogs and shortcuts.
 
 [![npm version](https://img.shields.io/npm/v/openalgo-charts.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/openalgo-charts)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![bundle](https://img.shields.io/badge/brotli-66%20KB%20base%20%C2%B7%20146%20KB%20all%20tiers-brightgreen.svg)](#size-budget)
+[![bundle](https://img.shields.io/badge/brotli-66%20KB%20base%20%C2%B7%20182%20KB%20all%20tiers-brightgreen.svg)](#size-budget)
 [![tests](https://img.shields.io/badge/tests-2898%20passing-brightgreen.svg)](#develop)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](#principles)
 
 [**Documentation**](https://marketcalls.github.io/openalgo-charts/) &nbsp;·&nbsp; [**Live examples**](https://marketcalls.github.io/openalgo-charts/examples) &nbsp;·&nbsp; [**Getting started**](./docs/getting-started.md) &nbsp;·&nbsp; [**Architecture**](./ARCHITECTURE.md)
 
-<img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts architecture: seven layers from the public API down to feeds and data, with 102 built-in plus custom indicators, 51 drawing tools, and a seven-tier bundle legend" width="920" />
+<img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts architecture: seven layers from the public API down to feeds and data, with 102 built-in plus custom indicators, 51 drawing tools, and an eight-tier bundle legend" width="920" />
 
 </div>
 
@@ -70,7 +70,8 @@ in front of npm rather than being places you upload to. A chart is one HTML file
 
 Each tier is its own file, so `openalgo-charts.indicators.mjs` next to it registers
 all 102 built-ins. Pin the version in anything you leave running. There is no
-stylesheet to load: the engine ships no DOM. See
+stylesheet to load: the engine ships no DOM, and the one tier that does
+(`openalgo-charts/widget`) injects its own. See
 [Use from a CDN](https://marketcalls.github.io/openalgo-charts/docs/cdn).
 
 ## Tiers
@@ -86,8 +87,9 @@ Import only what you use. Each tier is a separate bundle that registers into the
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 10.7 KB |
 | `openalgo-charts/trade` | Order / position / bracket tools + DOM ladder | 7.6 KB |
 | `openalgo-charts/webgl` | WebGL2 series backend: batched, analytically anti-aliased GPU rendering of the standard chart types behind `renderer: 'auto'`, with a session-long fallback to the 2D path | 6.4 KB |
+| `openalgo-charts/widget` | The chart with its chrome in one call: `createWidget` adds a top bar, the drawing rail, a status line, the settings and indicator dialogs, drawing properties, a right-click menu, a keymap with a `?` panel and optional layout persistence. The only tier that ships DOM | 35.6 KB |
 
-Everything together is **146.11 KB Brotli**. Figures are the measured `size-limit` output. The trade tier is listed as its delta over the base, so loading base + trade costs 74.02 KB.
+Everything together is **181.67 KB Brotli**; a widget terminal (base + draw + indicators + widget, what one `createWidget` call loads) is 154.36 KB. Figures are the measured `size-limit` output. The trade tier is listed as its delta over the base, so loading base + trade costs 74.02 KB.
 
 ## What's built
 
@@ -235,7 +237,9 @@ Enforced in CI by [`size-limit`](./.size-limit.json). Nothing is excluded, becau
 | Transform tier | 5 KB | 2.66 KB |
 | Profile tier | 11 KB | 10.66 KB |
 | WebGL2 tier | 7 KB | 6.38 KB |
-| **Everything** | **147 KB** | **146.11 KB** |
+| Widget tier | 36 KB | 35.56 KB |
+| Widget terminal (base + draw + indicators + widget) | 155 KB | 154.36 KB |
+| **Everything** | **182 KB** | **181.67 KB** |
 
 ## Documentation
 

@@ -344,3 +344,23 @@ Every figure in the legend, the `<desc>` and the subtitle was re-measured from
 `npm run size` on the 2.0.0 build (base 66.41 KB, everything 146.11 KB); the
 1.8.x figures the diagram had carried through several releases were replaced
 in the same pass, which is the drift this file exists to record.
+
+## 2.0.0: an eighth tier chip
+
+The widget tier, `openalgo-charts/widget`, is the eighth bundle and the first
+that is not an engine feature: it is the chrome (rail, top bar, status line,
+dialogs, keymap) as a package. Eight tier chips plus "Everything" on the 162 px
+pitch would run 144 px past the frame, so the row was re-spaced once more:
+every tier chip is 136 px wide on a 144 px pitch from x=248, the Everything
+chip is 168 px, and the row still ends at x=1568. The label dropped to 15 px,
+the size figure from 24 to 22 px and the caption from 12 to 11 px so
+"102 built-in indicators" still sits inside the chip. Descending size order
+puts `/widget` (35.56 KB, rose, a hue the legend had not used) second, between
+`base` and `/indicators`; its caption reads "Rail, top bar, dialogs, keys".
+
+Every figure was re-measured from `npm run size` on the build that added the
+tier: base 66.41 KB unchanged (the widget is a separate bundle and the base
+row did not move), everything 146.11 KB to 181.67 KB, the subtitle 146 KB to
+182 KB. The `<desc>` names the eighth chip. The layer count in the `<desc>` and
+the README alt text stays at seven: the widget is a bundle, not a layer of the
+engine, and the stack above the legend did not change.

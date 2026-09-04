@@ -29,6 +29,7 @@ const TIERS = {
   profile: 'openalgo-charts.profile.mjs',
   trade: 'openalgo-charts.trade.mjs',
   webgl: 'openalgo-charts.webgl.mjs',
+  widget: 'openalgo-charts.widget.mjs',
 }
 
 const mods = {}
@@ -36,8 +37,17 @@ for (const [tier, file] of Object.entries(TIERS)) {
   const p = join(ROOT, 'dist', file)
   try {
     mods[tier] = await import(pathToFileURL(p).href)
-  } catch {
-    console.error(`cannot read ${p}. Run \`npm run build\` first.`)
+  } catch (err) {
+    if (err?.code === 'ERR_MODULE_NOT_FOUND') {
+      console.error(`cannot read ${p}. Run \`npm run build\` first.`)
+    } else {
+      // This is Node, and the widget is the DOM tier: a ReferenceError here
+      // means the module reached for `document` or `window` while being
+      // evaluated, which would also break every host that imports it on a
+      // server. Importing a tier must be free; only its factory may build DOM.
+      console.error(`cannot import ${p}: ${err?.message ?? err}`)
+      console.error('A tier must not touch the DOM at module evaluation time. Build DOM inside the factory (createWidget), not at module scope.')
+    }
     process.exit(2)
   }
 }

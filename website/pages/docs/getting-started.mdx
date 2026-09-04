@@ -9,7 +9,7 @@ import { Callout } from 'nextra/components'
 # Getting started
 
 **OpenAlgo Charts** is a dependency-free, canvas-based financial charting engine. The full
-package (every tier) is **124.47 KB Brotli**, the base engine alone is **60.88 KB**, and it
+package (every tier) is **181.67 KB Brotli**, the base engine alone is **66.41 KB**, and it
 has **zero runtime dependencies** - what
 you import is what ships.
 
@@ -92,6 +92,7 @@ Pay only for what you use - each tier is a separate entry point:
 | `openalgo-charts/indicators` | 102 built-in indicators (SMA/EMA/MACD/Bollinger/RSI/ADX/VWAP/Supertrend/HalfTrend/CPR/...) + the Tier-2 contract |
 | `openalgo-charts/draw` | 51 drawing tools + a headless drawing controller |
 | `openalgo-charts/webgl` | the WebGL2 series backend behind `renderer: 'auto'`, composited into the pane's canvas |
+| `openalgo-charts/widget` | the chart with its chrome in one `createWidget` call: top bar, drawing rail, status line, dialogs, right-click menu, shortcuts, persistence. The only tier that ships DOM |
 
 ```ts
 import { createChart } from 'openalgo-charts';

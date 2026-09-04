@@ -157,6 +157,31 @@ time. Saved 1.9.x layouts and clipboard bodies are upgraded on the way in.
   `createWebGL2Backend`, `isWebGL2Supported`, `GlDevice`, `sharedGlDevice`,
   `registerWebGL2Renderer`, `WEBGL_TIER`. Base engine 65.52 KB to 66.41 KB.
 
+- **`openalgo-charts/widget`, the eighth tier and the only one that ships
+  DOM.** `createWidget(container, options)` builds the chart with its chrome
+  in one call: a top bar (symbol box with search, interval pills, chart type,
+  Indicators, capture, settings, theme), the drawing rail from the draw tier's
+  sprite with pins, flyouts, magnet and stay modes, a status line, toasts, a
+  keymap with a `?` shortcuts panel and conflict reporting against the
+  engine's own table, and optional layout persistence
+  (`persist: true | namespace`). Every dialog is generated from a schema the
+  engine already ships: chart settings from `chartSettingsSchema`, indicator
+  settings from the descriptor, drawing properties from
+  `drawingSettingsSchema`, plus an indicator picker, a level editor for the
+  fib and gann family, an in-place text editor and a right-click menu that
+  offers order entry through `onOrder`. The chrome takes its colours from the
+  active `ChartTheme` through `--oac-` tokens, so `setTheme` recolours canvas
+  and chrome together. The engine still ships no DOM: the widget is a
+  packaged host driving the public API, kept out of every other bundle by the
+  ESLint tier ACL and by `npm run shake`, and it must not touch the document
+  on import. Exported alongside `createWidget`: the `Widget` handle, the
+  `WidgetContext` every mount is handed, the dialog registry
+  (`registerWidgetDialog`, `widgetDialog`), the seven `mount*` functions,
+  `Keymap`, `mountRail`, `mountTopbar`, `mountStatusline`, `mountToasts`,
+  `renderForm`, the token helpers, `WIDGET_TIER`. Measured 35.56 KB Brotli
+  against a 36 kB budget; base + draw + indicators + widget 154.36 KB against
+  155 kB; everything 181.67 KB against 182 kB.
+
 ### Fixed
 
 - Fib retracement and extension stroke their anchor leg in `style.color`, so

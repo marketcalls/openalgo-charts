@@ -4,9 +4,9 @@
 
 Source of truth: `package.json` (`exports`, `sideEffects`, `files`), `rollup.config.js`, `.size-limit.json`, `src/all.ts`.
 
-## The seven entry points
+## The eight entry points
 
-`exports` declares exactly seven specifiers, each with only `types` and `import` conditions. There is no `main`, no `require` condition and no CJS build: the package is ESM-only (`"type": "module"`, `module: dist/openalgo-charts.mjs`).
+`exports` declares exactly eight specifiers, each with only `types` and `import` conditions. There is no `main`, no `require` condition and no CJS build: the package is ESM-only (`"type": "module"`, `module: dist/openalgo-charts.mjs`).
 
 | Specifier | Emitted file | Contents | Brotli budget | Import has side effects |
 |---|---|---|---|---|
@@ -17,8 +17,9 @@ Source of truth: `package.json` (`exports`, `sideEffects`, `files`), `rollup.con
 | `openalgo-charts/indicators` | `dist/openalgo-charts.indicators.mjs` | 102 Tier-1 built-ins plus the Tier-2 contract | 30 KB | **yes**, registers all 102 descriptors |
 | `openalgo-charts/draw` | `dist/openalgo-charts.draw.mjs` | 51 drawing tools, `DrawingController`, `DrawingLayer` | 26 KB | **yes**, registers every built-in tool |
 | `openalgo-charts/webgl` | `dist/openalgo-charts.webgl.mjs` | the WebGL2 series backend, `createWebGL2Backend`, `isWebGL2Supported`, `WebGL2Backend`, `GlDevice` | 7 KB | **yes**, registers the `webgl2` render backend |
+| `openalgo-charts/widget` | `dist/openalgo-charts.widget.mjs` | `createWidget`, the chrome (top bar, rail, status line, toasts), the dialogs, the keymap, the tokens and stylesheet; the only tier that ships DOM. Imports `openalgo-charts/draw` itself | 36 KB | **yes**, registers the seven dialog mounts with the shell |
 
-Types resolve per tier: `dist/index.d.ts`, `dist/trade/index.d.ts`, `dist/transform/index.d.ts`, `dist/profile/index.d.ts`, `dist/indicators/index.d.ts`, `dist/draw/index.d.ts`, `dist/webgl/index.d.ts`.
+Types resolve per tier: `dist/index.d.ts`, `dist/trade/index.d.ts`, `dist/transform/index.d.ts`, `dist/profile/index.d.ts`, `dist/indicators/index.d.ts`, `dist/draw/index.d.ts`, `dist/webgl/index.d.ts`, `dist/widget/index.d.ts`.
 
 ## Never deep-import into `dist/`
 
@@ -28,8 +29,10 @@ The reason is registry identity, and it is a correctness bug, not a size problem
 
 ```js
 const PKG = 'openalgo-charts';
-const tierExternal = (id) => id === PKG;
+const tierExternal = (id) => id === PKG || id.startsWith(`${PKG}/`);
 ```
+
+Every `openalgo-charts/<tier>` specifier is external too, and `output.paths` maps each to its sibling file, because the widget tier builds on the draw tier and would otherwise inline a second `DrawingController`.
 
 Every registry — chart types, indicators, drawing tools — is a module-level `Map` inside exactly one module instance. `createChart` reads the base bundle's copy. A deep import creates a second module instance with a second, empty `Map`:
 
@@ -54,15 +57,16 @@ Verified against the built output:
 
 ```json
 "sideEffects": [
-  "**/transform/**", "**/indicators/**", "**/draw/**", "**/webgl/**",
+  "**/transform/**", "**/indicators/**", "**/draw/**", "**/webgl/**", "**/widget/**",
   "./dist/openalgo-charts.transform.mjs",
   "./dist/openalgo-charts.indicators.mjs",
   "./dist/openalgo-charts.draw.mjs",
-  "./dist/openalgo-charts.webgl.mjs"
+  "./dist/openalgo-charts.webgl.mjs",
+  "./dist/openalgo-charts.widget.mjs"
 ]
 ```
 
-An array, not `false`: the base, trade and profile bundles are declared side-effect-free and tree-shake normally; the four registering tiers are marked as having side effects so a bare `import 'openalgo-charts/indicators'` (or `'openalgo-charts/webgl'`) is never dropped.
+An array, not `false`: the base, trade and profile bundles are declared side-effect-free and tree-shake normally; the five registering tiers are marked as having side effects so a bare `import 'openalgo-charts/indicators'` (or `'openalgo-charts/webgl'`, or the widget, whose import registers its dialogs) is never dropped.
 
 Tree-shaking will remove unused named exports from any tier. It will **not** remove a registration that a bundler can see is reachable — the registration runs at module scope in the tier's `index.ts`.
 
@@ -140,7 +144,9 @@ Enforced by `npm run size` (`size-limit`, Brotli, `@size-limit/file`), from `.si
 | Transform tier | `transform.mjs` | 5 KB | 2.66 KB |
 | Profile tier | `profile.mjs` | 11 KB | 10.66 KB |
 | WebGL2 tier | `webgl.mjs` | 7 KB | 6.38 KB |
-| Everything | all seven bundles | 147 KB | 146.11 KB |
+| Widget tier | `widget.mjs` | 36 KB | 35.56 KB |
+| Widget terminal | base + `draw.mjs` + `indicators.mjs` + `widget.mjs` | 155 KB | 154.36 KB |
+| Everything | all eight bundles | 182 KB | 181.67 KB |
 
 The indicator tier and the `Everything` row were both raised in 1.8.3, from 27 KB and 120 KB, to carry that release's eleven new indicators. They move together by necessity: `Everything` contains the tier, so an aggregate below all-other-tiers plus the tier's ceiling would fail while the tier itself passed. The limits in `.size-limit.json` are the budget of record: measure, do not quote these figures from memory.
 
@@ -162,7 +168,7 @@ It has no `.d.ts` build and no `exports` entry. `openalgo-charts/all` does not r
 
 ## Related
 
-[core-api](core-api.md) · [chart-types](chart-types.md) · [indicators](indicators.md) · [transforms](transforms.md) · [drawing-tools](drawing-tools.md) · [trade-tier](trade-tier.md) · [profiles-and-orderflow](profiles-and-orderflow.md) · [react-integration](react-integration.md) · [pitfalls](pitfalls.md)
+[core-api](core-api.md) · [chart-types](chart-types.md) · [indicators](indicators.md) · [transforms](transforms.md) · [drawing-tools](drawing-tools.md) · [trade-tier](trade-tier.md) · [profiles-and-orderflow](profiles-and-orderflow.md) · [widget](widget.md) · [react-integration](react-integration.md) · [pitfalls](pitfalls.md)
 
 ## Tier identity constants
 
@@ -177,6 +183,7 @@ not depend on a bare string literal that a rename would silently break:
 | `PROFILE_TIER` | `'profile'` | `openalgo-charts/profile` |
 | `TRADE_TIER` | `'trade'` | `openalgo-charts/trade` |
 | `WEBGL_TIER` | `'webgl'` | `openalgo-charts/webgl` |
+| `WIDGET_TIER` | `'widget'` | `openalgo-charts/widget` |
 
 They are exported from the tier's own entry point, not from the base bundle, so
 importing one to test for it defeats the purpose. Track what your own code loaded.

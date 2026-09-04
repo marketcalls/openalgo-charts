@@ -45,6 +45,23 @@
     "brotli": true
   },
   {
+    "name": "Widget tier (shell, top bar, drawing rail, status line, dialogs, keymap, styles)",
+    "path": "dist/openalgo-charts.widget.mjs",
+    "limit": "36 kB",
+    "brotli": true
+  },
+  {
+    "name": "Widget terminal (base + draw + indicators + widget: what one createWidget call loads)",
+    "path": [
+      "dist/openalgo-charts.mjs",
+      "dist/openalgo-charts.draw.mjs",
+      "dist/openalgo-charts.indicators.mjs",
+      "dist/openalgo-charts.widget.mjs"
+    ],
+    "limit": "155 kB",
+    "brotli": true
+  },
+  {
     "name": "Everything (all tiers, full package)",
     "path": [
       "dist/openalgo-charts.mjs",
@@ -53,9 +70,10 @@
       "dist/openalgo-charts.profile.mjs",
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.draw.mjs",
-      "dist/openalgo-charts.webgl.mjs"
+      "dist/openalgo-charts.webgl.mjs",
+      "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "147 kB",
+    "limit": "182 kB",
     "brotli": true
   }
 ]
