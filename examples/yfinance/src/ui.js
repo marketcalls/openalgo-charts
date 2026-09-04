@@ -319,7 +319,7 @@ export function initOverlays() {
 // failed load therefore never leaves a blank stage.
 
 export const CHART_STATES = ['ready', 'loading', 'empty', 'error'];
-/** A warm load lands in a few ms; the skeleton only shows for a slow one. */
+/** A warm load lands in a few ms; the dots only show for a slow one. */
 export const LOADING_DELAY_MS = 120;
 let chartStateName = 'ready';
 let loadingTimer = 0;
@@ -352,11 +352,17 @@ function showChartState(state, detail) {
   const dismiss = el('cs-dismiss');
   if (retry) retry.hidden = state === 'loading';
   if (dismiss) dismiss.hidden = state !== 'error';
-  // The ghost bars stand in for a chart that is not there. Behind a failed
-  // reload the last chart still is, and the card alone says what happened.
-  const sk = el('cs-skeleton');
-  const chart = el('chart');
-  if (sk) sk.hidden = state !== 'loading' && Boolean(chart && chart.children.length);
+  // The dots are the load, and the load only. An empty or failed request has
+  // something to say, and says it in the card.
+  const dots = el('cs-dots');
+  if (dots) dots.hidden = state !== 'loading';
+  // Blank the stage under the dots when the bars on their way belong to a
+  // different instrument than the ones drawn. `detail.blank` is the caller's
+  // judgement, because only it knows what it asked for last.
+  host.dataset.blank = state === 'loading' && detail.blank ? '1' : '';
+  // The card carries the wording for every other state; a load says its piece
+  // to the live region, since the card it would have used is off screen.
+  if (state === 'loading') announce(title.textContent);
   host.hidden = false;
 }
 
@@ -388,17 +394,18 @@ function retryLoad() {
   if (load) load.click();
 }
 
-/** The ghost chart behind the state card: a row of bars, drawn once. */
-function buildSkeleton() {
-  const sk = el('cs-skeleton');
-  if (!sk || sk.children.length) return;
-  for (let i = 0; i < 48; i++) {
-    const bar = document.createElement('i');
-    // A wave with a little noise, so it reads as a chart and not as a comb.
-    const h = 34 + Math.round(22 * Math.sin(i / 3.1)) + (i % 5) * 4;
-    bar.style.setProperty('--h', h + '%');
-    bar.style.setProperty('--i', String(i));   // staggers the loading pulse
-    sk.appendChild(bar);
+/**
+ * The three dots that stand where the chart will be, drawn once. Each carries
+ * its index, which the stylesheet turns into a negative animation delay so
+ * the three are permanently out of phase with each other.
+ */
+function buildLoadingDots() {
+  const host = el('cs-dots');
+  if (!host || host.children.length) return;
+  for (let i = 0; i < 3; i++) {
+    const dot = document.createElement('i');
+    dot.style.setProperty('--i', String(i));
+    host.appendChild(dot);
   }
 }
 
@@ -451,7 +458,7 @@ export function initShell(a) {
   app = a;
   initTheme();
   initOverlays();
-  buildSkeleton();
+  buildLoadingDots();
   const retry = el('cs-retry');
   if (retry) retry.addEventListener('click', retryLoad);
   const dismiss = el('cs-dismiss');

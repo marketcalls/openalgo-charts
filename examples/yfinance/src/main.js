@@ -386,14 +386,21 @@ async function load(opts) {
   const wanted = el('period').value;
   const period = clampPeriod(interval, wanted);
   if (period !== wanted) el('period').value = period;
+  const prev = app.req || {};
   app.req = { symbol: el('symbol').value.trim(), interval, period };
+  // A different instrument or timeframe means the bars on screen are about to
+  // be replaced rather than refreshed, so the stage blanks under the loading
+  // dots. A reload of the same request keeps them: they are still correct,
+  // and blanking a chart to redraw the same chart is just a flicker.
+  const identityChanged =
+    prev.symbol !== app.req.symbol || prev.interval !== app.req.interval;
   // Announced before the fetch, not after it: the follower starts loading
   // the same instrument in parallel instead of a second behind. Recorded
   // even with symbol sync off, so switching it on later converges on this
   // instrument rather than on a stale one.
   if (app.linkGroup && app.chart) app.linkGroup.setSymbol(app.chart, app.req.symbol);
   status.textContent = `loading ${app.req.symbol} ${app.req.interval}...`;
-  setChartState('loading', app.req);
+  setChartState('loading', { ...app.req, blank: identityChanged || !app.chart });
   try {
     // The main slot: a newer main load cancels the one in flight, so a
     // quick symbol switch cannot land the older answer on the newer name.

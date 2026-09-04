@@ -120,13 +120,14 @@
 
       <!-- What the stage says when there are no bars to draw. One overlay,
            three states (`data-state`): bars on their way, none for this
-           request, or a request that failed and can be retried. The ghost
-           bars behind the card are built once by initShell(); the card's
-           wording is written by setChartState(). The card is the only part
-           that takes the pointer, so a failed load still leaves the last
-           chart underneath it usable. -->
+           request, or a request that failed and can be retried. A load in
+           flight shows three pulsing dots and nothing else, because a chart
+           that is not there yet should not be impersonated; the empty and
+           failed states show the card, whose wording setChartState() writes.
+           The card is the only part that takes the pointer, so a failed load
+           still leaves the last chart underneath it usable. -->
       <div id="chartstate" class="chartstate" hidden>
-        <div class="chartstate__skeleton" id="cs-skeleton" aria-hidden="true"></div>
+        <div class="chartstate__dots" id="cs-dots" aria-hidden="true" hidden></div>
         <div class="chartstate__card" id="cs-card" role="status" aria-live="polite">
           <span class="chartstate__spin" aria-hidden="true"></span>
           <div class="chartstate__body">

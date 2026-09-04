@@ -131,7 +131,7 @@ function installDom() {
 /** The markup index.html carries for the chart-state card. */
 function chartStateMarkup() {
   const host = make('div', doc.body, { id: 'chartstate', hidden: true });
-  make('div', host, { id: 'cs-skeleton' });
+  make('div', host, { id: 'cs-dots', hidden: true });
   const card = make('div', host, { id: 'cs-card' });
   make('div', card, { id: 'cs-title' });
   make('div', card, { id: 'cs-text' });
@@ -404,7 +404,7 @@ describe('overlay stack', () => {
 
 // ── chart state ────────────────────────────────────────────────────────
 describe('chart state', () => {
-  it('shows the skeleton only once a load has taken a beat', () => {
+  it('shows the dots only once a load has taken a beat', () => {
     const host = chartStateMarkup();
     setChartState('loading', { symbol: 'aapl', interval: '1d' });
     expect(chartState()).toBe('loading');
@@ -455,18 +455,26 @@ describe('chart state', () => {
     expect(chartState()).toBe('ready');
   });
 
-  it('keeps the ghost bars off a chart that is still there', () => {
+  it('shows the dots for a load and never for an empty or failed one', () => {
     const host = chartStateMarkup();
-    const sk = host.children[0];
-    const chart = make('div', doc.body, { id: 'chart' });
+    const dots = host.children[0];
     setChartState('error', { message: 'offline' });
-    expect(sk.hidden).toBe(false);                 // nothing drawn yet: the ghost fills the stage
-    make('canvas', chart);
-    setChartState('error', { message: 'offline' });
-    expect(sk.hidden).toBe(true);                  // the last chart is underneath
+    expect(dots.hidden).toBe(true);
+    setChartState('empty', { symbol: 'ZZZZ' });
+    expect(dots.hidden).toBe(true);
     setChartState('loading', { symbol: 'AAPL' });
     vi.advanceTimersByTime(LOADING_DELAY_MS);
-    expect(sk.hidden).toBe(false);
+    expect(dots.hidden).toBe(false);
+  });
+
+  it('blanks the stage only when the bars coming belong to another symbol', () => {
+    const host = chartStateMarkup();
+    setChartState('loading', { symbol: 'AAPL', interval: '1d', blank: true });
+    vi.advanceTimersByTime(LOADING_DELAY_MS);
+    expect(host.dataset.blank).toBe('1');
+    setChartState('loading', { symbol: 'AAPL', interval: '1d' });
+    vi.advanceTimersByTime(LOADING_DELAY_MS);
+    expect(host.dataset.blank).toBe('');
   });
 
   it('retries through the page loader when the state names none', () => {
@@ -478,14 +486,14 @@ describe('chart state', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it('initShell draws the ghost bars once', () => {
+  it('initShell draws the three dots once', () => {
     chartStateMarkup();
     initShell({});
-    const sk = doc.getElementById('cs-skeleton');
-    expect(sk.children.length).toBe(48);
-    expect(sk.children[0].style['--h']).toMatch(/%$/);
+    const dots = doc.getElementById('cs-dots');
+    expect(dots.children.length).toBe(3);
+    expect(dots.children.map((d) => d.style['--i'])).toEqual(['0', '1', '2']);
     initShell({});
-    expect(sk.children.length).toBe(48);
+    expect(dots.children.length).toBe(3);
   });
 });
 

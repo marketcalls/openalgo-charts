@@ -389,25 +389,27 @@ select.field { cursor: pointer; padding-right: 24px; }
 /* ── loading, empty and error states ───────────────────────────
    One overlay over the plot with a ghost chart behind and a card in front.
    The ghost is a row of bars whose heights follow a wave; while bars are on
-   their way it pulses, and behind an empty or failed load it sits still, so
-   the stage always looks like a chart waiting for data rather than a hole.
-   Only the card takes the pointer: a failed reload leaves the last chart
-   underneath it, and that chart stays usable. */
+   their way, three dots pulse at the centre of the stage and nothing else
+   is drawn: a chart that has no bars yet must not be impersonated by
+   something shaped like bars. Only the card takes the pointer: a failed
+   reload leaves the last chart underneath it, and that chart stays usable. */
 .chartstate { position: absolute; inset: 0; z-index: 30; display: flex; align-items: center;
   justify-content: center; pointer-events: none; }
 .chartstate[hidden] { display: none; }
 .stage.has-rail .chartstate { left: 42px; }
-.chartstate__skeleton { position: absolute; left: 28px; right: 96px; top: 60px; bottom: 48px;
-  display: flex; align-items: flex-end; gap: 6px; opacity: .35; }
-.chartstate__skeleton i { flex: 1 1 0; min-width: 0; height: var(--h, 40%); position: relative;
-  border-radius: 2px; background: var(--elev-3); }
-/* The wick: a hairline through the bar, a little past it at both ends. */
-.chartstate__skeleton i::before { content: ''; position: absolute; left: 50%; top: -22%; bottom: -12%;
-  width: 1px; background: var(--elev-3); transform: translateX(-50%); }
-.chartstate[data-state="loading"] .chartstate__skeleton { opacity: .8; }
-.chartstate[data-state="loading"] .chartstate__skeleton i {
-  animation: cs-pulse 1.3s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 28ms); }
-@keyframes cs-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+.chartstate__dots { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; gap: 7px; }
+.chartstate__dots[hidden] { display: none; }
+.chartstate__dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--tx); opacity: .12; }
+/* Negative delays, so every dot is already mid-phase on the first frame. */
+.chartstate[data-state="loading"] .chartstate__dots i {
+  animation: cs-dot 800ms ease-in-out infinite alternate;
+  animation-delay: calc(var(--i, 0) * -260ms); }
+@keyframes cs-dot { from { opacity: .12; } to { opacity: .55; } }
+/* A new instrument blanks the stage: the last symbol's candles must not sit
+   under this one's name while its bars are on the way. Reloading the same
+   instrument keeps them, because they are still the right bars. */
+.chartstate[data-state="loading"][data-blank="1"] { background: var(--bg); }
 .chartstate__card { position: relative; display: flex; align-items: flex-start; gap: 12px;
   pointer-events: auto; min-width: 280px; max-width: min(440px, calc(100% - 32px));
   padding: 16px 18px; border-radius: 12px; background: var(--panel); border: 1px solid var(--bd);
@@ -420,17 +422,11 @@ select.field { cursor: pointer; padding-right: 24px; }
 .chartstate__actions .btn { height: 28px; padding: 0 12px; }
 .chartstate[data-state="empty"] .chartstate__card { border-left-color: var(--amber); }
 .chartstate[data-state="error"] .chartstate__card { border-left-color: var(--sell); }
-/* Loading is a pill, not a card: it says what is on its way and gets out of
-   the way, and the ring beside it is the only motion apart from the bars. */
-.chartstate[data-state="loading"] .chartstate__card { min-width: 0; padding: 8px 14px 8px 12px;
-  align-items: center; border-radius: 999px; border-left-width: 1px;
-  background: var(--glass-solid); backdrop-filter: blur(6px); }
-.chartstate[data-state="loading"] .chartstate__title { font-size: 12.5px; font-weight: 600; color: var(--mut); }
-.chartstate[data-state="loading"] .chartstate__actions { display: none; }
-.chartstate__spin { display: none; flex: none; width: 14px; height: 14px; border-radius: 50%;
-  border: 2px solid var(--elev-3); border-top-color: var(--acc); animation: cs-spin .8s linear infinite; }
-.chartstate[data-state="loading"] .chartstate__spin { display: block; }
-@keyframes cs-spin { to { transform: rotate(360deg); } }
+/* A load in flight is the dots alone. The card would only repeat the status
+   line, which already names the symbol and interval, so it is taken off
+   screen and the wording goes to the live region instead. */
+.chartstate[data-state="loading"] .chartstate__card { display: none; }
+.chartstate__spin { display: none; }
 
 /* ── toasts ─────────────────────────────────────────────────────
    Bottom right, newest at the bottom, each with a coloured edge for its
@@ -713,7 +709,7 @@ select.field { cursor: pointer; padding-right: 24px; }
     border-right: 0; border-bottom: 1px solid var(--bd-soft); }
   .cset-tab { flex: none; }
   .toasts { right: 8px; bottom: 60px; }
-  .chartstate__skeleton { left: 12px; right: 12px; top: 40px; }
+  .chartstate__card { max-width: calc(100% - 24px); }
 }
 @media (max-width: 900px), (pointer: coarse) {
   :root { --h: 40px; }
@@ -738,6 +734,6 @@ select.field { cursor: pointer; padding-right: 24px; }
 
 /* ── motion ─────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .chartstate[data-state="loading"] .chartstate__skeleton i, .chartstate__spin, .toast { animation: none; }
+  .chartstate[data-state="loading"] .chartstate__dots i, .toast { animation: none; }
   .toast.is-out, .btn, .splitbar { transition: none; }
 }
