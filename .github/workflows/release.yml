@@ -71,10 +71,16 @@ jobs:
           name: sbom-${{ inputs.tag }}
           path: sbom.cyclonedx.json
 
-      # No NPM_TOKEN. The registry verifies the OIDC identity of this workflow
-      # against the trusted publisher configured on the package, which means
-      # there is no long-lived credential to leak, rotate, or paste into a chat.
-      # Requires a one-time setup on npmjs.com: package settings, trusted
-      # publisher, GitHub Actions, this repository and this workflow filename.
+      # Trusted publishing is the intended path: the registry checks this
+      # workflow's OIDC identity against the trusted publisher configured on the
+      # package, so there is no long-lived credential to leak or rotate. It needs
+      # a one-time setup on npmjs.com (package settings, trusted publisher,
+      # GitHub Actions, this repository, this workflow filename). Until that
+      # exists the registry answers a publish with a 404 that reads as "not
+      # found" but means "not permitted", so NPM_TOKEN stands in when it is set.
+      # Provenance is signed either way: it is minted from this run's OIDC
+      # claims, not from whatever credential authenticated the upload.
       - name: publish with provenance
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
