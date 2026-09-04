@@ -213,6 +213,8 @@ export class FakeNode {
   get offsetHeight() { return this.size ? this.size.height : 20; }
 }
 
+const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"' };
+
 /** Parse the markup the rail writes: tags, double-quoted attributes, text. */
 function parseInto(root, html) {
   const doc = root.ownerDocument;
@@ -235,7 +237,10 @@ function parseInto(root, html) {
       continue;
     }
     if (m[5]) {
-      const text = m[5].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+      // One pass, not four: unescaping &amp; first would turn the literal
+      // "&amp;lt;" into "&lt;" and then into "<", which is a different string
+      // than the markup asked for.
+      const text = m[5].replace(/&(?:amp|lt|gt|quot);/g, (e) => ENTITIES[e]);
       stack[stack.length - 1]._text += text;
     }
   }
