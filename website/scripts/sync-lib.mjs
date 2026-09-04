@@ -10,6 +10,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const distDir = resolve(here, '..', '..', 'dist');
 const outDir = resolve(here, '..', 'lib', 'oac');
 
+// The architecture diagram is edited in docs/ (README and ARCHITECTURE.md show
+// it) and the site serves its own copy from public/. Copy it here so the two
+// cannot drift: the site once carried a whole release's pre-release sizes
+// because only dist/ was synced.
+const diagram = resolve(here, '..', '..', 'docs', 'architecture-diagram.svg');
+if (existsSync(diagram)) {
+  copyFileSync(diagram, resolve(here, '..', 'public', 'architecture-diagram.svg'));
+  console.log('[sync-lib] copied docs/architecture-diagram.svg into website/public');
+}
+
 if (!existsSync(distDir)) {
   console.warn('[sync-lib] ../dist not found. Run `npm run build` in the repo root first.');
   process.exit(0);

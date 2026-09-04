@@ -7,7 +7,7 @@ import { Callout } from 'nextra/components'
 
 # Drawing Tools
 
-`openalgo-charts/draw` is a lazy tier (**15.39 KB** Brotli) with 51 tools and a headless
+`openalgo-charts/draw` is a lazy tier (**25.12 KB** Brotli) with 51 tools and a headless
 controller. It ships **no UI**: no toolbar, no dialogs. It owns the model and the
 interactions; your app supplies the buttons.
 
@@ -269,21 +269,23 @@ payload format, the validation rules and the failure modes.
 
 ## Text and labels
 
-The `text` tool draws a standalone text box, but **shapes carry labels too**: set
-`style.text` on a rectangle, ellipse, or parallel channel and it renders inside the outline.
-That is one shape with two colours: `color` strokes the outline, `fontColor` paints the label.
+The `text` tool draws a standalone text box, but **shapes carry labels too**: give a
+rectangle, ellipse, or parallel channel a `text` block and it renders inside the outline.
+That is one shape with two colours: `style.color` strokes the outline, `text.color` paints
+the label. Text is its own block on the drawing, `drawing.text` (a `DrawingText`), not a
+set of keys on `style`, so a host can tell a label colour from a stroke colour without
+knowing the tool.
 
-| Style key | Applies to | Notes |
+| `text` key | Applies to | Notes |
 | --- | --- | --- |
-| `text` | text tool, shapes | `\n` starts a new line |
-| `fontSize` | both | media px |
+| `value` | text tool, shapes | `\n` starts a new line |
+| `color` | both | falls back to `style.color` |
+| `fontSize` | both | media px, default 12 (the `text` tool's `defaultText` sets 14) |
 | `fontFamily` | both | defaults to the UI sans stack |
-| `fontWeight` | both | `'normal'` \| `'bold'` |
-| `fontStyle` | both | `'normal'` \| `'italic'` |
-| `fontColor` | both | falls back to `color` |
-| `textAlign` | both | `'left'` \| `'center'` \| `'right'` |
-| `textVAlign` | both | `'top'` \| `'middle'` \| `'bottom'` |
-| `textPosition` | shapes only | `'inside'` the outline or `'outside'` just above it |
+| `bold`, `italic` | both | booleans |
+| `align` | both | `'left'` \| `'center'` \| `'right'` |
+| `valign` | both | `'top'` \| `'middle'` \| `'bottom'` |
+| `position` | shapes only | `'inside'` the outline or `'outside'` just above it |
 | `background`, `backgroundColor`, `backgroundOpacity` | text tool | filled plate behind the text |
 | `border`, `borderColor` | text tool | stroked plate border |
 | `wrap`, `wrapWidth` | both | soft-wrap instead of running off the pane |
@@ -294,23 +296,37 @@ draw.add({
   tool: 'rectangle',
   points: [a, b],
   paneIndex: 0,
-  style: {
-    color: '#8b5cf6',
-    text: 'Supply zone',
-    fontColor: '#ffffff',
+  style: { color: '#8b5cf6' },
+  text: {
+    value: 'Supply zone',
+    color: '#ffffff',
     fontSize: 13,
-    fontWeight: 'bold',
-    textPosition: 'inside',
-    textVAlign: 'top',
-    textAlign: 'center',
+    bold: true,
+    position: 'inside',
+    valign: 'top',
+    align: 'center',
   },
 });
+
+// Later edits patch the block: `text` merges, so send only the key that changed.
+draw.update(id, { text: { value: 'Supply zone (tested)' } });
 ```
 
 <Callout>
-With `textPosition: 'inside'`, `textVAlign` x `textAlign` give the nine placements a
-shape-text properties panel exposes. `'outside'` parks the block above the shape and ignores
-`textVAlign`. `examples/yfinance/index.html` wires all of it to a properties bar.
+With `position: 'inside'`, `valign` x `align` give the nine placements a shape-text
+properties panel exposes. `'outside'` parks the block above the shape and ignores
+`valign`. A tool merges its `defaultText` under the caller's block the way `defaultStyle`
+merges under `style` (`text` and `callout` ship one), and
+`drawingSettingsSchema(toolId).textIsContent` is true for the tools that *are* their text,
+so a host can ask for the content on placement. The yfinance example wires all of it to a
+properties bar.
+</Callout>
+
+<Callout type="info">
+Coming from 1.9.x, where these lived on `style` as `text`, `fontColor`, `fontWeight`,
+`fontStyle`, `textAlign`, `textVAlign` and `textPosition`: a saved layout is upgraded on
+load by `migrateDrawings`, and the key-by-key mapping is in
+[Migrating to 2.0](https://github.com/marketcalls/openalgo-charts/blob/master/docs/migrating-to-2.md).
 </Callout>
 
 ## Persistence

@@ -1,6 +1,6 @@
 # Trade tier (`openalgo-charts/trade`)
 
-*When to read this: placing, modifying or cancelling real orders from the chart — the order engine, its state machine, pre-trade validation, OCO brackets and the depth ladder.*
+*When to read this: placing, modifying or cancelling real orders from the chart, the order engine, its state machine, pre-trade validation, OCO brackets and the depth ladder.*
 
 Source of truth: every file in `src/trade/`, plus `src/feed/openalgo-trade.ts` (the `OrderFeed` adapter) and `src/feed/types.ts` (`MarketDepth`). Tests: `tests/trade.test.ts`, `tests/order-engine.test.ts`, `tests/dom-ladder.test.ts`. Demos: `examples/phase8-trade.html`, `examples/phase9-chart-trading.html`, `examples/phase10-dom.html`.
 
@@ -35,7 +35,7 @@ interface Order {
 interface Position { symbol: string; netQty: number; avgPrice: number }  // netQty signed
 ```
 
-`isWorking(o)` is true for `pending | working | partial` — the canonical "still live in the book" filter. Note these are *broker* statuses, distinct from the engine's `ClientOrderState` below.
+`isWorking(o)` is true for `pending | working | partial`, the canonical "still live in the book" filter. Note these are *broker* statuses, distinct from the engine's `ClientOrderState` below.
 
 ## `OrderEngine`
 
@@ -95,7 +95,7 @@ There is **no `placeLimit`** despite what `website/pages/docs/trading.mdx` shows
 
 **A default-constructed `OrderEngine` places nothing.** Either pass `armed: true` or pass a `gate`. Silent no-ops here look exactly like a broken network.
 
-`mode` is *only* forwarded as `feed.place({ ...req, mode })`. **The engine does not gate anything on `mode`, and `OpenAlgoTradeFeed` drops the field before it reaches the wire** — its `place()` body is `{ strategy, symbol, action, exchange, pricetype, product, quantity, price, trigger_price, disclosed_quantity }`, with no `mode` key. Analyzer/sandbox is a server-side OpenAlgo toggle (`/auth/analyzer-mode`, response field `data.analyze_mode`), not something this field turns on. Treat `mode: 'analyzer'` as a label your own adapter must honour; verify the server is in analyzer mode before trusting it.
+`mode` is *only* forwarded as `feed.place({ ...req, mode })`. **The engine does not gate anything on `mode`, and `OpenAlgoTradeFeed` drops the field before it reaches the wire**: its `place()` body is `{ strategy, symbol, action, exchange, pricetype, product, quantity, price, trigger_price, disclosed_quantity }`, with no `mode` key. Analyzer/sandbox is a server-side OpenAlgo toggle (`/auth/analyzer-mode`, response field `data.analyze_mode`), not something this field turns on. Treat `mode: 'analyzer'` as a label your own adapter must honour; verify the server is in analyzer mode before trusting it.
 
 ### Idempotency and modify throttling
 
@@ -110,14 +110,14 @@ Events: `ack`, `partialFill`, `fill`, `reject`, `submitModify`, `submitCancel`, 
 
 | From \ Event | `ack` | `partialFill` | `fill` | `reject` | `submitModify` | `submitCancel` | `cancelled` | `reconnectAbsent` |
 |---|---|---|---|---|---|---|---|---|
-| `pending_place` | `working` | `partial` | `filled` | `rejected` | — | — | — | `stale` |
-| `working` | — | `partial` | `filled` | — | `modify_pending` | `cancel_pending` | `cancelled` | `stale` |
-| `partial` | — | `partial` | `filled` | — | `modify_pending` | `cancel_pending` | `cancelled` | `stale` |
-| `modify_pending` | `working` | `partial` | `filled` | `working` | — | — | `cancelled` | `stale` |
-| `cancel_pending` | — | — | `filled` | `working` | — | — | `cancelled` | `stale` |
-| `filled` / `cancelled` / `rejected` / `stale` | — | — | — | — | — | — | — | — |
+| `pending_place` | `working` | `partial` | `filled` | `rejected` | none | none | none | `stale` |
+| `working` | none | `partial` | `filled` | none | `modify_pending` | `cancel_pending` | `cancelled` | `stale` |
+| `partial` | none | `partial` | `filled` | none | `modify_pending` | `cancel_pending` | `cancelled` | `stale` |
+| `modify_pending` | `working` | `partial` | `filled` | `working` | none | none | `cancelled` | `stale` |
+| `cancel_pending` | none | none | `filled` | `working` | none | none | `cancelled` | `stale` |
+| `filled` / `cancelled` / `rejected` / `stale` | none | none | none | none | none | none | none | none |
 
-`transition(state, event)` returns the **same state** for a disallowed event — it never throws, so spurious broker events are absorbed silently. Use `canTransition(state, event)` when you need to know. `isTerminal(state)` is true for `filled`, `cancelled`, `rejected`, `stale`.
+`transition(state, event)` returns the **same state** for a disallowed event, it never throws, so spurious broker events are absorbed silently. Use `canTransition(state, event)` when you need to know. `isTerminal(state)` is true for `filled`, `cancelled`, `rejected`, `stale`.
 
 Note the asymmetry: in `modify_pending`, `reject` means "the amend failed, the order is still working" and goes to `working`, not `rejected`.
 
@@ -132,11 +132,11 @@ withinPriceBand(price, band): boolean            // inclusive on both bounds
 validateOrder(price, qty, c): ValidationResult
 ```
 
-Check order: `qty <= 0` -> reject; `qty > freezeQty` -> reject; snap with `roundToTick(price, tickSize)`; band check runs on the **snapped** price. On success `price` holds the snapped value — always use `result.price`, not your input. `roundToTick` is `Math.round(value / step) * step` and returns raw floats (`100.05000000000001`), so format for display and never compare with `===`.
+Check order: `qty <= 0` -> reject; `qty > freezeQty` -> reject; snap with `roundToTick(price, tickSize)`; band check runs on the **snapped** price. On success `price` holds the snapped value, always use `result.price`, not your input. `roundToTick` is `Math.round(value / step) * step` and returns raw floats (`100.05000000000001`), so format for display and never compare with `===`.
 
 `OrderEngine.placeOrder` skips the price path entirely when `req.price` is undefined and only checks `qty > 0`. **A `MARKET` order bypasses the freeze-quantity check.**
 
-## P&L helpers (`src/trade/pnl.ts`) — pure, LTP-hot-path safe
+## P&L helpers (`src/trade/pnl.ts`): pure, LTP-hot-path safe
 
 ```ts
 unrealizedPnl(position, ltp): number              // (ltp - avgPrice) * netQty
@@ -160,7 +160,7 @@ interface BracketState { symbol: string; side: OrderSide; entry: number; stop: n
 
 `extentFromRight` defaults to `0.5`, clamped `0.1..1`. All three take `update(...)`; the first two take `setLtp(ltp)`. `WorkingOrderLine` renders at `triggerPrice ?? price`, dims when `status === 'pending'`, and shows `filledQty/qty` once partially filled. `PositionMarker` draws nothing when `netQty === 0`.
 
-**`BracketGroup` is purely visual — it carries no OCO logic.** One-cancels-other is `OrderEngine.linkOco(a, b)`, keyed on client ids.
+**`BracketGroup` is purely visual, it carries no OCO logic.** One-cancels-other is `OrderEngine.linkOco(a, b)`, keyed on client ids.
 
 ## `TradeController` / `TradeHost`
 
@@ -172,7 +172,7 @@ tc.reconcile(orders, positions);   // full snapshot; idempotent, safe on every u
 tc.onLtp('RELIANCE', 2950);        // pushes into every bound primitive
 ```
 
-`reconcile` diffs by `Order.id` and `Position.symbol`: new -> add, existing -> `update`, missing -> remove. Reconnect needs no special path — a fresh snapshot without a stale order removes its line. Rules: orders failing `isWorking` are skipped; orders with `role: 'sl' | 'tp'` are **excluded from standalone lines** and folded into a `BracketGroup`; a bracket only appears when a non-flat position exists for that symbol (SL uses `triggerPrice ?? price`, TP uses `price`). Introspection: `orderLineCount()`, `positionCount()`, `bracketCount()`.
+`reconcile` diffs by `Order.id` and `Position.symbol`: new -> add, existing -> `update`, missing -> remove. Reconnect needs no special path, a fresh snapshot without a stale order removes its line. Rules: orders failing `isWorking` are skipped; orders with `role: 'sl' | 'tp'` are **excluded from standalone lines** and folded into a `BracketGroup`; a bracket only appears when a non-flat position exists for that symbol (SL uses `triggerPrice ?? price`, TP uses `price`). Introspection: `orderLineCount()`, `positionCount()`, `bracketCount()`.
 
 ## `DomLadder`
 
@@ -181,9 +181,9 @@ interface DomLadderOptions { tickSize: number; width: number; groupBy: number; m
 const DEFAULT_DOM_LADDER_OPTIONS = { tickSize: 0.05, width: 96, groupBy: 1, maxRows: 60, rowHeight: 14 };
 ```
 
-A right-docked depth strip drawn on the overlay (`zOrder: 'top'`), price-aligned to the pane's price scale. Input is one method: `setDepth(depth: MarketDepth)`, called on every book update. `tier()` returns the current `LadderTier`. Rows hit-test as `ladder-bid:<price>` / `ladder-ask:<price>` with a `pointer` cursor — route them to a place-order flow.
+A right-docked depth strip drawn on the overlay (`zOrder: 'top'`), price-aligned to the pane's price scale. Input is one method: `setDepth(depth: MarketDepth)`, called on every book update. `tier()` returns the current `LadderTier`. Rows hit-test as `ladder-bid:<price>` / `ladder-ask:<price>` with a `pointer` cursor, route them to a place-order flow.
 
-`MarketDepth` (from `src/feed/types.ts`) is `{ bids: DepthLevel[]; asks: DepthLevel[]; ltp: number; ltq?: number }` with `DepthLevel = { price: number; qty: number; orders?: number }`. Length is whatever the broker streams — **5 to 200 levels**.
+`MarketDepth` (from `src/feed/types.ts`) is `{ bids: DepthLevel[]; asks: DepthLevel[]; ltp: number; ltq?: number }` with `DepthLevel = { price: number; qty: number; orders?: number }`. Length is whatever the broker streams, **5 to 200 levels**.
 
 Pure helpers, exported for custom rendering and tests:
 
@@ -193,7 +193,7 @@ Pure helpers, exported for custom rendering and tests:
 | `buildRows` | `(depth, tickSize, groupBy = 1) => LadderRow[]` | Merges bids+asks into `{ price, bidQty, askQty }`, bucketed to `tickSize * groupBy`, sorted high->low. Total qty is preserved across aggregation |
 | `visibleRows` | `(rows, priceToY, plotHeight, rowHeight, maxRows) => LadderRow[]` | Culls off-screen rows (±1 row), then keeps the `maxRows` nearest the vertical centre, re-sorted high->low |
 
-Depth arrives through the feed's optional `subscribeDepth(req, onDepth)` — `OpenAlgoLiveDataFeed` implements it over WS mode `'Depth'`.
+Depth arrives through the feed's optional `subscribeDepth(req, onDepth)`, `OpenAlgoLiveDataFeed` implements it over WS mode `'Depth'`.
 
 ```ts
 const ladder = new DomLadder({ tickSize: 0.05, width: 110, maxRows: 60, groupBy: 1 });
@@ -209,7 +209,7 @@ feed.subscribeDepth({ symbol, exchange, interval }, (d) => ladder.setDepth(d));
 
 Deterministic in-memory `OrderFeed` for tests and offline demos. Members: `onBook(cb)` / `setBook(orders, positions)` (copies its inputs), `onLtp(cb)` / `emitLtp(symbol, ltp)`, `onDepth(cb)` / `emitDepth(symbol, depth)`, `place`/`modify`/`cancel` (broker ids `B1`, `B2`, …), `fill(orderId)`, `orders()` / `positions()`, the test hook `rejectNextPlace = 'reason'` (next `place()` throws once), and `static makeDepth(ltp, levels, tickSize = 0.05)`.
 
-`place()` marks `MARKET` orders `'filled'` and everything else `'working'`. It appends to the order book but never updates `positions` — seed those with `setBook`.
+`place()` marks `MARKET` orders `'filled'` and everything else `'working'`. It appends to the order book but never updates `positions`, seed those with `setBook`.
 
 ## Worked example: engine + OpenAlgo + chart gesture
 
@@ -270,15 +270,15 @@ chart.subscribeClick((id) => {
 setInterval(refreshBook, 8000);
 ```
 
-Reconciling the fill back onto the chart *is* `refreshBook()` — the filled order drops out of `getOrders()`, `TradeController` removes its line, and the new `Position` grows a `PositionMarker`. Call `controller.onLtp(symbol, ltp)` on every tick so the P&L band and distance labels stay current.
+Reconciling the fill back onto the chart *is* `refreshBook()`, the filled order drops out of `getOrders()`, `TradeController` removes its line, and the new `Position` grows a `PositionMarker`. Call `controller.onLtp(symbol, ltp)` on every tick so the P&L band and distance labels stay current.
 
-`OpenAlgoTradeFeed.modify` needs the full order context, which it caches on `place()` and `getOrders()`. **Calling `modify()` for an order it has never seen throws** `cannot modify <id> — unknown order context`; call `getOrders()` after a page reload before allowing drags.
+`OpenAlgoTradeFeed.modify` needs the full order context, which it caches on `place()` and `getOrders()`. **Calling `modify()` for an order it has never seen throws** `cannot modify <id>, unknown order context`; call `getOrders()` after a page reload before allowing drags.
 
 ## Foot-guns
 
 **`onFill` takes a broker id, `cancelOrder`/`requestModify`/`state` take a client id.** Mixing them is a silent no-op.
 
-**`onReconnect` is destructive.** Any tracked non-terminal order whose broker id is missing from the set becomes `stale`, which is terminal — pass the *complete* fresh book, never a partial page.
+**`onReconnect` is destructive.** Any tracked non-terminal order whose broker id is missing from the set becomes `stale`, which is terminal, pass the *complete* fresh book, never a partial page.
 
 **Terminal states swallow everything.** After `stale`, a late fill event cannot move the order back; rebuild from a snapshot instead.
 

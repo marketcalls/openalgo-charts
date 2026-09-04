@@ -1,6 +1,6 @@
 # Drawing Tools
 
-*When to read this: you are adding chart annotations — trendlines, fibs, shapes, text — wiring a drawing toolbar, persisting drawings, or registering a custom tool.*
+*When to read this: you are adding chart annotations (trendlines, fibs, shapes, text) wiring a drawing toolbar, persisting drawings, or registering a custom tool.*
 
 Source of truth: `src/draw/types.ts`, `src/draw/tools.ts`, `src/draw/controller.ts`, `src/draw/layer.ts`, `src/draw/geometry.ts`, `src/draw/index.ts`.
 
@@ -29,36 +29,49 @@ Importing `openalgo-charts/draw` calls `registerBuiltinDrawingTools()` as a side
 interface Drawing {
   id: string;
   tool: string;              // a registered tool id
-  points: DrawingPoint[];    // { time: UTC seconds, price: number }
+  points: DrawingPoint[];    // { time: UTC seconds, price: number, pressure? }
   style: DrawingStyle;
+  text?: DrawingText;        // the label, or for the text tool the whole content
+  props?: Record<string, unknown>;   // per-tool extras, JSON-safe, persisted verbatim
   paneIndex: number;
   locked?: boolean;          // renders, but cannot be selected or dragged
   visible?: boolean;         // default true
+  zIndex: number;            // paint order; below 0 paints under the series. add() fills in 0
+  createdAt?: number;        // epoch ms, set by add()
 }
 
 interface DrawingStyle {
   color?: string; lineWidth?: number; lineStyle?: 'solid' | 'dashed' | 'dotted';
   fill?: boolean; fillColor?: string; fillOpacity?: number;      // default 0.12
   extendLeft?: boolean; extendRight?: boolean;
-  showLabels?: boolean; levels?: number[];                        // fib fractions
-  // text tools and shape labels
-  text?: string; fontSize?: number; fontFamily?: string;
-  fontWeight?: 'normal' | 'bold'; fontStyle?: 'normal' | 'italic'; fontColor?: string;
-  background?: boolean; backgroundColor?: string; backgroundOpacity?: number; // default 1
-  border?: boolean; borderColor?: string;
-  wrap?: boolean; wrapWidth?: number;                             // default 220 media px
-  textAlign?: 'left' | 'center' | 'right';
-  textVAlign?: 'top' | 'middle' | 'bottom';
-  textPosition?: 'inside' | 'outside';                            // shapes only
+  showLabels?: boolean;                                           // level / price / ratio labels where the tool has them
+  levels?: FibLevel[];                                            // fib and gann family; defaults per tool
   accountSize?: number; risk?: number;                            // position tools
+  showStats?: boolean;                                            // line family: midpoint readout
+  pressure?: boolean;                                             // brush: pen pressure drives the width
 }
+
+interface DrawingText {
+  value: string;                                                  // `\n` starts a new line
+  color?: string;                                                 // falls back to style.color
+  fontSize?: number; fontFamily?: string;                         // media px (default 12); UI sans stack
+  bold?: boolean; italic?: boolean;
+  align?: 'left' | 'center' | 'right';                            // default 'left'
+  valign?: 'top' | 'middle' | 'bottom';                           // default 'top'
+  wrap?: boolean; wrapWidth?: number;                             // default 220 media px
+  background?: boolean; backgroundColor?: string; backgroundOpacity?: number;   // plate; opacity default 1
+  border?: boolean; borderColor?: string;
+  position?: 'inside' | 'outside';                                // shapes only: where the label sits
+}
+
+interface FibLevel { ratio: number; color?: string; enabled?: boolean; label?: string; }
 ```
 
-Unset `color` falls back to `theme.lineColor`, unset `lineWidth` to `1.5`. `color` strokes the outline; `fontColor` paints an attached label, so one shape carries two colours. `textPosition: 'outside'` parks the label above the shape and ignores `textVAlign`.
+Unset `color` falls back to `theme.lineColor`, unset `lineWidth` to `1.5`. `style.color` strokes the outline; `text.color` paints an attached label, so one shape carries two colours. `text.position: 'outside'` parks the label above the shape and ignores `valign`. Nothing about text lives on `style`: a 1.9.x `style.text`, `fontColor`, `fontWeight`, `fontStyle`, `textAlign`, `textVAlign` or `textPosition` is a type error in 2.0, and `migrateDrawings` lifts them into `drawing.text` on load. `levels` is a list of `FibLevel` objects, never bare ratios.
 
 ## Anchors are `{ time, price }`, never pixels
 
-The time axis is gapless — weekends, holidays, and session breaks collapse — so a pixel anchor would slide the instant the viewport, interval, or dataset changed. Anchors resolve through `DataLayer.timeToIndexFloat`, which is *fractional*, and that has two consequences worth relying on:
+The time axis is gapless (weekends, holidays, and session breaks collapse) so a pixel anchor would slide the instant the viewport, interval, or dataset changed. Anchors resolve through `DataLayer.timeToIndexFloat`, which is *fractional*, and that has two consequences worth relying on:
 
 - An anchor can sit **inside a collapsed gap** (a Saturday between Friday and Monday) and still map to a stable x.
 - An anchor can sit **past the last bar**, which is where trend projections, `forecast`, and the position tools' targets live.
@@ -85,13 +98,13 @@ Two conventions worth knowing:
 - **`price-note` reads its price off the anchor** rather than storing one, the
   same as `price-label`. A typed price is a number that was true once, which on
   a chart is worse than no number.
-- **`table` encodes its cells in `style.text`**: a newline starts a row, a pipe
+- **`table` encodes its cells in `text.value`**: a newline starts a row, a pipe
   separates columns, and the first row is drawn bold as a header. One editable
   string, so a table needs no new shape in the drawing model and survives
   `getState` unchanged.
 
-Everything else comes from the shared text style: `text`, `fontSize`,
-`fontColor`, `backgroundColor`, `border`, `fillOpacity`.
+Everything else comes from the shared text block, `drawing.text`: `value`,
+`fontSize`, `color`, `backgroundColor`, `border`, plus `style.fillOpacity`.
 
 ## Icons
 
@@ -191,7 +204,7 @@ Tool-specific `defaultStyle` values that change behaviour, not just colour:
 `Drawing` is `{ id, tool, points, style, text?, props?, paneIndex, locked?, visible?, zIndex, createdAt? }`.
 
 - **`text` is its own block (`DrawingText`)**, not a set of keys on `style`: `{ value, color?, fontSize?, fontFamily?, bold?, italic?, align?, valign?, wrap?, wrapWidth?, background?, backgroundColor?, backgroundOpacity?, border?, borderColor?, position? }`. A 1.9.x `style.text` / `fontColor` / `textAlign` / `textVAlign` / `textPosition` / `fontWeight` / `fontStyle` is lifted into it on load and paste. The text tool is its content; a shape's text is a label placed by `position`.
-- **`style.levels` is `FibLevel[]`** (`{ ratio, color?, visible? }`), not `number[]`. A bare ratio takes the conventional colour from `levelColor(ratio)` (`LEVEL_NEUTRAL` for 0, 1, 2, 3 and anything unnamed); the migration attaches those colours, and `cloneLevels` copies a ladder so a tool default is never shared. `formatRatio` prints a level label, `CYCLE_PALETTE` / `cycleColor(i)` colour a sequence, and `DEFAULT_FIB`, `DEFAULT_FIB_FAN`, `DEFAULT_GANN_BOX`, `DEFAULT_GANN_FAN`, `DEFAULT_FIB_TIME_ZONE` are the frozen defaults.
+- **`style.levels` is `FibLevel[]`** (`{ ratio, color?, enabled?, label? }`; `enabled: false` hides a rung without forgetting it, `label` prints instead of the ratio), not `number[]`. A bare ratio takes the conventional colour from `levelColor(ratio)` (`LEVEL_NEUTRAL` for 0, 1, 2, 3 and anything unnamed); the migration attaches those colours, and `cloneLevels` copies a ladder so a tool default is never shared. `formatRatio` prints a level label, `CYCLE_PALETTE` / `cycleColor(i)` colour a sequence, and `DEFAULT_FIB`, `DEFAULT_FIB_FAN`, `DEFAULT_GANN_BOX`, `DEFAULT_GANN_FAN`, `DEFAULT_FIB_TIME_ZONE` are the frozen defaults.
 - **`zIndex` is paint order.** Below zero paints under the series, at or above zero over it; ties break by list order, so `drawings()` is the paint order. `sortByZIndex(list)` is the stable sort the layer uses, and `DrawingLayerOrder` (`'bottom' | 'top'`) is which of the two layers a pane primitive is. A default of 0 paints exactly where 1.9.2 painted.
 - **`props`** is a JSON-safe bag for a tool's extras (a table's cells, a callout's tail side), persisted verbatim.
 - **`DRAWING_STATE_VERSION`** (`2`) is the document version `toJSON` writes.
@@ -258,7 +271,7 @@ Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, 
 
 1. `setTool(id)` arms the tool and puts the chart in placement mode, so a press places an anchor instead of panning.
 2. Each `click` appends an anchor. Between anchors, a translucent preview (alpha 0.7) follows the live cursor.
-3. When `pending.length >= tool.points`, `expand()` runs (if the tool has one) and the drawing is committed, selected, and — unless `stayInDrawingMode` — the tool disarms.
+3. When `pending.length >= tool.points`, `expand()` runs (if the tool has one) and the drawing is committed, selected, and (unless `stayInDrawingMode`) the tool disarms.
 4. `points: 0` tools (`path`, `polyline`) never self-complete: double-click, or `finish()`. Fewer than 2 anchors discards the attempt.
 5. `freehand` tools (`brush`, `highlighter`) ignore clicks and sample the cursor while the pointer is held; the release commits. A tap that never moved is discarded.
 6. A press-drag-release also draws a two-anchor shape in one gesture: the chart emits the press point, then the release point tagged `viaDrag`.
@@ -279,7 +292,7 @@ The controller also tracks the unselected drawing under the pointer from the cha
 
 **A whole drag is one undo step.** The snapshot is pushed once per gesture, on the first `drag` event, not per frame. Any new edit clears the redo branch. Snapshots are `JSON.stringify` of the full list, capped at `historyLimit`.
 
-`update(id, { locked: true })` keeps the drawing rendered but removes it from hit-testing entirely — it cannot be selected or dragged, and it draws no handles. `update(id, { visible: false })` removes it from both rendering and hit-testing.
+`update(id, { locked: true })` keeps the drawing rendered but removes it from hit-testing entirely, it cannot be selected or dragged, and it draws no handles. `update(id, { visible: false })` removes it from both rendering and hit-testing.
 
 ## Clipboard: copy, cut, paste
 
@@ -364,7 +377,7 @@ Matching rules, all verified in `tests/draw-tier.test.ts`:
 - Key comparison is case-insensitive (`'t'` and `'T'` both match `Alt+T`).
 - **Modifiers must match exactly.** `Alt+T` does *not* fire for `Ctrl+Alt+T` or `Shift+Alt+T`, so a tool can never shadow a browser or host chord.
 - `metaKey` counts as Ctrl, so a Mac Cmd chord does not arm an Alt-only tool.
-- A bare letter never matches — without Alt or Ctrl the function returns `null` immediately, so ordinary typing is safe.
+- A bare letter never matches, without Alt or Ctrl the function returns `null` immediately, so ordinary typing is safe.
 
 ## Registering a custom tool
 
@@ -410,7 +423,7 @@ Three optional descriptor fields change *placement*, not rendering:
 | `angleLock: true` | Shift snaps the free end of a two-anchor tool to 45 degree steps on screen, while placing and while dragging a handle. The line family sets it; a rectangle's opposite corner is not a line end, so shapes leave it off. |
 | `expand(clicked, { barSeconds, visibleBars })` | Turn the clicked anchors into the full anchor set, so one click can drop a complete editable default. Every returned point stays a draggable handle. |
 
-Size an `expand` default against `visibleBars`, not a fixed bar count — a fixed count is a hairline zoomed out and pane-filling zoomed in. The position tools use `Math.max(5, round(visibleBars * 0.08))` bars and `±1%` of price.
+Size an `expand` default against `visibleBars`, not a fixed bar count, a fixed count is a hairline zoomed out and pane-filling zoomed in. The position tools use `Math.max(5, round(visibleBars * 0.08))` bars and `±1%` of price.
 
 **A non-finite `distance` must be a miss.** The layer treats `null`, `NaN`, and `Infinity` as misses; returning `NaN` from a degenerate shape would otherwise swallow every click on the pane.
 

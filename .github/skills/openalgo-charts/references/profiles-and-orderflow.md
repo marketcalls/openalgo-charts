@@ -12,7 +12,7 @@ import { computeMarketProfile, MarketProfile } from 'openalgo-charts/profile';
 
 `openalgo-charts/profile` is a separate entry point (`package.json` `exports["./profile"]`), not part of the base bundle. See [bundling-and-tiers](bundling-and-tiers.md).
 
-**Every profile ships as two halves: a pure compute function and a canvas primitive.** Nothing here is a series type — there is no `chart.addSeries('volumeProfile')`. Compute a result object, attach a primitive with `chart.addPrimitive(primitive, paneIndex = 0)`, detach with `chart.removePrimitive(primitive)`. See [primitives-and-plugins](primitives-and-plugins.md).
+**Every profile ships as two halves: a pure compute function and a canvas primitive.** Nothing here is a series type, there is no `chart.addSeries('volumeProfile')`. Compute a result object, attach a primitive with `chart.addPrimitive(primitive, paneIndex = 0)`, detach with `chart.removePrimitive(primitive)`. See [primitives-and-plugins](primitives-and-plugins.md).
 
 **A pane needs a price series before a profile renders.** Every profile primitive maps time to x via `rc.dataLayer.timeToIndex(...)`; with no bars that returns `undefined` and `draw` bails silently.
 
@@ -27,7 +27,7 @@ import { computeMarketProfile, MarketProfile } from 'openalgo-charts/profile';
 
 `bucketPrice(price, step)` snaps to the **nearest** multiple of `step`, rounded to 8 dp against float drift: `bucketPrice(100.003, 0.05) === 100`. `priceBuckets(low, high, step)` is inclusive at both ends: `priceBuckets(100, 100.2, 0.05)` is `[100, 100.05, 100.1, 100.15, 100.2]`.
 
-**Rows are `tickSize * rowTicks`, and the two are deliberately separate.** `tickSize` is the instrument's real tick; `rowTicks` widens the visual row without lying about it. `rowTicksFor(rowSize, tickSize)` does the division and floors at 1 — `rowTicksFor(2, 0.1) === 20`. `computeMarketProfile`, `computeFootprint` and `FootprintAggregator` all take that multiplier, so bricks and TPO rows can share one grid. `computeVolumeProfile` / `computeVolumeProfileSessions` have **no** `rowTicks`; pass a coarser `tickSize`.
+**Rows are `tickSize * rowTicks`, and the two are deliberately separate.** `tickSize` is the instrument's real tick; `rowTicks` widens the visual row without lying about it. `rowTicksFor(rowSize, tickSize)` does the division and floors at 1, `rowTicksFor(2, 0.1) === 20`. `computeMarketProfile`, `computeFootprint` and `FootprintAggregator` all take that multiplier, so bricks and TPO rows can share one grid. `computeVolumeProfile` / `computeVolumeProfileSessions` have **no** `rowTicks`; pass a coarser `tickSize`.
 
 **Bucketing rounds to nearest, so a profile can extend up to half a row past the bar's true high/low.**
 
@@ -35,13 +35,13 @@ import { computeMarketProfile, MarketProfile } from 'openalgo-charts/profile';
 
 ### Single profile
 
-`computeVolumeProfile(bars, tickSize, valueAreaPercent = 0.7)` — **positional**, not an options object — returns `VolumeProfileResult` = `{ buckets: { price, volume }[], poc, vah, val, totalVolume }`.
+`computeVolumeProfile(bars, tickSize, valueAreaPercent = 0.7)` (**positional**, not an options object) returns `VolumeProfileResult` = `{ buckets: { price, volume }[], poc, vah, val, totalVolume }`.
 
 **`VolumeProfileOptions` is exported but no function consumes it.** It only describes `{ tickSize, valueAreaPercent }`; passing an object where `tickSize` is expected yields `NaN` buckets. Use the positional form, or `computeVolumeProfileSessions` for the options-object API.
 
 Semantics, identical in `computeVolumeProfile`, `computeTpo` and the session family:
 
-- Each bar's volume is spread **uniformly** across `priceBuckets(bar.low, bar.high, tickSize)` — `bar.volume / buckets.length` per row. From OHLCV this is an approximation, not a tick-accurate profile.
+- Each bar's volume is spread **uniformly** across `priceBuckets(bar.low, bar.high, tickSize)`, `bar.volume / buckets.length` per row. From OHLCV this is an approximation, not a tick-accurate profile.
 - `buckets` / `levels` are always sorted **high price first**.
 - **POC** is the max-volume row; ties resolve to the **highest** price (strict `>` over a descending list).
 - **Value area** starts at the POC and repeatedly absorbs whichever immediate neighbour holds more volume, stopping once accumulated volume reaches `totalVolume * valueAreaPercent`. Ties go **upward**. `vah` / `val` are the extremes reached.
@@ -135,7 +135,7 @@ Returns `MarketProfileResult` = `{ sessions: MarketProfileSessionResult[], optio
 |---|---|
 | `tpoLetter(period)` | Period index to `A-Z`/`a-z`, mod 52. |
 | `rowTicksFor(rowSize, tickSize)` | `max(1, round(rowSize / tickSize))`; returns 1 on non-positive input. |
-| `rowOf(price, options)` | Snaps a price onto the profile's row grid — use it to hit-test against `levels`. |
+| `rowOf(price, options)` | Snaps a price onto the profile's row grid, use it to hit-test against `levels`. |
 | `inWindow(utcSeconds, window, zone?)` | Wrap-aware; `startMinute === endMinute` means all hours. `zone` (default `Asia/Kolkata`) is consulted only when the window names none of its own. |
 | `nakedLevels(result)` | Prior `poc`/`vah`/`val` no later session traded through, oldest first, tagged `{ time, price, kind }`. The last session's three levels are always naked. |
 
@@ -196,9 +196,9 @@ Selected `MarketProfilePrimitiveOptions`; `DEFAULT_MARKET_PROFILE_PRIMITIVE_OPTI
 
 ## Footprint and order flow
 
-**Footprint and order flow require trade-by-trade data classified bid/ask** — was each print at the bid (sell-initiated) or the ask (buy-initiated)? OpenAlgo serves live depth and tick LTP but **does not store historical classified trades by default**, so footprint is a **live-session-only** study unless the host runs a tick recorder that persists classified prints. The compute layer is pure and broker-agnostic; feeding it is the integration step. `ARCHITECTURE.md` section 6A gives the two paths: classify live WS prints against the live bid/ask and keep a rolling session buffer, or add an OpenAlgo-side tick/depth recorder. **`FootprintAggregator` is the live path.** See [feeds-and-live](feeds-and-live.md).
+**Footprint and order flow require trade-by-trade data classified bid/ask**: was each print at the bid (sell-initiated) or the ask (buy-initiated)? OpenAlgo serves live depth and tick LTP but **does not store historical classified trades by default**, so footprint is a **live-session-only** study unless the host runs a tick recorder that persists classified prints. The compute layer is pure and broker-agnostic; feeding it is the integration step. `ARCHITECTURE.md` section 6A gives the two paths: classify live WS prints against the live bid/ask and keep a rolling session buffer, or add an OpenAlgo-side tick/depth recorder. **`FootprintAggregator` is the live path.** See [feeds-and-live](feeds-and-live.md).
 
-Nothing else in this file has that dependency — Volume Profile and Market Profile derive from plain OHLCV.
+Nothing else in this file has that dependency, Volume Profile and Market Profile derive from plain OHLCV.
 
 `computeFootprint(time, trades, tickSize, rowTicks = 1)` returns a `FootprintBar`. `ClassifiedTrade` is `{ price, qty, side: 'bid' | 'ask' }`; `FootprintCell` is `{ price, bidVol, askVol }`; `FootprintBar` is `{ time, cells, delta }`, cells high to low, `delta = sum(askVol - bidVol)`.
 
@@ -206,7 +206,7 @@ Nothing else in this file has that dependency — Volume Profile and Market Prof
 |---|---|
 | `diagonalImbalances(cells, ratio = 3)` | `Imbalance[]` of `{ price, side }`. Buy when `askVol[P] >= ratio * max(1, bidVol[P - 1 row])`; sell when `bidVol[P] >= ratio * max(1, askVol[P + 1 row])`. |
 | `cumulativeDelta(bars)` | `number[]`, running total of `bar.delta`, same length as input. |
-| `stackedImbalances(cells, ratio = 3, minStack = 3)` | `StackedImbalance[]` of `{ startPrice, endPrice, side, count }` — runs of `minStack`+ consecutive same-side diagonal imbalances. |
+| `stackedImbalances(cells, ratio = 3, minStack = 3)` | `StackedImbalance[]` of `{ startPrice, endPrice, side, count }`, runs of `minStack`+ consecutive same-side diagonal imbalances. |
 
 **The `max(1, ...)` in the imbalance test means an empty neighbour counts as volume 1.** A single ask print of 3 against an untouched row below is already a buy imbalance at the default ratio. Raise `ratio`, or filter with the primitive's `imbalanceThreshold`.
 
@@ -214,7 +214,7 @@ Nothing else in this file has that dependency — Volume Profile and Market Prof
 
 `new Footprint(opts?: Partial<FootprintOptions>)`, then `setBars(FootprintBar[])`. Also `setOptions(patch)`, `options()`, `stats()`, `autoscaleInfo()`, `hitTest(x, y)` returning `footprint:<time>`, `hoverAt(x, y, rc?)` returning `FootprintHover` = `{ time, price, cell, stats }` with `cell === null` when the pointer is over the stats table.
 
-`autoscaleInfo()` reports the cell price extent so top and bottom rows are not clipped — same as `VolumeProfile` and `MarketProfile`. Only `HorizontalProfile` returns `null` and never participates in autoscale. `DEFAULT_FOOTPRINT_OPTIONS`:
+`autoscaleInfo()` reports the cell price extent so top and bottom rows are not clipped, same as `VolumeProfile` and `MarketProfile`. Only `HorizontalProfile` returns `null` and never participates in autoscale. `DEFAULT_FOOTPRINT_OPTIONS`:
 
 | Key | Default | Notes |
 |---|---|---|
@@ -240,11 +240,11 @@ Nothing else in this file has that dependency — Volume Profile and Market Prof
 
 ### `FootprintAggregator` (the live path)
 
-`new FootprintAggregator(tf: TickTimeframe, tickSize: number, rowTicks = 1)`. `TickTimeframe` (from `src/feed/tick-aggregator.ts`) is `{ mode: 'interval'; seconds; anchorSec? } | { mode: 'ticks'; count } | { mode: 'volume'; perBar }`. `onTick(tick: FootprintTick)` returns `FootprintUpdate` = `{ bar, isNew }` — push when `isNew`, otherwise replace the last element. `FootprintTick` is `ClassifiedTrade & { time: number }`; `current()` returns the forming bar or `null`.
+`new FootprintAggregator(tf: TickTimeframe, tickSize: number, rowTicks = 1)`. `TickTimeframe` (from `src/feed/tick-aggregator.ts`) is `{ mode: 'interval'; seconds; anchorSec? } | { mode: 'ticks'; count } | { mode: 'volume'; perBar }`. `onTick(tick: FootprintTick)` returns `FootprintUpdate` = `{ bar, isNew }`, push when `isNew`, otherwise replace the last element. `FootprintTick` is `ClassifiedTrade & { time: number }`; `current()` returns the forming bar or `null`.
 
-**The boundary is evaluated before the incoming tick is applied.** For `'ticks'` and `'volume'` modes the bar rolls on the tick *after* the limit is reached, so a 100-tick bar holds 101 prints. Nothing closes a bar on a timer either — with no ticks, the last bar stays open indefinitely.
+**The boundary is evaluated before the incoming tick is applied.** For `'ticks'` and `'volume'` modes the bar rolls on the tick *after* the limit is reached, so a 100-tick bar holds 101 prints. Nothing closes a bar on a timer either, with no ticks, the last bar stays open indefinitely.
 
-**Snapshots of the forming bar alias live cell objects.** `onTick` returns a fresh array but the same `FootprintCell` instances until the bar rolls, so keep only the latest snapshot for the current bar. Cells of already-closed bars are safe — a roll allocates a new map.
+**Snapshots of the forming bar alias live cell objects.** `onTick` returns a fresh array but the same `FootprintCell` instances until the bar rolls, so keep only the latest snapshot for the current bar. Cells of already-closed bars are safe, a roll allocates a new map.
 
 ## `HorizontalProfile` (generic)
 
@@ -255,9 +255,9 @@ chart.addPrimitive(new HorizontalProfile({
 }));
 ```
 
-`HorizontalProfileOptions` has no defaults object — every key is required. `setData(opts)` replaces the whole option object; there is no `setOptions` patch. `autoscaleInfo()` returns `null`, so it never drives the price range. Row height comes from `plotHeight / buckets.length`, not from a tick size, so rows always fill the pane.
+`HorizontalProfileOptions` has no defaults object, every key is required. `setData(opts)` replaces the whole option object; there is no `setOptions` patch. `autoscaleInfo()` returns `null`, so it never drives the price range. Row height comes from `plotHeight / buckets.length`, not from a tick size, so rows always fill the pane.
 
-Use it for a price-keyed distribution the built-ins do not model — delivery volume at price, open interest at strike, a broker-supplied profile, or `computeTpo` output drawn as a plain histogram rather than letters. Use `VolumeProfile` or `MarketProfile` for anything they already compute: they handle multiple sessions, tick-accurate row height, value-area dimming and hit-testing, none of which `HorizontalProfile` does.
+Use it for a price-keyed distribution the built-ins do not model, delivery volume at price, open interest at strike, a broker-supplied profile, or `computeTpo` output drawn as a plain histogram rather than letters. Use `VolumeProfile` or `MarketProfile` for anything they already compute: they handle multiple sessions, tick-accurate row height, value-area dimming and hit-testing, none of which `HorizontalProfile` does.
 
 ## Known gaps (verified against current source)
 
@@ -274,7 +274,7 @@ Gaps that are real today:
 
 - **The profile overlays are the ones that ignore the theme.** `VolumeProfile`, `MarketProfile` and `HorizontalProfile` never touch `rc.theme`; their defaults are fixed hexes tuned for a dark background and look wrong on `lightTheme` until you pass explicit colours. Only `Footprint` adapts.
 - The renderer's imbalance detection is a private reimplementation (`_imbalances` / `_runs`) that honours `imbalanceThreshold`; the exported `diagonalImbalances` / `stackedImbalances` do not. They agree only at `imbalanceThreshold: 0`.
-- `VolumeProfile` has no `hitTest`, `hoverAt` or `options()` — `MarketProfile` and `Footprint` have all three.
+- `VolumeProfile` has no `hitTest`, `hoverAt` or `options()`, `MarketProfile` and `Footprint` have all three.
 - `HorizontalProfile` has no `setOptions` and hardcodes its POC (`#f0a020`) and VA line (`#5a6b8c`) colours.
 - Only `FootprintAggregator` is incremental. Volume and market profiles are full recomputes; on live bars call the compute again and hand the result to `setData`.
 
@@ -321,7 +321,7 @@ chart.addPrimitive(mp);
 chart.on('crosshair:move', (e) => {
   const p = (e as { point?: { x: number; y: number } }).point;
   const hit = p ? mp.hoverAt(p.x, p.y) : null;
-  tooltip.textContent = hit ? `${hit.level.letters} — ${hit.level.count} TPO @ ${hit.price}` : '';
+  tooltip.textContent = hit ? `${hit.level.letters}, ${hit.level.count} TPO @ ${hit.price}` : '';
 });
 ```
 

@@ -39,6 +39,8 @@ chart.fitContent();
 | `legendOffset` | `{ top?, left? }` | `{ top: 6, left: 8 }` | Where indicator legend rows start in the top-most pane. |
 | `crosshairMode` | `'normal' \| 'magnet'` | `'normal'` | `magnet` snaps to O/H/L/C, price pane only. |
 | `now` | `() => number` | `performance.now` | Time source for kinetic pan / navigator fade. |
+| `animZoom` | `boolean` | `true` | Ease a wheel zoom over a few frames (`ZoomGlide`, in log space) instead of landing the whole step on one. The first frame's step is applied on the event itself, so `barSpacing` has moved by the time anything reads it synchronously, and the glide lands on exactly the single-frame result. **On by default**, which a 1.9.x host sees as a change; `false` restores the single-frame step. Not re-appliable. |
+| `zoomAnchor` | `'cursor' \| 'right'` | `'cursor'` | What a wheel zoom holds still: the bar under the cursor, or the right edge (the latest bar), which a live chart usually wants. Not re-appliable. |
 | `conflate` | `boolean` | `false` | OHLC-preserving downsampling when bars fall under ~0.5 device px. |
 | `conflationFactor` | `number` | `1` | Conflation aggressiveness. |
 | `renderer` | `'canvas2d' \| 'webgl2' \| 'auto'` | `'canvas2d'` | Which backend paints the series. `'webgl2'` throws until `openalgo-charts/webgl` has been imported, and on a device without WebGL2 falls back to `canvas2d` with one console warning; `'auto'` takes `webgl2` when it is registered and works on this device, else `canvas2d`, silently. Decided once, at construction; read the result from `chart.rendererKind`. See [Render backends](#render-backends). |
@@ -100,8 +102,8 @@ Items are `{ time, open, high, low, close, volume?, color? }`, `{ time, value, c
 
 ## Lifecycle and sizing
 
-- `chart.destroy()` — the only teardown method. **There is no `chart.remove()`.** It stops the render loop and kinetic animation, removes every indicator, disconnects the `ResizeObserver`, unbinds all pointer/wheel/keyboard listeners, destroys every pane, and clears the container's cursor hint.
-- `chart.applySize(width, height)` — media px; no-ops when unchanged. A `ResizeObserver` on the container calls it automatically, so manual calls are only needed in hosts without `ResizeObserver`.
+- `chart.destroy()`: the only teardown method. **There is no `chart.remove()`.** It stops the render loop and kinetic animation, removes every indicator, disconnects the `ResizeObserver`, unbinds all pointer/wheel/keyboard listeners, destroys every pane, and clears the container's cursor hint.
+- `chart.applySize(width, height)`: media px; no-ops when unchanged. A `ResizeObserver` on the container calls it automatically, so manual calls are only needed in hosts without `ResizeObserver`.
 - `chart.applyOptions(opts)` takes a runtime subset only: `theme`, `grid`, `canvas`, `statusLine`, `priceScale`, `priceFormatter`, `timeFormatter`, `timezone`, `crosshairMode`. Nothing else from `ChartOptions` is re-appliable.
 
 ## Viewport
@@ -112,9 +114,9 @@ mainSeries.setData(fullHistory);
 chart.setVisibleLogicalRange(range);           // restore the user's zoom
 ```
 
-- `chart.fitContent()` — fit all bars; no-op on an empty chart.
-- `chart.resetScale()` — fit content **and** re-enable autoscale on every pane. This is what double-click runs.
-- `chart.timeScale` — the live `TimeScale`; mutating it repaints via an injected change handler.
+- `chart.fitContent()`: fit all bars; no-op on an empty chart.
+- `chart.resetScale()`: fit content **and** re-enable autoscale on every pane. This is what double-click runs.
+- `chart.timeScale`: the live `TimeScale`; mutating it repaints via an injected change handler.
 
 **A logical range is meaningless before data lands.** `setVisibleLogicalRange` indexes bars, so apply it after `setData`, not before.
 

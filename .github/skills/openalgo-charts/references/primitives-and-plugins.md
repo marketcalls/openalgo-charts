@@ -31,7 +31,7 @@ interface PrimitiveHit {
 
 **`zOrder` is a method, not a property.** `{ zOrder: 'bottom' }` compiles under a loose annotation and then throws at paint time when the pane calls `p.zOrder()`.
 
-`attached(host)` is called on `pane.addPrimitive`; keep the host and call `host.requestUpdate()` whenever your state changes — it takes no arguments. `detached()` fires on `chart.removePrimitive` and on pane destruction; drop the host reference there.
+`attached(host)` is called on `pane.addPrimitive`; keep the host and call `host.requestUpdate()` whenever your state changes, it takes no arguments. `detached()` fires on `chart.removePrimitive` and on pane destruction; drop the host reference there.
 
 **The repaint level follows your `zOrder()`, so there is nothing to opt into.** The host reads `zOrder()` on every `requestUpdate` call and schedules a `Cursor` repaint (overlay canvas only, the layer `Pane.paintTop` draws) for a `'top'` primitive and a `Light` one (base canvas) for everything else. A cursor-rate overlay therefore costs one overlay repaint rather than a full series redraw. It is read per call rather than captured at attach, so a primitive that changes layer at runtime is handled too.
 
@@ -46,7 +46,7 @@ interface PrimitiveHit {
 | `priceAxisWidth` | `number` | Media px. |
 | `dpr` | `number` | Device pixel ratio for this frame. |
 | `theme` | `ChartTheme` | Palette. `theme.background` may be the literal `'transparent'`. |
-| `bars?` | `() => readonly Bar[]` | Lazy; the pane's primary price series. Optional — guard with `rc.bars?.()`. |
+| `bars?` | `() => readonly Bar[]` | Lazy; the pane's primary price series. Optional, guard with `rc.bars?.()`. |
 | `hoverId?` | `string \| null` | `externalId` currently hovered, for hover styling. |
 | `dragId?` | `string \| null` | `externalId` currently being dragged. |
 
@@ -61,7 +61,7 @@ The reason is in `src/core/canvas.ts`: the backing buffer is sized `round(media 
 - `timeScale.indexToX()`, `priceScale.priceToY()`, `rc.plotWidth`, `rc.plotHeight` are all **media** px. Multiply.
 - Font sizes, line widths, radii, and paddings are yours to scale: set the font from `11 * dpr` px, and `ctx.lineWidth = Math.max(1, Math.round(w * dpr))`.
 - `hitTest` receives `x`/`y` in **media** px relative to the plot's top-left, and must return `distance` in media px. Do **not** scale in `hitTest`.
-- Snap 1px strokes with `Math.round(v * dpr) + 0.5` — the pattern every built-in uses.
+- Snap 1px strokes with `Math.round(v * dpr) + 0.5`, the pattern every built-in uses.
 - When a left price axis exists the pane translates the context by `round(plotLeft * dpr)` before calling you, so `(0, 0)` is always the plot's top-left.
 
 ## Paint order
@@ -100,12 +100,12 @@ Smallest `distance` wins; on a tie the higher z-order wins (`top` > `normal` > `
 
 Routing, from `src/core/chart.ts`:
 
-- **Click** — on pointerup without movement, the pane is hit-tested at the press point. A hit fires `chart.subscribeClick(cb)` with the `externalId`, and the `click` bus event carries `{ id, price, time, paneIndex, point }` with `id: null` on empty plot.
-- **Drag** — on pointerdown, a hit arms a drag when `hit.draggable === true`, or when `hit.cursor === 'ns-resize'` and `subscribeDrag` has a callback. Moves fire `subscribeDrag(onDrag)` and a `drag` bus event `{ id, price, time, paneIndex, fromPrice, fromTime }`; release fires `onDragEnd` and `drag:end`.
+- **Click**: on pointerup without movement, the pane is hit-tested at the press point. A hit fires `chart.subscribeClick(cb)` with the `externalId`, and the `click` bus event carries `{ id, price, time, paneIndex, point }` with `id: null` on empty plot.
+- **Drag**: on pointerdown, a hit arms a drag when `hit.draggable === true`, or when `hit.cursor === 'ns-resize'` and `subscribeDrag` has a callback. Moves fire `subscribeDrag(onDrag)` and a `drag` bus event `{ id, price, time, paneIndex, fromPrice, fromTime }`; release fires `onDragEnd` and `drag:end`.
 - A drag that never moved is replayed as a click, so a draggable primitive is still clickable.
 - `hoverId` / `dragId` are pushed back into `PrimitiveRenderContext` each frame, which is how `PriceLine` renders its hover and dragging states without any state of its own.
 
-Namespacing convention used by the built-ins — one primitive, several targets:
+Namespacing convention used by the built-ins, one primitive, several targets:
 
 | Primitive | `externalId` |
 |---|---|
@@ -116,13 +116,13 @@ Namespacing convention used by the built-ins — one primitive, several targets:
 | `DrawingLayer` | `draw:<drawingId>`, `draw:<drawingId>#<anchorIndex>` |
 | `SeriesMarkers` / `EventMarkers` | the caller's `marker.id` / `event.id` (no hit at all when absent) |
 
-Record hit geometry during `draw` and read it in `hitTest` — that is how `PriceLine`, `BuySellButtons`, and `PaneLegend` stay in sync with what was actually painted, and it means a primitive that has not drawn yet correctly reports no hit.
+Record hit geometry during `draw` and read it in `hitTest`, that is how `PriceLine`, `BuySellButtons`, and `PaneLegend` stay in sync with what was actually painted, and it means a primitive that has not drawn yet correctly reports no hit.
 
 ## `autoscaleInfo`
 
 Returning `{ min, max }` **expands the pane's right price scale** so the primitive is not clipped. It is consulted only for the right scale, only when that scale is on `autoScale`, and once per autoscale pass alongside every visible bar.
 
-Return `null` for anything that overlays rather than drives the range — the drawing layer, indicator fills, watermarks, legends, and on-chart buttons all do. `PriceLine` returns `{ min: price, max: price }`, which is what keeps an order line on screen.
+Return `null` for anything that overlays rather than drives the range, the drawing layer, indicator fills, watermarks, legends, and on-chart buttons all do. `PriceLine` returns `{ min: price, max: price }`, which is what keeps an order line on screen.
 
 Keep it cheap: it runs on every `Full` invalidation, which includes every `series.update()`.
 
@@ -137,7 +137,7 @@ Keep it cheap: it runs on every `Full` invalidation, which includes every `serie
 | `LogoWatermark` | `top` (option) | Corner brand mark with an optional hover-revealed label and link. | `src`/`image`, `position`, `height` (28), `margin` (12), `opacity` (0.7), `tint`, `label`, `padding`, `href`; `setOptions`, `href()` |
 | `TextWatermark` | `bottom` (option) | A word stamped faintly across the plot to say what mode the chart is in, `Replay` being the case it exists for. Shrinks to fit a narrow pane, hit-tests to nothing, and is captured by `takeScreenshot()` because it is drawn on the canvas. | `text`, `fontSize` (64), `opacity` (0.08), `color`, `font`, `zOrder`; `setOptions` |
 | `ReplayShade` | `top` (option) | Dims every bar after `index` and rules a line at the cut. Used while a replay start bar is being chosen: picking one while the next twenty bars are readable is picking on hindsight. Add one per pane, or a bright volume pane gives away what the price pane is hiding. | `index` (null draws nothing), `color`, `lineColor`, `lineWidth`, `lineVisible`; `setOptions` |
-| `BuySellButtons` | `top` | Docked in-plot BUY / qty / SELL panel. | `id` (`trade`), `position` (`top-left`), `margin` (12), `qty`, `buyColor`, `sellColor`, `showPrices`, `scale` (0.6–1.5); `setPrices`, `setMark`, `setQty`, `setColors` |
+| `BuySellButtons` | `top` | Docked in-plot BUY / qty / SELL panel. | `id` (`trade`), `position` (`top-left`), `margin` (12), `qty`, `buyColor`, `sellColor`, `showPrices`, `scale` (0.6 to 1.5); `setPrices`, `setMark`, `setQty`, `setColors` |
 | `PaneLegend` | `top` | Canvas-drawn legend row: swatch, title, params, live values, action buttons, and the status line. | `id`, `title`, `params`, `color`, `valueColor`, `row`, `actions`, `hidden`, `maximized`, `font` (11), `left` (8), `top` (6), `statusLine` (per-field switches), `status` (host data or a per-frame getter); `setValue`, `setValues` (readings may carry `field: 'ohlc' \| 'change' \| 'volume'`), `setOptions`. See [settings-and-menus](settings-and-menus.md) |
 | `TimeNavigator` | `top` (option) | Hover-revealed zoom / step controls above the time axis. | Created by the chart itself from `ChartOptions.timeNavigator` (default `true`); `buttons`, `size` (26), `bottomMargin` (10), `revealHeight` (64), `labels`, `hints`, `showTooltip` |
 | `LinkCrosshair` | `top` | The crosshair a linked chart shows for a cursor in **another** chart: a vertical line only, at `LINK_CROSSHAIR_ALPHA` (0.55) of the pane's crosshair colour. A mirrored horizontal line would assert a price belonging to another instrument. Normally created for you by `LinkGroup`, one per pane. | `setIndex(index \| null)`, `index()`. See [chart-linking](chart-linking.md) |
@@ -309,7 +309,7 @@ registerChartType('range-band', {
 chart.addSeries('range-band').setData(bars);
 ```
 
-`RendererEntry` in full: `defaultStyle: SeriesStyle`, `isPriceSeries: boolean`, `draw(ctx, items, toY, barSpacing, dpr, style, rc)`, `extents(bar, style)`. `items` is `{ x: number /* bar centre, media px */, bar: Bar }[]`, already culled to the visible range and conflated when `conflate` is on. `rc` is `{ plotHeight, maxVolume, theme }` — media px, the visible-window volume peak, and the palette.
+`RendererEntry` in full: `defaultStyle: SeriesStyle`, `isPriceSeries: boolean`, `draw(ctx, items, toY, barSpacing, dpr, style, rc)`, `extents(bar, style)`. `items` is `{ x: number /* bar centre, media px */, bar: Bar }[]`, already culled to the visible range and conflated when `conflate` is on. `rc` is `{ plotHeight, maxVolume, theme }`, media px, the visible-window volume peak, and the palette.
 
 `registeredChartTypes()` lists every registered id. `'point-figure'` and `'kagi'` live in the transform tier and only resolve once `openalgo-charts/transform` is imported.
 
@@ -323,7 +323,7 @@ chart.addSeries('range-band').setData(bars);
 
 **`rc.theme.background` can be the string `'transparent'`.** Built-ins branch on it (`PriceLine`, `PaneLegend`) rather than filling with it; a plate filled with `'transparent'` disappears against a busy chart.
 
-**`rc.bars()` returns the live array the data layer holds.** Treat it as read-only, and guard the call — a synthetic render context may not supply it.
+**`rc.bars()` returns the live array the data layer holds.** Treat it as read-only, and guard the call, a synthetic render context may not supply it.
 
 **`series.update()` schedules a `Full` repaint,** which re-runs every `autoscaleInfo()` and every `draw`. Cache anything expensive across frames.
 

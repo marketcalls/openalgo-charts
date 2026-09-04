@@ -11,12 +11,12 @@ Ships in the **base** bundle (`openalgo-charts`). No extra entry point, no broke
 **This layer never talks to a broker.** It is a renderer for state you own plus an event source for gestures. Getting this wrong is the single most common failure: dragging a line does *not* move the order, it only tells you the user wants it moved.
 
 ```
-your app  ──── chart.trading.syncState({ positions, orders, trades }) ────▶  chart draws
-                                                                                 │
-                                          user drags a line / hits cancel        │
-your app  ◀──────────── 'trading:order_modify' | 'trading:order_cancel' ─────────┘
-    │
-    └─▶ broker REST/WS ─▶ (broker confirms) ─▶ chart.trading.syncState(fresh state)
+your app  ---- chart.trading.syncState({ positions, orders, trades }) ---->  chart draws
+                                                                                 |
+                                          user drags a line / hits cancel        |
+your app  <------------ 'trading:order_modify' | 'trading:order_cancel' ---------'
+    |
+    '-> broker REST/WS -> (broker confirms) -> chart.trading.syncState(fresh state)
 ```
 
 The chart applies one optimistic write on drag end (`order.price` is updated locally so the line does not snap back mid-frame). Everything else is yours. If the broker rejects, push the previous state back with `setOrders(...)` and the line reverts.
@@ -35,7 +35,7 @@ chart.trading.syncState({ positions, orders, trades });
 - Its `PriceLine`s and marker primitive always land on **pane 0** (`new TradingController(this)` routes through `chart.addPrimitive`, whose `paneIndex` defaults to `0`).
 - `chart.tradeHost(paneIndex)` is the *other* host shape (`addPrimitive`/`removePrimitive` only) and is for the trade tier's `TradeController`, not for `chart.trading`.
 
-**Touching `chart.trading` steals `chart.subscribeClick` and `chart.subscribeDrag`.** Both are single-slot setters (`this._clickCb = cb`), and the `TradingController` constructor calls them. Register your own callbacks and the trading layer goes deaf; access `chart.trading` afterwards and your callbacks are dropped. Use `chart.on('click' | 'drag' | 'drag:end' | 'hover', cb)` — the multi-listener bus — for app-side handling alongside `chart.trading`.
+**Touching `chart.trading` steals `chart.subscribeClick` and `chart.subscribeDrag`.** Both are single-slot setters (`this._clickCb = cb`), and the `TradingController` constructor calls them. Register your own callbacks and the trading layer goes deaf; access `chart.trading` afterwards and your callbacks are dropped. Use `chart.on('click' | 'drag' | 'drag:end' | 'hover', cb)` (the multi-listener bus) for app-side handling alongside `chart.trading`.
 
 ## Worked example: full round trip
 
@@ -95,7 +95,7 @@ The payload argument is typed `unknown` on both buses; destructure with a local 
 | `readOnly` | `boolean` | no | `true` hides the cancel button (`closeButton: false`) |
 | `variant` | `'standard' \| 'line-only'` | no | `line-only` drops badge, qty, info and the cancel button |
 
-Positions are drawn with a hard-coded `lineWidth: 2`, `dashed: false`, `extentFromRight: 0.3`. **Position lines are never draggable** — `_positionOpts` sets no `cursor`, so there is no `trading:position_modify` event.
+Positions are drawn with a hard-coded `lineWidth: 2`, `dashed: false`, `extentFromRight: 0.3`. **Position lines are never draggable**: `_positionOpts` sets no `cursor`, so there is no `trading:position_modify` event.
 
 ## `TradingOrder`
 
@@ -158,7 +158,7 @@ Diffing: `_sync` recreates a line whenever `color | dashed | closeButton | curso
 
 ## Event catalogue
 
-Six events, all emitted from `src/core/trading-controller.ts`. Names carry the `trading:` prefix on **both** buses — `chart.trading.on('trading:order_modify', cb)` and `chart.on('trading:order_modify', cb)` are the two valid forms; a bare `'order_modify'` matches nothing.
+Six events, all emitted from `src/core/trading-controller.ts`. Names carry the `trading:` prefix on **both** buses, `chart.trading.on('trading:order_modify', cb)` and `chart.on('trading:order_modify', cb)` are the two valid forms; a bare `'order_modify'` matches nothing.
 
 | Event | Payload | Fired by |
 |---|---|---|
@@ -171,7 +171,7 @@ Six events, all emitted from `src/core/trading-controller.ts`. Names carry the `
 
 `_emit` fans out to the controller's own listeners and then mirrors through `host.emit?.(...)`, which is `Chart.emit`. A `chart.on` listener that throws is swallowed; a `chart.trading.on` listener that throws propagates.
 
-**A plain click on a *draggable* order pill emits `trading:order_modify` as well as `trading:order_click`.** A press on an `ns-resize` primitive arms the drag, so pointer-up runs `_dragEndCb` (emitting `order_modify` with `newPrice` = the price under the cursor, a few pixels off the line) before `_clickCb`. Guard the handler: `if (Math.abs(newPrice - previousPrice) < tickSize) return;`. Position pills and cancel segments are unaffected — neither arms a drag.
+**A plain click on a *draggable* order pill emits `trading:order_modify` as well as `trading:order_click`.** A press on an `ns-resize` primitive arms the drag, so pointer-up runs `_dragEndCb` (emitting `order_modify` with `newPrice` = the price under the cursor, a few pixels off the line) before `_clickCb`. Guard the handler: `if (Math.abs(newPrice - previousPrice) < tickSize) return;`. Position pills and cancel segments are unaffected, neither arms a drag.
 
 `trading:bracket_modify` gives you `parentId`, not the child order id. Keep your own `parentId + bracketRole -> orderId` map if the broker amends by order id.
 
@@ -184,13 +184,13 @@ export const DEFAULT_TRADING_COLORS: TradingColors = {
 };
 ```
 
-`setSettings(settings: TradingSettings)` takes the optional keys `longColor`, `shortColor`, `orderColor`, `tpColor`, `slColor`, `buyColor`, `sellColor`, merges only the defined ones, then re-runs `setPositions`/`setOrders` and pushes the new palette into the markers. `getSettings()` returns a copy of the resolved `TradingColors` (long/short/order/tp/sl/buy/sell keys — note the different key names from the setter).
+`setSettings(settings: TradingSettings)` takes the optional keys `longColor`, `shortColor`, `orderColor`, `tpColor`, `slColor`, `buyColor`, `sellColor`, merges only the defined ones, then re-runs `setPositions`/`setOrders` and pushes the new palette into the markers. `getSettings()` returns a copy of the resolved `TradingColors` (long/short/order/tp/sl/buy/sell keys, note the different key names from the setter).
 
 Resolution order per object: explicit `color` -> `bracketRole` colour (`tp`/`sl`) -> role default (`long`/`short`/`order`/`buy`/`sell`). Pill badge text auto-contrasts against its fill via `contrastText`, so custom colours stay legible on either theme.
 
 ## Brackets
 
-A bracket child is any `TradingOrder` with `bracketRole` set. `parentId` links it to a position or entry order. The controller uses `bracketRole` for the badge, colour and event routing, and `parentId` only as event payload and as the `removeOrder` cascade key. **There is no OCO logic here** — filling the TP does not cancel the SL. That lives in the trade tier's `OrderEngine.linkOco`.
+A bracket child is any `TradingOrder` with `bracketRole` set. `parentId` links it to a position or entry order. The controller uses `bracketRole` for the badge, colour and event routing, and `parentId` only as event payload and as the `removeOrder` cascade key. **There is no OCO logic here**: filling the TP does not cancel the SL. That lives in the trade tier's `OrderEngine.linkOco`.
 
 ## `BuySellButtons`
 
@@ -216,7 +216,7 @@ Base size is 190x42 media px before `scale`. Use `margin` plus `legendOffset` to
 
 ## Right-click order menu
 
-The chart installs its own `contextmenu` handler that composites the base canvas under the overlay so the browser's "Save image as…" captures the visible chart, and freezes overlay repaints until the next input. **Calling `e.preventDefault()` in your own listener disables that path entirely** — which is exactly what an app-owned order menu wants (`if (e.defaultPrevented) return;` guards it).
+The chart installs its own `contextmenu` handler that composites the base canvas under the overlay so the browser's "Save image as…" captures the visible chart, and freezes overlay repaints until the next input. **Calling `e.preventDefault()` in your own listener disables that path entirely**: which is exactly what an app-owned order menu wants (`if (e.defaultPrevented) return;` guards it).
 
 Pattern from `examples/live/index.html` and `examples/yfinance/index.html`:
 

@@ -1,0 +1,280 @@
+---
+title: The Widget Tier
+description: The chart with its chrome in one createWidget call - top bar, drawing rail, status line, dialogs, right-click menu, shortcuts and persistence, from the one tier that ships DOM.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# The widget tier
+
+`openalgo-charts/widget` turns the engine into a working terminal in one call: a chart
+with a top bar (symbol, interval, chart type, theme, settings, indicators), a drawing rail
+down the left, a status line, the dialogs behind each of those buttons, keyboard shortcuts
+with a `?` panel that lists them, and optional persistence of the layout. It is the eighth
+loadable tier (**35.56 KB** Brotli), and it is the only one that builds DOM.
+
+<RunnableExample height={480} tiers={['widget']} caption="Pick a tool from the rail, open Indicators, change the chart type, right-click the chart, press ? for the shortcut list. No feed is wired here, so the bars go straight on widget.series." code={`const widget = lib.createWidget(el, {
+  symbol: 'DEMO',
+  exchange: 'NSE',
+  interval: '1h',
+  intervals: ['5m', '15m', '1h', '1d'],
+});
+
+// Without a feed the host puts bars on the primary series itself.
+const bars = lib.generateBars(1700000000, 240, 3600);
+widget.series.setData(bars);
+widget.chart.timeScale.fitContent(160);
+return widget;`} />
+
+## The engine still ships no DOM
+
+`openalgo-charts` and the six tiers beneath the widget contain no toolbar, no dialog, no
+menu and no stylesheet. They touch the document only to own their canvases. The widget is
+a host, packaged: everything it draws in HTML it drives through the same public API a host
+of your own would use (`createChart`, `DrawingController`, `chartSettingsSchema`, the
+`contextmenu` event, the indicator registry).
+
+That promise is enforced, not stated:
+
+- **The tier ACL** (`eslint.config.js`). Nothing under `src/` except `src/widget/` may
+  import the widget, and the widget may reach the engine and the draw tier only through
+  their package specifiers, so it can never be inlined into another bundle.
+- **`npm run shake`** bundles an entry that imports only `createChart` and asserts the
+  widget's CSS scope (`oac-widget`) is absent from the result, on every build.
+- **The size budgets** (`.size-limit.json`). The base engine row did not move when the
+  widget arrived; the widget has its own row, and a `Widget terminal` row measures what
+  one `createWidget` call actually loads.
+
+Importing the module touches no DOM either; only `createWidget` does. The module can
+therefore be imported by code that also runs on a server, and called once a container
+exists.
+
+## Install
+
+```bash
+npm install openalgo-charts
+```
+
+The widget entry imports `openalgo-charts` and `openalgo-charts/draw` itself. The
+indicator picker offers whatever the indicator registry holds, so import
+`openalgo-charts/indicators` alongside it for the 102 built-ins; without that import the
+picker offers only what you registered yourself.
+
+## One call
+
+```ts
+import { createWidget } from 'openalgo-charts/widget';
+import 'openalgo-charts/indicators';
+import { OpenAlgoDataFeed } from 'openalgo-charts';
+
+const widget = createWidget('#terminal', {
+  feed: new OpenAlgoDataFeed({ baseUrl: 'http://127.0.0.1:5000', apiKey: 'YOUR_KEY' }),
+  symbol: 'RELIANCE',
+  exchange: 'NSE',
+  interval: '5m',
+  theme: 'dark',
+  persist: true,
+});
+```
+
+The container is an element, a CSS selector or an element id, and it needs a non-zero
+size before the call, the same rule `createChart` has. What comes back is a `Widget`:
+
+```ts
+widget.chart;                 // the Chart underneath, every base API available
+widget.draw;                  // the DrawingController the rail drives
+widget.series;                // the primary series; setChartType replaces it
+widget.root;                  // the .oac-widget element
+widget.context;               // what every dialog was handed, for a panel of your own
+widget.symbol(); widget.exchange(); widget.interval(); widget.chartType(); widget.theme();
+widget.setSymbol('INFY', 'NSE');
+widget.setInterval('15m');    // throws UnknownIntervalError for a code the registry lacks
+widget.setChartType('area');
+widget.setTheme('light');
+widget.openSettings();        // false when no settings dialog is registered
+widget.openIndicatorPicker();
+await widget.reload();        // fetch again for the current symbol and interval
+const saved = widget.getState();   // { version, symbol, exchange, interval, chartType, theme, chart, rail }
+widget.restoreState(saved);        // { applied, reason?, chart? }
+widget.destroy();                  // saves if persisting, removes the chrome, destroys the chart
+widget.isDestroyed;
+```
+
+`restoreState` applies a saved viewport only when the state was captured on the same
+symbol and interval; on any other dataset the indicators, drawings and panes still land
+and the view is dropped, because a range of bar indices means nothing on different bars.
+
+A `Widget` is a thin owner. Anything the chrome does not expose, do on `widget.chart` or
+`widget.draw` directly; the chrome observes the chart and stays in step.
+
+## Options
+
+`WidgetOptions` is `ChartOptions` plus the fields below. Every `ChartOptions` key
+(`timezone`, `grid`, `priceScale`, `axisChrome`, `renderer`, `animZoom` and the rest)
+passes through to `createChart` unchanged.
+
+| Option | Type | What it does |
+|---|---|---|
+| `feed` | `DataFeed` | Where bars come from. The widget calls `getBars` for the current symbol and interval (and `subscribeBars` when the feed has it), and again on every `setSymbol` / `setInterval` / `reload`; with no feed, put data on `widget.series` yourself. See [Custom Data Feeds](/docs/data-feeds). |
+| `symbol` | `string` | The instrument shown at start and in the top bar. Upper-cased. |
+| `exchange` | `string` | Passed to the feed with the symbol. Default `''`. |
+| `interval` | `string` | An interval code the interval registry knows (`'1m'`, `'5m'`, `'1d'`, or one you registered with `registerInterval`). An unknown code throws `UnknownIntervalError`; a persisted code this build does not know falls back to `'1d'`. Default `'1d'`. |
+| `intervals` | `string[]` | The interval pills. Default: `DEFAULT_INTERVALS` (`1m 5m 15m 1h 1d 1w`) plus every other registered code. |
+| `chartType` | `string` | The primary series type, a registered chart type id. Default `'candlestick'`. |
+| `theme` | `'dark'` \| `'light'` \| `ChartTheme` | A named palette or a full theme object. Drives both the canvas and the chrome tokens (see below). Default `'dark'` (the engine's own default is light). |
+| `rail` | `boolean` \| `RailOptions` | The drawing rail. `false` hides it; `tools` restricts which registered tool ids appear (the order follows the rail's own groups); `favorites` seeds the pins when nothing is stored. |
+| `topbar` | `boolean` | The symbol, interval, chart type, indicators, capture, settings and theme controls. |
+| `statusline` | `boolean` | The status line under the chart. |
+| `indicators` | `boolean` | The Indicators button and picker. Turn it off for a host that manages indicators itself. |
+| `persist` | `boolean` \| `string` | `true` saves the state under the `default` namespace (`oac-widget:default:state`) and restores it on the next `createWidget`; a string names the namespace, for more than one widget per origin. |
+| `storage` | `StorageLike` \| `null` | The store behind `persist`. Default: the page's `localStorage`. |
+| `locale` | `string` | A BCP 47 tag the status line formats numbers with. |
+| `symbolSearch` | `(query) => SymbolMatch[] \| Promise<SymbolMatch[]>` | Called as the user types in the symbol box; the results open as a menu under it. |
+| `lookbackBars` | `number` | Bars per load. Default 500. |
+| `now` | `() => number` | The clock for the load window and the capture filename. Default `Date.now`. |
+| `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). Without it the menu draws no trade rows. |
+
+The chrome switches (`rail`, `topbar`, `statusline`, `indicators`) default to on, so a
+bare `createWidget(el)` is the full terminal. `persist` defaults to off: nothing is
+written to storage until you ask.
+
+<Callout type="info">
+A control exists only where the engine has something behind it. Every dialog is generated
+from a schema the engine already ships: chart settings from `chartSettingsSchema`,
+indicator settings from the descriptor, drawing properties from `drawingSettingsSchema`,
+so a field appears only when the renderer reads it. The right-click menu draws its order
+rows only when `onOrder` is given.
+</Callout>
+
+## Events
+
+```ts
+widget.on('symbol', (e) => console.log(e));    // { symbol, exchange }: picked in the top bar, or setSymbol
+widget.on('interval', (e) => console.log(e));  // { interval }
+widget.on('theme', (e) => console.log(e));     // { theme, chartTheme }
+widget.on('layout', (e) => console.log(e));    // { reason, chartType? }: getState() would now return differently
+widget.on('data', (e) => console.log(e));      // { symbol, interval, bars, error? }: a load finished or failed
+widget.on('status', (e) => console.log(e));    // { text, kind }: the status line's message changed
+```
+
+`on` returns the unsubscriber; `off(event, cb?)` is the same thing by name. The six
+events are what a host needs to keep its own state (a URL, a workspace, a watchlist) in
+step with the chrome. Everything the chart itself emits (`crosshair:move`, `contextmenu`,
+`trading:*`, the drawing controller's `drawing:*`) is still there on `widget.chart` and
+`widget.draw`; see [Events](/docs/events). The exact callback payloads are in
+`dist/widget/index.d.ts`.
+
+## Theming tokens
+
+The chrome never carries a colour of its own. `widgetTokens(theme)` derives every chrome
+colour from the active `ChartTheme`: panels are the theme `background` stepped towards
+white or black, borders come from `axisLine` and `paneSeparator`, text from `axisText`
+lifted for legibility, the accent from `lineColor`, and the buy and sell colours from
+`upColor` and `downColor`. Spacing, radius and font are added, and the set is written as
+`--oac-` custom properties on the widget root, `.oac-widget`. One `<style>` element is
+injected per page, scoped under that class, so nothing leaks into the host page and
+nothing from the host page leaks in. Calling `setTheme` rewrites the tokens; every control
+follows without a repaint of its own.
+
+| Token group | Names (each prefixed `--oac-`) |
+|---|---|
+| Surfaces | `bg`, `panel`, `panel-2`, `elev`, `elev-2`, `elev-3`, `scrim`, `shadow` |
+| Borders | `bd`, `bd-soft`, `bd-hover` |
+| Text | `tx`, `tx-strong`, `mut`, `faint` |
+| Accent and state | `acc`, `acc-2`, `on-bg`, `on-bd`, `ring`, `ring-soft`, `buy`, `sell`, `amber`, `danger` |
+| Scrollbars | `sb-thumb`, `sb-thumb-hover` |
+| Type and metrics | `font`, `mono`, `fs`, `radius`, `rail-w`, `topbar-h`, `status-h`, `ctl-h` |
+
+The tokens are set as inline custom properties on the root (that is how `setTheme` can
+swap them without touching the stylesheet), so a host override in a stylesheet has to
+outrank an inline declaration:
+
+```css
+#terminal .oac-widget {
+  --oac-font: "IBM Plex Sans", system-ui, sans-serif !important;
+  --oac-radius: 4px !important;
+}
+```
+
+Override tokens, not controls: a rule written against an internal class name is a rule
+against an implementation detail.
+
+## Extending the rail with your own tools
+
+The rail is a view of the draw tier's tool registry. Register a tool the way
+[Drawing Tools](/docs/drawing-tools#building-your-own-tool) documents, then name it in
+`rail.tools`:
+
+```ts
+import { createWidget } from 'openalgo-charts/widget';
+import { registerDrawingTool, LINE_FIELDS, type DrawingTool } from 'openalgo-charts/draw';
+
+const midline: DrawingTool = {
+  id: 'midline',
+  name: 'Midline',
+  points: 2,
+  angleLock: true,
+  shortcut: 'Alt+M',
+  settings: LINE_FIELDS,
+  draw(c) {
+    // paint a horizontal line at the midpoint of the two anchors
+  },
+  distance(x, y, c) {
+    // media px from the cursor to the line, or null for a miss
+    return null;
+  },
+};
+registerDrawingTool(midline);
+
+createWidget('#terminal', {
+  rail: { tools: ['trend-line', 'horizontal-line', 'midline', 'fib-retracement'], favorites: ['midline'] },
+});
+```
+
+Register before you call `createWidget`: the rail reads the registry once when it builds,
+shows only ids it finds there, and drops a favourite it cannot resolve. The rail labels
+every button with the tool's `name` and draws a glyph when the draw tier's icon registry
+(`DRAWING_TOOL_ICONS`) has one for the id; the built-in 51 all do. A tool that declares
+`shortcut` is bound by the widget's keymap and listed in the `?` panel, and a binding that
+collides with an existing one is reported rather than silently overridden. `settings`
+decides what the drawing properties dialog shows for the tool: a control appears only for
+a field the tool's `draw` reads.
+
+## Loading without a bundler
+
+Every tier bundle imports its neighbours by sibling path (`./openalgo-charts.mjs`,
+`./openalgo-charts.draw.mjs`), so `dist/` served as-is is enough and no import map is
+needed:
+
+```html
+<div id="terminal" style="height: 600px"></div>
+<script type="module">
+  import { createWidget } from '/dist/openalgo-charts.widget.mjs';
+  import '/dist/openalgo-charts.indicators.mjs';
+  createWidget(document.getElementById('terminal'), { symbol: 'RELIANCE', interval: '5m' });
+</script>
+```
+
+The standalone script (`openalgo-charts.standalone.js`) is base-only and cannot host the
+widget: a tier loaded beside it would import its own second engine. See
+[Use from a CDN](/docs/cdn).
+
+## Size
+
+Budgets from `.size-limit.json`, Brotli, enforced by `npm run size`:
+
+| Row | Files | Budget | Measured |
+|---|---|--:|--:|
+| Widget tier | `openalgo-charts.widget.mjs` | 36 kB | 35.56 KB |
+| Widget terminal | base + draw + indicators + widget | 155 kB | 154.34 KB |
+
+The widget is a tier because of these rows. A host that never calls `createWidget`
+downloads none of it, and the base engine's own budget is unchanged.
+
+## In a framework
+
+Create the widget in a mount effect, hold it in a ref, and `destroy()` it on cleanup, the
+same lifecycle as a bare chart in [Framework Integration](/docs/frameworks). The widget
+instance is never framework state: it owns DOM of its own and re-rendering around it is
+wasted work.

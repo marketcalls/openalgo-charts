@@ -70,16 +70,16 @@ Import only what you use. Each tier is a separate entry point that registers int
 
 | Import | Contents | Brotli limit |
 |---|---|---|
-| `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators | 62 KB |
+| `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators, vector SVG export, the render backend port | 67 KB |
 | `openalgo-charts/indicators` | 102 built-in indicators + the Tier-2 external-data contract | 30 KB |
-| `openalgo-charts/draw` | 51 drawing tools + a headless `DrawingController` and its clipboard | 16 KB |
+| `openalgo-charts/draw` | 51 drawing tools + a headless `DrawingController` with multi-select, z-order, a per-tool settings schema, the 1.9.x migration, the clipboard and the icon builders | 26 KB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point and Figure, Kagi | 5 KB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 11 KB |
 | `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 75 KB with base |
 | `openalgo-charts/webgl` | The WebGL2 series backend behind `renderer: 'auto' \| 'webgl2'`; composites into the pane's canvas, falls back to 2D for the session on context loss | 7 KB |
 | `openalgo-charts/widget` | `createWidget`: the chart with a top bar, drawing rail, status line, settings and indicator dialogs, drawing properties, right-click menu, keymap and optional persistence. The only tier that ships DOM; imports the draw tier itself | 36 KB |
 
-Limits are the CI-enforced budgets in `.size-limit.json`; the whole package measures 181.67 KB Brotli against a 182 KB budget (a widget terminal, base + draw + indicators + widget, 154.36 KB against 155 KB), and the indicator tier 27.27 KB against 30 KB. Both budgets were raised in 1.8.3 to carry that release's eleven new indicators, and the aggregate was raised to stay consistent with the tier: every other tier sums to 93.11 KB, so 93.11 plus the tier's 30 KB ceiling is 123.11 KB and the aggregate has to sit above that or it would fail while the tier it contains passes. Nothing is excluded from these figures because there are no runtime dependencies to exclude.
+Limits are the CI-enforced budgets in `.size-limit.json`. Measured on the 2.0.0 build: base engine 66.39 KB against 67 KB, draw tier 25.12 KB against 26 KB, indicator tier 27.27 KB against 30 KB, widget tier 35.56 KB against 36 KB, a widget terminal (base + draw + indicators + widget, what one `createWidget` call loads) 154.34 KB against 155 KB, and the whole package 181.65 KB against 182 KB. The aggregate budget always sits above the sum of the tier ceilings it contains, or it would fail while every tier it contains passes. Nothing is excluded from these figures because there are no runtime dependencies to exclude; the exact table is in [bundling-and-tiers](references/bundling-and-tiers.md).
 
 The clipboard lives in the **draw** tier, not the base one, because it needs the drawing-tool registry. `DrawingClipboard` and friends come from `openalgo-charts/draw`.
 

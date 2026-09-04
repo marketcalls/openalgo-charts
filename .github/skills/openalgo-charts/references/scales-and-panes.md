@@ -122,7 +122,7 @@ keep in sync.
 
 ### Autoscale rules
 
-Per frame, for each active scale on a pane: skip if `autoScale` is false; scan only visible bars of series matching that scale id and not `visible: false`; take `min`/`max` from the chart type's `extents(bar, style)`. **Only the `'right'` scale also folds in primitive `autoscaleInfo()`** — a `PriceLine` widens the right axis but never the left or overlay one.
+Per frame, for each active scale on a pane: skip if `autoScale` is false; scan only visible bars of series matching that scale id and not `visible: false`; take `min`/`max` from the chart type's `extents(bar, style)`. **Only the `'right'` scale also folds in primitive `autoscaleInfo()`**: a `PriceLine` widens the right axis but never the left or overlay one.
 
 ## The three scale ids
 
@@ -164,7 +164,7 @@ import { DEFAULT_TIME_SCALE_OPTIONS } from 'openalgo-charts';
 | `maxBarSpacing` | `number` | `80` | Ceiling; read once in the constructor, not settable later. |
 | `rightOffset` | `number` | `4` | Empty bar slots kept right of the latest bar. Unclamped. |
 
-The chart constructs its own `TimeScale` with defaults — **`ChartOptions` has no `timeScale` key**. Tune the live instance:
+The chart constructs its own `TimeScale` with defaults, **`ChartOptions` has no `timeScale` key**. Tune the live instance:
 
 ```ts
 chart.timeScale.setBarSpacing(12);
@@ -176,9 +176,9 @@ chart.timeScale.fitContent(bars.length);
 
 ### The logical-index model
 
-`x = width - (baseIndex + rightOffset - index) * barSpacing`. The x of a bar is a function of its **integer position in the series**, never of its timestamp. Bars get consecutive indices regardless of the real elapsed time between them, so weekends, holidays and session breaks have no index and therefore no blank space to draw — the axis is gapless by construction. `xToIndex` is the exact inverse and returns a fractional index.
+`x = width - (baseIndex + rightOffset - index) * barSpacing`. The x of a bar is a function of its **integer position in the series**, never of its timestamp. Bars get consecutive indices regardless of the real elapsed time between them, so weekends, holidays and session breaks have no index and therefore no blank space to draw, the axis is gapless by construction. `xToIndex` is the exact inverse and returns a fractional index.
 
-`visibleRange()` returns `{ from, to }` as fractional logical indices, unclamped to the data (it can run negative or past the last bar). `setVisibleLogicalRange({ from, to })` picks `barSpacing = width / span`, anchors the right edge at `to`, and fires the repaint hook — it is a no-op when width or span is not positive, and an extreme span lands at the nearest clamped zoom. `zoomAtX(focusX, factor)` keeps the index under `focusX` pinned. `fitContent(barCount)` sets `baseIndex = barCount - 1`, resets `rightOffset` to `4`, and sizes bars to `width / (barCount + rightOffset)`.
+`visibleRange()` returns `{ from, to }` as fractional logical indices, unclamped to the data (it can run negative or past the last bar). `setVisibleLogicalRange({ from, to })` picks `barSpacing = width / span`, anchors the right edge at `to`, and fires the repaint hook, it is a no-op when width or span is not positive, and an extreme span lands at the nearest clamped zoom. `zoomAtX(focusX, factor)` keeps the index under `focusX` pinned. `fitContent(barCount)` sets `baseIndex = barCount - 1`, resets `rightOffset` to `4`, and sizes bars to `width / (barCount + rightOffset)`.
 
 ## How interaction mutates the scales
 
@@ -191,7 +191,7 @@ Details in [interactions](interactions.md); what matters here is which gesture l
 | Drag either price axis strip (right, or the reserved left column) | `setPriceRange` around the centre by `exp(dy * 0.005)` on **that strip's** scale, then `setAutoScale(false)` | **yes** |
 | Drag the time axis strip (bottom pane, last `timeAxisHeight` px) | `setBarSpacing(start * exp(dx * 0.005))` | no |
 | Two-finger pinch | zoom time, pan time, `panByPixels` on the pinched pane | **yes** (price scale) |
-| Double-click | `chart.resetScale()` | no — restores autoscale everywhere |
+| Double-click | `chart.resetScale()` | no, restores autoscale everywhere |
 | `panUp` / `panDown` shortcuts | `panByPixels(±20)` on **pane 0 only** | **yes** |
 
 **Once a pane goes manual it stops tracking new data.** A live feed that keeps printing highs will run off the top of a pane whose axis the user dragged. Call `pane.priceScale.setAutoScale(true)` or `chart.resetScale()` to recover.
@@ -273,7 +273,7 @@ Heights are **relative weights**, not pixels: pane height is `chartHeight * weig
 
 Each call emits an event: `paneRemoved`, `paneMoved`, `paneMaximized`, and `paneResized` after a divider drag.
 
-**Pane 0 is pinned.** `removePane(0)` and any `movePane` that would displace pane 0 return `false` — including `movePane(1, -1)`. Both also return `false` for an out-of-range index, so check the boolean rather than assuming success.
+**Pane 0 is pinned.** `removePane(0)` and any `movePane` that would displace pane 0 return `false`, including `movePane(1, -1)`. Both also return `false` for an out-of-range index, so check the boolean rather than assuming success.
 
 **Removing a pane re-indexes everything below it.** Indicators shift with their pane, but any `paneIndex` a host has cached is stale afterwards.
 

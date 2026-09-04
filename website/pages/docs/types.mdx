@@ -93,8 +93,16 @@ interface ChartOptions {
   /** 'normal' follows the pointer exactly; 'magnet' snaps to nearest O/H/L/C. */
   crosshairMode?: 'normal' | 'magnet';
   now?: () => number;
+  /** Ease a wheel zoom over a few frames. Default true; false is the single-frame step. */
+  animZoom?: boolean;
+  /** What a wheel zoom holds still: the bar under the cursor, or the latest bar. Default 'cursor'. */
+  zoomAnchor?: 'cursor' | 'right';
   conflate?: boolean;
   conflationFactor?: number;
+  /** Which backend paints the series. Default 'canvas2d'; 'webgl2' needs the webgl tier. */
+  renderer?: 'canvas2d' | 'webgl2' | 'auto';
+  /** Build the backend yourself, one call per pane, bypassing `renderer`. */
+  renderBackend?: RenderBackendFactory;
   grid?: { vertLines?: boolean; horzLines?: boolean };
   ariaLabel?: string;
   /**

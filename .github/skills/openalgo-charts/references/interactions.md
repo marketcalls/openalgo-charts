@@ -15,7 +15,7 @@ Everything is built on Pointer Events, so mouse, touch and pen share one code pa
 | Drag the price axis (right strip) | rescale price | `exp(dy * 0.005)` about the range centre, then `setAutoScale(false)` |
 | Drag the time axis (bottom strip of the last pane) | rescale bar spacing | `barSpacing * exp(dx * 0.005)` |
 | Drag a pane divider | redistribute height between the two adjacent panes | grab tolerance 4 px, cursor `row-resize`, summed weight preserved, neither side below `min(24, total/4)` px; emits `paneResized` on release |
-| Double-click | `resetScale()` — fit content plus autoscale on every pane | suppressed while placement mode is on; the `dblclick` event still fires |
+| Double-click | `resetScale()`, fit content plus autoscale on every pane | suppressed while placement mode is on; the `dblclick` event still fires |
 | Press on a draggable primitive | drags the line instead of panning | arms when `hit.draggable` is true, or `hit.cursor === 'ns-resize'` and `subscribeDrag` is registered |
 | Flick and release | kinetic scroll | see below |
 | Two pointers | pinch | see below |
@@ -29,7 +29,7 @@ A press-and-release with under 3 px of movement is a click: `subscribeClick` fir
 
 Kinetic scrolling: a release faster than `triggerSpeed` decelerates as `velocity(t) = v0 · e^(−k·t)`. `DEFAULT_KINETIC_OPTIONS` is `friction: 0.0055` (1/ms, larger stops sooner), `minSpeed: 0.02` px/ms (animation ends), `triggerSpeed: 0.08` px/ms (slower flicks ignored). `KineticAnimation` uses no `Date` or `rAF` internally, so it is deterministic; the next `pointerdown` cancels it.
 
-Pinch: a second pointer aborts any single-pointer drag. Each frame compares two `pinchState` snapshots — `factor` (distance ratio) zooms time at the midpoint, `dx` pans time, `dy` pans the pinched pane's price scale — all in the same frame, so spreading while sliding zooms and pans at once.
+Pinch: a second pointer aborts any single-pointer drag. Each frame compares two `pinchState` snapshots (`factor` (distance ratio) zooms time at the midpoint, `dx` pans time, `dy` pans the pinched pane's price scale) all in the same frame, so spreading while sliding zooms and pans at once.
 
 ## Crosshair
 
@@ -69,7 +69,7 @@ On by default. `chart.shortcuts` is the `ShortcutManager`, or `null` when disabl
 | `toggleGridHorz` | Toggle horizontal grid | `Alt+KeyH` | flips `grid.horzLines` |
 | `toggleCrosshairMagnet` | Toggle crosshair magnet | `Alt+KeyM` | swaps `normal` / `magnet` |
 
-`panLeftBar` and `panRightBar` (`rightOffset ∓ 1`) are executable commands with **no default binding** — they exist for the TimeNavigator buttons and for hosts that want a one-bar step. `BUILTIN_COMMANDS` is the set built from `DEFAULT_KEYMAP`, so it does not contain them.
+`panLeftBar` and `panRightBar` (`rightOffset ∓ 1`) are executable commands with **no default binding**: they exist for the TimeNavigator buttons and for hosts that want a one-bar step. `BUILTIN_COMMANDS` is the set built from `DEFAULT_KEYMAP`, so it does not contain them.
 
 `ALT_PRESET` overlays three: `panLeftFast: Alt+ArrowLeft`, `panRightFast: Alt+ArrowRight`, `screenshot: Mod+Shift+KeyS`. Select it with `preset: 'alt'` or `setPreset('alt')`; user rebinds still win.
 
@@ -90,7 +90,7 @@ eventToCombo(keyboardEvent);    // 'Mod+ArrowLeft'
 
 Reserved (never bindable): `Mod+KeyW/T/N/Q/R/L`, `Mod+Shift+KeyT/N/W`.
 
-Scope: `hover` (default) fires only while the pointer is inside the chart or focus is on the container or a descendant — the right choice for a multi-chart page. `global` always fires. Keys are ignored whenever the event target is an `input`, `textarea`, `select`, or a `contenteditable` element (`ShortcutManager.shouldIgnore`).
+Scope: `hover` (default) fires only while the pointer is inside the chart or focus is on the container or a descendant, the right choice for a multi-chart page. `global` always fires. Keys are ignored whenever the event target is an `input`, `textarea`, `select`, or a `contenteditable` element (`ShortcutManager.shouldIgnore`).
 
 ### Configuring and rebinding
 
@@ -113,7 +113,7 @@ chart.shortcuts?.disable('panUp');
 chart.shortcuts?.resetBinding('panUp');
 chart.shortcuts?.resetAll();
 chart.shortcuts?.list();   // [{ command, label, combos, isCustom, isDisabled }]
-chart.shortcuts?.state();  // { preset, overrides, disabled } — serializable
+chart.shortcuts?.state();  // { preset, overrides, disabled }, serializable
 chart.shortcuts?.on((e) => track(e.command)); // { command, combo, isCustom }; returns an unsubscribe
 ```
 
@@ -151,7 +151,7 @@ Keyboard-only navigation is complete: focus the container, then arrows pan, `=`/
 chart.setPlacementMode(true);
 ```
 
-While active: a press no longer pans, `dblclick` no longer resets the scale (so a variable-anchor tool can be finished with a double-click), and a press-drag-release is reported as **two** `click` events — the press point, then the release point tagged `viaDrag: true` — so a two-point shape is drawn in one gesture. A press-release that never moves more than 3 px stays a single click. Verified in `tests/placement-mode.test.ts`.
+While active: a press no longer pans, `dblclick` no longer resets the scale (so a variable-anchor tool can be finished with a double-click), and a press-drag-release is reported as **two** `click` events (the press point, then the release point tagged `viaDrag: true`) so a two-point shape is drawn in one gesture. A press-release that never moves more than 3 px stays a single click. Verified in `tests/placement-mode.test.ts`.
 
 `DrawingController` drives this for you: `setTool(id)` turns it on, and clearing the tool, finishing a shape or destroying the controller turns it off. Call it directly only when building a placement UI that is not a drawing tool (an alert level, a custom annotation).
 
@@ -176,7 +176,7 @@ createChart(el, { timeNavigator: { size: 30, revealHeight: 90, fadeSeconds: 0.2,
 
 Buttons run the same command ids the keyboard does, through `_runShortcut`, so the two paths cannot drift. Tooltip hints are read from the live keymap at construction, so a rebind of `zoomIn` shows in the tooltip; the one-bar step buttons have no default binding and therefore no hint.
 
-Reveal is driven by an explicit `setPointer(plotLocalPoint | null)` from the chart, not by hover ids — a drawing or order line near the bottom edge would otherwise win the hit test and hide the strip. While hidden the buttons hit-test to nothing, so they never steal a click.
+Reveal is driven by an explicit `setPointer(plotLocalPoint | null)` from the chart, not by hover ids, a drawing or order line near the bottom edge would otherwise win the hit test and hide the strip. While hidden the buttons hit-test to nothing, so they never steal a click.
 
 ## Related
 

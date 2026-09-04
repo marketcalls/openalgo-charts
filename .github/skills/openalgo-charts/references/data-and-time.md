@@ -36,7 +36,7 @@ const bar: Bar = { time: 1700000000, open: 100, high: 102, low: 99.5, close: 101
 ```ts
 series.setData([
   { time: 1700000000, value: 101 },   // LinePoint
-  { time: 1700000060 },               // Whitespace — index reserved, nothing drawn
+  { time: 1700000060 },               // Whitespace, index reserved, nothing drawn
   { time: 1700000120, value: 103 },
 ]);
 ```
@@ -49,7 +49,7 @@ series.setData([
 |---|---|---|
 | `setData(items)` | Full replace of this series. Sorted ascending, duplicate times collapsed **last-wins**. | Auto-fits **only on the first non-empty call** for the chart's lifetime (`_hasFitContent`). Later calls leave the logical range alone. |
 | `update(item)` | Upsert one item: newer time appends, equal time replaces the last bar, older time replaces or inserts. | Appends auto-scroll only when the viewport was already at the right edge; otherwise `rightOffset` is decremented so visible bars do not shift. |
-| `prependData(items)` | Upsert-merge by time (`DataLayer.addBars`) — existing times replaced, new times inserted, result stays sorted. | Preserved. `baseIndex` shifts by the inserted count and `rightEdge - index` is invariant. |
+| `prependData(items)` | Upsert-merge by time (`DataLayer.addBars`), existing times replaced, new times inserted, result stays sorted. | Preserved. `baseIndex` shifts by the inserted count and `rightEdge - index` is invariant. |
 | `getData()` | Read back the normalized `Bar[]`, oldest to newest. | None. Allocates a fresh array each call. |
 
 **A second `setData` does not refit the chart.** The auto-fit latch fires once. After a timeframe or symbol switch, call `chart.fitContent()` (or `chart.timeScale.fitContent(n)`) yourself, or the old logical range is reapplied to a different bar count.
@@ -68,10 +68,10 @@ One `DataLayer` per chart (`src/model/data-layer.ts`). Every distinct time acros
 Consequences you must design around:
 
 - **One bar per time, per series, is an invariant.** Times map through a `Set`, so two bars sharing a time resolve to the same x and draw on top of each other. `setData` collapses duplicates keeping the last occurrence in the caller's array (`Array#sort` is stable); `addBars`/`prependData` upsert through a `Map`, so incoming bars win.
-- **Reconnect overlap is safe.** Re-fetch a window that overlaps what you already have and hand it to `prependData` — the merge dedupes by time. No gap arithmetic needed.
+- **Reconnect overlap is safe.** Re-fetch a window that overlaps what you already have and hand it to `prependData`, the merge dedupes by time. No gap arithmetic needed.
 - **Logical indices are not stable across a prepend.** Anything you cached as an index is wrong afterwards. Cache times, not indices.
 - **The axis is gapless, so most x positions have no bar behind them.** `indexToTime(i)` answers only for whole indices that have a bar; `indexToTimeFloat(i)` interpolates between bars and extrapolates past either edge at the nearest bar spacing, and `timeToIndexFloat(t)` is its inverse. Both return `NaN` with no data. `chart.coordinateToTime(x)` / `chart.timeToCoordinate(time)` wrap them.
-- `visibleBars(id, from, to)` binary-searches into the window, so a repaint costs `O(log n + visible)`, not `O(total)`. Prefer it over scanning `seriesBars(id)` (which returns the live array — treat as read-only).
+- `visibleBars(id, from, to)` binary-searches into the window, so a repaint costs `O(log n + visible)`, not `O(total)`. Prefer it over scanning `seriesBars(id)` (which returns the live array, treat as read-only).
 
 `DataLayer.update` classifies each live bar and returns the kind, which is what drives the auto-scroll decision:
 
@@ -96,11 +96,11 @@ chart.setHistoryLoader(async () => {
 });
 ```
 
-The loader fires from `_maybeLoadHistory` whenever the visible logical range's `from` drops below 10 — during a drag, a wheel zoom, or a kinetic glide. A latch (`_loadingHistory`) suppresses re-entry until you call `historyLoadComplete()`.
+The loader fires from `_maybeLoadHistory` whenever the visible logical range's `from` drops below 10, during a drag, a wheel zoom, or a kinetic glide. A latch (`_loadingHistory`) suppresses re-entry until you call `historyLoadComplete()`.
 
 **`historyLoadComplete()` is mandatory on every invocation, including the one that returns nothing.** Skipping it leaves the latch set and paging never fires again.
 
-The same trigger also emits the observable `lazy-load` event (`{ from, to, direction: 'backward' }`) — see [events-and-state](events-and-state.md). Only `'backward'` is ever emitted.
+The same trigger also emits the observable `lazy-load` event (`{ from, to, direction: 'backward' }`), see [events-and-state](events-and-state.md). Only `'backward'` is ever emitted.
 
 ## Timezone
 
@@ -234,11 +234,11 @@ ws.onTrade((t) => {
 
 The four cases are the `Bucketing` union from the interval registry, and `TickTimeframe` still names exactly the three time-agnostic ones. `new TickBarAggregator(bucketing, { timezone })` supplies the zone a calendar bucket resolves in when the rule did not pin its own: a month opens at local midnight on the first, and which instant that is depends on the exchange. See [feeds-and-live](feeds-and-live.md#the-interval-registry).
 
-**Tick and volume bars can collide on time.** Two consecutive count-bars whose first ticks land in the same second get the same `time`, and the DataLayer collapses them last-wins — one bar disappears. If your feed timestamps at second resolution, carry your own monotonic time when building tick bars.
+**Tick and volume bars can collide on time.** Two consecutive count-bars whose first ticks land in the same second get the same `time`, and the DataLayer collapses them last-wins, one bar disappears. If your feed timestamps at second resolution, carry your own monotonic time when building tick bars.
 
 **Tick and volume bars require real trade ticks.** OHLCV history cannot be re-bucketed into them.
 
-For interval bars built from an LTP/quote stream, use `CandleBuilder` instead — see [feeds-and-live](feeds-and-live.md).
+For interval bars built from an LTP/quote stream, use `CandleBuilder` instead, see [feeds-and-live](feeds-and-live.md).
 
 ## Conflation
 
@@ -257,12 +257,12 @@ const chart = createChart(el, { conflate: true, conflationFactor: 1 });
 
 Merging is lossless for candle shape: open from the first bar, close from the last, high/low from the extremes, volume summed. Never averaged. The merged bar takes the **first** bar's time; `conflateItems` places x at the group centre.
 
-Conflation is a render-time transform only — the DataLayer, your `getData()`, indicators and autoscale all still see every source bar. What changes is what you see: a group of candles becomes one wider-range candle, so wick counts and per-bar colors no longer correspond 1:1 to your data at extreme zoom-out. The helpers `conflateBars(bars, groupSize)` and `mergeBars(group)` are exported for manual use.
+Conflation is a render-time transform only, the DataLayer, your `getData()`, indicators and autoscale all still see every source bar. What changes is what you see: a group of candles becomes one wider-range candle, so wick counts and per-bar colors no longer correspond 1:1 to your data at extreme zoom-out. The helpers `conflateBars(bars, groupSize)` and `mergeBars(group)` are exported for manual use.
 
 ## Related
 
-- [feeds-and-live](feeds-and-live.md) — `DataFeed`, the OpenAlgo adapters, `CandleBuilder`.
-- [events-and-state](events-and-state.md) — `lazy-load`, `pan`/`zoom`, saved layouts.
-- [core-api](core-api.md) — `createChart`, `addSeries`, viewport methods.
-- [scales-and-panes](scales-and-panes.md) — logical range, bar spacing, price scales.
-- [pitfalls](pitfalls.md) — the short list of things that bite.
+- [feeds-and-live](feeds-and-live.md), `DataFeed`, the OpenAlgo adapters, `CandleBuilder`.
+- [events-and-state](events-and-state.md), `lazy-load`, `pan`/`zoom`, saved layouts.
+- [core-api](core-api.md), `createChart`, `addSeries`, viewport methods.
+- [scales-and-panes](scales-and-panes.md), logical range, bar spacing, price scales.
+- [pitfalls](pitfalls.md), the short list of things that bite.

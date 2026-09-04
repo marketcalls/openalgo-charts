@@ -1,7 +1,7 @@
 # Getting started
 
 OpenAlgo Charts is a dependency-free, canvas-based financial charting engine.
-The base engine is about **66.41 KB Brotli**; the full package (all tiers) is about **181.67 KB Brotli**.
+The base engine is **66.39 KB Brotli**; the full package (all eight tiers) is **181.65 KB Brotli**, measured with `size-limit` on the 2.0.0 build.
 
 ## Install
 
@@ -19,12 +19,12 @@ const series = chart.addSeries('candlestick');
 series.setData([
   { time: 1705286700, open: 100, high: 101, low: 99.5, close: 100.6, volume: 1200 },
   { time: 1705286760, open: 100.6, high: 101.4, low: 100.2, close: 101.1, volume: 900 },
-  // …
+  // ...
 ]);
 ```
 
 Time is **UTC seconds** internally. Feed adapters convert broker formats at the
-edge (IST date strings, epoch milliseconds) — see the OpenAlgo adapter below.
+edge (IST date strings, epoch milliseconds); see the OpenAlgo adapter below.
 
 ## Live updates
 
@@ -42,7 +42,7 @@ ws.onTick(({ price, ltq, timeSec }) => {
 
 ## Loadable tiers
 
-Only pay for what you use — each tier is a separate entry point:
+Only pay for what you use: each tier is a separate entry point.
 
 | Import | Contents |
 |---|---|
@@ -70,7 +70,7 @@ const bars = await feed.getBars({
 series.setData(bars);
 ```
 
-Live LTP / Quote / Depth come from the WS adapter — feed its LTP ticks through a
+Live LTP / Quote / Depth come from the WS adapter. Feed its LTP ticks through a
 `CandleBuilder` and call `series.update()`:
 
 ```ts
@@ -87,4 +87,6 @@ can be wired with a small adapter. Verify the exact REST paths against your
 running OpenAlgo build before production use.
 
 See [guides.md](./guides.md) for chart types, trading, profiles, and writing
-custom chart styles / primitives. Runnable demos live in [`../examples`](../examples/index.html).
+custom chart styles / primitives, [widget.md](./widget.md) for the one-call terminal,
+and [migrating-to-2.md](./migrating-to-2.md) if you are coming from 1.9.x. Runnable
+demos live in [`../examples`](../examples/index.html).

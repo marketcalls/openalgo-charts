@@ -11,7 +11,8 @@ Every live demo on this site is fully interactive. The points below apply to all
 
 ## Mouse
 
-- **Wheel**: zoom both axes around the cursor.
+- **Wheel**: zoom both axes around the cursor, eased over a few frames (`animZoom: false`
+  for the single-frame step); `zoomAnchor: 'right'` holds the latest bar still instead.
 - **Drag the plot**: pan left/right (time) and up/down (price).
 - **Drag the price axis**: rescale price; **drag the time axis**: rescale bar spacing.
 - **Double-click**: reset scale (fit content + autoscale). While a drawing tool is

@@ -7,9 +7,10 @@ Written 2026-08-28 against openalgo-charts 1.8.2.
 > record of what was wrong, what the measured figures were, and why each change
 > was made, so the next redraw starts from evidence rather than memory.
 >
-> **Current source of truth, 1.9.2:** the SVG now reports 60.88 KB base, 124.47
-> KB for every tier, and 51 drawing tools. The figures below record the 1.8.2
-> redraw unless an appendix says otherwise.
+> **Current source of truth, 2.0.0:** the SVG reports 66.39 KB base, 181.65 KB
+> for every tier, eight tier chips, 102 built-in indicators and 51 drawing
+> tools. The figures below record the 1.8.2 redraw unless an appendix says
+> otherwise; the 2.0.0 appendices at the end record each later pass.
 
 Build brief for the replacement of `docs/architecture-diagram.png` in
 `openalgo-charts`, shown in `README.md` at 920 px wide.
@@ -364,3 +365,21 @@ row did not move), everything 146.11 KB to 181.67 KB, the subtitle 146 KB to
 182 KB. The `<desc>` names the eighth chip. The layer count in the `<desc>` and
 the README alt text stays at seven: the widget is a bundle, not a layer of the
 engine, and the stack above the legend did not change.
+
+## 2.0.0 release: every figure re-measured on the shipping build
+
+The release pass changed two numbers and confirmed the rest. `npm run size` on
+the 2.0.0 build (with the version string that ships) reads base 66.39 KB and
+everything 181.65 KB, two hundredths under the 66.41 KB and 181.67 KB the
+diagram carried from the widget pass, because the version string itself moves
+the bundle. Both figures were substituted by matching the text of the chip
+they sit in, not by searching for the old number, which is the failure mode
+CLAUDE.md records for the README. The `<desc>` carries the same two values.
+
+Confirmed unchanged by measurement on the same build: widget 35.56 KB,
+indicators 27.27 KB, draw 25.12 KB, profile 10.66 KB, trade 7.61 KB (the
+base + trade row reads 74.00 KB, so the delta over the base is unchanged),
+webgl 6.38 KB, transform 2.66 KB. The subtitle's rounded "66 KB base, 182 KB
+everything" still rounds correctly. Counts from the registry at runtime on the
+same build: 102 indicators, 15 chart types, 51 drawing tools; the three
+strings that carry them did not change. Eight tier chips, seven layers.
