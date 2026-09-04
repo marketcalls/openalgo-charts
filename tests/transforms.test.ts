@@ -83,6 +83,57 @@ describe('Point & Figure', () => {
     expect(out[1].close).toBeLessThan(out[1].open); // O (down)
   });
 
+  /**
+   * A box is filled by price reaching its level, not by price sitting inside
+   * it. The four cases below are the standard desk checks at box 1, reversal 3.
+   */
+  it('fills a rise up to the box price reached, and no further', () => {
+    T = 1;
+    // 10.50 is inside the box already filled; 11.20 fills the box at 11.
+    const out = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3, method: 'close' }), closes([5, 10.5, 10.5, 11.2]));
+    expect(out).toHaveLength(1);
+    expect(out[0].high).toBe(12); // exclusive top edge of the box at 11
+  });
+
+  it('fills a fall down to the level price reached, and no further', () => {
+    T = 1;
+    // A column topped at 15 reversing on 11.80: Os at 14, 13 and 12. Price has
+    // not come to 11, so no O is drawn there.
+    const out = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3, method: 'close' }), closes([10, 15.5, 13.5, 11.8]));
+    expect(out).toHaveLength(2);
+    expect(cols(out)[1].low).toBe(12);
+    expect(cols(out)[1].boxes).toBe(3);
+  });
+
+  it('draws nothing while price stays between the two levels', () => {
+    T = 1;
+    // A column footed at 50 needs 49 to extend and 53 to reverse. None of the
+    // chop reaches either, so the chart must not move -- 49.80 included.
+    const quiet = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3, method: 'close' }), closes([55, 50]));
+    T = 1;
+    const chopped = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3, method: 'close' }), closes([55, 50, 50.5, 52.1, 49.8, 51.5, 52.95]));
+    expect(chopped.map(oc)).toEqual(quiet.map(oc));
+  });
+
+  it('turns the column at the reversal level, not a box before it', () => {
+    T = 1;
+    // Topped at 15, three boxes down is 12.00. 12.99 is inside the box above.
+    const held = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3, method: 'close' }), closes([10, 15.5, 12.99]));
+    expect(held).toHaveLength(1);
+    T = 1;
+    const turned = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3, method: 'close' }), closes([10, 15.5, 12]));
+    expect(turned).toHaveLength(2);
+  });
+
+  it('fills every box of an oversized gap in one update', () => {
+    T = 1;
+    // Topped at 100, gapping to 90: Os from 99 down to 90.
+    const out = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3, method: 'close' }), closes([95, 100.5, 90]));
+    expect(out).toHaveLength(2);
+    expect(cols(out)[1].low).toBe(90);
+    expect(cols(out)[1].boxes).toBe(10);
+  });
+
   it('emits no phantom zero-height column when the first move is down', () => {
     T = 1;
     const out = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3 }), closes([100, 99, 98, 96, 95]));

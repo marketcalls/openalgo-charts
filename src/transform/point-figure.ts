@@ -191,8 +191,24 @@ export class PointFigureTransform implements ISeriesTransform {
       return [];
     }
 
+    // Which box each direction has filled.
+    //
+    // A box index is the level the box sits on: index `n` is the box whose
+    // bottom edge is `n * box`. Rising, price fills index `n` by reaching
+    // `n * box` from below, so the highest index a rise has filled is
+    // `floor(price / box)`. Falling, price fills index `n` by reaching that
+    // same edge from *above*, which `floor` reports a box too early: a price
+    // sitting inside a box has not come down to its foot.
+    //
+    // Using `floor` both ways drew boxes at levels price never reached -- a
+    // close of 11.80 reversing a column topped at 15 printed Os at 14, 13, 12
+    // and 11, and a close of 49.80 under a column footed at 50 extended it to
+    // 49 on a bar a three-box chart should have left untouched. It also turned
+    // a column a box early, at 12.99 rather than at 12.00. Every level read off
+    // this chart is measured from a column's edges, so a box drawn at a price
+    // that never traded puts stops and targets where the market never went.
     const hb = Math.floor(upPrice / this._box);
-    const lb = Math.floor(downPrice / this._box);
+    const lb = Math.ceil(downPrice / this._box);
 
     // Direction not established yet: the first real move sets it, still with no
     // column emitted. Ties (an outside bar) resolve up, the classic convention.
@@ -217,7 +233,7 @@ export class PointFigureTransform implements ISeriesTransform {
         out.push(this._column());
         this._box = this._resolveBox(downPrice);
         this._top = Math.ceil(boundary / this._box) - 1;
-        this._bot = Math.floor(downPrice / this._box);
+        this._bot = Math.ceil(downPrice / this._box);
         this._dir = -1;
         this._time = bar.time;
       }
