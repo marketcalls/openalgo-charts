@@ -207,6 +207,16 @@ export interface ExpandContext {
    * zoomed out and fills the pane when zoomed in, so size against this instead.
    */
   visibleBars: number;
+  /**
+   * Anchor to media px on the placing pane, and back. Present when the host
+   * can map coordinates, absent otherwise. A default sized in pixels (a
+   * position box 64 px of risk tall, 150 px wide) reads the same at every
+   * zoom and on every instrument, which a price percentage cannot: 1% of a
+   * 2.87 stock and 1% of an index are the same fraction and very different
+   * boxes. Without the mapping a tool falls back to chart units.
+   */
+  toPixel?(p: DrawingPoint): ScreenPoint | null;
+  fromPixel?(at: ScreenPoint): DrawingPoint | null;
 }
 
 export interface DrawingTool {
@@ -242,6 +252,15 @@ export interface DrawingTool {
    * draggable handle.
    */
   expand?(clicked: readonly DrawingPoint[], ctx: ExpandContext): DrawingPoint[];
+  /**
+   * Keep the anchors consistent after one of them moves: a handle drag
+   * (`handle` is its index) or a patch to `points` (`handle` is null). Returns
+   * the anchors to store. The position tools use it to keep the stop and the
+   * target on opposite sides of the entry, so dragging the stop up through
+   * the entry of a long turns the trade into a short instead of piling both
+   * levels on one side. Pure: the same input always yields the same output.
+   */
+  constrain?(points: readonly DrawingPoint[], handle: number | null): DrawingPoint[];
   /**
    * Keyboard shortcut that arms this tool, as `'Alt+T'` / `'Shift+Alt+F'`:
    * modifiers in `Ctrl`, `Alt`, `Shift` order, then a single key. Hosts render

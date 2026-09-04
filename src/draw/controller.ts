@@ -225,6 +225,21 @@ let nextId = 1;
 const sameIds = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((id, i) => id === b[i]);
 
+/**
+ * The index of the one anchor that differs between two sets, or null when
+ * none or several do. What a tool's constraint is told a points patch moved.
+ */
+function changedAnchor(prev: readonly DrawingPoint[], next: readonly DrawingPoint[]): number | null {
+  if (prev.length !== next.length) return null;
+  let found: number | null = null;
+  for (let i = 0; i < next.length; i++) {
+    if (prev[i].time === next[i].time && prev[i].price === next[i].price) continue;
+    if (found !== null) return null;
+    found = i;
+  }
+  return found;
+}
+
 /** The 1.9.x boolean and the 2.0 modes, folded onto one. */
 function magnetModeOf(value: boolean | MagnetMode | undefined): MagnetMode {
   if (value === true) return 'strong';
@@ -460,7 +475,14 @@ export class DrawingController {
   }
 
   private _applyPatch(d: Drawing, patch: DrawingPatch): void {
-    if (patch.points !== undefined) d.points = patch.points.map((p) => ({ ...p }));
+    if (patch.points !== undefined) {
+      const points = patch.points.map((p) => ({ ...p }));
+      const tool = hasDrawingTool(d.tool) ? getDrawingTool(d.tool) : undefined;
+      // A patch that moved exactly one anchor (a price typed into a settings
+      // field) is told which, so the constraint leaves that one where it was
+      // put, the same as a drag of its handle would.
+      d.points = tool?.constrain === undefined ? points : tool.constrain(points, changedAnchor(d.points, points));
+    }
     if (patch.style !== undefined) d.style = { ...d.style, ...patch.style };
     if (patch.text !== undefined) d.text = { ...d.text, ...patch.text };
     if (patch.props !== undefined) d.props = { ...d.props, ...patch.props };
@@ -957,7 +979,20 @@ export class DrawingController {
     if (tool.expand === undefined) return clicked;
     const range = this._chart.getVisibleLogicalRange();
     const visibleBars = range === null ? 60 : Math.max(1, range.to - range.from);
-    return tool.expand(clicked, { barSeconds: this._barSeconds(), visibleBars });
+    const pane = this._pendingPane;
+    // The pixel mapping is offered only when the host has one, so a tool can
+    // tell "cannot map" from "mapped to nothing" and size in chart units.
+    const mapped = this._chart.timeToCoordinate !== undefined && this._chart.priceToCoordinate !== undefined
+      && this._chart.coordinateToTime !== undefined && this._chart.coordinateToPrice !== undefined;
+    const expanded = tool.expand(clicked, {
+      barSeconds: this._barSeconds(),
+      visibleBars,
+      ...(mapped ? {
+        toPixel: (p: DrawingPoint) => this._toPixel(p, pane),
+        fromPixel: (at: ScreenPoint) => this._fromPixel(at, pane),
+      } : {}),
+    });
+    return tool.constrain === undefined ? expanded : tool.constrain(expanded, null);
   }
 
   /**
@@ -1287,7 +1322,12 @@ export class DrawingController {
         && getDrawingTool(d.tool).angleLock === true) {
         target = this._lockAngle(item.points[1 - handle], target, d.paneIndex) ?? target;
       }
-      d.points = item.points.map((q, i) => (i === handle ? { ...q, ...target } : { ...q }));
+      const moved = item.points.map((q, i) => (i === handle ? { ...q, ...target } : { ...q }));
+      // A tool with a constraint reads the whole set after the one anchor
+      // moved, from the gesture's snapshot every frame: constraining the
+      // already-constrained previous frame would let a flip feed on itself.
+      const tool = hasDrawingTool(d.tool) ? getDrawingTool(d.tool) : undefined;
+      d.points = tool?.constrain === undefined ? moved : tool.constrain(moved, handle);
     }
   }
 

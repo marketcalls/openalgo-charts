@@ -440,6 +440,68 @@ describe('text styling', () => {
   });
 });
 
+describe('position readouts', () => {
+  const rc = {
+    timeScale: { indexToX: (i: number) => i },
+    priceScale: { priceToY: (p: number) => p, format: (p: number) => p.toFixed(2) },
+    dataLayer: { timeToIndexFloat: (t: number) => t },
+    plotWidth: W, plotHeight: H, priceAxisWidth: 60, dpr: 1, theme: darkTheme,
+  } as never;
+
+  const render = (points: Drawing['points'], props?: Drawing['props'], tool = 'long-position') => {
+    const drawing: Drawing = {
+      id: 'p', tool, paneIndex: 0, zIndex: 0, points,
+      style: { color: '#a855f7', lineWidth: 1.5, accountSize: 100000, risk: 1 },
+      ...(props === undefined ? {} : { props }),
+    };
+    const pts = points.map((p) => ({ x: p.time * 10, y: p.price }));
+    const { ctx, rec } = makeCtx();
+    getDrawingTool(tool).draw({
+      ctx, rc, drawing, selected: false, pts,
+      style: { color: '#a855f7', lineWidth: 1.5, accountSize: 100000, risk: 1 },
+      formatPrice: (v) => v.toFixed(2),
+    });
+    return rec.ops.filter((o) => o.type === 'fillText').map((o) => o.text);
+  };
+
+  const LONG = [{ time: 10, price: 100 }, { time: 20, price: 104 }, { time: 20, price: 98 }];
+
+  it('reads direction, ratio, money at risk, size, and each zone in percent', () => {
+    const texts = render(LONG);
+    expect(texts).toContain('Long  R:R 2.00');
+    // 1% of 100,000 at risk over a 2.00 stop distance buys 500.
+    expect(texts).toContain('Loss 1,000.00  Size 500');
+    expect(texts).toContain('Target +4.00%');
+    expect(texts).toContain('Stop -2.00%');
+  });
+
+  it('reads the direction off the geometry, not the tool', () => {
+    // A long tool whose target sits below the entry is a short.
+    const texts = render([{ time: 10, price: 100 }, { time: 20, price: 96 }, { time: 20, price: 102 }]);
+    expect(texts.some((t) => t?.startsWith('Short'))).toBe(true);
+  });
+
+  it('previews from two anchors by deriving the stop at the ratio', () => {
+    const texts = render([{ time: 10, price: 100 }, { time: 20, price: 104 }]);
+    expect(texts).toContain('Target +4.00%');
+    expect(texts).toContain('Stop -2.00%');     // 98 derived, never stored
+  });
+
+  it('appends the level prices only when asked', () => {
+    expect(render(LONG).some((t) => t?.includes('@'))).toBe(false);
+    const texts = render(LONG, { showPrices: true });
+    expect(texts).toContain('Target +4.00%  @ 104.00');
+    expect(texts).toContain('Stop -2.00%  @ 98.00');
+  });
+
+  it('every readout toggle removes exactly its line', () => {
+    expect(render(LONG, { showHeader: false }).some((t) => t?.includes('R:R'))).toBe(false);
+    expect(render(LONG, { showLossSize: false }).some((t) => t?.startsWith('Loss'))).toBe(false);
+    expect(render(LONG, { showTargetLabel: false }).some((t) => t?.startsWith('Target'))).toBe(false);
+    expect(render(LONG, { showStopLabel: false }).some((t) => t?.startsWith('Stop'))).toBe(false);
+  });
+});
+
 describe('shape labels', () => {
   const rc = {
     timeScale: { indexToX: (i: number) => i },
@@ -672,30 +734,103 @@ describe('DrawingController', () => {
   });
 
   for (const [tool, sign] of [['long-position', 1], ['short-position', -1]] as const) {
-    it(`${tool} drops a complete 1:1 box from a single click`, () => {
-      // It used to need three clicks (entry, target, stop) and showed nothing
-      // until the third. Other packages place a ready box you then drag.
+    it(`${tool} drops a default 2:1 box facing its way from a bare click`, () => {
+      // Two clicks on the same spot: nothing was dragged, so the tool picks
+      // the direction and sizes the box on screen (64 px of risk, 150 px wide).
       const { chart } = makeChart();
       const draw = new DrawingController(chart);
       draw.setTool(tool);
 
       chart.emit('click', { id: null, time: 1700003000, price: 100, paneIndex: 0, point: { x: 40, y: 40 } });
+      expect(draw.drawings()).toHaveLength(0);          // one click is not a box yet
+      chart.emit('click', { id: null, time: 1700003000, price: 100, paneIndex: 0, point: { x: 40, y: 40 } });
 
       expect(draw.drawings()).toHaveLength(1);
       const [entry, target, stop] = draw.drawings()[0].points;
       expect(entry).toEqual({ time: 1700003000, price: 100 });
-      // Reward and risk equal: a 1:1 ratio out of the box.
-      expect(Math.abs(target.price - entry.price)).toBeCloseTo(Math.abs(entry.price - stop.price), 9);
-      // Target on the profitable side for the direction.
       expect(Math.sign(target.price - entry.price)).toBe(sign);
       expect(Math.sign(stop.price - entry.price)).toBe(-sign);
-      // ...and the box has width, or it renders as a hairline.
-      expect(target.time).toBeGreaterThan(entry.time);
-      expect(stop.time).toBeGreaterThan(entry.time);
-      // All three anchors stay draggable handles.
+      // Two parts reward to one of risk, measured on the (linear) screen.
+      const reward = chart.priceToCoordinate(entry.price, 0)! - chart.priceToCoordinate(target.price, 0)!;
+      const risk = chart.priceToCoordinate(stop.price, 0)! - chart.priceToCoordinate(entry.price, 0)!;
+      expect(reward / risk).toBeCloseTo(2, 6);
+      expect(Math.abs(risk)).toBeCloseTo(64, 6);
+      // Width on screen too, so it is grabbable at any zoom.
+      expect(chart.timeToCoordinate(target.time) - chart.timeToCoordinate(entry.time)).toBeCloseTo(150, 6);
+      expect(stop.time).toBe(target.time);
       expect(draw.drawings()[0].points).toHaveLength(3);
     });
   }
+
+  it('the second click is the target, and the stop lands opposite at 2:1', () => {
+    const { chart } = makeChart();
+    const draw = new DrawingController(chart);
+    draw.setTool('long-position');
+
+    chart.emit('click', { id: null, time: 1700003000, price: 100, paneIndex: 0, point: { x: 40, y: 40 } });
+    chart.emit('click', { id: null, time: 1700003600, price: 104, paneIndex: 0, point: { x: 100, y: 10 } });
+
+    const [entry, target, stop] = draw.drawings()[0].points;
+    expect(target.price).toBeCloseTo(104, 6);
+    expect(stop.price).toBeCloseTo(98, 6);              // half the reward, below the entry
+    expect(target.time).toBeGreaterThan(entry.time);
+    expect(stop.time).toBe(target.time);
+  });
+
+  it('a target released below the entry makes a short, whichever tool was armed', () => {
+    // The armed tool only decides which way a bare click faces; a drag says
+    // where the profit is, and the readout follows the geometry.
+    const { chart } = makeChart();
+    const draw = new DrawingController(chart);
+    draw.setTool('long-position');
+
+    chart.emit('click', { id: null, time: 1700003000, price: 100, paneIndex: 0, point: { x: 40, y: 40 } });
+    chart.emit('click', { id: null, time: 1700003600, price: 96, paneIndex: 0, point: { x: 100, y: 80 } });
+
+    const [entry, target, stop] = draw.drawings()[0].points;
+    expect(target.price).toBeLessThan(entry.price);
+    expect(stop.price).toBeGreaterThan(entry.price);
+    expect(stop.price).toBeCloseTo(102, 6);
+  });
+
+  it('dragging the stop through the entry flips the target across it', () => {
+    // Both levels on one side of the entry is not a trade. The moved level
+    // stays under the hand; the other reflects, so the ratio survives.
+    const { chart } = makeChart();
+    const draw = new DrawingController(chart);
+    draw.setTool('long-position');
+    chart.emit('click', { id: null, time: 1700003000, price: 100, paneIndex: 0, point: { x: 40, y: 40 } });
+    chart.emit('click', { id: null, time: 1700003600, price: 104, paneIndex: 0, point: { x: 100, y: 10 } });
+    const d = draw.drawings()[0];
+    const [, , stop] = d.points;
+
+    chart.emit('drag', {
+      id: `draw:${d.id}#2`, time: stop.time, price: 103, paneIndex: 0,
+      fromTime: stop.time, fromPrice: stop.price,
+    });
+    chart.emit('drag:end', {});
+
+    const [entry, target, moved] = draw.drawings()[0].points;
+    expect(moved.price).toBeCloseTo(103, 6);            // the stop went where it was dragged
+    expect(target.price).toBeCloseTo(96, 6);            // 104 reflected across 100
+    expect(Math.sign(target.price - entry.price)).toBe(-Math.sign(moved.price - entry.price));
+  });
+
+  it('a points patch keeps the levels opposed too', () => {
+    const { chart } = makeChart();
+    const draw = new DrawingController(chart);
+    draw.setTool('long-position');
+    chart.emit('click', { id: null, time: 1700003000, price: 100, paneIndex: 0, point: { x: 40, y: 40 } });
+    chart.emit('click', { id: null, time: 1700003600, price: 104, paneIndex: 0, point: { x: 100, y: 10 } });
+    const d = draw.drawings()[0];
+
+    // Set the target below the entry while the stop is still below it.
+    draw.update(d.id, { points: [d.points[0], { ...d.points[1], price: 97 }, d.points[2]] });
+
+    const [entry, target, stop] = draw.drawings()[0].points;
+    expect(target.price).toBeCloseTo(97, 6);
+    expect(stop.price).toBeGreaterThan(entry.price);    // reflected: the patch did not move it
+  });
 
   it('ignores the release click for a single-anchor tool', () => {
     // Otherwise dragging with `text` armed drops a second box where you let go.
