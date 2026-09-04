@@ -10,6 +10,7 @@ const entries = {
   profile: 'src/profile/index.ts',
   indicators: 'src/indicators/index.ts',
   draw: 'src/draw/index.ts',
+  webgl: 'src/webgl/index.ts',
 };
 
 const outFile = {
@@ -19,6 +20,7 @@ const outFile = {
   profile: 'openalgo-charts.profile',
   indicators: 'openalgo-charts.indicators',
   draw: 'openalgo-charts.draw',
+  webgl: 'openalgo-charts.webgl',
 };
 
 const typesFile = {
@@ -28,6 +30,7 @@ const typesFile = {
   profile: 'profile/index',
   indicators: 'indicators/index',
   draw: 'draw/index',
+  webgl: 'webgl/index',
 };
 
 /**

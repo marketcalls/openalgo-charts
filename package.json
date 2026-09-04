@@ -54,6 +54,10 @@
     "./draw": {
       "types": "./dist/draw/index.d.ts",
       "import": "./dist/openalgo-charts.draw.mjs"
+    },
+    "./webgl": {
+      "types": "./dist/webgl/index.d.ts",
+      "import": "./dist/openalgo-charts.webgl.mjs"
     }
   },
   "files": [
@@ -66,9 +70,11 @@
     "**/transform/**",
     "**/indicators/**",
     "**/draw/**",
+    "**/webgl/**",
     "./dist/openalgo-charts.transform.mjs",
     "./dist/openalgo-charts.indicators.mjs",
-    "./dist/openalgo-charts.draw.mjs"
+    "./dist/openalgo-charts.draw.mjs",
+    "./dist/openalgo-charts.webgl.mjs"
   ],
   "scripts": {
     "clean": "rimraf dist",

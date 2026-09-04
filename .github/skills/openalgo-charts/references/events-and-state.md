@@ -39,6 +39,7 @@ Every name emitted by the engine, verified against the `emit(` call sites in `sr
 | `pan` | `{ from, to, logicalFrom, logicalTo }` | The user pans, **or** a programmatic move that changed the window without changing its span. |
 | `zoom` | `{ from, to, logicalFrom, logicalTo }` | Wheel or pinch zoom, **or** a programmatic move that changed the span. |
 | `resize` | `{ width, height }` | Container size changed (CSS px); also emitted by an explicit `applySize` that actually changes size. |
+| `renderer:fallback` | `RendererFallbackEvent`: `{ from, to: 'canvas2d', reason: 'context-lost' \| 'unavailable' }` | Once per chart, when a GPU render backend lost its context or its device turned out unusable. Every pane is on `canvas2d` for the rest of the session and `chart.rendererKind` already reads it. See [core-api](core-api.md#render-backends). |
 | `lazy-load` | `{ from, to, direction: 'backward' }` | The viewport neared the oldest bar and the history loader ran. |
 | `paneRemoved` | `{ paneIndex }` | A pane was removed. |
 | `paneMoved` | `{ from, to }` | A pane swapped position. |

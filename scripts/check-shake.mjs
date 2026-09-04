@@ -43,6 +43,10 @@ const LIMIT_BYTES = 44 * 1024;
 const MUST_BE_SHAKEN = [
   ['WebSocket adapter', 'authenticate'],
   ['order decoder', 'placeorder'],
+  // The GPU backend lives in its own tier (src/render/webgl, shipped as
+  // openalgo-charts.webgl.mjs) and nothing in the base entry imports it. The
+  // string is the context-loss listener that only that backend installs.
+  ['WebGL2 backend', 'webglcontextlost'],
 ];
 
 const virtual = {

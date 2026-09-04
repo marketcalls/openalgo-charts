@@ -1,6 +1,6 @@
 # OpenAlgo Charts agent skills
 
-Agent Skills that teach an AI coding assistant how to use `openalgo-charts` correctly - the real API surface, the six-tier bundle model, and the foot-guns that are not obvious from the type signatures.
+Agent Skills that teach an AI coding assistant how to use `openalgo-charts` correctly - the real API surface, the seven-tier bundle model, and the foot-guns that are not obvious from the type signatures.
 
 ## Install
 

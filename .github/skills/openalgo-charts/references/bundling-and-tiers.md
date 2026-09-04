@@ -4,9 +4,9 @@
 
 Source of truth: `package.json` (`exports`, `sideEffects`, `files`), `rollup.config.js`, `.size-limit.json`, `src/all.ts`.
 
-## The six entry points
+## The seven entry points
 
-`exports` declares exactly six specifiers, each with only `types` and `import` conditions. There is no `main`, no `require` condition and no CJS build — the package is ESM-only (`"type": "module"`, `module: dist/openalgo-charts.mjs`).
+`exports` declares exactly seven specifiers, each with only `types` and `import` conditions. There is no `main`, no `require` condition and no CJS build: the package is ESM-only (`"type": "module"`, `module: dist/openalgo-charts.mjs`).
 
 | Specifier | Emitted file | Contents | Brotli budget | Import has side effects |
 |---|---|---|---|---|
@@ -15,9 +15,10 @@ Source of truth: `package.json` (`exports`, `sideEffects`, `files`), `rollup.con
 | `openalgo-charts/transform` | `dist/openalgo-charts.transform.mjs` | Renko, Range, Point & Figure, Kagi, Line Break, Heikin Ashi, `runTransform` | 5 KB | **yes**, registers the `point-figure` and `kagi` chart types |
 | `openalgo-charts/profile` | `dist/openalgo-charts.profile.mjs` | Volume Profile, TPO / Market Profile, Footprint, orderflow | 11 KB | no |
 | `openalgo-charts/indicators` | `dist/openalgo-charts.indicators.mjs` | 102 Tier-1 built-ins plus the Tier-2 contract | 30 KB | **yes**, registers all 102 descriptors |
-| `openalgo-charts/draw` | `dist/openalgo-charts.draw.mjs` | 51 drawing tools, `DrawingController`, `DrawingLayer` | 14 KB | **yes**, registers every built-in tool |
+| `openalgo-charts/draw` | `dist/openalgo-charts.draw.mjs` | 51 drawing tools, `DrawingController`, `DrawingLayer` | 26 KB | **yes**, registers every built-in tool |
+| `openalgo-charts/webgl` | `dist/openalgo-charts.webgl.mjs` | the WebGL2 series backend, `createWebGL2Backend`, `isWebGL2Supported`, `WebGL2Backend`, `GlDevice` | 7 KB | **yes**, registers the `webgl2` render backend |
 
-Types resolve per tier: `dist/index.d.ts`, `dist/trade/index.d.ts`, `dist/transform/index.d.ts`, `dist/profile/index.d.ts`, `dist/indicators/index.d.ts`, `dist/draw/index.d.ts`.
+Types resolve per tier: `dist/index.d.ts`, `dist/trade/index.d.ts`, `dist/transform/index.d.ts`, `dist/profile/index.d.ts`, `dist/indicators/index.d.ts`, `dist/draw/index.d.ts`, `dist/webgl/index.d.ts`.
 
 ## Never deep-import into `dist/`
 
@@ -53,14 +54,15 @@ Verified against the built output:
 
 ```json
 "sideEffects": [
-  "**/transform/**", "**/indicators/**", "**/draw/**",
+  "**/transform/**", "**/indicators/**", "**/draw/**", "**/webgl/**",
   "./dist/openalgo-charts.transform.mjs",
   "./dist/openalgo-charts.indicators.mjs",
-  "./dist/openalgo-charts.draw.mjs"
+  "./dist/openalgo-charts.draw.mjs",
+  "./dist/openalgo-charts.webgl.mjs"
 ]
 ```
 
-An array, not `false`: the base, trade and profile bundles are declared side-effect-free and tree-shake normally; the three registering tiers are marked as having side effects so a bare `import 'openalgo-charts/indicators'` is never dropped.
+An array, not `false`: the base, trade and profile bundles are declared side-effect-free and tree-shake normally; the four registering tiers are marked as having side effects so a bare `import 'openalgo-charts/indicators'` (or `'openalgo-charts/webgl'`) is never dropped.
 
 Tree-shaking will remove unused named exports from any tier. It will **not** remove a registration that a bundler can see is reachable — the registration runs at module scope in the tier's `index.ts`.
 
@@ -131,13 +133,14 @@ Enforced by `npm run size` (`size-limit`, Brotli, `@size-limit/file`), from `.si
 
 | Budget row | Files measured | Limit | Measured |
 |---|---|---|---|
-| Base engine | `openalgo-charts.mjs` | 67 KB | 66.10 KB |
-| Base + trade layer | base + `trade.mjs` | 74 KB | 73.71 KB |
+| Base engine | `openalgo-charts.mjs` | 67 KB | 66.41 KB |
+| Base + trade layer | base + `trade.mjs` | 75 KB | 74.02 KB |
 | Indicator tier | `indicators.mjs` | 30 KB | 27.27 KB |
 | Draw tier | `draw.mjs` | 26 KB | 25.12 KB |
 | Transform tier | `transform.mjs` | 5 KB | 2.66 KB |
 | Profile tier | `profile.mjs` | 11 KB | 10.66 KB |
-| Everything | all six bundles | 140 KB | 139.42 KB |
+| WebGL2 tier | `webgl.mjs` | 7 KB | 6.38 KB |
+| Everything | all seven bundles | 147 KB | 146.11 KB |
 
 The indicator tier and the `Everything` row were both raised in 1.8.3, from 27 KB and 120 KB, to carry that release's eleven new indicators. They move together by necessity: `Everything` contains the tier, so an aggregate below all-other-tiers plus the tier's ceiling would fail while the tier itself passed. The limits in `.size-limit.json` are the budget of record: measure, do not quote these figures from memory.
 
@@ -147,7 +150,7 @@ The indicator tier and the `Everything` row were both raised in 1.8.3, from 27 K
 
 ## `src/all.ts` is not an entry point
 
-`src/all.ts` re-exports the base plus transform, profile, indicators and draw into one module, built by the `allBundle` config with the `aliasSelf` plugin resolving `openalgo-charts` back to `src/index.ts`. Nothing is external, so every tier shares one registry instance.
+`src/all.ts` re-exports the base plus transform, profile, indicators, draw and webgl into one module, built by the `allBundle` config with the `aliasSelf` plugin resolving `openalgo-charts` back to `src/index.ts`. Nothing is external, so every tier shares one registry instance.
 
 It exists so the documentation site's live demos can run every tier from a single module. It is **not** published: `files` excludes it explicitly.
 
@@ -173,6 +176,7 @@ not depend on a bare string literal that a rename would silently break:
 | `TRANSFORM_TIER` | `'transform'` | `openalgo-charts/transform` |
 | `PROFILE_TIER` | `'profile'` | `openalgo-charts/profile` |
 | `TRADE_TIER` | `'trade'` | `openalgo-charts/trade` |
+| `WEBGL_TIER` | `'webgl'` | `openalgo-charts/webgl` |
 
 They are exported from the tier's own entry point, not from the base bundle, so
 importing one to test for it defeats the purpose. Track what your own code loaded.

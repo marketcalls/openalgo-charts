@@ -41,7 +41,7 @@ chart.fitContent();
 | `now` | `() => number` | `performance.now` | Time source for kinetic pan / navigator fade. |
 | `conflate` | `boolean` | `false` | OHLC-preserving downsampling when bars fall under ~0.5 device px. |
 | `conflationFactor` | `number` | `1` | Conflation aggressiveness. |
-| `renderer` | `'canvas2d' \| 'webgl2' \| 'auto'` | `'canvas2d'` | Which backend paints the series. `'webgl2'` throws until a tier registers that backend; `'auto'` takes `webgl2` when it is registered and works on this device, else `canvas2d`. Decided once, at construction. See [Render backends](#render-backends). |
+| `renderer` | `'canvas2d' \| 'webgl2' \| 'auto'` | `'canvas2d'` | Which backend paints the series. `'webgl2'` throws until `openalgo-charts/webgl` has been imported, and on a device without WebGL2 falls back to `canvas2d` with one console warning; `'auto'` takes `webgl2` when it is registered and works on this device, else `canvas2d`, silently. Decided once, at construction; read the result from `chart.rendererKind`. See [Render backends](#render-backends). |
 | `renderBackend` | `RenderBackendFactory` | from `renderer` | Build the backend yourself, one call per pane, bypassing `renderer` and the registry. A factory that returns `null` gets the 2D backend for that pane. |
 | `grid` | `Partial<GridOptions>` | `vertLines`/`horzLines` `true` | Visibility plus per-axis colour, dash, width and spacing. Unset colours fall through to the theme. |
 | `canvas` | `CanvasOptions` | `{}` | Grid, crosshair, scale text/lines, plot margins in one block. See [settings-and-menus](settings-and-menus.md). |
@@ -219,6 +219,7 @@ The per-frame series pass on each pane goes through an `IRenderBackend` (`src/re
 ```ts
 interface IRenderBackend {
   readonly kind: RenderBackendKind;                       // 'canvas2d' | 'webgl2'
+  readonly device?: RenderDevice;                         // { available, lost }; a GPU backend only
   mount(canvas: HTMLCanvasElement, ctx2d: CanvasRenderingContext2D | null): void;
   resize(widthPx: number, heightPx: number, dpr: number): void;
   beginFrame(clear: boolean): void;
@@ -231,7 +232,7 @@ interface IRenderBackend {
 
 `mount` takes the pane's existing 2D context as its second argument (the pane's base `CanvasLayer` already asked the canvas for one; a second `getContext` would split a frame across two contexts). A backend that owns its canvas ignores it.
 
-Choosing one: `chart.renderer` (a `RenderBackendKind`) reports what the chart actually paints with, which differs from the `renderer` option only when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in. The registry behind the option is exported for a tier or host that brings a backend:
+Choosing one: `chart.rendererKind` (a `RenderBackendKind`; `chart.renderer` is the same value under the name it first shipped with) reports what the chart actually paints with. It differs from the `renderer` option when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in, and from the moment a GPU backend degrades (see the fallback below). The registry behind the option is exported for a tier or host that brings a backend:
 
 | Export | What it does |
 |---|---|
@@ -240,8 +241,36 @@ Choosing one: `chart.renderer` (a `RenderBackendKind`) reports what the chart ac
 | `registeredRenderBackends()` | The kinds currently registered. |
 | `resolveRenderBackend(choice?: RendererChoice)` | Turn the option into a factory: an unregistered explicit kind throws, a factory that declines falls back to `canvas2d`. |
 | `createRenderBackend(choice?)` | One backend instance for the choice, via `resolveRenderBackend`. |
+| `backendDegradation(backend)` | `RendererFallbackReason \| null`: `'context-lost'` while a GPU backend's context is away, `'unavailable'` when its device never came up (the program failed to compile on a live context), `null` for a healthy backend and always for `canvas2d`. What the chart polls after each frame. |
 
 The export path bypasses the backend: `exportSVG` calls each renderer's `draw` directly on the serialising context, because a document has no pixels to take from a GPU. `candleGeometry` in [chart-types](chart-types.md#renderer-geometry) is the shared snapping source a second backend must reproduce.
+
+### The WebGL2 tier (`openalgo-charts/webgl`)
+
+```ts
+import { createChart } from 'openalgo-charts';
+import 'openalgo-charts/webgl';                 // registers the 'webgl2' backend
+
+const chart = createChart(el, { renderer: 'auto' });
+chart.rendererKind;                             // 'webgl2' where WebGL2 works, else 'canvas2d'
+chart.on('renderer:fallback', (e) => { /* e.from, e.to === 'canvas2d', e.reason */ });
+```
+
+The GPU series backend is its own lazy tier (6.38 KB Brotli; nothing of it is in the base bundle, which `tests/renderer-option.test.ts` and `npm run shake` both check). Importing it registers the backend under `'webgl2'`, so `renderer: 'auto'` picks it up wherever WebGL2 is available and `renderer: 'webgl2'` stops throwing. The bare import is enough; `registerWebGL2Renderer()` is exported (idempotent) for a bundler that would drop a side-effect-only import. Its other exports:
+
+| Export | What it does |
+|---|---|
+| `createWebGL2Backend(device?)` | One backend for one pane, or `null` when WebGL2 is unavailable on this device. The registered factory is this call, so an explicit `renderer: 'webgl2'` on such a device gets `canvas2d` and one console warning. |
+| `isWebGL2Supported()` | Whether this browser hands out a WebGL2 context. A cached probe; always `false` outside a browser. |
+| `WebGL2Backend` | The backend class, `new WebGL2Backend(device = sharedGlDevice())`, for a host that injects it through `renderBackend`. |
+| `GlDevice`, `sharedGlDevice()` | The holder of the one page-wide context and the offscreen surface it draws on. `device.available` and `device.lost` are what `backendDegradation` reads. |
+| `GlSurface` (type) | What the context is created on: a detached canvas or an `OffscreenCanvas`, or a stand-in in tests. |
+| `WEBGL_TIER` | `'webgl'`, the tier's identity constant. |
+| `VertexBatch`, `ColorCache`, `PremultipliedRgba` (types) | What `WebGL2Backend.batch` and `GlDevice.colors` are: the frame's vertex batch and the parsed, premultiplied colour cache. Type-only exports, for a host that reads them off a backend. |
+
+**How it paints.** The pane keeps its base canvas and its 2D context; the backend is handed that context at `mount` like the 2D backend is. It batches every native series into one offscreen WebGL2 surface shared by every pane of every chart on the page (browsers allow around sixteen live contexts, so one per pane would fail a dashboard of a few multi-pane charts) and at `endFrame` composites the result into the pane's base canvas with a single `drawImage`, under the plot clip and exactly where the 2D backend would have painted the series. The DOM is unchanged, so `takeScreenshot`, `exportSVG` and the context-menu snapshot read the same canvases they always did, and axes, text, price lines, markers and drawings stay on the 2D path. Drawn natively: `candlestick`, `hollow-candle`, `volume-candle`, `bar`, `high-low`, `line`, `line-markers`, `step`, `area`, `hlc-area`, `baseline`, `column`, `histogram`. Rect-based types land on the same device pixels as the 2D renderers because both read the same geometry helpers; anti-aliased edges (lines, fills, markers) differ by sub-pixel fringe amounts. `kagi`, `point-figure` and any custom chart type flush the batch and draw through the 2D context, so z-order between series holds.
+
+**Falling back.** The chart reads `backendDegradation` on every pane after each frame. When a GPU backend loses its context, or its program fails to compile on a live context, the chart moves every pane to `canvas2d` for the rest of the session (a pane added later matches), `rendererKind` reads `'canvas2d'`, and one `'renderer:fallback'` event fires with a `RendererFallbackEvent` (`{ from: RenderBackendKind; to: 'canvas2d'; reason: RendererFallbackReason }`, the reason `'context-lost' | 'unavailable'`). The frame in which the context went away is painted through the backend's own 2D fallback, so the chart never shows a blank frame. The types `RenderDevice`, `RendererFallbackReason` and `RendererFallbackEvent` are exported from the base entry.
 
 ## The rest of the base surface
 

@@ -7,9 +7,9 @@ the repo.
 
 ## What this project is
 
-A from-scratch, dependency-free HTML5 canvas charting engine. Six lazy ESM tiers (base,
-trade, transform, profile, indicators, draw), zero runtime dependencies, enforced Brotli
-budgets. It is a **general library that ships an Indian default**, not an Indian library:
+A from-scratch, dependency-free HTML5 canvas charting engine. Seven lazy ESM tiers (base,
+trade, transform, profile, indicators, draw, webgl), zero runtime dependencies, enforced
+Brotli budgets. It is a **general library that ships an Indian default**, not an Indian library:
 IST is the default timezone, never an assumption baked into behaviour.
 
 **The engine ships no DOM.** Toolbars, dialogs, menus and pickers live in the host. The

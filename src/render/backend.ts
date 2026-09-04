@@ -67,6 +67,44 @@ export interface IRenderBackend {
   overlay2d(): CanvasRenderingContext2D | null;
   /** Release the context and any GPU resources. The pane removes the canvas. */
   destroy(): void;
+  /**
+   * The GPU device behind the backend, when it has one. The chart reads it
+   * after a frame (`backendDegradation`) to learn that the context has been
+   * lost or never came up, and moves every pane to `canvas2d` for the rest of
+   * the session, announced by the 'renderer:fallback' chart event. A backend
+   * without a device is never degraded, so the 2D backend leaves it unset.
+   */
+  readonly device?: RenderDevice;
+}
+
+/**
+ * What the chart needs to know about a GPU device. `available` is whether it
+ * ever got a usable context (a driver that cannot run the program counts as
+ * never having one), and `lost` is the window between a context loss and its
+ * restoration.
+ */
+export interface RenderDevice {
+  readonly available: boolean;
+  readonly lost: boolean;
+}
+
+/**
+ * Why a chart left its GPU backend: the context went away mid-session, or
+ * the device turned out to be unusable after the backend was built (the
+ * program failed to compile on a live context).
+ */
+export type RendererFallbackReason = 'context-lost' | 'unavailable';
+
+/**
+ * Whether a backend is painting through its own 2D fallback rather than the
+ * path it was chosen for, and why. Null for a healthy backend and always for
+ * `canvas2d`, which has nothing to fall back from.
+ */
+export function backendDegradation(backend: IRenderBackend): RendererFallbackReason | null {
+  if (backend.kind === 'canvas2d' || backend.device === undefined) return null;
+  if (backend.device.lost) return 'context-lost';
+  if (!backend.device.available) return 'unavailable';
+  return null;
 }
 
 /**

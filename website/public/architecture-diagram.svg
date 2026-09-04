@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" role="img" aria-label="OpenAlgo Charts layered architecture">
 <title>OpenAlgo Charts architecture</title>
-<desc>Seven layers from public API down to feeds and data, with a six-tier bundle legend: base 60.88 KB, indicators 27.27 KB, draw 15.39 KB, profile 10.66 KB, trade 7.61 KB, transform 2.66 KB, everything 124.47 KB Brotli.</desc>
+<desc>Seven layers from public API down to feeds and data, with a seven-tier bundle legend: base 66.41 KB, indicators 27.27 KB, draw 25.12 KB, profile 10.66 KB, trade 7.61 KB, webgl 6.38 KB, transform 2.66 KB, everything 146.11 KB Brotli.</desc>
 
 <defs>
 <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
@@ -14,7 +14,7 @@
 
 <text x="800" y="58" fill="url(#titleGrad)" font-size="42" font-weight="700" text-anchor="middle">OpenAlgo Charts</text>
 <text x="800" y="94" fill="#B9C0CC" font-size="20" text-anchor="middle">Dependency-free HTML5 Canvas charting engine</text>
-<text x="800" y="124" font-size="20" text-anchor="middle" fill="#8B93A3"><tspan fill="#2DD4BF" font-weight="600">61 KB</tspan><tspan fill="#B9C0CC"> base, </tspan><tspan fill="#A78BFA" font-weight="600">124 KB</tspan><tspan fill="#B9C0CC"> everything</tspan><tspan fill="#6B7280"> (Brotli)</tspan></text>
+<text x="800" y="124" font-size="20" text-anchor="middle" fill="#8B93A3"><tspan fill="#2DD4BF" font-weight="600">66 KB</tspan><tspan fill="#B9C0CC"> base, </tspan><tspan fill="#A78BFA" font-weight="600">146 KB</tspan><tspan fill="#B9C0CC"> everything</tspan><tspan fill="#6B7280"> (Brotli)</tspan></text>
 
 <rect x="36" y="145" width="140" height="648" rx="14" fill="#0E1015" stroke="#2A2F3A" stroke-width="1.5"/>
 <text x="106" y="300" fill="#E8EBF0" font-size="21" font-weight="600" text-anchor="middle">Host</text>
@@ -161,40 +161,45 @@
 <text x="800" y="832" fill="#8B93A3" font-size="19" letter-spacing="1.5" text-anchor="middle" dominant-baseline="central">BUNDLE TIERS (Brotli)</text>
 <line x1="980" y1="832" x2="1414" y2="832" stroke="#2A2F3A" stroke-width="1.5" stroke-dasharray="5 6"/>
 
-<rect x="248" y="855" width="170" height="110" rx="12" fill="#2DD4BF" fill-opacity="0.07" stroke="#2DD4BF" stroke-opacity="0.55" stroke-width="1.5"/>
-<text x="333" y="884" fill="#7FE8D8" font-size="16" text-anchor="middle" dominant-baseline="central">base</text>
-<text x="333" y="915" fill="#2DD4BF" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">60.88 KB</text>
-<text x="333" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">Charting engine core</text>
+<rect x="248" y="855" width="146" height="110" rx="12" fill="#2DD4BF" fill-opacity="0.07" stroke="#2DD4BF" stroke-opacity="0.55" stroke-width="1.5"/>
+<text x="321" y="884" fill="#7FE8D8" font-size="16" text-anchor="middle" dominant-baseline="central">base</text>
+<text x="321" y="915" fill="#2DD4BF" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">66.41 KB</text>
+<text x="321" y="944" fill="#7C8492" font-size="12" text-anchor="middle" dominant-baseline="central">Charting engine core</text>
 
-<rect x="434" y="855" width="170" height="110" rx="12" fill="#A78BFA" fill-opacity="0.07" stroke="#A78BFA" stroke-opacity="0.55" stroke-width="1.5"/>
-<text x="519" y="884" fill="#C9B8FF" font-size="16" text-anchor="middle" dominant-baseline="central">/indicators</text>
-<text x="519" y="915" fill="#A78BFA" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">27.27 KB</text>
-<text x="519" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">102 built-in indicators</text>
+<rect x="410" y="855" width="146" height="110" rx="12" fill="#A78BFA" fill-opacity="0.07" stroke="#A78BFA" stroke-opacity="0.55" stroke-width="1.5"/>
+<text x="483" y="884" fill="#C9B8FF" font-size="16" text-anchor="middle" dominant-baseline="central">/indicators</text>
+<text x="483" y="915" fill="#A78BFA" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">27.27 KB</text>
+<text x="483" y="944" fill="#7C8492" font-size="12" text-anchor="middle" dominant-baseline="central">102 built-in indicators</text>
 
-<rect x="620" y="855" width="170" height="110" rx="12" fill="#8B5CF6" fill-opacity="0.07" stroke="#8B5CF6" stroke-opacity="0.55" stroke-width="1.5"/>
-<text x="705" y="884" fill="#B79BFF" font-size="16" text-anchor="middle" dominant-baseline="central">/draw</text>
-<text x="705" y="915" fill="#8B5CF6" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">15.39 KB</text>
-<text x="705" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">51 drawing tools</text>
+<rect x="572" y="855" width="146" height="110" rx="12" fill="#8B5CF6" fill-opacity="0.07" stroke="#8B5CF6" stroke-opacity="0.55" stroke-width="1.5"/>
+<text x="645" y="884" fill="#B79BFF" font-size="16" text-anchor="middle" dominant-baseline="central">/draw</text>
+<text x="645" y="915" fill="#8B5CF6" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">25.12 KB</text>
+<text x="645" y="944" fill="#7C8492" font-size="12" text-anchor="middle" dominant-baseline="central">51 drawing tools</text>
 
-<rect x="806" y="855" width="170" height="110" rx="12" fill="#F0B429" fill-opacity="0.07" stroke="#F0B429" stroke-opacity="0.55" stroke-width="1.5"/>
-<text x="891" y="884" fill="#F7D07A" font-size="16" text-anchor="middle" dominant-baseline="central">/profile</text>
-<text x="891" y="915" fill="#F0B429" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">10.66 KB</text>
-<text x="891" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">Profiles &amp; orderflow</text>
+<rect x="734" y="855" width="146" height="110" rx="12" fill="#F0B429" fill-opacity="0.07" stroke="#F0B429" stroke-opacity="0.55" stroke-width="1.5"/>
+<text x="807" y="884" fill="#F7D07A" font-size="16" text-anchor="middle" dominant-baseline="central">/profile</text>
+<text x="807" y="915" fill="#F0B429" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">10.66 KB</text>
+<text x="807" y="944" fill="#7C8492" font-size="12" text-anchor="middle" dominant-baseline="central">Profiles &amp; orderflow</text>
 
-<rect x="992" y="855" width="170" height="110" rx="12" fill="#EF4444" fill-opacity="0.07" stroke="#EF4444" stroke-opacity="0.55" stroke-width="1.5"/>
-<text x="1077" y="884" fill="#F79191" font-size="16" text-anchor="middle" dominant-baseline="central">/trade</text>
-<text x="1077" y="915" fill="#EF4444" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">7.61 KB</text>
-<text x="1077" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">Trading &amp; order layer</text>
+<rect x="896" y="855" width="146" height="110" rx="12" fill="#EF4444" fill-opacity="0.07" stroke="#EF4444" stroke-opacity="0.55" stroke-width="1.5"/>
+<text x="969" y="884" fill="#F79191" font-size="16" text-anchor="middle" dominant-baseline="central">/trade</text>
+<text x="969" y="915" fill="#EF4444" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">7.61 KB</text>
+<text x="969" y="944" fill="#7C8492" font-size="12" text-anchor="middle" dominant-baseline="central">Trading &amp; order layer</text>
 
-<rect x="1178" y="855" width="170" height="110" rx="12" fill="#3B82F6" fill-opacity="0.07" stroke="#3B82F6" stroke-opacity="0.55" stroke-width="1.5"/>
-<text x="1263" y="884" fill="#8FB8F8" font-size="16" text-anchor="middle" dominant-baseline="central">/transform</text>
-<text x="1263" y="915" fill="#3B82F6" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">2.66 KB</text>
-<text x="1263" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">Price transforms</text>
+<rect x="1058" y="855" width="146" height="110" rx="12" fill="#22C55E" fill-opacity="0.07" stroke="#22C55E" stroke-opacity="0.55" stroke-width="1.5"/>
+<text x="1131" y="884" fill="#86EFAC" font-size="16" text-anchor="middle" dominant-baseline="central">/webgl</text>
+<text x="1131" y="915" fill="#22C55E" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">6.38 KB</text>
+<text x="1131" y="944" fill="#7C8492" font-size="12" text-anchor="middle" dominant-baseline="central">WebGL2 series backend</text>
 
-<rect x="1378" y="855" width="190" height="110" rx="12" fill="#0E1015" stroke="#4A5160" stroke-width="1.5" stroke-dasharray="6 5"/>
-<text x="1473" y="884" fill="#B9C0CC" font-size="16" text-anchor="middle" dominant-baseline="central">Everything</text>
-<text x="1473" y="915" fill="#E8EBF0" font-size="26" font-weight="700" text-anchor="middle" dominant-baseline="central">124.47 KB</text>
-<text x="1473" y="944" fill="#7C8492" font-size="13" text-anchor="middle" dominant-baseline="central">All tiers combined</text>
+<rect x="1220" y="855" width="146" height="110" rx="12" fill="#3B82F6" fill-opacity="0.07" stroke="#3B82F6" stroke-opacity="0.55" stroke-width="1.5"/>
+<text x="1293" y="884" fill="#8FB8F8" font-size="16" text-anchor="middle" dominant-baseline="central">/transform</text>
+<text x="1293" y="915" fill="#3B82F6" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">2.66 KB</text>
+<text x="1293" y="944" fill="#7C8492" font-size="12" text-anchor="middle" dominant-baseline="central">Price transforms</text>
+
+<rect x="1382" y="855" width="186" height="110" rx="12" fill="#0E1015" stroke="#4A5160" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="1475" y="884" fill="#B9C0CC" font-size="16" text-anchor="middle" dominant-baseline="central">Everything</text>
+<text x="1475" y="915" fill="#E8EBF0" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">146.11 KB</text>
+<text x="1475" y="944" fill="#7C8492" font-size="12" text-anchor="middle" dominant-baseline="central">All tiers combined</text>
 
 <rect x="330" y="990" width="940" height="76" rx="12" fill="#0C0E13" stroke="#2A2F3A" stroke-width="1.5"/>
 <text x="800" y="1016" font-size="16" text-anchor="middle" dominant-baseline="central"><tspan fill="#2DD4BF" font-weight="600">Custom indicators:</tspan><tspan fill="#D4D8E0"> any host can register its own with the same descriptor contract the 102 built-ins use.</tspan></text>

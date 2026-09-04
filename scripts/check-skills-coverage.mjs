@@ -28,6 +28,7 @@ const TIERS = {
   transform: 'openalgo-charts.transform.mjs',
   profile: 'openalgo-charts.profile.mjs',
   trade: 'openalgo-charts.trade.mjs',
+  webgl: 'openalgo-charts.webgl.mjs',
 }
 
 const mods = {}

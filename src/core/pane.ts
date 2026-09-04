@@ -2,6 +2,24 @@
  * A pane is one vertically-stacked drawing region (price pane, volume pane,
  * indicator pane). It owns a base + top canvas (ARCHITECTURE.md §3.1) and a
  * price scale, and renders its series against the shared time scale + DataLayer.
+ *
+ * The canvas pile, bottom to top, and what lands on each:
+ *
+ *   base canvas (2D context, z 0): background, grid, the series pass, the
+ *     normal-layer primitives, the axis strip (ladder, last-price tag, value
+ *     tags, trading pills). Repainted on Light and Full.
+ *   top canvas (2D context, z 1): crosshair, hover highlights, primitives
+ *     being dragged. Repainted on Cursor.
+ *
+ * A GPU backend adds no canvas to the pile. It rasterises the series pass on
+ * one page-wide offscreen surface shared by every pane of every chart and
+ * blits the result into the base canvas at `endFrame`, between the grid and
+ * the normal-layer primitives, exactly where the 2D backend would have
+ * painted them. That is why the grid, the primitives, the axes and the
+ * overlay keep painting on 2D contexts whatever the backend is, why
+ * `takeScreenshot` and the export still read `base.element`, and why a
+ * browser's cap on live WebGL contexts never limits how many panes a page
+ * can show.
  */
 import { CanvasLayer } from './canvas';
 import { PriceScale } from '../scale/price-scale';
@@ -20,7 +38,7 @@ import {
 } from '../render/axis';
 import { drawCrosshair, drawCrosshairTag, resolveCrosshairStyle } from '../render/crosshair';
 import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
-import type { IRenderBackend } from '../render/backend';
+import { backendDegradation, type IRenderBackend, type RendererFallbackReason } from '../render/backend';
 import { Canvas2dBackend } from '../render/canvas2d-backend';
 import type { ChartTheme } from '../theme';
 import { DEFAULT_TIMEZONE, formatZonedCrosshairLabel } from '../feed/time';
@@ -105,9 +123,10 @@ export class Pane {
    * What paints this pane's series onto `base`. Everything else on that canvas
    * (background, grid, axes, primitives) the pane draws itself on the 2D
    * context the backend hands back, so a GPU backend only has to own the one
-   * pass that is worth moving.
+   * pass that is worth moving. Replaced through `setBackend` when the chart
+   * falls back to 2D for the session.
    */
-  public readonly backend: IRenderBackend;
+  private _backend: IRenderBackend;
   private _rightScale = new PriceScale();
   /** Extra scales created on demand: left axis and a hidden overlay (volume). */
   private _leftScale: PriceScale | null = null;
@@ -149,12 +168,41 @@ export class Pane {
     this.top = new CanvasLayer(doc, 1);
     this.element.appendChild(this.base.element);
     this.element.appendChild(this.top.element);
-    this.backend = backend;
+    this._backend = backend;
     // The base canvas already holds a 2D context (CanvasLayer asks for it on
     // construction), so the backend is handed that one rather than left to ask
     // for another: a frame is then one context's op stream, which is what the
     // recording-context tests and the parity gate both compare.
     backend.mount(this.base.element, this.base.ctx);
+  }
+
+  public get backend(): IRenderBackend {
+    return this._backend;
+  }
+
+  /**
+   * Swap the backend for the rest of the session: the old one releases its
+   * resources, the new one takes the base canvas and its context and is told
+   * the current size, so it is ready for the very next frame. The chart calls
+   * this for every pane at once when a GPU backend degrades, so a chart never
+   * paints half its panes one way and half the other.
+   */
+  public setBackend(next: IRenderBackend): void {
+    if (next === this._backend) return;
+    this._backend.destroy();
+    this._backend = next;
+    next.mount(this.base.element, this.base.ctx);
+    if (this._width > 0 && this._height > 0) next.resize(this._width, this._height, this.base.pixelRatio);
+  }
+
+  /**
+   * Why the backend is painting through its 2D fallback rather than the path
+   * it was chosen for, or null. Read by the chart after each frame; the
+   * answer is a property of the device, so it is the same for every pane
+   * sharing it.
+   */
+  public get backendDegradation(): RendererFallbackReason | null {
+    return backendDegradation(this._backend);
   }
 
   /**
@@ -355,7 +403,7 @@ export class Pane {
   public destroy(): void {
     for (const p of this._primitives) p.detached?.();
     this._primitives.length = 0;
-    this.backend.destroy();
+    this._backend.destroy();
     this.element.remove();
   }
 
@@ -394,7 +442,7 @@ export class Pane {
     this.top.resize(width, height, dpr);
     // After the layer, which owns the backing store: a backend that keeps its
     // own buffers (a GL viewport) sizes them to what the canvas now is.
-    this.backend.resize(width, height, dpr);
+    this._backend.resize(width, height, dpr);
   }
 
   /**
@@ -556,8 +604,8 @@ export class Pane {
     // (the base canvas's own, for the 2D backend). A serialising target takes
     // the whole frame, series included: the export is a document, and the
     // backend has no pixels to put in one.
-    const g = target ?? this.backend.overlay2d() ?? this.base.ctx;
-    if (target === undefined) this.backend.beginFrame(true);
+    const g = target ?? this._backend.overlay2d() ?? this.base.ctx;
+    if (target === undefined) this._backend.beginFrame(true);
 
     const axisStyle = resolveScaleStyle(ctx.theme, ctx.canvasOptions?.scales);
 
@@ -642,7 +690,7 @@ export class Pane {
       let maxVolume = 0;
       for (const it of items) if ((it.bar.volume ?? 0) > maxVolume) maxVolume = it.bar.volume ?? 0;
       const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume, theme: ctx.theme };
-      if (target === undefined) this.backend.drawSeries(entry, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
+      if (target === undefined) this._backend.drawSeries(entry, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
       else entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
       // Only the readout scale has a strip to write into. A volume overlay
       // sitting on its own hidden scale is excluded by that alone, while a
@@ -674,7 +722,7 @@ export class Pane {
     // Still inside the clip and before the normal-layer primitives: a backend
     // that batched the series has to land them under the price lines and
     // markers, not over them.
-    if (target === undefined) this.backend.endFrame();
+    if (target === undefined) this._backend.endFrame();
 
     // End of the plot clip. Everything below draws into the axis strip on
     // purpose: the ladder, the last-price tag, the trading pills. Restoring here

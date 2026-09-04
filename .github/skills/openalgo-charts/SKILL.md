@@ -13,14 +13,14 @@ description: >-
   price scales, the chart timezone, reference price levels (previous close,
   session high/low, bid/ask), axis chrome (session clock, bar-close countdown),
   the settings schema with its paired up/down colour control, and context menus
-  including one raised on a price axis. Covers the six-tier bundle model, the UI
+  including one raised on a price axis. Covers the seven-tier bundle model, the UI
   standard for host chrome, and the time, scale, registry, indicator, drawing,
   linking, caching, trading and bundling foot-guns.
 ---
 
 # OpenAlgo Charts skill
 
-`openalgo-charts` is a from-scratch, dependency-free HTML5-canvas charting engine: one canvas pipeline, no SVG, no DOM per bar, six lazy-loaded bundle tiers, zero runtime dependencies.
+`openalgo-charts` is a from-scratch, dependency-free HTML5-canvas charting engine: one canvas pipeline, no SVG, no DOM per bar, seven lazy-loaded bundle tiers, zero runtime dependencies.
 
 Works the same whether the project is a downstream npm consumer app or an upstream `openalgo-charts` source checkout. Detect which one you are in and resolve every API name from whatever typings are locally available.
 
@@ -58,7 +58,7 @@ Eight layers, in dependency order. Most bugs come from confusing one for another
 5. **Series** - `chart.addSeries(type, options)` returns a `SeriesApi`. The type names an entry in the chart-type **registry**; the core never switches on type.
 6. **Registries** - chart types, indicators, and drawing tools are all descriptors in a Map. Adding one is a registration, never a core change.
 7. **Primitives** - the extension point. Anything that draws but is not a series: price lines, markers, legends, profiles, trading pills, drawings.
-8. **Tiers** - `indicators`, `draw`, `transform`, `profile`, `trade` are separate bundles that register into the base engine's registries on import.
+8. **Tiers** - `indicators`, `draw`, `transform`, `profile`, `trade`, `webgl` are separate bundles that register into the base engine's registries on import.
 
 ## Install and tiers
 
@@ -75,9 +75,10 @@ Import only what you use. Each tier is a separate entry point that registers int
 | `openalgo-charts/draw` | 51 drawing tools + a headless `DrawingController` and its clipboard | 16 KB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point and Figure, Kagi | 5 KB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 11 KB |
-| `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 68 KB with base |
+| `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 75 KB with base |
+| `openalgo-charts/webgl` | The WebGL2 series backend behind `renderer: 'auto' \| 'webgl2'`; composites into the pane's canvas, falls back to 2D for the session on context loss | 7 KB |
 
-Limits are the CI-enforced budgets in `.size-limit.json`; the whole package measures 124.47 KB Brotli against a 126 KB budget, and the indicator tier 27.27 KB against 30 KB. Both budgets were raised in 1.8.3 to carry that release's eleven new indicators, and the aggregate was raised to stay consistent with the tier: every other tier sums to 93.11 KB, so 93.11 plus the tier's 30 KB ceiling is 123.11 KB and the aggregate has to sit above that or it would fail while the tier it contains passes. Nothing is excluded from these figures because there are no runtime dependencies to exclude.
+Limits are the CI-enforced budgets in `.size-limit.json`; the whole package measures 146.11 KB Brotli against a 147 KB budget, and the indicator tier 27.27 KB against 30 KB. Both budgets were raised in 1.8.3 to carry that release's eleven new indicators, and the aggregate was raised to stay consistent with the tier: every other tier sums to 93.11 KB, so 93.11 plus the tier's 30 KB ceiling is 123.11 KB and the aggregate has to sit above that or it would fail while the tier it contains passes. Nothing is excluded from these figures because there are no runtime dependencies to exclude.
 
 The clipboard lives in the **draw** tier, not the base one, because it needs the drawing-tool registry. `DrawingClipboard` and friends come from `openalgo-charts/draw`.
 

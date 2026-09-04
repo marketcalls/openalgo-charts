@@ -134,6 +134,29 @@ time. Saved 1.9.x layouts and clipboard bodies are upgraded on the way in.
   `SvgContextOptions` for a host that wants to run its own primitive into
   one. Base engine 61.81 KB to 65.52 KB Brotli.
 
+- **A render backend port, and a WebGL2 backend behind it.** The series pass
+  on each pane goes through an `IRenderBackend` (`beginFrame`, `drawSeries`,
+  `endFrame`); the shipped `Canvas2dBackend` draws through the pane's own 2D
+  context and is pixel-identical to 1.9.2. The `renderer` option
+  (`'canvas2d' | 'webgl2' | 'auto'`, default `'canvas2d'`) or an injected
+  `renderBackend` factory picks the backend once, at construction;
+  `chart.rendererKind` (alias `chart.renderer`) reports the kind in use. The
+  new `openalgo-charts/webgl` tier (6.38 KB Brotli) registers `WebGL2Backend`
+  under `'webgl2'`: every standard chart type is batched into one shared
+  offscreen WebGL2 surface with analytic anti-aliasing and composited into the
+  pane's base canvas, so screenshots, the SVG export and the DOM are
+  unchanged; kagi, point-figure and custom types draw through the 2D context.
+  An explicit `'webgl2'` throws until the tier is imported and falls back to
+  `canvas2d` with one console warning on a device without WebGL2; `'auto'` is
+  silent. A lost context or an unusable device moves the chart to `canvas2d`
+  for the session and emits `renderer:fallback`
+  (`RendererFallbackEvent { from, to, reason }`). Exported alongside:
+  `registerRenderBackend`, `unregisterRenderBackend`,
+  `registeredRenderBackends`, `resolveRenderBackend`, `createRenderBackend`,
+  `backendDegradation`, `candleGeometry`, and from the tier
+  `createWebGL2Backend`, `isWebGL2Supported`, `GlDevice`, `sharedGlDevice`,
+  `registerWebGL2Renderer`, `WEBGL_TIER`. Base engine 65.52 KB to 66.41 KB.
+
 ### Fixed
 
 - Fib retracement and extension stroke their anchor leg in `style.color`, so

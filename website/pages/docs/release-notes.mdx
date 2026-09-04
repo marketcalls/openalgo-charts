@@ -41,6 +41,11 @@ a per-tool settings schema, and an upgrade path for every 1.9.x layout and clipb
   family (`DrawingTool.angleLock`), `magnet: 'off' | 'weak' | 'strong'` with a ring where
   the next click lands, `cancel()` and `popAnchor()`, touch-sized grab targets, and an
   under-series drawing lifted to the top layer for the length of a drag.
+- A render backend port with `renderer: 'canvas2d' | 'webgl2' | 'auto'` and
+  `chart.rendererKind`, and a new `openalgo-charts/webgl` tier (6.38 KB Brotli) that
+  draws every standard chart type on the GPU into the pane's own canvas, so screenshots
+  and the SVG export are unchanged. A lost context falls back to the 2D path for the
+  session and emits `renderer:fallback`.
 - `style.showStats` on the line family: a midpoint readout of change, percent, bars and angle.
 - Freehand strokes ink every coalesced pointer sample, thin on release and paint as a spline;
   a pen's `DrawingPoint.pressure` can drive the width (`style.pressure`). `rdpSimplify`,

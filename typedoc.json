@@ -6,7 +6,8 @@
     "src/transform/index.ts",
     "src/profile/index.ts",
     "src/indicators/index.ts",
-    "src/draw/index.ts"
+    "src/draw/index.ts",
+    "src/webgl/index.ts"
   ],
   "out": "website/public/api",
   "tsconfig": "tsconfig.json",

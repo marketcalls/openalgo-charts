@@ -326,3 +326,21 @@ The six tier chips, the seven rows, the transform list of six, the profile list
 of five, the session row, the IANA timezone wording, `registerIndicator` in the
 public API row and the drawing tool count of 43 are all unchanged from 1.8.2 and
 were checked by eye against section 6 rather than remeasured.
+
+## 2.0.0: a seventh tier chip
+
+The WebGL2 render backend ships as its own tier, `openalgo-charts/webgl`, so the
+legend row gained a chip. Seven tier chips plus "Everything" do not fit at the
+170 px width the six were drawn at, so the row was re-spaced rather than
+extended past the frame: every tier chip is 146 px wide on a 162 px pitch from
+x=248, the Everything chip is 186 px, and the row still ends at x=1568 where it
+did. The size figure dropped from 26 to 24 px and the caption from 13 to 12 px
+so "102 built-in indicators", still the widest caption, sits inside the
+narrower chip. Chips stay in descending size order, which puts `/webgl`
+(6.38 KB, green, a hue the legend had not used) between `/trade` and
+`/transform`. The `/webgl` caption reads "WebGL2 series backend".
+
+Every figure in the legend, the `<desc>` and the subtitle was re-measured from
+`npm run size` on the 2.0.0 build (base 66.41 KB, everything 146.11 KB); the
+1.8.x figures the diagram had carried through several releases were replaced
+in the same pass, which is the drift this file exists to record.

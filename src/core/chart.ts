@@ -16,6 +16,7 @@ import { resolvePlotMargins, type CanvasOptions, type GridOptions } from '../ren
 import { SvgContext } from '../render/svg-export';
 import {
   resolveRenderBackend, type IRenderBackend, type RenderBackendFactory, type RenderBackendKind, type RendererChoice,
+  type RendererFallbackReason,
 } from '../render/backend';
 import { DataLayer } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type SeriesRecord, type PriceScaleId } from '../model/series';
@@ -216,10 +217,15 @@ export interface ChartOptions {
   /**
    * Which backend paints the series. `'canvas2d'` (the default) is the 2D
    * path every chart has always drawn with. `'webgl2'` asks for the GPU
-   * backend and throws when the tier that registers it has not been imported.
-   * `'auto'` takes `webgl2` when it is registered and available on this device
-   * and `canvas2d` otherwise, so a chart that opts in keeps painting on a
-   * machine without it. Decided once, at construction.
+   * backend: it throws when the tier that registers it has not been imported
+   * (a missing import is a mistake in the code), and on a device where that
+   * tier finds no WebGL2 it falls back to `canvas2d` with one console warning
+   * (a property of the machine the host should still hear about). `'auto'`
+   * takes `webgl2` when it is registered and available on this device and
+   * `canvas2d` otherwise, silently. Decided once, at construction; read what
+   * was actually chosen from `rendererKind`. A GPU backend that loses its
+   * context later moves the chart to `canvas2d` for the rest of the session
+   * and emits 'renderer:fallback'.
    */
   renderer?: RendererChoice;
   /**
@@ -549,6 +555,19 @@ export interface ContextMenuEvent {
   preventDefault(): void;
 }
 
+/**
+ * Payload of the 'renderer:fallback' event: the chart has moved every pane
+ * from a GPU backend to `canvas2d` for the rest of the session, because the
+ * device's context was lost or turned out unusable. The frame that noticed
+ * was already painted through 2D by the backend itself, so nothing went
+ * blank; this is the host's cue to update anything that shows the renderer.
+ */
+export interface RendererFallbackEvent {
+  from: RenderBackendKind;
+  to: 'canvas2d';
+  reason: RendererFallbackReason;
+}
+
 function defaultPixelRatio(): number {
   return typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
 }
@@ -609,13 +628,19 @@ export class Chart {
   private readonly _now: () => number;
   private readonly _conflate: boolean;
   private readonly _conflationFactor: number;
-  /** One backend per pane; see `ChartOptions.renderer` and `renderBackend`. */
-  private readonly _backendFactory: RenderBackendFactory;
+  /**
+   * One backend per pane; see `ChartOptions.renderer` and `renderBackend`.
+   * Replaced by the 2D factory after a session fallback, so a pane added
+   * later matches the ones already on screen.
+   */
+  private _backendFactory: RenderBackendFactory;
   /**
    * The kind the first pane got. A factory may decline per pane, so this is
    * what the chart actually paints with rather than what was asked for.
    */
   private _rendererKind: RenderBackendKind | null = null;
+  /** What the `renderer` option asked for, so a decline can be reported once. */
+  private readonly _requestedRenderer: RendererChoice | null;
   private _gridVert = true;
   private _gridHorz = true;
   /** The Canvas option block: overrides of the theme, never a copy of it. */
@@ -786,6 +811,7 @@ export class Chart {
     // Resolved here, before the first pane, so an unregistered explicit choice
     // fails at construction rather than on the first frame.
     this._backendFactory = options.renderBackend ?? resolveRenderBackend(options.renderer ?? 'canvas2d');
+    this._requestedRenderer = options.renderBackend === undefined ? (options.renderer ?? 'canvas2d') : null;
     this._priceFormatter = options.priceFormatter ?? null;
     this._priceScaleOptions = options.priceScale ?? null;
     this._timeFormatter = options.timeFormatter;
@@ -1481,7 +1507,8 @@ export class Chart {
   // `subscribe*` helpers. Names emitted by the core: 'ready', 'crosshair:move',
   // 'click', 'dblclick', 'hover', 'drag', 'drag:end', 'pan', 'zoom', 'resize',
   // 'lazy-load', 'paneAdded', 'paneRemoved', 'paneMoved', 'paneMaximized', 'paneResized',
-  // 'priceAxisMoved', 'indicatorRemoved', 'indicatorSettings', 'destroy'. The
+  // 'priceAxisMoved', 'indicatorRemoved', 'indicatorSettings', 'renderer:fallback',
+  // 'destroy'. The
   // trading layer routes its 'trading:*' events through here too, and the draw
   // tier emits 'draw:*' plus the 2.0 pair 'drawing:select' and 'drawing:change'
   // (the legacy names carry one id; the new ones carry the whole selection).
@@ -2221,20 +2248,51 @@ export class Chart {
   }
 
   /**
-   * The render backend the chart paints series with: what the first pane was
-   * given, which is the `renderer` option unless its factory declined (no
-   * WebGL2 on this device) and the 2D backend stood in.
+   * The render backend the chart is painting series with right now: what the
+   * first pane was given, which is the `renderer` option unless its factory
+   * declined (no WebGL2 on this device) and the 2D backend stood in, and
+   * `canvas2d` from the moment a GPU backend degrades ('renderer:fallback').
    */
-  public get renderer(): RenderBackendKind {
+  public get rendererKind(): RenderBackendKind {
     return this._rendererKind ?? 'canvas2d';
+  }
+
+  /** The name `rendererKind` shipped under; the same value. */
+  public get renderer(): RenderBackendKind {
+    return this.rendererKind;
   }
 
   /** A backend for one more pane, with the 2D one standing in for a refusal. */
   private _newBackend(): IRenderBackend {
     const backend = this._backendFactory() ?? resolveRenderBackend('canvas2d')();
     if (backend === null) throw new Error('openalgo-charts: the canvas2d render backend factory returned null');
-    this._rendererKind ??= backend.kind;
+    if (this._rendererKind === null) {
+      this._rendererKind = backend.kind;
+      // An explicit ask that the device could not honour. Once, at the first
+      // pane, and only for an explicit kind: 'auto' promised nothing.
+      if (this._requestedRenderer !== null && this._requestedRenderer !== 'auto' && backend.kind !== this._requestedRenderer) {
+        // eslint-disable-next-line no-console
+        console.warn(`openalgo-charts: render backend "${this._requestedRenderer}" is unavailable on this device; using "${backend.kind}"`);
+      }
+    }
     return backend;
+  }
+
+  /**
+   * Leave the GPU backend for good. Every pane is switched in the same call
+   * so the chart never paints half its panes on each path, later panes get
+   * the 2D factory, and the frame that noticed is repainted on the new
+   * backends (the one just painted went through the old backend's own 2D
+   * path, so nothing was blank in between).
+   */
+  private _fallbackToCanvas2d(reason: RendererFallbackReason): void {
+    const from = this.rendererKind;
+    this._backendFactory = resolveRenderBackend('canvas2d');
+    for (const pane of this._panes) pane.setBackend(this._newBackend());
+    this._rendererKind = 'canvas2d';
+    const event: RendererFallbackEvent = { from, to: 'canvas2d', reason };
+    this.emit('renderer:fallback', event);
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
   private _addPane(weight = 1): Pane {
@@ -3030,6 +3088,16 @@ export class Chart {
           ? null
           : { x: this._cursor.x, yLocal: i === this._cursorPane ? this._cursor.y : null, showTimeTag: isBottom };
         pane.paintTop(cross, ctx);
+      }
+    }
+    // After the loop, not inside it: swapping a pane's backend while its
+    // frame is half painted would hand the rest of that frame to a backend
+    // that never began one. The device is shared, so one pane's answer is
+    // every pane's.
+    if (this._rendererKind !== null && this._rendererKind !== 'canvas2d') {
+      for (const pane of this._panes) {
+        const reason = pane.backendDegradation;
+        if (reason !== null) { this._fallbackToCanvas2d(reason); break; }
       }
     }
   }

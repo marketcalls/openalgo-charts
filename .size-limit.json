@@ -11,7 +11,7 @@
       "dist/openalgo-charts.mjs",
       "dist/openalgo-charts.trade.mjs"
     ],
-    "limit": "74 kB",
+    "limit": "75 kB",
     "brotli": true
   },
   {
@@ -39,6 +39,12 @@
     "brotli": true
   },
   {
+    "name": "WebGL2 tier (GPU series backend)",
+    "path": "dist/openalgo-charts.webgl.mjs",
+    "limit": "7 kB",
+    "brotli": true
+  },
+  {
     "name": "Everything (all tiers, full package)",
     "path": [
       "dist/openalgo-charts.mjs",
@@ -46,9 +52,10 @@
       "dist/openalgo-charts.transform.mjs",
       "dist/openalgo-charts.profile.mjs",
       "dist/openalgo-charts.indicators.mjs",
-      "dist/openalgo-charts.draw.mjs"
+      "dist/openalgo-charts.draw.mjs",
+      "dist/openalgo-charts.webgl.mjs"
     ],
-    "limit": "140 kB",
+    "limit": "147 kB",
     "brotli": true
   }
 ]

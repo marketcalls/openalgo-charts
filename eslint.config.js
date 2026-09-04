@@ -3,7 +3,7 @@
  * Lint config. Two jobs, and the second is the one that earns its keep.
  *
  * 1. Ordinary correctness rules over TypeScript.
- * 2. The TIER ACL. This package's whole shape is six lazily-loaded ESM bundles
+ * 2. The TIER ACL. This package's whole shape is seven lazily-loaded ESM bundles
  *    with enforced Brotli budgets, which only works while the base tier never
  *    reaches into a lazy one. ARCHITECTURE.md says so in prose; prose does not
  *    fail CI, and a single stray import is enough to pull a 27 KB tier into the
@@ -18,7 +18,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 /** Lazy tiers: each is its own bundle and its own size budget. */
-const LAZY_TIERS = ['indicators', 'draw', 'transform', 'profile', 'trade'];
+const LAZY_TIERS = ['indicators', 'draw', 'transform', 'profile', 'trade', 'webgl'];
 
 /**
  * Base-tier directories. Everything here lands in `openalgo-charts.mjs`, so an

@@ -9,7 +9,7 @@ export type {
   ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState,
   AxisChromeOptions, ZoomAnchor, ExportSvgOptions,
   PointerModifiers, PointerKind, PointerSample, PointerInfo,
-  ChartClickEvent, ChartDragEvent, ChartDragEndEvent,
+  ChartClickEvent, ChartDragEvent, ChartDragEndEvent, RendererFallbackEvent,
 } from './core/chart';
 // vector export: the serialising context behind `chart.exportSVG`, exported so
 // a host can run its own primitives or a bare renderer into one.
@@ -48,14 +48,17 @@ export type { CrosshairOptions, CrosshairStyle } from './render/crosshair';
 export { DEFAULT_CANDLE_STYLE, optimalBarWidth, candleTier, candleGeometry } from './render/candles';
 export type { CandleStyle, CandleTier, CandleGeometry } from './render/candles';
 
-// render backend port: the 2D backend ships here and registers itself; a GPU
-// backend registers under 'webgl2' from its own tier and `renderer: 'auto'`
-// picks it up.
+// render backend port: the 2D backend ships here and registers itself; the
+// GPU backend registers under 'webgl2' from its own lazy tier
+// ('openalgo-charts/webgl') and `renderer: 'auto'` picks it up. Nothing under
+// render/webgl is imported here: that is what keeps it out of the base bundle.
 export {
   registerRenderBackend, unregisterRenderBackend, registeredRenderBackends,
-  resolveRenderBackend, createRenderBackend,
+  resolveRenderBackend, createRenderBackend, backendDegradation,
 } from './render/backend';
-export type { IRenderBackend, RenderBackendKind, RendererChoice, RenderBackendFactory } from './render/backend';
+export type {
+  IRenderBackend, RenderBackendKind, RendererChoice, RenderBackendFactory, RenderDevice, RendererFallbackReason,
+} from './render/backend';
 export { Canvas2dBackend } from './render/canvas2d-backend';
 export { DEFAULT_HISTOGRAM_STYLE } from './render/histogram';
 export type { HistogramStyle } from './render/histogram';

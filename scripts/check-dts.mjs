@@ -31,6 +31,7 @@ const TIERS = [
   'dist/trade/index.d.ts',
   'dist/transform/index.d.ts',
   'dist/profile/index.d.ts',
+  'dist/webgl/index.d.ts',
 ];
 
 let failed = false;
