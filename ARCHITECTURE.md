@@ -4,7 +4,7 @@
 > Target: **< 50 KB Brotli** for the full package (engine + trade overlay), no runtime dependencies. *(Brotli is the size metric we hold the budget against - see §11. Gzip runs ~10-15% larger.)*
 > Goal: professional-grade interactive financial-chart rendering + advanced on-chart trading & trade management.
 
-> **Status: shipped, currently 2.0.0.** The design below is implemented and published to npm. The pre-implementation size estimates in this document have been superseded by measured `size-limit` (Brotli) figures, which live in the README size budget and are re-measured on every release: on the 2.0.0 build the base engine is **66.39 KB**, base + trade **74.00 KB**, and everything (all eight tiers) **182.34 KB**. The original "under 50 KB" target below is kept as history; the budgets that are enforced are the per-tier rows in `.size-limit.json`. See the *Revision log* for the point-by-point mapping and §13a for the honest deferred list.
+> **Status: shipped, currently 2.0.0.** The design below is implemented and published to npm. The pre-implementation size estimates in this document have been superseded by measured `size-limit` (Brotli) figures, which live in the README size budget and are re-measured on every release: on the 2.0.1 build the base engine is **66.42 KB**, base + trade **74.03 KB**, and everything (all eight tiers) **182.37 KB**. The original "under 50 KB" target below is kept as history; the budgets that are enforced are the per-tier rows in `.size-limit.json`. See the *Revision log* for the point-by-point mapping and §13a for the honest deferred list.
 
 <p align="center">
   <img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts layered architecture" width="900" />
@@ -142,7 +142,7 @@ src/
 
 > **Methodology (point of record):** numbers are **Brotli-compressed**. Since we have zero runtime dependencies, nothing is excluded from the measurement. Raw-minified ≈ 3 to 3.5× the Brotli figure; gzip ≈ 1.1 to 1.15× Brotli. **All figures below are pre-implementation estimates** and the first deliverable of Phase 1 is to wire `size-limit` and replace them with measured values.
 
-We split the package into **eight loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 66.39 KB Brotli while supporting 102 indicators, 51 drawing tools, 15 chart types, footprint/TPO/orderflow, a GPU render backend and, in the eighth tier, the chrome itself (§8.5). Measured sizes for every tier are in the README size budget.
+We split the package into **eight loadable tiers** so the base stays tiny and heavy features are opt-in (dynamic `import()` / separate entry points). This keeps the base engine at 66.42 KB Brotli while supporting 102 indicators, 51 drawing tools, 15 chart types, footprint/TPO/orderflow, a GPU render backend and, in the eighth tier, the chrome itself (§8.5). Measured sizes for every tier are in the README size budget.
 
 **Tier 1, Base bundle (always loaded):**
 

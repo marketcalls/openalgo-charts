@@ -8,6 +8,19 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.0.1
+
+**Fixed**
+
+- A depth subscription asks for its book depth under the key the OpenAlgo websocket proxy
+  reads. The feed sent `depth_level`; the proxy reads `depth`, and never read the other, so
+  every request above the default was served at five levels with no error (five is also the
+  proxy's fallback). The frame now carries `depth`, and keeps `depth_level` beside it for any
+  consumer that copied the old name from this library.
+
+Measured on the 2.0.1 build: base engine 66.42 KB, base + trade 74.03 KB, widget terminal
+155.06 KB, everything 182.37 KB; the other six tiers did not move.
+
 ## 2.0.0
 
 The drawing model, rebuilt, and the chrome as a package: paint order, a text block,

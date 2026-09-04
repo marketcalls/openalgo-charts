@@ -7,7 +7,7 @@ Written 2026-08-28 against openalgo-charts 1.8.2.
 > record of what was wrong, what the measured figures were, and why each change
 > was made, so the next redraw starts from evidence rather than memory.
 >
-> **Current source of truth, 2.0.0:** the SVG reports 66.39 KB base, 182.34 KB
+> **Current source of truth, 2.0.0:** the SVG reports 66.42 KB base, 182.37 KB
 > for every tier, eight tier chips, 102 built-in indicators and 51 drawing
 > tools. The figures below record the 1.8.2 redraw unless an appendix says
 > otherwise; the 2.0.0 appendices at the end record each later pass.
@@ -398,3 +398,12 @@ KB, indicators 27.27 KB, profile 10.66 KB, webgl 6.38 KB, widget 35.56 KB and
 transform 2.66 KB were confirmed unchanged on the same build.
 `website/public/architecture-diagram.svg` is a byte copy of the docs file,
 refreshed by `website/scripts/sync-lib.mjs` on every website build.
+
+## 2.0.1: the version string moves four chips by three hundredths
+
+The depth-key fix adds a few bytes to the base tier and the version string
+changes with it. `npm run size` on the 2.0.1 build reads base 66.42 KB (was
+66.39), base + trade 74.03 KB (was 74.00), widget terminal 155.06 KB (was
+155.03) and everything 182.37 KB (was 182.34). The other six rows did not move.
+Chips and `<desc>` substituted by matching the surrounding text; the rounded
+subtitle still rounds correctly.

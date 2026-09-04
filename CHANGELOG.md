@@ -2,7 +2,7 @@
 
 All notable changes to OpenAlgo Charts.
 
-## 2.0.1 (unreleased)
+## 2.0.1
 
 ### Fixed
 
@@ -15,6 +15,13 @@ All notable changes to OpenAlgo Charts.
   for any consumer that learned the old name from this library. Found while
   wiring the 2.0.0 depth ladder into a host; the ladder was the first caller
   to ask for more than five.
+
+### Sizes
+
+Measured with `npm run size` (Brotli) on the 2.0.1 build: base engine 66.42 KB
+against 67 kB, base + trade 74.03 KB against 75 kB, widget terminal 155.06 KB
+against 156 kB, everything 182.37 KB against 183 kB. The other six rows did not
+move.
 
 ## 2.0.0
 

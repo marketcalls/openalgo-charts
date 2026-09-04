@@ -44,7 +44,7 @@ const config = {
   footer: {
     content: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85rem' }}>
-        <span>Apache-2.0 - Original, dependency-free code - 66.39 KB Brotli base engine</span>
+        <span>Apache-2.0 - Original, dependency-free code - 66.42 KB Brotli base engine</span>
         <span style={{ opacity: 0.7 }}>OpenAlgo Charts - an open charting engine for the OpenAlgo community.</span>
       </div>
     ),
@@ -54,7 +54,7 @@ const config = {
     const pageTitle = title && title !== 'OpenAlgo Charts' ? `${title} - OpenAlgo Charts` : 'OpenAlgo Charts';
     const description =
       (frontMatter as { description?: string }).description ??
-      'A from-scratch, dependency-free HTML5-canvas charting engine for OpenAlgo: 15 chart types, 102 built-in indicators plus your own, 51 drawing tools, on-chart trading, and live data, from a 66.39 KB base engine.';
+      'A from-scratch, dependency-free HTML5-canvas charting engine for OpenAlgo: 15 chart types, 102 built-in indicators plus your own, 51 drawing tools, on-chart trading, and live data, from a 66.42 KB base engine.';
     return (
       <>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />

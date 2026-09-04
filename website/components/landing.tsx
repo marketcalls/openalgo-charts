@@ -15,7 +15,7 @@ return chart;`;
 
 const STATS: Array<[string, string]> = [
   ['0', 'runtime dependencies'],
-  ['182.34 KB', 'Brotli, every tier'],
+  ['182.37 KB', 'Brotli, every tier'],
   ['15', 'chart types'],
   ['3990', 'tests, green'],
 ];
