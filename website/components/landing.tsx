@@ -1,93 +1,134 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import Link from 'next/link';
-import RunnableExample from './RunnableExample';
+import BtcUsdChart from './BtcUsdChart';
 
-const HERO_DEMO = `// A candlestick chart with a 21-EMA overlay - rendered by the real library.
-const chart = lib.createChart(el);
-const bars = lib.generateBars(1700000000, 180, 3600);
+function Arrow({ diagonal = false }: { diagonal?: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d={diagonal ? 'M6 18 18 6M6 6h12v12' : 'M4 12h15m-6-6 6 6-6 6'} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
-chart.addSeries('candlestick').setData(bars);
-chart.addSeries('line', { style: { color: '#f5a623', lineWidth: 2 } })
-     .setData(lib.emaSeries(bars, 21));
-
-chart.timeScale.fitContent(bars.length);
-return chart;`;
-
-const STATS: Array<[string, string]> = [
-  ['0', 'runtime dependencies'],
-  ['183.74 KB', 'Brotli, every tier'],
-  ['15', 'chart types'],
-  ['4026', 'unit tests'],
-];
+function Reveal({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (el.getBoundingClientRect().top < window.innerHeight) return;
+    el.dataset.reveal = 'waiting';
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        el.dataset.reveal = 'visible';
+        observer.disconnect();
+      }
+    }, { threshold: 0.08 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return <div ref={ref} className={`oac-reveal ${className}`}>{children}</div>;
+}
 
 export function Hero() {
   return (
-    <section className="oac-hero">
-      <div className="oac-hero__grid">
-        <div className="oac-hero__copy">
-          <span className="oac-pill">Open source - Apache-2.0 - Zero dependencies</span>
-          <h1 className="oac-hero__title">
-            The charting engine built for <span className="oac-grad">OpenAlgo</span>.
-          </h1>
-          <p className="oac-hero__sub">
-            A from-scratch, dependency-free HTML5-canvas charting library: candlesticks to
-            Renko, indicators, depth-of-market, and full on-chart trading - fast, tiny, and
-            yours to extend. No black box, no licensing strings.
-          </p>
-          <div className="oac-hero__cta">
-            <Link className="oac-btn oac-btn--primary" href="/docs/getting-started">Get started</Link>
-            <a className="oac-btn" href="https://github.com/marketcalls/openalgo-charts" target="_blank" rel="noreferrer">Star on GitHub</a>
-            <Link className="oac-btn oac-btn--ghost" href="/examples">See live examples</Link>
-          </div>
-          <div className="oac-stats">
-            {STATS.map(([n, l]) => (
-              <div className="oac-stat" key={l}>
-                <div className="oac-stat__n">{n}</div>
-                <div className="oac-stat__l">{l}</div>
-              </div>
-            ))}
-          </div>
+    <section className="oac-hero" aria-labelledby="hero-title">
+      <div className="oac-hero__atmosphere" aria-hidden="true">
+        <div className="oac-hero__halo" />
+        <svg className="oac-hero__trace" viewBox="0 0 1440 680" preserveAspectRatio="none">
+          <path d="M-40 610 110 560 215 578 340 463 430 491 555 370 650 396 810 238 900 284 1090 99 1190 130 1470 -15" />
+          <path d="M-40 650 130 595 240 612 350 510 475 528 590 430 710 448 870 316 990 358 1120 225 1260 230 1470 84" />
+        </svg>
+      </div>
+      <div className="oac-hero__copy">
+        <div className="oac-eyebrow oac-intro oac-intro--eyebrow"><span className="oac-status-dot" /> THE OPENALGO CHARTING EXPERIENCE</div>
+        <h1 id="hero-title" className="oac-hero__title">
+          <span className="oac-title-line"><span className="oac-intro oac-intro--title">Every move.</span></span>
+          <span className="oac-title-line"><span className="oac-intro oac-intro--gradient oac-gradient-text">A clearer view.</span></span>
+        </h1>
+        <p className="oac-hero__sub oac-intro oac-intro--sub">
+          Go from watching the market to exploring it.<br className="oac-desktop-break" /> Beautiful charts. Powerful tools. A perspective that&rsquo;s yours.
+        </p>
+        <div className="oac-actions oac-intro oac-intro--actions">
+          <a className="oac-action oac-action--primary" href="#playground">Try the live chart <Arrow /></a>
+          <a className="oac-action oac-action--secondary" href="#possibilities">Explore the possibilities <Arrow diagonal /></a>
         </div>
-        <div className="oac-hero__demo">
-          <RunnableExample code={HERO_DEMO} hideCode height={340} />
-        </div>
+        <p className="oac-hero__note oac-intro oac-intro--actions">Free to explore. Open source by nature.</p>
+      </div>
+      <BtcUsdChart />
+      <div className="oac-capability-strip" aria-label="Chart capabilities">
+        <span>More ways to see the market</span>
+        <div><strong>15</strong> chart styles</div>
+        <div><strong>102</strong> indicators</div>
+        <div><strong>51</strong> drawing tools</div>
       </div>
     </section>
   );
 }
 
-interface Feature {
-  title: string;
-  body: string;
+function FeatureArt({ type }: { type: 'indicators' | 'drawings' | 'views' }) {
+  if (type === 'indicators') return (
+    <div className="oac-feature-art oac-feature-art--indicators" aria-hidden="true">
+      <span className="oac-art-label">A little more insight.</span>
+      <svg viewBox="0 0 360 175" fill="none">
+        <path className="oac-art-grid" d="M0 35H360M0 80H360M0 125H360M50 0V175M130 0V175M210 0V175M290 0V175" />
+        <path className="oac-art-band" d="M0 138Q38 113 70 124T137 97T205 95T270 59T360 35L360 84Q310 104 270 106T205 136T137 139T70 164T0 170Z" />
+        <path className="oac-art-average" d="M0 154Q38 130 70 144T137 118T205 114T270 82T360 61" />
+        <path className="oac-art-signal" d="M0 152 17 144 29 149 42 126 58 139 72 131 88 148 100 124 114 129 126 110 141 119 153 98 164 106 177 100 190 120 204 103 218 111 230 87 244 96 259 67 273 84 288 60 300 69 311 46 325 56 341 41 360 47" />
+        <circle cx="311" cy="46" r="5" fill="var(--oac-accent-2)" /><circle cx="311" cy="46" r="12" stroke="var(--oac-accent-2)" opacity=".25" />
+      </svg>
+      <span className="oac-art-tag"><i /> Trend, momentum &amp; beyond</span>
+    </div>
+  );
+  if (type === 'drawings') return (
+    <div className="oac-feature-art oac-feature-art--drawings" aria-hidden="true">
+      <span className="oac-art-label">Room for your next idea.</span>
+      <svg viewBox="0 0 360 175" fill="none">
+        <path className="oac-art-grid" d="M0 35H360M0 80H360M0 125H360M50 0V175M130 0V175M210 0V175M290 0V175" />
+        <path d="M45 155 300 45 300 93 45 203Z" fill="var(--oac-accent)" opacity=".07" />
+        <path d="M24 127 42 120 54 136 73 116 90 120 108 104 127 115 140 94 161 101 178 83 193 96 212 79 234 82 250 63 271 70 289 49 310 57 336 33" stroke="var(--oac-muted)" strokeWidth="1.7" opacity=".7" />
+        <path d="M46 155 300 45M46 185 300 75" stroke="var(--oac-accent)" strokeWidth="1.5" />
+        <path d="M210 0V175M0 82H360" stroke="var(--oac-accent)" strokeDasharray="3 5" opacity=".3" />
+        <circle cx="46" cy="155" r="4" fill="var(--oac-card)" stroke="var(--oac-accent)" strokeWidth="2" />
+        <circle cx="300" cy="45" r="4" fill="var(--oac-card)" stroke="var(--oac-accent)" strokeWidth="2" />
+        <path d="m213 85 3 23 5-8 9-3Z" fill="var(--oac-text)" stroke="var(--oac-card)" strokeWidth="2" />
+      </svg>
+      <span className="oac-art-tag">Trend lines · Channels · Fibonacci</span>
+    </div>
+  );
+  return (
+    <div className="oac-feature-art oac-feature-art--views" aria-hidden="true">
+      <span className="oac-art-label">A different angle changes everything.</span>
+      <div className="oac-art-views">
+        <div className="oac-art-view oac-art-view--candles"><span>Candles</span><svg viewBox="0 0 110 96" fill="none"><path d="M15 43V86M36 35V73M57 40V78M78 15V57M99 3V43" stroke="var(--oac-accent-2)" /><path d="M15 52V76M36 42V65M57 49V68M78 24V46M99 13V33" stroke="var(--oac-accent-2)" strokeWidth="7" /></svg></div>
+        <div className="oac-art-view oac-art-view--line"><span>Line</span><svg viewBox="0 0 110 96" fill="none"><path d="M0 80 15 70 25 74 39 49 49 59 62 33 75 41 86 19 97 25 110 7" stroke="var(--oac-accent)" strokeWidth="2" /></svg></div>
+        <div className="oac-art-view oac-art-view--area"><span>Area</span><svg viewBox="0 0 110 96" fill="none"><path d="M0 80 15 70 25 74 39 49 49 59 62 33 75 41 86 19 97 25 110 7V96H0Z" fill="var(--oac-accent)" opacity=".15" /><path d="M0 80 15 70 25 74 39 49 49 59 62 33 75 41 86 19 97 25 110 7" stroke="var(--oac-accent)" strokeWidth="2" /></svg></div>
+      </div>
+      <span className="oac-art-tag">Find a view that speaks to you</span>
+    </div>
+  );
 }
-
-const FEATURES: Feature[] = [
-  { title: 'Single-canvas pipeline', body: 'No SVG, no DOM-per-bar. One canvas per pane with an invalidation-aware render loop keeps it small and smooth at scale.' },
-  { title: 'Gapless time axis', body: 'Weekends, holidays, and session breaks collapse automatically - x is a logical index, not a raw timestamp.' },
-  { title: '15 chart types', body: 'Candles (standard, hollow, volume), bars, high-low, line, line-markers, step, area, HLC area, baseline, columns, histogram, Point & Figure and Kagi - plus Heikin Ashi, Renko, Range and Line Break from the transform tier.' },
-  { title: 'Tick & second timeframes', body: 'Sub-minute and tick/volume bars are first-class: build them live from a tick stream with the candle and tick aggregators.' },
-  { title: 'On-chart trading', body: 'Order, position, and bracket lines with live P&L, one-click and drag-to-modify, OCO, validation, and a depth-of-market ladder.' },
-  { title: 'Indicators & profiles', body: '102 built-in indicators across trend, momentum, volatility, and volume, with EMA/RSI/ATR/Supertrend matching openalgo.ta - and you can register your own with the same descriptor contract. Plus Volume Profile, Market Profile (TPO), and Footprint / order flow.' },
-  { title: 'OpenAlgo-native data', body: 'REST history + WebSocket live + candle builder adapters speak the OpenAlgo protocol. Any broker fits behind a small DataFeed.' },
-  { title: 'Production operations', body: 'Keep long-running charts bounded with rolling history, explicit feed cleanup, cache limits, and a measurable browser memory budget.' },
-  { title: 'Loadable tiers', body: 'Ship only what you use - /indicators, /draw, /profile, /trade, /transform, /webgl and /widget are separate entry points on top of a 66 KB base, each independently sized.' },
-  { title: 'The terminal in one call', body: 'createWidget from the widget tier adds the top bar, drawing rail, status line, settings and indicator dialogs, right-click menu and shortcuts, all generated from schemas the engine already ships. The only tier that builds DOM; the engine underneath still ships none.' },
-  { title: '51 drawing tools, 2.0 model', body: 'Paint order, multi-select, a text block per drawing, per-level fib colours, a settings schema per tool, hover handles, angle lock, a magnet ring and freehand splines. Saved 1.9.x layouts are upgraded on load.' },
-  { title: 'Vector export and WebGL2', body: 'exportSVG returns the chart as text-stays-text SVG at any size; renderer: \'auto\' moves the series pass to a batched WebGL2 backend that falls back to the 2D path for the session if the context is lost.' },
-  { title: 'Plugin / primitive API', body: 'The same API markers, trading, and profiles are built on is open to you: implement IPrimitive and draw anything on the chart.' },
-];
 
 export function Features() {
   return (
-    <section className="oac-section">
-      <h2 className="oac-section__title">Everything a trading chart needs, nothing it doesn&rsquo;t</h2>
+    <section id="possibilities" className="oac-section oac-possibilities" aria-labelledby="possibilities-title">
+      <Reveal className="oac-section-heading">
+        <span className="oac-eyebrow">BUILT FOR YOUR CURIOSITY</span>
+        <h2 id="possibilities-title">There&rsquo;s more to<br /><span className="oac-text-muted">every market move.</span></h2>
+        <p>Follow the trend. Connect the dots. See what you couldn&rsquo;t see before.</p>
+      </Reveal>
       <div className="oac-features">
-        {FEATURES.map((f) => (
-          <div className="oac-feature" key={f.title}>
-            <h3>{f.title}</h3>
-            <p>{f.body}</p>
-          </div>
-        ))}
+        <Reveal className="oac-feature">
+          <FeatureArt type="indicators" />
+          <div className="oac-feature__copy"><span className="oac-feature__index">01 / DISCOVER</span><h3>Look beneath the surface.</h3><p>Bring price, momentum, and volatility into focus with 102 indicators. Layer your favorites and explore the bigger picture.</p><Link href="/examples#custom-indicators" className="oac-text-link">Explore indicators <Arrow /></Link></div>
+        </Reveal>
+        <Reveal className="oac-feature">
+          <FeatureArt type="drawings" />
+          <div className="oac-feature__copy"><span className="oac-feature__index">02 / EXPRESS</span><h3>Give your ideas a shape.</h3><p>Mark a level. Map a scenario. Tell the story you see with 51 drawing tools that put your thinking right on the chart.</p><Link href="/examples#drawing-tools" className="oac-text-link">Try the drawing tools <Arrow /></Link></div>
+        </Reveal>
+        <Reveal className="oac-feature">
+          <FeatureArt type="views" />
+          <div className="oac-feature__copy"><span className="oac-feature__index">03 / MAKE IT YOURS</span><h3>A fresh perspective, instantly.</h3><p>From the detail of candlesticks to the simplicity of a line. Find your rhythm with 15 chart styles and a look that feels like you.</p><Link href="/examples#interactive" className="oac-text-link">Find your view <Arrow /></Link></div>
+        </Reveal>
       </div>
     </section>
   );
@@ -95,31 +136,29 @@ export function Features() {
 
 export function WhyOpenSource() {
   return (
-    <section className="oac-section oac-why">
-      <h2 className="oac-section__title">Why contributors love it</h2>
-      <div className="oac-why__grid">
-        <div>
-          <h3>Readable, original code</h3>
-          <p>No reverse-engineering a minified vendor blob. The engine is a few thousand lines of clean, commented TypeScript with a documented architecture.</p>
-        </div>
-        <div>
-          <h3>Add a doc in one line</h3>
-          <p>This site is Nextra + MDX. Drop a <code>.mdx</code> file in <code>website/pages/docs</code>, add one line to <code>_meta.ts</code>, and your page (with live demos) is in the sidebar.</p>
-        </div>
-        <div>
-          <h3>Truly dependency-free</h3>
-          <p>Nothing is excluded from the size budget - what you import is what ships. Easy to audit, easy to embed, friendly to every bundler.</p>
-        </div>
-        <div>
-          <h3>Apache-2.0, forever</h3>
-          <p>Permissive license, no attribution gymnastics, no &ldquo;non-commercial&rdquo; asterisks. Build products on it.</p>
-        </div>
-      </div>
-      <div className="oac-hero__cta" style={{ marginTop: 28 }}>
-        <Link className="oac-btn oac-btn--primary" href="/docs/getting-started">Read the docs</Link>
-        <Link className="oac-btn oac-btn--ghost" href="/docs/performance-and-operations">Performance &amp; operations</Link>
-        <a className="oac-btn" href="https://github.com/marketcalls/openalgo-charts" target="_blank" rel="noreferrer">Contribute on GitHub</a>
-      </div>
-    </section>
+    <>
+      <section className="oac-section oac-freedom" aria-labelledby="freedom-title">
+        <Reveal className="oac-freedom__copy">
+          <span className="oac-eyebrow">YOUR CHARTS. YOUR RULES.</span>
+          <h2 id="freedom-title">Made to be<br /><span className="oac-gradient-text">made your own.</span></h2>
+          <p>Your style. Your workflow. Your next big idea. OpenAlgo Charts gives you the freedom to create a charting experience that feels entirely yours.</p>
+          <Link href="/examples" className="oac-text-link">See what&rsquo;s possible <Arrow diagonal /></Link>
+        </Reveal>
+        <Reveal className="oac-freedom__details">
+          <div><span className="oac-freedom__icon" aria-hidden="true">✦</span><div><h3>Every detail, considered.</h3><p>Thoughtful tools, fluid interaction, and room to focus on what matters to you.</p></div></div>
+          <div><span className="oac-freedom__icon" aria-hidden="true">◐</span><div><h3>At home in your world.</h3><p>Light or dark. A single chart or a complete workspace. Shape it around the way you work.</p></div></div>
+          <div><span className="oac-freedom__icon" aria-hidden="true">↗</span><div><h3>Open from the start.</h3><p>Free to use, explore, and extend. Built in the open, for a community that keeps moving.</p></div></div>
+        </Reveal>
+      </section>
+      <section className="oac-section oac-closing" aria-labelledby="closing-title">
+        <Reveal>
+          <span className="oac-eyebrow">A CHART IS JUST THE BEGINNING</span>
+          <h2 id="closing-title">What will you see next?</h2>
+          <p>Your next perspective is a click away.</p>
+          <div className="oac-actions"><a href="#playground" className="oac-action oac-action--primary">Make your first move <Arrow /></a><Link href="/docs/getting-started" className="oac-action oac-action--secondary">Start creating <Arrow diagonal /></Link></div>
+          <span className="oac-closing__wordmark" aria-hidden="true">OpenAlgo</span>
+        </Reveal>
+      </section>
+    </>
   );
 }

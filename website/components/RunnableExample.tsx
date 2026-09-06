@@ -55,6 +55,8 @@ export default function RunnableExample({ code, tiers = [], height = 360, hideCo
   useEffect(() => {
     let chart: { destroy?: () => void } | undefined;
     let cancelled = false;
+    setReady(false);
+    setErr(null);
     (async () => {
       try {
         const lib = await loadLib(tiers);
@@ -108,11 +110,6 @@ export default function RunnableExample({ code, tiers = [], height = 360, hideCo
 
   return (
     <div className="oac-example">
-      {!hideCode && (
-        <pre className="oac-example__code" aria-label="example source">
-          <code dangerouslySetInnerHTML={{ __html: highlight(code) }} />
-        </pre>
-      )}
       <div className="oac-example__stage">
         <span className="oac-example__badge">live</span>
         <div className="oac-example__chart" ref={ref} style={{ height }} />
@@ -120,6 +117,14 @@ export default function RunnableExample({ code, tiers = [], height = 360, hideCo
         {err && <div className="oac-example__err">Demo error: {err}</div>}
       </div>
       {caption && <div className="oac-example__caption">{caption}</div>}
+      {!hideCode && (
+        <details className="oac-example__source">
+          <summary>View example code</summary>
+          <pre className="oac-example__code" aria-label="example source">
+            <code dangerouslySetInnerHTML={{ __html: highlight(code) }} />
+          </pre>
+        </details>
+      )}
     </div>
   );
 }

@@ -37,16 +37,22 @@
     chart.addSeries('candlestick').setData(bars);
 
     const broker = new FakeBroker();
-    const ladder = new DomLadder({ tickSize: 0.05, width: 110, maxRows: 60, groupBy: 1 });
+    let ladder = new DomLadder({ tickSize: 0.05, width: 110, maxRows: 60, groupBy: 1 });
     chart.tradeHost(0).addPrimitive(ladder);
     broker.onDepth((_s, d) => ladder.setDepth(d));
 
     let levels = 200, group = 1, t = 0;
     document.getElementById('levels').onchange = (e) => { levels = +e.target.value; };
-    document.getElementById('group').onchange = (e) => { group = +e.target.value; ladder.setDepth(FakeBroker.makeDepth(ltp(), levels, 0.05)); };
+    document.getElementById('group').onchange = (e) => {
+      group = +e.target.value;
+      chart.removePrimitive(ladder);
+      ladder = new DomLadder({ tickSize: 0.05, width: 110, maxRows: 60, groupBy: group });
+      chart.addPrimitive(ladder);
+      ladder.setDepth(FakeBroker.makeDepth(ltp(), levels, 0.05));
+      window.__ladder = ladder;
+    };
 
     function ltp() { return last * (1 + Math.sin(t / 25) * 0.004); }
-    // rebuild ladder with current groupBy by recreating options is overkill; emit fresh depth each tick
     setInterval(() => {
       t++;
       const d = FakeBroker.makeDepth(ltp(), levels, 0.05);

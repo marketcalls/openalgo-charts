@@ -9,6 +9,8 @@ const withNextra = nextra({
 });
 
 export default withNextra({
+  // Keep the live local preview available while building the static export.
+  distDir: process.env.NODE_ENV === 'development' ? '.next-dev' : '.next',
   output: 'export',
   images: { unoptimized: true },
   basePath: '/openalgo-charts',

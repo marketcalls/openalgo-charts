@@ -4,12 +4,27 @@ description: 51 drawing tools, a headless controller, undo/redo, and persistence
 ---
 
 import { Callout } from 'nextra/components'
+import DrawingToolsDemo from '../../components/DrawingToolsDemo'
 
 # Drawing Tools
 
 `openalgo-charts/draw` is a lazy tier (**25.82 KB** Brotli) with 51 tools and a headless
 controller. It ships **no UI**: no toolbar, no dialogs. It owns the model and the
 interactions; your app supplies the buttons.
+
+## Try the drawing tools
+
+Pick a tool from the visible rail and draw directly on the chart. The three sample
+drawings are editable: select one on the chart or from the drawing list, then move
+it, drag a handle, or delete it. Undo and redo let you try changes; Reset demo restores
+the examples.
+
+<DrawingToolsDemo />
+
+This playground supplies a small toolbar around `DrawingController`. For the complete
+packaged rail, properties dialogs and shortcuts, use [the widget tier](/docs/widget).
+
+## Start with the controller
 
 ```ts
 import { createChart } from 'openalgo-charts';

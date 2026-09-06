@@ -23,7 +23,7 @@ export default {
   api: {
     title: 'API Reference',
     type: 'page',
-    href: '/openalgo-charts/api/',
+    href: '/openalgo-charts/api/index.html',
     newWindow: true,
   },
 };

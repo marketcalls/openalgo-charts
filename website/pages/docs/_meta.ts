@@ -40,6 +40,7 @@ export default {
   '-- trading': { type: 'separator', title: 'Trading' },
   'trading-api': 'Trading API',
   trading: 'Order Engine & Ladder',
+  'depth-of-market': 'Depth of Market Demo',
 
   '-- data': { type: 'separator', title: 'Data & Feeds' },
   'data-loading': 'Data Loading',

@@ -63,6 +63,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Verify homepage market data handling
+        run: node --test scripts/check-btc-usd-feed.test.mjs
+      - name: Generate current API reference
+        run: npx typedoc --out website/public/api
       - name: Build the docs site (prebuild syncs the bundles)
         working-directory: website
         run: |

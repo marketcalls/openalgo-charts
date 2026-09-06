@@ -1,0 +1,138 @@
+---
+title: Depth of Market
+description: A simulated real-time depth ladder with 5, 20 or 200 levels per side and configurable price aggregation.
+---
+
+import DepthLadderDemo from '../../components/DepthLadderDemo'
+
+# Depth of market
+
+Explore a changing order book with **simulated updates every 750 ms**. Choose 5,
+20 or 200 price levels per side, pause a snapshot, and combine several ticks into
+one display row. The chart uses the published `DomLadder` primitive; the adjacent
+table uses the same `buildRows` aggregation helper.
+
+<DepthLadderDemo />
+
+The source tick stays at **0.05**. Start with 20 levels and pause the demo, then
+change the display row size from 0.05 to 0.50. The number of rows falls while
+the total bid and ask quantities stay the same. Scroll the table to see levels
+outside the chart's visible price range. Selecting a quantity in the table only
+displays a message; this demo has no order connection.
+
+## Source ticks and display grouping
+
+`tickSize` is the instrument's actual price increment. `groupBy` is the number of
+those ticks combined into a display row. A larger display step can make a deep
+book easier to read without changing the instrument's tick size.
+
+| Source tick | `groupBy` | Display row size |
+|---|---|---|
+| 0.05 | 1 | 0.05 |
+| 0.05 | 5 | 0.25 |
+| 0.05 | 10 | 0.50 |
+| 0.05 | 20 | 1.00 |
+
+The helper rounds each supplied price to the nearest multiple of
+`tickSize * groupBy`, sums quantities independently on each side, and sorts rows
+from high to low. For example, at a 0.50 display step, bids of 10 at 100.05 and 20
+at 100.10 become a bid quantity of 30 in the 100.00 display row.
+
+Bid and ask quantities can appear in the **same display row** after rounding.
+That row label is an aggregation bucket, not an executable quote. The best bid
+and ask above the demo come from the ungrouped supplied book. Empty price levels
+are not invented or filled in between the supplied levels.
+
+## Add a ladder
+
+The ladder is available in the trade tier. The following code uses the published
+2.1.0 API:
+
+```ts
+import { createChart } from 'openalgo-charts';
+import { DomLadder } from 'openalgo-charts/trade';
+import type { MarketDepth } from 'openalgo-charts';
+
+const chart = createChart(document.getElementById('chart')!);
+const prices = chart.addSeries('line', {
+  priceFormat: { type: 'price', minMove: 0.05 },
+});
+prices.setData([
+  { time: 1700000000, value: 99.80 },
+  { time: 1700000060, value: 100.20 },
+  { time: 1700000120, value: 100.00 },
+]);
+
+const ladder = new DomLadder({
+  tickSize: 0.05,
+  groupBy: 1,
+  width: 112,
+  rowHeight: 16,
+  maxRows: 40,
+});
+chart.addPrimitive(ladder);
+
+// A complete snapshot of the available book; values here are simulated.
+const depth: MarketDepth = {
+  bids: [{ price: 99.95, qty: 120 }, { price: 99.90, qty: 200 }],
+  asks: [{ price: 100.05, qty: 90 }, { price: 100.10, qty: 160 }],
+  ltp: 100.00,
+};
+ladder.setDepth(depth);
+chart.fitContent();
+
+// Call ladder.setDepth(nextSnapshot) on each update from your depth source.
+// On teardown, unsubscribe from that source and call chart.destroy().
+```
+
+The container needs an explicit height. A book snapshot is supplied by your
+application; `DomLadder` itself does not fetch or subscribe to market data. Feed
+adapters that support depth expose optional `subscribeDepth(...)`; see
+[Data feeds](/docs/data-feeds) for the interface.
+
+## Change the display step
+
+In 2.1.0, ladder options are supplied to the constructor. Replace the primitive
+when a grouping control changes, then apply the latest snapshot:
+
+```ts
+chart.removePrimitive(ladder);
+const groupedLadder = new DomLadder({
+  tickSize: 0.05,
+  groupBy: 10, // 0.50 display rows
+  width: 112,
+  rowHeight: 16,
+  maxRows: 40,
+});
+chart.addPrimitive(groupedLadder);
+groupedLadder.setDepth(depth);
+// Route subsequent snapshots to groupedLadder.
+```
+
+For a separate table, use the same public helper:
+
+```ts
+import { buildRows } from 'openalgo-charts/trade';
+
+const rows = buildRows(depth, 0.05, 10);
+// [{ price, bidQty, askQty }, ...], sorted high to low.
+```
+
+## Rendering and data limits
+
+The ladder is docked inside the chart's right edge and aligns quantities to its
+price scale. Its canvas displays rows in the visible price range, capped by
+`maxRows`; it does not automatically fit all supplied depth. Zoom or adjust the
+price scale to inspect a different range. The demo adjusts its price span when
+the grouping changes and centres the viewport on the nearest display bucket.
+Raw tick movements inside that bucket update quantities without shifting the
+ladder vertically. Its simulated price history is bounded to 240 points.
+
+`ladder.tier()` reports `none` for an empty book, `compact` for up to five levels
+per side, and `deep` for larger snapshots. Passing empty bid and ask arrays clears
+the rendered book.
+
+This primitive visualizes supplied depth. It does not calculate synthetic
+multi-leg spreads, market-fill prices, or execution guarantees. Applications
+that need synthetic depth must calculate and validate that data before supplying
+a book, and distinguish their derived prices from actual instrument quotes.

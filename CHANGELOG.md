@@ -26,7 +26,7 @@ All notable changes to OpenAlgo Charts.
   standalone demo presets, applied through existing public APIs.
 - **Website profile examples and screenshot gallery.** The website embeds the
   standalone demo, provides links to each theme, and includes reproducible
-  screenshots of all five themes plus packed/split close-ups. The homepage,
+  screenshots of all five themes plus packed/split close-ups. The
   profile guide, themes guide and examples page link to the new showcase.
 
 ### Changed
@@ -54,6 +54,27 @@ All notable changes to OpenAlgo Charts.
 Base engine **66.51 KB**, profile tier **11.95 KB**, full package **183.74 KB**
 Brotli. Validation covers **4,026 unit tests** across 172 files and 219 demo tests,
 plus browser checks for compact rendering, per-day controls and website examples.
+
+### Website follow-up
+
+- Redesigned the marketing homepage around an interactive chart, with a refined
+  dark/light visual system and an intro animation that respects reduced motion.
+  Documentation, examples and the generated API reference share the new design.
+- Connected the homepage chart to real BTC/USD exchange candles, refreshed every
+  15 seconds, with 15-minute, hourly, four-hour and daily views, a Supertrend
+  overlay and a separate MACD pane. Connection errors are visible; unavailable
+  prices are never replaced with simulated candles.
+- Replaced tiny profile overview thumbnails with readable single-day close-ups
+  in all five themes. Profile promotion stays on the dedicated guides and examples.
+- Added a simulated live depth-of-market demo, working display tick grouping,
+  pause/resume, book-depth controls and a README integration example for issue #6.
+  Fixed the original standalone depth example's group selector.
+- Added an interactive drawing playground with placement, selection, deletion,
+  undo/redo and keyboard controls. Example code is available below each chart.
+- Regenerated API pages from the current source, with visible package versions,
+  navigation back to the guides and demos, and refreshed stylesheet asset URLs.
+
+These website changes use the existing 2.1.0 library APIs.
 
 ## 2.0.2
 

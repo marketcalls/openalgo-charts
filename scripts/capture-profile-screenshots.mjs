@@ -1,4 +1,5 @@
-/** Reproducible screenshots of the real synthetic-data profile demo. */
+/** Reproducible close-ups of the real synthetic-data profile demo. */
+import { strict as assert } from 'node:assert';
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -8,7 +9,7 @@ const output = fileURLToPath(new URL('../website/public/screenshots/market-profi
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 400, height: 1100 }, deviceScaleFactor: 2 });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const paint = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -17,49 +18,54 @@ try {
     await paint();
     const point = await page.evaluate(() => {
       const chart = window.__chart();
-      const rect = document.getElementById('chart').getBoundingClientRect();
       const session = window.__profileResult().sessions[5];
-      return { x: rect.left + chart.timeScale.indexToX(375) + 18,
-        y: rect.top + chart.panes()[0].priceScale.priceToY(session.poc) };
+      return { x: chart.timeScale.indexToX(375) + 30,
+        y: chart.panes()[0].priceScale.priceToY(session.poc) };
     });
-    await page.mouse.click(point.x, point.y, { button: 'right' });
+    await page.locator('#chart').click({ button: 'right', position: point });
     await page.getByRole('menuitem', { name: split ? 'Split this day' : 'Unsplit this day', exact: true }).click();
-    await page.mouse.move(700, 80);
+    await page.mouse.move(0, 0);
   };
+  const url = new URL(demoUrl);
+  url.searchParams.set('theme', 'dark');
+  await page.goto(url.href);
+  await page.waitForFunction(() => typeof window.__mp === 'function');
+  // Fit a full day vertically and give every period room. Crop only the chart;
+  // the surrounding gallery supplies theme names and links to the live controls.
+  const chartTop = await page.locator('#chart').evaluate(node => node.getBoundingClientRect().top);
+  await page.locator('#chart').evaluate(node => { node.style.flex = 'none'; node.style.height = '660px'; });
+  await page.setViewportSize({ width: 400, height: Math.ceil(chartTop + 660) });
+  const clip = { x: 0, y: Math.ceil(chartTop), width: 400, height: 660 };
+  await paint();
+  await page.locator('#density').fill('18');
+  await page.locator('#density').dispatchEvent('input');
+  await paint();
+  const before = await page.evaluate(() => JSON.stringify(window.__profileResult()));
+  await page.evaluate(() => {
+    const chart = window.__chart();
+    const scale = chart.panes()[0].priceScale;
+    const session = window.__profileResult().sessions.at(-1);
+    const span = scale.height * 2 / 18;
+    const centre = (session.high + session.low) / 2;
+    scale.setPriceRange({ min: centre - span / 2, max: centre + span / 2 });
+    chart.timeScale.setVisibleLogicalRange({ from: 375, to: 455 });
+    window.__mp().setOptions({ font: 16, letterWidth: 12, volumeProfileWidth: 90, showSessionLabel: true });
+  });
+  await setSplit(true);
   for (const theme of ['dark', 'blue', 'graphite', 'emerald', 'ivory']) {
-    const url = new URL(demoUrl);
-    url.searchParams.set('theme', theme);
-    await page.goto(url.href);
-    await page.waitForFunction(() => typeof window.__mp === 'function');
-    await page.locator('#compressed').click();
-    await setSplit(true);
-    await page.mouse.move(700, 80);
+    await page.locator('#theme').selectOption(theme);
     await paint();
-    await page.screenshot({ path: `${output}/${theme}.png` });
-    console.log(`Captured ${theme}: 1600 x 1000, DPR 1, 5px rows, newest session split`);
+    await page.screenshot({ path: `${output}/${theme}.png`, clip });
+    console.log(`Captured ${theme}: 800 x 1320, DPR 2, 18px rows, 16px letters, newest session split`);
   }
   await page.locator('#theme').selectOption('graphite');
-  await page.locator('#comfortable').click();
-  // Centre the latest session for the close views, without changing its rows.
-  await page.evaluate(() => {
-    const scale = window.__chart().panes()[0].priceScale;
-    const s = window.__profileResult().sessions.at(-1);
-    const span = scale.height * 2 / 12;
-    const centre = (s.high + s.low) / 2;
-    scale.setPriceRange({ min: centre - span / 2, max: centre + span / 2 });
-  });
   for (const split of [false, true]) {
     await setSplit(split);
     await paint();
-    const clip = await page.evaluate(() => {
-      const chart = window.__chart();
-      const rect = document.getElementById('chart').getBoundingClientRect();
-      const x = Math.max(0, Math.floor(chart.timeScale.indexToX(375) - 30));
-      return { x, y: Math.floor(rect.top), width: Math.floor(innerWidth - x), height: Math.floor(rect.height) };
-    });
     await page.screenshot({ path: `${output}/${split ? 'split' : 'packed'}-detail.png`, clip });
   }
-  if (errors.length) throw new Error(errors.join('\n'));
+  assert.equal(await page.evaluate(() => JSON.stringify(window.__profileResult())), before, 'Close-up captures must preserve the original price rows and analytics');
+  assert.deepEqual(errors, []);
 } finally {
   await browser.close();
 }

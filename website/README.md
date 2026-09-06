@@ -46,13 +46,52 @@ node tests/e2e/serve.cjs
 node scripts/capture-profile-screenshots.mjs
 ```
 
-The capture script writes five theme PNGs at 1600 × 1000, DPR 1, 5 CSS pixels
-per row, with identical synthetic sessions and the newest profile split. It
-also captures packed/split close-ups at 12 CSS pixels per row. Screenshots are
+The capture script writes five theme PNGs at 800 × 1320, DPR 2, focusing on the
+same newest synthetic session with 18 CSS pixels per row and 16-pixel letters.
+It also captures packed/split views with the same framing and unchanged price
+aggregation. Gallery cards display images at 320–400 CSS pixels wide; narrow
+screens scroll within a card instead of shrinking letters further. Screenshots are
 tracked in `public/screenshots/market-profile/`; generated demo bundles are ignored.
 Pass a full demo URL as the script's first argument to capture another local host.
 
 The gallery and 2.1.0 release notes describe features present in the current source tree.
+
+## Interactive and API checks
+
+After building and starting the static preview, run these from the repository root:
+
+```bash
+node scripts/check-profile-website.mjs
+node scripts/check-depth-demo.mjs
+node scripts/check-drawing-demo.mjs
+node scripts/check-site-design.mjs
+node --test scripts/check-btc-usd-feed.test.mjs
+```
+
+To verify actual exchange responses, all four timeframes, refreshes, reconnection
+and cleanup in a browser, run `node scripts/check-btc-usd-chart.mjs
+http://127.0.0.1:4174/openalgo-charts`. This check requires network access to the
+public data endpoint; the feed unit tests run without external requests.
+
+The depth demo uses simulated updates and the published tick-grouping API.
+The drawing playground exercises the same controller used by applications.
+The homepage, guides and API reference share the site's dark and light palettes.
+Intro animations respect the visitor's reduced-motion preference.
+
+The homepage chart uses public BTC/USD exchange candles through
+`lib/market-data/btc-usd.mjs`. It refreshes every 15 seconds and supports 15-minute,
+hourly, four-hour and daily candles, with Supertrend (10, 3) over price and MACD
+(12, 26, 9) in a separate pane. Four-hour candles aggregate hourly OHLCV on
+UTC boundaries. No API key or server is required. The source is linked below the
+chart. Failed requests show an unavailable state or label previously received
+candles as disconnected; the homepage never substitutes generated prices.
+
+The deployment generates the API reference from all eight current source entry
+points with `npx typedoc --out website/public/api` before exporting the site.
+`typedoc.json` includes the package version in page titles, applies
+`styles/api.css`, and changes asset URLs on regeneration to refresh cached styles.
+The API introduction lives in `../docs/api-introduction.md`; generated API pages
+are ignored in git and rebuilt by CI on every site deployment.
 
 ## Add or edit a page
 

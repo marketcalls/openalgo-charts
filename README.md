@@ -245,6 +245,53 @@ Headless like the rest, and the engine has no instrument concept, so symbol sync
 ### Trading
 Order, position, and bracket lines with live P&amp;L, one-click and drag-to-modify, OCO, validation, an order state machine, analyzer (sandbox) mode, and a depth-of-market ladder (5 to 200 levels).
 
+### Depth of market: simulated live example
+
+[Try the depth ladder](https://marketcalls.github.io/openalgo-charts/docs/depth-of-market/)
+with continuously simulated bids and asks, pause/resume, 5/20/200 depth levels,
+and configurable price grouping. The
+[drawing playground](https://marketcalls.github.io/openalgo-charts/docs/drawing-tools/)
+also lets you place, select, move, delete, undo and redo drawings.
+
+```html
+<div id="depth-chart" style="height: 440px"></div>
+```
+
+```ts
+import { createChart, darkTheme, generateBars } from 'openalgo-charts';
+import { DomLadder, FakeBroker } from 'openalgo-charts/trade';
+
+const chart = createChart(document.getElementById('depth-chart')!, { theme: darkTheme });
+const bars = generateBars(1700000000, 120, 60);
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(bars.length);
+const mid = Math.round(bars.at(-1)!.close / 0.05) * 0.05;
+const ladder = new DomLadder({ tickSize: 0.05, groupBy: 20, width: 180, maxRows: 40 });
+chart.addPrimitive(ladder);
+chart.panes()[0].priceScale.setPriceRange({ min: mid - 12, max: mid + 12 });
+chart.setPriceAxisAutoFit(0, 'right', false);
+
+let step = 0;
+function updateDepth() {
+  const price = mid + Math.round(Math.sin(step++ / 8) * 4) * 0.05;
+  ladder.setDepth(FakeBroker.makeDepth(price, 200, 0.05));
+}
+updateDepth();
+const timer = setInterval(updateDepth, 750);
+
+// Call this when removing the demo from your application.
+function dispose() {
+  clearInterval(timer);
+  chart.destroy();
+}
+```
+
+`tickSize` is the instrument's minimum tick; `groupBy` is the number of ticks
+per display row. Here, 20 × 0.05 creates 1.00-point rows. Quantities are summed
+into the nearest price bucket, with bids and asks kept separate. Grouping changes
+the display; it does not change the instrument's valid order prices. With a real
+feed, pass each supplied order-book snapshot to `ladder.setDepth(depth)`.
+
 ### Profiles &amp; order flow
 Volume Profile, Market Profile (TPO), Footprint, and cumulative delta.
 
@@ -260,8 +307,8 @@ The [website profile guide](./website/pages/docs/market-profile-examples.mdx) in
 the interactive demo, all five theme screenshots and packed/split close-ups.
 See the [2.1.0 changelog](./CHANGELOG.md#210).
 
-<a href="website/public/screenshots/market-profile/blue.png"><img src="website/public/screenshots/market-profile/blue.png" alt="Blue compact TPO theme, with the newest session split" width="49%" /></a>
-<a href="website/public/screenshots/market-profile/ivory.png"><img src="website/public/screenshots/market-profile/ivory.png" alt="Ivory compact TPO theme using the same synthetic sessions" width="49%" /></a>
+<a href="website/public/screenshots/market-profile/blue.png"><img src="website/public/screenshots/market-profile/blue.png" alt="Blue TPO close-up with readable letters and the newest session split" width="400" /></a>
+<a href="website/public/screenshots/market-profile/ivory.png"><img src="website/public/screenshots/market-profile/ivory.png" alt="Ivory TPO close-up using the same synthetic session" width="400" /></a>
 
 ### Warm-load cache &amp; interval registry
 

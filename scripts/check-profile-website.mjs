@@ -20,7 +20,8 @@ try {
     assert.equal(response.status(), 200, src);
     const body = await response.body();
     assert.equal(body.subarray(1, 4).toString(), 'PNG', src);
-    assert.ok(body.readUInt32BE(16) > 250 && body.readUInt32BE(20) > 500, src);
+    assert.equal(body.readUInt32BE(16), 800, src);
+    assert.equal(body.readUInt32BE(20), 1320, src);
   }
   const iframe = page.locator('iframe[title="Interactive compact market profile demo"]');
   await iframe.scrollIntoViewIfNeeded();
@@ -64,16 +65,35 @@ try {
   await page.goto(`${base}/docs/release-notes/`);
   await expect(page.getByRole('heading', { name: /^2\.1\.0/ })).toBeVisible();
   await page.goto(`${base}/`);
-  await expect(page.getByRole('link', { name: 'Explore the profile demo' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Explore the profile demo' })).toHaveCount(0);
+  await expect(page.locator('img[src*="screenshots/market-profile"]')).toHaveCount(0);
+  await expect(page.locator('.oac-profile-demo')).toHaveCount(0);
   await page.screenshot({ path: 'artifacts/website-profile-home.png', fullPage: true });
   const api = await page.request.get(`${base}/api/classes/profile.MarketProfile.html`);
   assert.equal(api.status(), 200);
   assert.match(await api.text(), /setSessionSplit/);
   assert.match(await api.text(), /isSessionSplit/);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${base}/docs/market-profile-examples/`);
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Mobile page must not overflow horizontally');
-  await page.screenshot({ path: 'artifacts/website-profile-mobile.png' });
+  for (const route of ['/docs/market-profile-examples/', '/examples/']) {
+    await page.goto(`${base}${route}`);
+    for (const width of [320, 390, 768, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      const shots = page.locator('.oac-profile-shot img');
+      for (const shot of await shots.all()) {
+        await shot.scrollIntoViewIfNeeded();
+        await expect(shot).toBeVisible();
+        const metrics = await shot.evaluate(node => ({ width: node.getBoundingClientRect().width, sourceWidth: node.naturalWidth }));
+        assert.equal(metrics.sourceWidth, 800);
+        // Captures use 16 CSS pixel letters at DPR 2. Check the actual rendered
+        // font size, including responsive card and thumbnail scaling.
+        assert.ok(32 * metrics.width / metrics.sourceWidth >= 12.7, `${route} at ${width}px must keep readable letters`);
+      }
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${route} at ${width}px must not overflow horizontally`);
+      if (route.includes('/docs/') && (width === 390 || width === 1440)) {
+        await shots.nth(1).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `artifacts/website-profile-gallery-${width}.png` });
+      }
+    }
+  }
   assert.deepEqual(errors, []);
   console.log('Website checks passed: embedded split/unsplit, five themes, unchanged analytics, seven screenshots, examples, homepage, release notes, API reference and mobile layout.');
 } finally {

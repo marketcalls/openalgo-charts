@@ -13,8 +13,18 @@
   "out": "website/public/api",
   "tsconfig": "tsconfig.json",
   "excludeInternal": true,
-  "readme": "none",
+  "readme": "docs/api-introduction.md",
   "name": "OpenAlgo Charts API",
+  "includeVersion": true,
+  "cacheBust": true,
+  "customCss": "website/styles/api.css",
+  "navigationLinks": {
+    "Website": "/openalgo-charts/",
+    "Live demos": "/openalgo-charts/examples/",
+    "Guides": "/openalgo-charts/docs/getting-started/",
+    "Source": "https://github.com/marketcalls/openalgo-charts"
+  },
+  "customFooterHtml": "<div class=\"oac-api-footer\"><strong>Build your next market experience.</strong><a href=\"/openalgo-charts/examples/\">Explore live demos →</a><span>API definitions generated from the current source with every website deployment.</span></div>",
   "intentionallyNotExported": [
     "CanvasLayer",
     "CrosshairMode",

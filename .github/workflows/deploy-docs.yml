@@ -8,6 +8,7 @@ on:
       - 'examples/market-profile/**'
       - 'src/**'
       - 'typedoc.json'
+      - 'docs/api-introduction.md'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 

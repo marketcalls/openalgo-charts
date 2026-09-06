@@ -1,5 +1,4 @@
 import React from 'react';
-import Link from 'next/link';
 
 const ROOT = '/openalgo-charts';
 const IMAGE_ROOT = `${ROOT}/screenshots/market-profile`;
@@ -30,7 +29,7 @@ export function ProfileThemeGallery() {
       {THEMES.map(theme => (
         <figure className="oac-profile-shot" key={theme.id}>
           <a href={`${IMAGE_ROOT}/${theme.id}.png`} target="_blank" rel="noreferrer" aria-label={`View full-resolution ${theme.name} screenshot`}>
-            <img src={`${IMAGE_ROOT}/${theme.id}.png`} alt={`${theme.name} compact TPO profiles, volume values, open and latest-price markers; the newest session is split`} width={1600} height={1000} loading="lazy" />
+            <img src={`${IMAGE_ROOT}/${theme.id}.png`} alt={`${theme.name} close-up of the newest daily TPO profile, with readable period letters, volume, open and latest-price markers; the session is split`} width={800} height={1320} loading="lazy" />
           </a>
           <figcaption>
             <strong>{theme.name}</strong>
@@ -49,27 +48,11 @@ export function ProfileSplitScreenshots() {
       {['packed', 'split'].map(mode => (
         <figure className="oac-profile-shot" key={mode}>
           <a href={`${IMAGE_ROOT}/${mode}-detail.png`} target="_blank" rel="noreferrer">
-            <img src={`${IMAGE_ROOT}/${mode}-detail.png`} alt={`${mode === 'packed' ? 'Packed' : 'Split'} view of the same daily TPO profile, with lowercase o at the open and # at the latest price`} loading="lazy" />
+            <img src={`${IMAGE_ROOT}/${mode}-detail.png`} alt={`${mode === 'packed' ? 'Packed' : 'Split'} view of the same daily TPO profile, with lowercase o at the open and # at the latest price`} width={800} height={1320} loading="lazy" />
           </a>
           <figcaption><strong>{mode === 'packed' ? 'Packed: gaps closed' : 'Split: one column per period'}</strong></figcaption>
         </figure>
       ))}
     </div>
-  );
-}
-
-export function ProfilePreview() {
-  return (
-    <section className="oac-section oac-profile-preview">
-      <div>
-        <span className="oac-pill">2.1.0</span>
-        <h2>Compact market profiles, in five themes.</h2>
-        <p>Read small TPO letters, split one day with a right-click, and follow the opening and latest-price markers. Explore dark and light palettes with the same data.</p>
-        <Link className="oac-btn oac-btn--primary" href="/docs/market-profile-examples">Explore the profile demo</Link>
-      </div>
-      <Link href="/docs/market-profile-examples">
-        <img src={`${IMAGE_ROOT}/blue.png`} alt="Blue theme with six compact daily market profiles and the newest session split" width={1600} height={1000} loading="lazy" />
-      </Link>
-    </section>
   );
 }

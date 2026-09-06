@@ -14,6 +14,9 @@ validation, and a depth-of-market ladder. The `OrderEngine` write path talks to 
 through a small `OrderFeed` interface (`place` / `modify` / `cancel`) - the OpenAlgo adapter
 (`OpenAlgoTradeFeed`) implements it.
 
+Try the [simulated live depth ladder](/docs/depth-of-market) to explore bid/ask
+quantities, configurable price grouping and different book depths.
+
 <Callout type="info">
 Two trade interfaces exist and are easy to confuse. The trade tier's `OrderFeed`
 (`place` / `modify` / `cancel`, from `openalgo-charts/trade`) is the broker write

@@ -5,12 +5,34 @@ description: Live, in-page chart demos powered by the real OpenAlgo Charts libra
 
 import RunnableExample from '../components/RunnableExample'
 import { ProfileDemo, ProfileThemeGallery } from '../components/ProfileShowcase'
+import DepthLadderDemo from '../components/DepthLadderDemo'
+import DrawingToolsDemo from '../components/DrawingToolsDemo'
 import { RangeSwitcherCard, LegendCard, SeriesCompareCard, IndicatorsCard, ChartTypeCard, ThemeCard, DataTooltipCard, EventMarkersCard, PriceScaleCard, CustomTypesCard, ScalesFormatCard, ScalesConfigCard, DataCard, CustomPluginsCard, PositionsCard, TradeMarkersCard } from '../components/gallery'
 
 # Live examples
 
 Every chart on this page is the real library running in your browser - the code shown
 is the code that ran. Try it, copy it, ship it.
+
+Jump to [depth of market](#depth-of-market), [drawing tools](#drawing-tools),
+[market profiles](#compact-market-profiles), [chart controls](#interactive),
+or [trading](#trading).
+
+## Depth of market
+
+Watch a simulated live order book, pause updates, and group multiple ticks into
+one price row. The [depth-of-market guide](/docs/depth-of-market) explains feed
+integration and price aggregation. All data and interactions here are simulated.
+
+<DepthLadderDemo />
+
+## Drawing tools
+
+Choose a tool, draw on the chart, then select it to move or delete it. Try undo
+and redo with the visible controls. See the [drawing tools guide](/docs/drawing-tools)
+for the full tool catalogue and integration API.
+
+<DrawingToolsDemo />
 
 ## Compact market profiles
 
