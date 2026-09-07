@@ -1,10 +1,30 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import type { MarketDepth } from '../../src/feed/types';
+import type { Bar } from '../../src/model/bar';
 import type { LadderRow } from '../../src/trade/dom-ladder';
 
 const TICK_SIZE = 0.05;
 const UPDATE_MS = 750;
+type Scenario = 'option-option' | 'spot-option';
+
+function chartClose(sequence: number, scenario: Scenario): number {
+  return scenario === 'spot-option'
+    ? Math.round((24000 + Math.sin(sequence / 13) * 18 + Math.sin(sequence / 4) * 5) * 100) / 100
+    : (2000 + Math.round(Math.sin(sequence / 8) * 3)) * TICK_SIZE;
+}
+
+function chartBar(sequence: number, scenario: Scenario): Bar {
+  const open = chartClose(sequence - 1, scenario);
+  const close = chartClose(sequence, scenario);
+  const wick = scenario === 'spot-option' ? 2.5 : TICK_SIZE;
+  return {
+    time: 1700000000 + (sequence + 80) * 60,
+    open, close,
+    high: Math.max(open, close) + wick,
+    low: Math.min(open, close) - wick,
+  };
+}
 
 function makeDepth(frame: number, levels: number): MarketDepth {
   const centreTick = 2000 + Math.round(Math.sin(frame / 8) * 3);
@@ -17,11 +37,11 @@ function makeDepth(frame: number, levels: number): MarketDepth {
 }
 
 interface DemoRuntime {
-  render: (depth: MarketDepth, frame: number, groupBy: number) => LadderRow[];
+  render: (depth: MarketDepth, frame: number, groupBy: number, scenario: Scenario) => LadderRow[];
   destroy: () => void;
 }
 
-/** A simulated book using the same DomLadder and buildRows APIs as an application. */
+/** Independent candle and order-book views using the public buildRows helper. */
 export default function DepthLadderDemo() {
   const chartElement = useRef<HTMLDivElement>(null);
   const bookElement = useRef<HTMLDivElement>(null);
@@ -29,6 +49,7 @@ export default function DepthLadderDemo() {
   const [frame, setFrame] = useState(0);
   const [levels, setLevels] = useState(20);
   const [groupBy, setGroupBy] = useState(1);
+  const [scenario, setScenario] = useState<Scenario>('option-option');
   const [running, setRunning] = useState(true);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +58,8 @@ export default function DepthLadderDemo() {
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme !== 'light';
   const depth = useMemo(() => makeDepth(frame, levels), [frame, levels]);
-  const latest = useRef({ depth, frame, groupBy });
-  latest.current = { depth, frame, groupBy };
+  const latest = useRef({ depth, frame, groupBy, scenario });
+  latest.current = { depth, frame, groupBy, scenario };
 
   useEffect(() => {
     let cancelled = false;
@@ -59,47 +80,29 @@ export default function DepthLadderDemo() {
         });
         // Keep cleanup available even if setup fails after allocating the chart.
         instance = { render: () => [], destroy: () => chart.destroy() };
-        const series = chart.addSeries('line', {
+        const series = chart.addSeries('candlestick', {
           priceFormat: { type: 'price', minMove: TICK_SIZE },
-          style: { color: dark ? '#7dafff' : '#2f6df6', lineWidth: 2 },
         });
-        const history = Array.from({ length: 80 }, (_, index) => ({
-          time: 1700000000 + index,
-          value: 100 + Math.sin(index / 9) * 0.14,
-        }));
-        series.setData(history);
-        chart.fitContent();
-        chart.timeScale.setRightOffset(128 / chart.timeScale.barSpacing);
-        let currentGroup = latest.current.groupBy;
-        const createLadder = () => new trade.DomLadder({
-          tickSize: TICK_SIZE, groupBy: currentGroup, width: 112, maxRows: 24, rowHeight: 16,
-        });
-        let ladder = createLadder();
-        chart.addPrimitive(ladder);
-        instance.render = (book, sequence, nextGroup) => {
-          if (nextGroup !== currentGroup) {
-            // Options are constructor-only in 2.1.0; replace the attached primitive.
-            chart.removePrimitive(ladder);
-            currentGroup = nextGroup;
-            ladder = createLadder();
-            chart.addPrimitive(ladder);
+        let currentScenario: Scenario | null = null;
+        let currentFrame = -1;
+        instance.render = (book, sequence, nextGroup, nextScenario) => {
+          if (nextScenario !== currentScenario) {
+            currentScenario = nextScenario;
+            series.setData(Array.from({ length: 80 }, (_, index) => chartBar(sequence - 79 + index, nextScenario)));
+            series.priceScale().setAutoScale(true);
+            chart.fitContent();
+          } else if (sequence !== currentFrame) {
+            series.update(chartBar(sequence, nextScenario));
+            const points = series.getData();
+            if (points.length > 240) series.setData(points.slice(-160));
           }
-          series.update({ time: 1700000080 + sequence, value: book.ltp });
-          const points = series.getData();
-          if (points.length > 240) series.setData(points.slice(-160));
-          // Match the displayed price span to the row step so quantities stay legible.
-          const step = TICK_SIZE * currentGroup;
-          const centre = Math.round(book.ltp / step) * step;
-          const radius = step * 10;
-          const scale = series.priceScale();
-          scale.setAutoScale(false);
-          scale.setPriceRange({ min: centre - radius, max: centre + radius });
-          ladder.setDepth(book);
-          return trade.buildRows(book, TICK_SIZE, currentGroup);
+          currentFrame = sequence;
+          // Grouping belongs to the separate book view and never changes chart data or axes.
+          return trade.buildRows(book, TICK_SIZE, nextGroup);
         };
         runtime.current = instance;
         const current = latest.current;
-        setRows(instance.render(current.depth, current.frame, current.groupBy));
+        setRows(instance.render(current.depth, current.frame, current.groupBy, current.scenario));
         setReady(true);
       } catch (cause) {
         instance?.destroy();
@@ -122,8 +125,8 @@ export default function DepthLadderDemo() {
   }, [ready, running]);
 
   useEffect(() => {
-    if (runtime.current) setRows(runtime.current.render(depth, frame, groupBy));
-  }, [depth, frame, groupBy]);
+    if (runtime.current) setRows(runtime.current.render(depth, frame, groupBy, scenario));
+  }, [depth, frame, groupBy, scenario]);
 
   // Centre the scrollable table when its row structure changes; retain the user's
   // scroll position while quantities refresh.
@@ -149,6 +152,12 @@ export default function DepthLadderDemo() {
           <span className="depth-status">Simulated · {running ? 'updating' : 'paused'}</span>
         </div>
         <div className="depth-controls">
+          <label>Chart and ladder
+            <select value={scenario} onChange={event => setScenario(event.target.value as Scenario)} disabled={!ready}>
+              <option value="option-option">Option chart + option ladder</option>
+              <option value="spot-option">Spot chart + ATM call ladder</option>
+            </select>
+          </label>
           <label>Depth levels per side
             <select value={levels} onChange={event => setLevels(Number(event.target.value))} disabled={!ready}>
               <option value={5}>5 levels</option>
@@ -170,6 +179,7 @@ export default function DepthLadderDemo() {
         </div>
       </div>
       <div className="depth-quotes">
+        <span>Ladder <strong>NIFTY ATM CE</strong></span>
         <span>Best bid <strong className="depth-bid">{depth.bids[0].price.toFixed(2)}</strong></span>
         <span>Best ask <strong className="depth-ask">{depth.asks[0].price.toFixed(2)}</strong></span>
         <span>Source tick <strong>0.05</strong></span>
@@ -177,13 +187,13 @@ export default function DepthLadderDemo() {
       </div>
       <div className="depth-panels">
         <div className="depth-chart-panel">
-          <div className="depth-panel-label">Simulated price · bid / ask ladder at right</div>
-          <div className="depth-chart" ref={chartElement} role="img" aria-label="Simulated price chart with price-aligned depth quantities" />
+          <div className="depth-panel-label">{scenario === 'spot-option' ? 'NIFTY spot' : 'NIFTY ATM CE'} · candlesticks</div>
+          <div className="depth-chart" ref={chartElement} role="img" aria-label="Simulated candlestick chart with independent price scale" />
           {!ready && !error && <p className="depth-loading">Loading depth chart…</p>}
           {error && <p className="depth-error" role="alert">Demo error: {error}</p>}
         </div>
         <div className="depth-book-panel">
-          <div className="depth-panel-label">{rows.length} display rows · scroll to explore</div>
+          <div className="depth-panel-label">ATM call ladder · {rows.length} rows · independent scale</div>
           <div className="depth-book" ref={bookElement} tabIndex={0} aria-label="Scrollable depth rows">
             <table aria-label="Aggregated depth quantities">
               <thead><tr><th scope="col">Bid qty</th><th scope="col">Price</th><th scope="col">Ask qty</th></tr></thead>
@@ -207,6 +217,8 @@ export default function DepthLadderDemo() {
       <div className="depth-footer">
         <span>Supplied book totals: <strong className="depth-bid">{qty(totalBid)} bid</strong> · <strong className="depth-ask">{qty(totalAsk)} ask</strong></span>
         <span>Updates every 750 ms. All prices and quantities are simulated.</span>
+        <span>Ladder grouping leaves candle prices, zoom and price scale untouched. Both views have separate instrument configuration.</span>
+        <span>ATM call is an illustrative fixed contract; this demo does not select or roll live option contracts.</span>
         <span>Row prices are rounded display buckets. Grouping can place both sides in one row.</span>
         <p role="status" aria-live="polite">{selection}</p>
       </div>
@@ -233,7 +245,7 @@ export default function DepthLadderDemo() {
         .depth-error { color: #ef5350; }
         .depth-book-panel { border-left: 1px solid var(--oac-card-border); min-width: 0; }
         .depth-book { height: 380px; overflow: auto; overscroll-behavior: contain; }
-        .depth-book table { display: table; width: 100%; margin: 0; border-collapse: separate; border-spacing: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+        .depth-book table { display: table; width: 100%; margin: 0; overflow: visible; border-collapse: separate; border-spacing: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
         .depth-book th, .depth-book td { width: 33.333%; height: 27px; text-align: center; padding: 0 3px; border: 0; border-bottom: 1px solid var(--oac-card-border); white-space: nowrap; }
         .depth-book thead th { position: sticky; top: 0; z-index: 1; height: 30px; background: var(--oac-card); color: var(--oac-muted); font-size: 11px; }
         .depth-book tbody th { font-weight: 500; }

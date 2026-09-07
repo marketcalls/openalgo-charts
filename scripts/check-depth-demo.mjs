@@ -1,6 +1,7 @@
 /** Exercise the published API through the website's simulated depth demo. */
 import { strict as assert } from 'node:assert';
 import { mkdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { chromium, expect } from '@playwright/test';
 
 const base = (process.argv[2] ?? 'http://127.0.0.1:4174/openalgo-charts').replace(/\/$/, '');
@@ -60,27 +61,63 @@ try {
   const totals = rows => rows.reduce((sum, row) => [sum[0] + row.bid, sum[1] + row.ask], [0, 0]);
   const raw = await readBook();
   assert.equal(raw.length, 40, '20 source levels per side should display 40 raw rows');
+  const bookBounds = await demo.getByLabel('Scrollable depth rows').boundingBox();
+  const headerBounds = await demo.getByRole('columnheader', { name: 'Bid qty' }).boundingBox();
+  assert.ok(headerBounds.y >= bookBounds.y && headerBounds.y < bookBounds.y + 32, 'Column headings must stay visible when the book is scrolled to its centre');
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(150);
+  const chartPixels = async () => createHash('sha256').update(await demo.locator('.depth-chart canvas').first().evaluate(canvas => canvas.toDataURL())).digest('hex');
+  const originalChart = await chartPixels();
   for (const step of ['0.25', '0.50', '1.00']) {
-    await demo.locator('canvas').evaluateAll(canvases => canvases.forEach(canvas => window.__depthCanvasText.delete(canvas)));
     await demo.getByLabel('Display row size').selectOption(step);
     const grouped = await readBook();
     assert.ok(grouped.length < raw.length, 'Larger display rows must aggregate the supplied book');
     assert.deepEqual(totals(grouped), totals(raw), 'Grouping must preserve both side totals');
     assert.ok(grouped.every(row => Math.abs(row.price / Number(step) - Math.round(row.price / Number(step))) < 1e-7));
     assert.equal(await snapshot.textContent(), paused, 'Changing grouping must preserve the paused snapshot');
-    const largest = String(Math.max(...grouped.flatMap(row => [row.bid, row.ask])));
-    await expect.poll(() => demo.locator('canvas').evaluateAll(canvases =>
-      canvases.flatMap(canvas => Array.from(window.__depthCanvasText.get(canvas) ?? []))
-    )).toContain(largest);
+    await page.waitForTimeout(150);
+    assert.equal(await chartPixels(), originalChart, 'Ladder grouping must not change the candle chart or its price scale');
   }
 
   await demo.getByLabel('Display row size').selectOption('0.05');
   assert.deepEqual(await readBook(), raw, 'Returning to the source tick must restore the original rows');
+  const chartBounds = await demo.locator('.depth-chart').boundingBox();
+  await page.mouse.move(chartBounds.x + chartBounds.width - 20, chartBounds.y + 140);
+  await page.mouse.down();
+  await page.mouse.move(chartBounds.x + chartBounds.width - 20, chartBounds.y + 210, { steps: 6 });
+  await page.mouse.up();
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(150);
+  const manuallyScaled = await chartPixels();
+  assert.notEqual(manuallyScaled, originalChart, 'The regression check must start with a manually adjusted price scale');
+  await demo.getByLabel('Display row size').selectOption('0.50');
+  await page.waitForTimeout(150);
+  assert.equal(await chartPixels(), manuallyScaled, 'Grouping must preserve a manually adjusted price scale');
+  await demo.getByLabel('Display row size').selectOption('0.05');
+  await demo.locator('canvas').evaluateAll(canvases => canvases.forEach(canvas => window.__depthCanvasText.delete(canvas)));
+  await demo.getByLabel('Chart and ladder').selectOption('spot-option');
+  await expect(demo.getByText('NIFTY spot · candlesticks', { exact: true })).toBeVisible();
+  await expect.poll(chartPixels).not.toBe(originalChart);
+  await expect.poll(() => demo.locator('.depth-chart canvas').evaluateAll(canvases =>
+    canvases.flatMap(canvas => Array.from(window.__depthCanvasText.get(canvas) ?? []))
+      .some(text => /^24,?0\d\d(?:\.\d+)?$/.test(text))
+  )).toBe(true);
+  assert.deepEqual(await readBook(), raw, 'Changing the chart instrument must preserve the independent option book');
+  await page.waitForTimeout(150);
+  const spotChart = await chartPixels();
+  await demo.getByLabel('Display row size').selectOption('1.00');
+  await page.waitForTimeout(150);
+  assert.equal(await chartPixels(), spotChart, 'Option grouping must not rescale a spot chart');
+  await demo.getByLabel('Display row size').selectOption('0.05');
   for (const levels of ['5', '200']) {
     await demo.getByLabel('Depth levels per side').selectOption(levels);
     assert.equal((await readBook()).length, Number(levels) * 2);
     assert.equal(await snapshot.textContent(), paused, 'Depth selection must not restart a paused simulation');
+    await page.waitForTimeout(150);
+    assert.equal(await chartPixels(), spotChart, 'Depth selection must not alter the chart');
   }
+  await demo.getByLabel('Chart and ladder').selectOption('option-option');
+  await expect(demo.getByText('NIFTY ATM CE · candlesticks', { exact: true })).toBeVisible();
   await demo.getByLabel('Display row size').selectOption('0.50');
   const pick = demo.getByRole('button', { name: /^Inspect bid at / }).first();
   await pick.click();
@@ -118,7 +155,7 @@ try {
   assert.equal(await page.evaluate(() => performance.timeOrigin), origin, 'Lifecycle check must navigate within the same document');
   assert.equal(await page.evaluate(() => window.__depthTimers.size), 0, 'Unmount must clear the simulation timer');
   assert.deepEqual(errors, []);
-  console.log('Depth demo checks passed: changing quantities, pause/resume, quantity-preserving canvas and table grouping, 5/20/200 levels, row inspection, light/dark themes, mobile layout and timer cleanup.');
+  console.log('Depth demo checks passed: independent candle/ladder scales, option and spot scenarios, changing quantities, pause/resume, quantity-preserving grouping, 5/20/200 levels, row inspection, themes, mobile layout and timer cleanup.');
 } finally {
   await browser.close();
 }

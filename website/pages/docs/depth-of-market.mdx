@@ -1,6 +1,6 @@
 ---
 title: Depth of Market
-description: A simulated real-time depth ladder with 5, 20 or 200 levels per side and configurable price aggregation.
+description: Independent candlestick and depth views, with option or spot charts and configurable ladder aggregation.
 ---
 
 import DepthLadderDemo from '../../components/DepthLadderDemo'
@@ -9,16 +9,97 @@ import DepthLadderDemo from '../../components/DepthLadderDemo'
 
 Explore a changing order book with **simulated updates every 750 ms**. Choose 5,
 20 or 200 price levels per side, pause a snapshot, and combine several ticks into
-one display row. The chart uses the published `DomLadder` primitive; the adjacent
-table uses the same `buildRows` aggregation helper.
+one display row. **The ladder has its own rows and scrolling, independent of the
+candlestick chart's price scale.** Its quantities use the published `buildRows`
+aggregation helper.
 
 <DepthLadderDemo />
 
 The source tick stays at **0.05**. Start with 20 levels and pause the demo, then
 change the display row size from 0.05 to 0.50. The number of rows falls while
-the total bid and ask quantities stay the same. Scroll the table to see levels
-outside the chart's visible price range. Selecting a quantity in the table only
-displays a message; this demo has no order connection.
+the total bid and ask quantities stay the same. The candle chart stays exactly
+where you left it, including its zoom and price scale. Scroll the ladder to
+explore the supplied book. Selecting a quantity only displays a message; this
+demo has no order connection.
+
+Use **Chart and ladder** to try either requested setup:
+
+| Setup | Candlestick chart | Independent ladder |
+|---|---|---|
+| Option chart + option ladder | Illustrative NIFTY ATM call, normal price scale | The same option, with 0.05–1.00 display rows |
+| Spot chart + ATM call ladder | Illustrative NIFTY spot, around 24,000 | An option around 100, with its own display grouping |
+
+All data in these two scenarios is simulated. The ATM call label represents a
+fixed illustrative contract; automatic strike selection, expiry selection and
+contract rollover are not part of this demo.
+
+## Keep the chart and ladder independent
+
+Use a separate table or panel for a ladder whose grouping or instrument differs
+from the chart. `buildRows` only aggregates a supplied book: it does not read or
+change a chart's price axis. The demo previously set the chart's price range from
+the ladder row size; that coupling has been removed.
+
+The following example uses the existing 2.1.0 API. Give `chart` a height and put a
+`<tbody id="book-rows">` in a separate scrollable table with bid, price and ask
+column headings:
+
+```ts
+import { createChart } from 'openalgo-charts';
+import { buildRows } from 'openalgo-charts/trade';
+import type { Bar, MarketDepth } from 'openalgo-charts';
+
+const chart = createChart(document.getElementById('chart')!);
+const candles = chart.addSeries('candlestick');
+const bookRows = document.getElementById('book-rows')!;
+const ladderTick = 0.05;
+let groupBy = 10; // Independent 0.50 display rows.
+let latestDepth: MarketDepth = { bids: [], asks: [], ltp: 0 };
+
+function onChartHistory(bars: Bar[]) {
+  candles.setData(bars);
+  chart.fitContent();
+}
+
+function onChartBar(bar: Bar) {
+  candles.update(bar);
+}
+
+function onOptionDepth(depth: MarketDepth) {
+  latestDepth = depth;
+  bookRows.replaceChildren(...buildRows(depth, ladderTick, groupBy).map(row => {
+    const tr = document.createElement('tr');
+    for (const text of [String(row.bidQty), row.price.toFixed(2), String(row.askQty)]) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      td.style.height = '28px';
+      tr.append(td);
+    }
+    return tr;
+  }));
+}
+
+function setLadderGrouping(ticksPerRow: number) {
+  if (!Number.isInteger(ticksPerRow) || ticksPerRow < 1) {
+    throw new Error('Grouping must be a positive integer number of source ticks.');
+  }
+  groupBy = ticksPerRow;
+  onOptionDepth(latestDepth);
+}
+
+// Connect chart history/live bars and option depth to their own feed subscriptions.
+// For a spot chart, route spot bars here and the chosen option's book to onOptionDepth.
+// On teardown, unsubscribe both feeds, then call chart.destroy().
+```
+
+For an application, keep separate chart and ladder instrument identifiers,
+source tick sizes, display settings and feed subscriptions. For a spot chart
+with an ATM option ladder, resolve a concrete option symbol and expiry in your
+host application. On a contract change, unsubscribe the previous book, clear its
+rows, subscribe to the new contract and ignore late messages from the old
+subscription. Show the selected strike/expiry and a feed timestamp beside the
+ladder. Consider keeping the selected contract fixed during inspection and
+making ATM reselection explicit, so rows do not suddenly switch instruments.
 
 ## Source ticks and display grouping
 
@@ -43,10 +124,11 @@ That row label is an aggregation bucket, not an executable quote. The best bid
 and ask above the demo come from the ungrouped supplied book. Empty price levels
 are not invented or filled in between the supplied levels.
 
-## Add a ladder
+## Attach a price-aligned ladder instead
 
-The ladder is available in the trade tier. The following code uses the published
-2.1.0 API:
+`DomLadder` is an alternative when the book should align to the **same instrument
+and price scale** as its chart. It is available in the trade tier. The following
+code uses the published 2.1.0 API:
 
 ```ts
 import { createChart } from 'openalgo-charts';
@@ -109,7 +191,7 @@ groupedLadder.setDepth(depth);
 // Route subsequent snapshots to groupedLadder.
 ```
 
-For a separate table, use the same public helper:
+The independent demo uses the same public helper without attaching a primitive:
 
 ```ts
 import { buildRows } from 'openalgo-charts/trade';
@@ -120,13 +202,18 @@ const rows = buildRows(depth, 0.05, 10);
 
 ## Rendering and data limits
 
-The ladder is docked inside the chart's right edge and aligns quantities to its
+The attached `DomLadder` primitive is docked inside the chart's right edge and aligns quantities to its
 price scale. Its canvas displays rows in the visible price range, capped by
 `maxRows`; it does not automatically fit all supplied depth. Zoom or adjust the
-price scale to inspect a different range. The demo adjusts its price span when
-the grouping changes and centres the viewport on the nearest display bucket.
-Raw tick movements inside that bucket update quantities without shifting the
-ladder vertically. Its simulated price history is bounded to 240 points.
+price scale to inspect a different range. `rowHeight` controls the drawn row's
+height; it does not create an independent price scale. Grouping the primitive
+does not itself rescale the chart, although adjacent grouped prices can overlap
+when the chart's price scale places them too close together.
+
+The independent demo above uses a scrollable table with fixed-height rows, so
+every supplied aggregated row remains accessible at any chart zoom. Its
+simulated candle history is bounded to 240 bars. For much deeper books, a host
+can virtualize this table while continuing to use `buildRows` for aggregation.
 
 `ladder.tier()` reports `none` for an empty book, `compact` for up to five levels
 per side, and `deep` for larger snapshots. Passing empty bid and ask arrays clears

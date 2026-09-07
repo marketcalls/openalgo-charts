@@ -249,32 +249,48 @@ Order, position, and bracket lines with live P&amp;L, one-click and drag-to-modi
 
 [Try the depth ladder](https://marketcalls.github.io/openalgo-charts/docs/depth-of-market/)
 with continuously simulated bids and asks, pause/resume, 5/20/200 depth levels,
-and configurable price grouping. The
+and configurable price grouping independent of the candlestick chart's scale.
+Try option candles with an option ladder, or spot candles with a separate ATM
+call ladder. The
 [drawing playground](https://marketcalls.github.io/openalgo-charts/docs/drawing-tools/)
 also lets you place, select, move, delete, undo and redo drawings.
 
 ```html
 <div id="depth-chart" style="height: 440px"></div>
+<div style="max-height: 440px; overflow: auto">
+  <table>
+    <thead><tr><th>Bid qty</th><th>Price</th><th>Ask qty</th></tr></thead>
+    <tbody id="depth-rows"></tbody>
+  </table>
+</div>
 ```
 
 ```ts
 import { createChart, darkTheme, generateBars } from 'openalgo-charts';
-import { DomLadder, FakeBroker } from 'openalgo-charts/trade';
+import { buildRows, FakeBroker } from 'openalgo-charts/trade';
 
 const chart = createChart(document.getElementById('depth-chart')!, { theme: darkTheme });
 const bars = generateBars(1700000000, 120, 60);
 chart.addSeries('candlestick').setData(bars);
 chart.timeScale.fitContent(bars.length);
 const mid = Math.round(bars.at(-1)!.close / 0.05) * 0.05;
-const ladder = new DomLadder({ tickSize: 0.05, groupBy: 20, width: 180, maxRows: 40 });
-chart.addPrimitive(ladder);
-chart.panes()[0].priceScale.setPriceRange({ min: mid - 12, max: mid + 12 });
-chart.setPriceAxisAutoFit(0, 'right', false);
+const bookRows = document.getElementById('depth-rows')!;
+let groupBy = 20; // Change this to regroup the ladder; the chart keeps its own scale.
 
 let step = 0;
 function updateDepth() {
   const price = mid + Math.round(Math.sin(step++ / 8) * 4) * 0.05;
-  ladder.setDepth(FakeBroker.makeDepth(price, 200, 0.05));
+  const depth = FakeBroker.makeDepth(price, 200, 0.05);
+  bookRows.replaceChildren(...buildRows(depth, 0.05, groupBy).map(row => {
+    const tr = document.createElement('tr');
+    for (const text of [String(row.bidQty), row.price.toFixed(2), String(row.askQty)]) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      td.style.height = '28px';
+      tr.append(td);
+    }
+    return tr;
+  }));
 }
 updateDepth();
 const timer = setInterval(updateDepth, 750);
@@ -290,7 +306,10 @@ function dispose() {
 per display row. Here, 20 × 0.05 creates 1.00-point rows. Quantities are summed
 into the nearest price bucket, with bids and asks kept separate. Grouping changes
 the display; it does not change the instrument's valid order prices. With a real
-feed, pass each supplied order-book snapshot to `ladder.setDepth(depth)`.
+feed, pass each supplied order-book snapshot to `buildRows`. Chart candles and
+ladder depth can come from separate instrument subscriptions. `DomLadder` remains
+available for an attached ladder that aligns to the chart's own price scale;
+see the guide for both integration patterns.
 
 ### Profiles &amp; order flow
 Volume Profile, Market Profile (TPO), Footprint, and cumulative delta.

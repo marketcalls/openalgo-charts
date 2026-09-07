@@ -72,6 +72,14 @@ jobs:
         run: |
           npm install
           npm run build
+      - name: Verify independent depth demo in a browser
+        run: |
+          npx playwright install --with-deps chromium
+          node website/scripts/serve-preview.mjs 4174 &
+          depth_preview_pid=$!
+          trap 'kill "$depth_preview_pid"' EXIT
+          curl --retry 10 --retry-connrefused --retry-delay 1 --fail --silent http://127.0.0.1:4174/openalgo-charts/docs/depth-of-market/ > /dev/null
+          node scripts/check-depth-demo.mjs
 
   e2e:
     name: playwright smoke (real browser)
