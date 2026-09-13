@@ -169,7 +169,7 @@ legend it is screen-space: no time anchor, no part in autoscale, and a zoom leav
 where it was. Seasonality heatmaps, performance summaries and signal scoreboards are all
 the same shape, so they are all this primitive.
 
-<RunnableExample height={320} watermark={false} code={`const chart = lib.createChart(el);
+<RunnableExample height={320} code={`const chart = lib.createChart(el);
 chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 140, 3600));
 
 const table = new lib.ChartTable({
@@ -210,6 +210,11 @@ directly. See [indicators](/docs/indicators#tables).
 
 ## Logo / brand watermark
 
+Version 2.1.9 adds a chart-owned OpenAlgo corner logo by default.
+Use `branding: false` when managing your own logo primitive. The optional background
+text watermark remains off by default. See [Branding and Watermarks](/docs/branding-and-watermarks)
+for shared settings, automatic symbol text and host customization.
+
 `LogoWatermark` stamps a small image in a corner of the plot. It draws on the canvas (so it
 is captured by `takeScreenshot()`), is source-agnostic (pass a `src` URL/data-URI or a
 preloaded `image`), and an optional `tint` recolors the opaque pixels so a single-color logo
@@ -243,7 +248,7 @@ listener reads settled geometry. Use it if you keep your own chrome positioned; 
 anchor if the engine can do it for you.
 </Callout>
 
-<RunnableExample height={320} watermark={false} code={`const chart = lib.createChart(el);
+<RunnableExample height={320} code={`const chart = lib.createChart(el, { branding: false });
 chart.addSeries('candlestick').setData(lib.generateBars(1700000000, 140, 3600));
 
 // colored badge, bottom-right (the default corner)

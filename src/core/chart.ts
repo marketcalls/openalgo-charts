@@ -99,6 +99,16 @@ import { PaneLegend, type PaneLegendAction, type LegendStatusLineOptions } from 
 import { ChartTable } from '../primitives/table';
 import { TimeNavigator, type TimeNavigatorOptions } from '../primitives/time-navigator';
 import type { ChartSettingsState } from '../model/chart-settings';
+import { LogoWatermark, type LogoWatermarkOptions } from '../primitives/watermark';
+import { TextWatermark, type TextWatermarkOptions } from '../primitives/text-watermark';
+
+/** Optional background text. Blank text follows the chart's symbol and interval. */
+export interface ChartWatermarkOptions extends Partial<TextWatermarkOptions> {
+  visible?: boolean;
+}
+
+/** Defensive branding snapshot emitted synchronously after setBranding as `branding:changed`. */
+export type BrandingChangedEvent = false | LogoWatermarkOptions;
 import { DEFAULT_TIMEZONE, isValidTimezone } from '../feed/time';
 import { clamp } from '../helpers/math';
 
@@ -335,6 +345,10 @@ export interface ChartOptions {
    * of the chart. Pass `false` to drop them, or an options object to restyle.
    */
   timeNavigator?: boolean | Partial<TimeNavigatorOptions>;
+  /** OpenAlgo corner mark by default. Pass false to hide it or options for custom branding. */
+  branding?: boolean | LogoWatermarkOptions;
+  /** Background text, off by default. Blank text follows setDataContext. */
+  watermark?: boolean | ChartWatermarkOptions;
 }
 
 export interface AddSeriesOptions {
@@ -828,6 +842,13 @@ export class Chart {
   private _timeNav: TimeNavigator | null = null;
   /** Pane the navigator is currently attached to, so it can follow the bottom. */
   private _timeNavPane = -1;
+  private _branding: LogoWatermark | null = null;
+  private _brandingOptions: false | LogoWatermarkOptions = false;
+  private _brandingPress: { pointerId: number; mark: LogoWatermark; moved: boolean } | null = null;
+  private _watermark: TextWatermark | null = null;
+  private _watermarkOptions: ChartWatermarkOptions = {
+    visible: false, text: '', color: '#9aa4b2', opacity: 0.08, fontSize: 64,
+  };
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._timeScale = new TimeScale(options.timeScale);
@@ -920,6 +941,8 @@ export class Chart {
     this._loop = new RenderLoop(() => this._onFrame(), this._raf.schedule, this._raf.cancel);
 
     this._addPane();
+    this.setBranding(options.branding ?? true);
+    this.setWatermarkOptions(options.watermark ?? false);
     this._observeSize();
     this._attachInput();
     // A host that mutates the time scale directly (e.g. setVisibleLogicalRange to
@@ -1355,7 +1378,65 @@ export class Chart {
     if (this._dataContext?.symbol === context?.symbol && this._dataContext?.exchange === context?.exchange
       && this._dataContext?.interval === context?.interval && !!this._dataContext === !!context) return;
     this._dataContext = context ? Object.freeze({ ...context }) : undefined;
+    this._syncWatermark();
     this.emit('data:context', this._dataContext);
+  }
+
+  /** Replace chart-owned branding. Manually attached primitives are independent. */
+  public setBranding(options: boolean | LogoWatermarkOptions): void {
+    if (this._branding !== null) this.removePrimitive(this._branding);
+    this._branding = null;
+    this._brandingOptions = options === false ? false : {
+      position: 'bottom-left', margin: 14, opacity: 1, padding: 8,
+      label: 'Chart by OpenAlgo', href: 'https://openalgo.in', id: 'chart-branding',
+      ...(options === true ? {} : options),
+    };
+    if (this._brandingOptions !== false) {
+      if (typeof this._brandingOptions.padding === 'object') this._brandingOptions.padding = { ...this._brandingOptions.padding };
+      this._branding = new LogoWatermark(this._brandingOptions);
+      this.addPrimitive(this._branding, { anchor: 'chart-bottom' });
+    }
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
+    this.emit('branding:changed', this.brandingOptions());
+  }
+
+  /** Host branding options, excluded from saved chart state. */
+  public brandingOptions(): false | LogoWatermarkOptions {
+    const o = this._brandingOptions;
+    return o === false ? false : { ...o, ...(typeof o.padding === 'object' ? { padding: { ...o.padding } } : {}) };
+  }
+
+  /** Patch background text preferences. Boolean input changes visibility only. */
+  public setWatermarkOptions(options: boolean | ChartWatermarkOptions): void {
+    const patch = typeof options === 'boolean' ? { visible: options } : options;
+    if (patch === null || typeof patch !== 'object') return;
+    const o = this._watermarkOptions;
+    if (typeof patch.visible === 'boolean') o.visible = patch.visible;
+    for (const key of ['text', 'color', 'font', 'id'] as const) {
+      if (typeof patch[key] === 'string') o[key] = patch[key];
+    }
+    if (typeof patch.opacity === 'number' && Number.isFinite(patch.opacity)) o.opacity = Math.max(0, Math.min(1, patch.opacity));
+    if (typeof patch.fontSize === 'number' && Number.isFinite(patch.fontSize)) o.fontSize = Math.max(10, Math.min(200, patch.fontSize));
+    if (patch.zOrder === 'bottom' || patch.zOrder === 'normal' || patch.zOrder === 'top') o.zOrder = patch.zOrder;
+    this._syncWatermark();
+  }
+
+  /** JSON-safe preferences. Automatic text remains blank in this snapshot. */
+  public watermarkOptions(): Readonly<ChartWatermarkOptions> { return { ...this._watermarkOptions }; }
+
+  private _syncWatermark(): void {
+    const o = this._watermarkOptions;
+    if (!o.visible) {
+      if (this._watermark !== null) this.removePrimitive(this._watermark);
+      this._watermark = null;
+      return;
+    }
+    const text = o.text?.trim() ? o.text : [this._dataContext?.symbol, this._dataContext?.interval].filter(Boolean).join(' ');
+    if (this._watermark === null) {
+      this._watermark = new TextWatermark({ ...o, text });
+      this.addPrimitive(this._watermark, { anchor: 'chart-top' });
+    } else this._watermark.setOptions({ ...o, text });
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
   }
 
   private _indicatorHost(): IndicatorHost {
@@ -1631,7 +1712,7 @@ export class Chart {
   // 'click', 'dblclick', 'hover', 'drag', 'drag:end', 'pan', 'zoom', 'resize',
   // 'lazy-load', 'paneAdded', 'paneRemoved', 'paneMoved', 'paneMaximized', 'paneResized',
   // 'priceAxisMoved', 'indicatorRemoved', 'indicatorSettings', 'renderer:fallback',
-  // 'destroy'. The
+  // 'branding:changed', 'destroy'. The
   // trading layer routes its 'trading:*' events through here too, and the draw
   // tier emits 'draw:*' plus the 2.0 pair 'drawing:select' and 'drawing:change'
   // (the legacy names carry one id; the new ones carry the whole selection).
@@ -2094,9 +2175,12 @@ export class Chart {
     g.fillRect(0, 0, out.width, out.height);
     const layout = this._paneLayout();
     for (let i = 0; i < this._panes.length; i++) {
+      if (this._layoutWeight(i) <= 0) continue;
       const y = Math.round((layout[i]?.top ?? 0) * dpr);
-      g.drawImage(this._panes[i].base.element, 0, y);
-      g.drawImage(this._panes[i].top.element, 0, y);
+      for (const layer of [this._panes[i].base, this._panes[i].top]) {
+        // Hidden or unmeasured buffers are invalid Canvas2D image sources.
+        if (layer.element.width > 0 && layer.element.height > 0) g.drawImage(layer.element, 0, y);
+      }
     }
     return out;
   }
@@ -2594,6 +2678,7 @@ export class Chart {
       // the settings module so `ChartState` stays the shape of the core.
       canvas: this.canvasOptions(),
       statusLine: this.statusLineOptions(),
+      watermark: this.watermarkOptions(),
       trading: { ...this._tradingSettings },
       // The two switches, never the clock function: a callback does not survive
       // JSON, and the host that supplied one supplies it again on the way back.
@@ -2645,6 +2730,7 @@ export class Chart {
     // last and win.
     if (s.canvas) this.setCanvasOptions(s.canvas);
     if (s.statusLine) this.setStatusLineOptions(s.statusLine);
+    if (s.watermark) this.setWatermarkOptions(s.watermark);
     if (s.trading) this.setTradingSettings(s.trading);
     if (s.axisChrome) this.setAxisChromeOptions(s.axisChrome);
     if (s.navigation && typeof s.navigation === 'object') this._patchNavigation(s.navigation);
@@ -3250,7 +3336,7 @@ export class Chart {
     el.addEventListener('pointerdown', this._onPointerDown);
     el.addEventListener('pointermove', this._onPointerMove);
     el.addEventListener('pointerup', this._onPointerUpNative);
-    el.addEventListener('pointercancel', this._onPointerUp);
+    el.addEventListener('pointercancel', this._onPointerCancel);
     el.addEventListener('pointerleave', this._onPointerLeave);
     el.addEventListener('wheel', this._onWheel, { passive: false });
     el.addEventListener('dblclick', this._onDblClick);
@@ -3465,7 +3551,8 @@ export class Chart {
     // Only the primary button starts a pan / line-drag. A right-click (context
     // menu) also fires pointerdown, and its pointerup is often swallowed by the
     // menu — arming the drag state then makes the chart pan with no button held.
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if ((e.pointerType === 'mouse' || e.pointerType === 'pen') && e.button !== 0) return;
+    this._endedPointers.delete(e.pointerId);
     this._stopKinetic();
     // Taking hold of the chart ends a zoom glide too: the viewport is the
     // user's again the moment they touch it.
@@ -3530,6 +3617,13 @@ export class Chart {
       return;
     }
 
+    if (this._branding !== null && this._brandingHit(p.pane, p.x, p.localY)) {
+      this._brandingPress = { pointerId: e.pointerId, mark: this._branding, moved: false };
+      this._dragging = false;
+      this._pointerMoved = false;
+      return;
+    }
+
     // While a host is placing something (a drawing tool is armed), a press is the
     // start of a shape, not a pan. Bail before the drag/hit paths so the gesture
     // can only produce anchors — `_onPointerUp` turns it into clicks.
@@ -3578,7 +3672,9 @@ export class Chart {
     this._unfreezeOverlay();
     // Safety: if the primary button is no longer held (missed pointerup — e.g.
     // released over a context menu or outside the window), end any drag now.
-    if (e.pointerType === 'mouse' && (e.buttons & 1) === 0 && (this._dragging || this._dragId !== null || this._axisDrag !== null)) {
+    if (e.pointerType === 'mouse' && (e.buttons & 1) === 0
+      && (this._dragging || this._dragId !== null || this._axisDrag !== null || this._brandingPress !== null)) {
+      if (this._brandingPress !== null) this._brandingPress.moved = true;
       this._onPointerUp(e);
       // Marked after the fact, not before: the recovery IS this pointer's one
       // real end, so it has to run. What must be swallowed is the release that
@@ -3589,6 +3685,13 @@ export class Chart {
     const p = this._localPoint(e);
     if (this._pointers.has(e.pointerId)) this._pointers.set(e.pointerId, { x: p.x, y: p.y, pane: p.pane });
     if (this._pinch !== null) { this._updatePinch(); return; }
+    if (this._brandingPress !== null) {
+      if (Math.abs(p.x - this._downX) > 3 || Math.abs(p.localY - this._downLocalY) > 3
+        || p.pane !== this._downPane || (e.pointerType === 'mouse' && (e.buttons & 1) === 0)) {
+        this._brandingPress.moved = true;
+      }
+      return;
+    }
     if (this._axisDrag === 'price') {
       // drag up (dy<0) → expand (zoom in); drag down → compress (zoom out)
       const dy = p.localY - this._axisStartCoord;
@@ -3693,9 +3796,22 @@ export class Chart {
     // `subscribeClick` doubles: a legend's hide toggles twice and looks dead.
     if (this._endedPointers.has(e.pointerId)) { this._endedPointers.delete(e.pointerId); return; }
     this._pointers.delete(e.pointerId);
+    if (this._brandingPress?.pointerId === e.pointerId) {
+      const press = this._brandingPress;
+      this._brandingPress = null;
+      const p = this._localPoint(e);
+      if (!press.moved && press.mark === this._branding && p.pane === this._downPane
+        && Math.abs(p.x - this._downX) <= 3 && Math.abs(p.localY - this._downLocalY) <= 3
+        && this._brandingHit(p.pane, p.x, p.localY)) {
+        const href = press.mark.href();
+        if (href && /^https?:\/\//i.test(href)) this._doc.defaultView?.open(href, '_blank', 'noopener,noreferrer');
+      }
+      this._endedPointers.add(e.pointerId);
+      return;
+    }
     if (this._pinch !== null) {
-      // a finger lifted mid-pinch: end the gesture; don't start a drag with the remnant
-      if (this._pointers.size < 2) { this._pinch = null; this._dragging = false; }
+      // Keep the remaining finger in the same gesture so its release cannot place a drawing.
+      if (this._pointers.size === 0) { this._pinch = null; this._dragging = false; }
       return;
     }
     if (this._paneResize !== null) {
@@ -3812,14 +3928,31 @@ export class Chart {
    * refreshed and still holds the *previous* left-click. Letting a non-primary
    * pointerup through would re-run the click branch against that stale position
    * and replay the last click (e.g. re-firing a Buy/Sell button → a phantom
-   * order). Touch/pen are unaffected (they contact with button 0). The internal
+   * order). Touch and pen tip contact use button 0. The internal
    * recovery call from `_onPointerMove` invokes `_onPointerUp` directly, so it
    * bypasses this filter and still ends a drag when a button release is missed.
    */
   private readonly _onPointerUpNative = (e: PointerEvent): void => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if ((e.pointerType === 'mouse' || e.pointerType === 'pen') && e.button !== 0) return;
     this._onPointerUp(e);
   };
+
+  private readonly _onPointerCancel = (e: PointerEvent): void => {
+    if (this._brandingPress?.pointerId === e.pointerId) this._brandingPress.moved = true;
+    this._onPointerUp(e);
+  };
+
+  private _brandingHit(paneIndex: number, x: number, y: number): boolean {
+    const pane = this._panes[paneIndex];
+    if (this._branding === null || !pane?.hasPrimitive(this._branding)) return false;
+    const isBottom = paneIndex === this._bottomPaneIndex();
+    return this._branding.hitTest(x - this._leftAxisWidth, y, {
+      timeScale: this._timeScale, priceScale: pane.priceScale, dataLayer: this._dataLayer,
+      plotWidth: this._width - this._leftAxisWidth - this._rightAxisWidth,
+      plotHeight: (this._paneLayout()[paneIndex]?.height ?? 0) - (isBottom ? this._timeAxisHeight : 0),
+      priceAxisWidth: this._rightAxisWidth, dpr: this._pixelRatio(), theme: this._theme,
+    }) !== null;
+  }
 
   private readonly _onPointerLeave = (): void => {
     this._pointerInside = false;
@@ -3966,6 +4099,7 @@ export class Chart {
 
   private readonly _onDblClick = (e: { clientX: number; clientY: number }): void => {
     const p = this._localPoint(e);
+    if (this._brandingHit(p.pane, p.x, p.localY)) return;
     const ev: DoubleClickEvent = { paneIndex: p.pane, x: p.x, y: p.y, handled: false };
     this.emit('dblclick', ev);
     // While a tool is armed a double-click means "finish this shape" — a
@@ -3979,6 +4113,7 @@ export class Chart {
 
   // ── multi-touch pinch (zoom + two-finger pan) ─────────────────────────────
   private _beginPinch(): void {
+    this._brandingPress = null;
     const pts = [...this._pointers.values()];
     this._pinch = pinchState(pts[0], pts[1]);
     this._pinchPane = pts[0].pane;
@@ -4142,7 +4277,9 @@ export class Chart {
     this._setHover(hit);
     // The navigator reveals on pointer position, not on hover id — see the note
     // in time-navigator.ts. Only the bottom pane carries it.
-    this._feedTimeNav(paneIndex === this._bottomPaneIndex() ? { x: plotX, y: localY } : null);
+    // The hover label occupies the same bottom strip as the navigation row.
+    this._feedTimeNav(paneIndex === this._bottomPaneIndex() && !this._brandingHit(paneIndex, x, localY)
+      ? { x: plotX, y: localY } : null);
     let y = localY;
     const index = Math.round(this._timeScale.xToIndex(plotX));
     let hoveredBar: Bar | null = null;
@@ -4282,7 +4419,7 @@ export class Chart {
       el.removeEventListener('pointerdown', this._onPointerDown);
       el.removeEventListener('pointermove', this._onPointerMove);
       el.removeEventListener('pointerup', this._onPointerUpNative);
-      el.removeEventListener('pointercancel', this._onPointerUp);
+      el.removeEventListener('pointercancel', this._onPointerCancel);
       el.removeEventListener('pointerleave', this._onPointerLeave);
       el.removeEventListener('wheel', this._onWheel);
       el.removeEventListener('dblclick', this._onDblClick);

@@ -1,6 +1,5 @@
 import { registeredIndicators, getIndicator, indicatorStyleInputs, INDICATOR_SOURCES } from '/dist/openalgo-charts.mjs';
 import { el, esc } from './ui.js';
-import { placeWatermark } from './watermark.js';
 import { autosave } from './persist.js';
 
 let app;
@@ -280,7 +279,6 @@ export function initIndicators(a) {
     const inst = app.chart.addIndicator(id);
     app.activeIndicators.push({ indicatorId: id, settings: inst.settings() });
     renderIndicatorChips();
-    placeWatermark(); // a new pane may now be the bottom one
     autosave();
     el('status').textContent = `added ${inst.name} on pane ${inst.paneIndex}`;
   });

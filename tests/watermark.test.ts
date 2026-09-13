@@ -199,3 +199,36 @@ describe('link attribution', () => {
     expect(linked.hitTest(20, 375, rc)?.cursor).toBe('pointer');
   });
 });
+
+describe('built-in vector geometry', () => {
+  const context = (plotWidth: number, plotHeight: number, dpr = 1): PrimitiveRenderContext => ({
+    plotWidth, plotHeight, dpr, theme: darkTheme,
+  }) as PrimitiveRenderContext;
+
+  it('keeps a full touch target around the smaller narrow-chart mark', () => {
+    const mark = new LogoWatermark({ position: 'bottom-left', margin: 14, padding: 8, href: 'https://openalgo.in' });
+    const rc = context(320, 180);
+    expect(mark.hitTest(4, 132, rc)).not.toBeNull();
+    expect(mark.hitTest(48, 176, rc)).not.toBeNull();
+    expect(mark.hitTest(3, 132, rc)).toBeNull();
+    expect(mark.hitTest(-1, 150, rc)).toBeNull();
+  });
+
+  it('constrains oversized custom artwork and hover plates inside a small plot at every DPR', () => {
+    for (const dpr of [1, 1.5, 2, 3]) {
+      const mark = new LogoWatermark({
+        image: { width: 1000, height: 100 } as never, position: 'bottom-right',
+        height: 400, margin: 0, padding: 8, label: 'A long custom brand label', revealSeconds: 0,
+      });
+      const rc = { ...context(120, 60, dpr), hoverId: 'watermark' };
+      const { ctx, rec } = makeCtx();
+      mark.draw(ctx, rc);
+      const [x, y, w, h] = rec.ops.find((op) => op.type === 'roundRect')!.args;
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(x + w).toBeLessThanOrEqual(120 * dpr);
+      expect(y + h).toBeLessThanOrEqual(60 * dpr);
+      expect(mark.hitTest(121, 30, rc)).toBeNull();
+    }
+  });
+});

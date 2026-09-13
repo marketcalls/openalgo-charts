@@ -58,16 +58,16 @@ Import only what you use. Each tier is a separate entry point that registers int
 
 | Import | Contents | Brotli limit |
 |---|---|---|
-| `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking, shared loading controller, request pool, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators, vector SVG export, the render backend port | 75 KB |
+| `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking, shared loading controller, request pool, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators, vector SVG export, the render backend port | 77 KB |
 | `openalgo-charts/indicators` | 102 built-in indicators + the Tier-2 external-data contract | 30 KB |
 | `openalgo-charts/draw` | 51 drawing tools + a headless `DrawingController` with multi-select, z-order, a per-tool settings schema, the 1.9.x migration, the clipboard and the icon builders | 26 KB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point and Figure, Kagi | 5 KB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 15 KB |
-| `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 83 KB with base |
+| `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 85 KB with base |
 | `openalgo-charts/webgl` | The WebGL2 series backend behind `renderer: 'auto' \| 'webgl2'`; composites into the pane's canvas, falls back to 2D for the session on context loss | 7 KB |
 | `openalgo-charts/widget` | `createWidget`: the chart with a top bar, drawing rail, responsive mobile controls, status line, settings and indicator dialogs, drawing properties, right-click menu, keymap and optional persistence. The only tier that ships DOM; imports the draw tier itself | 42 KB |
 
-Limits are the CI-enforced budgets in `.size-limit.json`. This reference targets 2.1.8.
+Limits are the CI-enforced budgets in `.size-limit.json`. This reference targets 2.1.9.
 In a source checkout, run `npm run size` before quoting byte counts. In a consumer app,
 check the installed version and measure its actual imports with the app's bundler.
 Reference measurements and every budget row live in [bundling-and-tiers](references/bundling-and-tiers.md).

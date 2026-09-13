@@ -136,6 +136,7 @@ export function buildChart2() {
     timezone: app.chartTimezone,
     ...chartMotionOptions(),
   });
+  app.chart2.setDataContext({ symbol: app.p2.symbol, interval: app.p2.interval });
   price2 = app.chart2.addSeries('candlestick');
   price2.setData(bars2);
   app.volume2 = app.chart2.addSeries('histogram', {
@@ -175,6 +176,7 @@ export function buildChart2() {
 export async function loadPane2() {
   if (!app.chart2) return;
   app.p2.period = clampPeriod(app.p2.interval, app.p2.period);
+  app.chart2.setDataContext({ symbol: app.p2.symbol, interval: app.p2.interval });
   setPane2Note('loading ' + app.p2.symbol + ' ' + intervalLabel(app.p2.interval) + '...');
   try {
     bars2 = await fetchBars(app.p2.symbol, app.p2.interval, app.p2.period, { slot: 'pane2' });

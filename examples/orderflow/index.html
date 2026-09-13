@@ -196,6 +196,9 @@
       const marginBottom = tableRows.length ? Math.min(0.65,(tableHeight + cardsHeight + 35) / plotHeight) : 0.27;
       chart.setPriceScaleOptions({ marginBottom });
       footprint.setOptions({ tableRows });
+      // Keep the corner mark clear of the optional table's metric labels.
+      const position = tableRows.length ? 'top-left' : 'bottom-left';
+      if (chart.brandingOptions().position !== position) chart.setBranding({ position });
       el('table-count').textContent = selectedTableRows().length;
       if (fit) fitColumns();
     }

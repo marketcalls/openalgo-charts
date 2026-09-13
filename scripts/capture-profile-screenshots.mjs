@@ -91,7 +91,7 @@ try {
   assert.equal(await page.evaluate(() => JSON.stringify(window.__profileResult())), before, 'Close-up captures must preserve the original price rows and analytics');
   assert.deepEqual(errors, []);
   const sources = {};
-  for (const path of ['examples/market-profile/index.html', 'examples/market-profile/themes.js', 'src/profile/market-profile-primitive.ts', 'src/profile/market-profile.ts', 'src/profile/compact-text.ts']) {
+  for (const path of ['examples/market-profile/index.html', 'examples/market-profile/themes.js', 'src/profile/market-profile-primitive.ts', 'src/profile/market-profile.ts', 'src/profile/compact-text.ts', 'src/primitives/watermark.ts', 'src/primitives/openalgo-glyph.ts']) {
     sources[path] = digest(await readFile(new URL(`../${path}`, import.meta.url)));
   }
   await writeFile(`${output}/captures.json`, JSON.stringify({

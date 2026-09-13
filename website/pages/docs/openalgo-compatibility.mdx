@@ -130,6 +130,18 @@ These checks validate the inspected consumer and mocked protocol cases. They do
 not establish broker-specific data quality, exchange session alignment or exact
 trade volume when the upstream stream supplies only sampled prices.
 
+## Branding compatibility in 2.1.9
+
+Charts now owns the responsive corner logo. The companion OpenAlgo change removes
+its manually attached logo and exposes an accessible link that follows host branding.
+Optional watermark controls use the shared Appearance schema and saved chart state;
+the background text is off by default. Automatic text follows the current symbol
+and interval, and Replay retains its separate marker.
+
+The packed candidate passes the consumer production build and 20 simulated `/trading`
+browser workflows, including branding changes, watermark persistence, order quantities,
+replay, navigation, drawing restoration, profiles and independent panes.
+
 ## Reproduce the browser check
 
 Use an isolated OpenAlgo git worktree with its own copied dependencies and the
@@ -138,9 +150,10 @@ candidate package installed. From the Charts repository:
 ```bash
 node scripts/check-openalgo-compat.mjs \
   --frontend /path/to/isolated-openalgo/frontend \
-  --label candidate-2.1.8 \
+  --label candidate-2.1.9 \
   --objects true \
   --navigation true \
+  --branding true \
   --probe-host true \
   --output /tmp/openalgo-compatibility.json
 ```

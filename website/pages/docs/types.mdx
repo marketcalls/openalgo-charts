@@ -753,7 +753,7 @@ interface LogoWatermarkOptions {
 }
 ```
 
-Options for `new LogoWatermark(opts)`. Pass `src` (a URL or data URI) or a preloaded `image` to skip loading. `tint` recolors the opaque pixels to a flat color so a single-tone logo reads correctly on both dark and light themes. Defaults: `position 'bottom-right'`, `margin 12`, `height 28`, `opacity 0.7`, `zOrder 'top'`.
+Options for `new LogoWatermark(opts)`. Pass `src` (a URL or data URI) or a preloaded `image` to skip loading. Since 2.1.9, omitting both draws the built-in OpenAlgo vector glyph. `tint` recolors the opaque pixels to a flat color so a single-tone logo reads correctly on both dark and light themes. Manual primitive defaults: `position 'bottom-right'`, `margin 12`, `height 28`, `opacity 0.7`, `zOrder 'top'`. The chart-owned `branding` option applies the responsive defaults described in [Branding and watermarks](/docs/branding-and-watermarks).
 
 ### `WatermarkPosition`
 
@@ -1473,3 +1473,20 @@ interface ShortcutListItem {
 ```
 
 One entry returned by `ShortcutManager.list()`. Useful for rendering a keyboard shortcut reference panel in a settings UI.
+
+## `ChartWatermarkOptions` (2.1.9)
+
+```ts
+interface ChartWatermarkOptions extends Partial<TextWatermarkOptions> {
+  visible?: boolean
+}
+```
+
+`ChartOptions.watermark` and `chart.setWatermarkOptions` accept this shape or a
+boolean. Visibility defaults to false. Empty or omitted custom text uses the current
+symbol and interval from `chart.getDataContext()`. `chart.watermarkOptions()` returns
+the preferences, preserving the distinction between automatic and custom text.
+
+`ChartOptions.branding` independently accepts `boolean | LogoWatermarkOptions`, default
+true, with `chart.setBranding` and `chart.brandingOptions` for runtime updates and reads.
+See [Branding and Watermarks](/docs/branding-and-watermarks) for examples and migration.

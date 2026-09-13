@@ -171,7 +171,6 @@ examples/yfinance/
     volume.js         volume visibility and the symbol legend row
     bracket.js        the bracket panel: entry, target and stop pills
     orders.js         resting orders, market fills, the net position, trade state
-    watermark.js      the chart watermark
     indicators.js     the indicator picker and the generated settings form
     chart-settings.js the chart settings dialog, built from chartSettingsSchema()
     compare.js        multi-symbol comparison
@@ -292,7 +291,7 @@ exists to show one engine surface carrying real use, not just being present.
 | `level-editor.js` | A ladder tool's levels (retracement, extension, channel, fan, time zones, the Gann pair) edited one row each: enable, ratio, colour, label, add, remove, reset. Every edit is one undo entry through the controller. |
 | `text-editor.js` | Inline text editing over the painted text, sized by the same rules the text tool paints with, with every pointer and key event stopped at the box so the chart under it does not pan. |
 | `menus.js`, `toolbar.js`, `hover.js` | Host chrome to the standard in `CLAUDE.md`: styled scrollbars, no native form controls on a dark panel, real tooltips that flip inside the window, and dialog furniture in one arrangement. |
-| `snapshot.js` | `chart.takeScreenshot()` saved as a PNG or copied to the clipboard, with the watermark and the replay mark in the image because they are on the canvas. |
+| `snapshot.js` | `chart.takeScreenshot()` saved as a PNG or copied to the clipboard, with chart branding, an enabled watermark and the replay mark in the image because they are on the canvas. |
 | `persist.js` | A versioned layout document with migrations, quarantine instead of deletion, memory-only degradation when storage refuses a write, and export and import as a file. See the next section. |
 
 ## Persistence

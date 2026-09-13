@@ -38,7 +38,10 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // brotli: 39.34 kB before, 43.09 kB after, on the same build.
 // Navigation preferences and reset controls in 2.1.3 also belong to chart-only hosts.
 // Proportional wheel routing and eased price projections are part of the core chart.
-const LIMIT_BYTES = 46 * 1024;
+// Default vector branding and the opt-in chart watermark are available to raw
+// chart hosts too. The chart-only build measures 48.96 KiB versus 45.51 KiB on
+// 2.1.8, including guarded link gestures and screenshot handling for hidden panes.
+const LIMIT_BYTES = 50 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

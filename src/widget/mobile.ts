@@ -3,7 +3,7 @@ import { h, type WidgetContext } from './context';
 import type { RailHandle } from './rail';
 import {
   SEARCH_DEBOUNCE_MS, chartTypeChoices, chartTypeLabel, intervalLabel,
-  type SymbolMatch, type SymbolSearch, type TopbarState,
+  brandingLink, type SymbolMatch, type SymbolSearch, type TopbarState,
 } from './topbar';
 
 export type MobileMode = 'auto' | 'always' | 'never';
@@ -379,6 +379,15 @@ export function mountMobile(ctx: WidgetContext, opts: MobileOptions): MobileHand
         });
         settings.setAttribute('aria-disabled', String(!opts.settingsAvailable()));
         body.appendChild(settings);
+        const link = brandingLink(ctx.chart);
+        if (link !== null) {
+          const branding = h(doc, 'a', 'oac-mobile__action oac-mobile__branding', {
+            href: link.href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': link.label,
+          });
+          branding.dataset.mobileAction = 'branding';
+          branding.textContent = link.label;
+          body.appendChild(branding);
+        }
         const heading = h(doc, 'div', 'oac-head');
         heading.textContent = 'Chart type';
         body.appendChild(heading);
@@ -459,6 +468,7 @@ export function mountMobile(ctx: WidgetContext, opts: MobileOptions): MobileHand
   offs.push(ctx.bus.on('symbol', refresh));
   offs.push(ctx.bus.on('interval', refresh));
   offs.push(ctx.bus.on('theme', refresh));
+  offs.push(ctx.chart.on('branding:changed', refresh));
   applyMode();
   refresh();
 

@@ -254,6 +254,28 @@ describe('mobile mode', () => {
     expect(action(root, 'more')).toBeNull();
   });
 
+  it('keeps an accessible branding link current in the More sheet', () => {
+    const { w, doc, root } = make({ mobile: 'always' });
+    action(root, 'more').click();
+    let link = action(root, 'branding');
+    expect(link.tagName).toBe('A');
+    expect(link.classList.contains('oac-mobile__action')).toBe(true);
+    expect(doc.head.textContent).toContain('.oac-mobile__branding { display: flex;');
+    expect(link.getAttribute('href')).toBe('https://openalgo.in');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(link.getAttribute('aria-label')).toBe('Chart by OpenAlgo');
+
+    w.chart.setBranding(false);
+    expect(action(root, 'branding')).toBeNull();
+
+    w.chart.setBranding({ href: 'https://charts.example.test', label: 'Charts provider' });
+    link = action(root, 'branding');
+    expect(link.getAttribute('href')).toBe('https://charts.example.test');
+    expect(link.textContent).toBe('Charts provider');
+    expect(link.getAttribute('aria-label')).toBe('Charts provider');
+  });
+
   it('uses symbol search only when the host supplies it', async () => {
     vi.useFakeTimers();
     const search = vi.fn(() => [{ symbol: 'INFY', exchange: 'NSE', name: 'Infosys' }]);

@@ -53,7 +53,7 @@ const config = {
         <div className="oac-site-footer__brand"><Link href="/" aria-label="OpenAlgo Charts home"><Logo /></Link><p>A clearer view of every move.<br />An open world of possibilities.</p></div>
         <div className="oac-site-footer__group"><h2>Explore</h2><Link href="/examples">Interactive examples</Link><Link href="/examples#drawing-tools">Drawing tools</Link><Link href="/examples#custom-indicators">Indicators</Link></div>
         <div className="oac-site-footer__group"><h2>Create</h2><Link href="/docs/getting-started">Get started</Link><Link href="/docs/core-concepts">Documentation</Link><a href="/openalgo-charts/api/index.html">API reference</a><a href={REPO} target="_blank" rel="noreferrer">Contribute on GitHub ↗</a></div>
-        <div className="oac-site-footer__bottom"><Link href="/docs/release-notes#218">OpenAlgo Charts 2.1.8</Link><a href={`${REPO}/blob/master/LICENSE`} target="_blank" rel="noreferrer">Free and open source · Apache-2.0</a></div>
+        <div className="oac-site-footer__bottom"><Link href="/docs/release-notes#219">OpenAlgo Charts 2.1.9</Link><a href={`${REPO}/blob/master/LICENSE`} target="_blank" rel="noreferrer">Free and open source · Apache-2.0</a></div>
       </div>
     ),
   },

@@ -91,6 +91,17 @@ export const CHART_TYPES = [
 export const chartTypeLabel = (v) => (CHART_TYPES.find((t) => t.v === v) || { label: 'Candles' }).label;
 export const chartTypeIcon = (v) => (CHART_TYPES.find((t) => t.v === v) || { icon: 'candles' }).icon;
 
+/** Link metadata for the chart's active branding, or null when it has no link. */
+export function brandingLink(chart) {
+  if (!chart || typeof chart.brandingOptions !== 'function') return null;
+  const options = chart.brandingOptions();
+  if (!options || typeof options.href !== 'string' || !/^https?:\/\//i.test(options.href)) return null;
+  const label = typeof options.label === 'string' && options.label.trim()
+    ? options.label.trim()
+    : 'Chart branding';
+  return { href: options.href, label };
+}
+
 /* ── chart-only full screen ────────────────────────────────────────────
    Full-screens the stage (rail + chart + legend) rather than the page, so
    the toolbar and the hint strip drop away and the plot gets the whole
@@ -150,10 +161,16 @@ export function renderToolbar() {
   if (statusText.parentElement) statusText.parentElement.removeChild(statusText);
   bar.innerHTML = '';
 
-  const brand = document.createElement('div');
+  const link = brandingLink(app.chart);
+  const brand = document.createElement(link ? 'a' : 'div');
   brand.className = 'brand';
-  brand.tabIndex = 0;
-  brand.title = 'OpenAlgo Charts · yfinance demo';
+  brand.title = link ? link.label : 'OpenAlgo Charts yfinance demo';
+  if (link) {
+    brand.setAttribute('href', link.href);
+    brand.setAttribute('target', '_blank');
+    brand.setAttribute('rel', 'noopener noreferrer');
+    brand.setAttribute('aria-label', link.label);
+  }
   brand.innerHTML =
     '<span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true">'
     + '<path d="M3 17.5 9 7l4 6.5L21 3v4.2l-8 10.3-4-6.5-3.6 6.5z"/></svg></span>'

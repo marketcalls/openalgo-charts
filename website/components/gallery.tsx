@@ -3,8 +3,6 @@ import React, { useEffect, useRef, useState } from 'react';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const LOGO_SRC = '/openalgo-charts/openalgo-logo.svg';
-
 async function loadLib(): Promise<any> {
   return import('../lib/oac/openalgo-charts.all.mjs');
 }
@@ -57,9 +55,6 @@ function InteractiveChart({ title, tabs, build, height = 320, code }: { title: s
             create(host, { theme: dark ? lib.darkTheme : lib.lightTheme, ...opts }),
         };
         chart = build(ref.current, themed, tab);
-        if (chart?.addPrimitive && lib.LogoWatermark) {
-          chart.addPrimitive(new lib.LogoWatermark({ src: LOGO_SRC, height: 22, opacity: 0.75, position: 'bottom-left' }));
-        }
       } catch (e: any) {
         setErr(e?.message ?? String(e));
       }

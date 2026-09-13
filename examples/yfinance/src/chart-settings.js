@@ -26,6 +26,18 @@ let chartSetTab = null;
 let chartSetBefore = null;          // values as they were when the dialog opened
 const chartSetDirty = new Set();    // keys this session touched, for Cancel
 
+/** Branding and watermark options that must outlive a chart-type rebuild. */
+export function chartDecorationsForRebuild(chart) {
+  const options = {};
+  if (chart && typeof chart.brandingOptions === 'function') {
+    options.branding = chart.brandingOptions();
+  }
+  if (chart && typeof chart.watermarkOptions === 'function') {
+    options.watermark = chart.watermarkOptions();
+  }
+  return options;
+}
+
 /**
  * A glyph per tab. Keyed by the schema's tab id rather than by position, so
  * reordering the tabs in the engine cannot silently shuffle the icons; a tab

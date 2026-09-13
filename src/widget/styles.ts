@@ -124,6 +124,9 @@ export const WIDGET_CSS = `
 .oac-widget .oac-topbar { grid-row: 1; display: flex; align-items: center; gap: 4px; min-height: ${v('topbar-h')};
   padding: 5px 8px; background: ${v('panel')}; border-bottom: 1px solid ${v('bd-soft')}; flex-wrap: wrap; }
 .oac-widget .oac-topbar__spacer { flex: 1 1 auto; }
+.oac-widget .oac-topbar__branding-slot { display: inline-flex; align-items: center; }
+.oac-widget .oac-topbar__branding { color: ${v('mut')}; font-size: 11px; text-decoration: none; white-space: nowrap; }
+.oac-widget .oac-topbar__branding:hover { color: ${v('tx')}; text-decoration: underline; }
 .oac-widget .oac-sym { position: relative; display: inline-flex; align-items: center; }
 .oac-widget .oac-sym > input { width: 132px; height: ${v('ctl-h')}; padding: 0 8px 0 28px; font-weight: 600;
   letter-spacing: .3px; text-transform: uppercase; }
@@ -271,6 +274,7 @@ export const WIDGET_CSS = `
 .oac-widget .oac-mobile__action:hover, .oac-widget .oac-mobile__action:focus-visible { background: ${v('elev')}; }
 .oac-widget .oac-mobile__action[aria-pressed="true"] { color: ${v('acc-2')}; background: ${v('on-bg')}; }
 .oac-widget .oac-mobile__action[aria-disabled="true"] { color: ${v('faint')}; cursor: default; background: transparent; }
+.oac-widget .oac-mobile__branding { display: flex; align-items: center; width: 100%; min-height: 44px; text-decoration: none; }
 .oac-widget .oac-mobile-sheet.oac-dialog { left: 0; right: 0; top: auto; bottom: 0; transform: none; width: 100%;
   max-width: 100%; max-height: calc(100% - env(safe-area-inset-top) - 12px); border-radius: 14px 14px 0 0;
   padding-bottom: env(safe-area-inset-bottom); }

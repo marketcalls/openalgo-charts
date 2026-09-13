@@ -4,6 +4,7 @@
  * node scripts/check-openalgo-compat.mjs --frontend /tmp/openalgo/frontend
  * Add --objects true only when the host includes the shared Objects integration.
  * Add --navigation true to validate the wheel routing introduced in 2.1.8.
+ * Add --branding true to validate corner branding and optional watermark settings.
  *
  * No backend is started. Vite proxies are removed and every API/WS is mocked.
  * The app source is unchanged; an entry wrapper records terminal instances so
@@ -157,7 +158,15 @@ try {
     if (!t) throw new Error('No active terminal');
     return (0, eval)(`(${source})`)(t, arg);
   }, { source: fn.toString(), arg });
-  const waitReady = () => page.waitForFunction(() => window.__compatTerminals?.some((t) => !t.destroyed && t.price?.getData().length > 0));
+  // Toolbar setters keep the old chart visible while the next history load runs.
+  // Wait for that chart's context before driving Replay or another interaction.
+  const waitReady = () => page.waitForFunction(() => window.__compatTerminals?.some(t => {
+    const context = t.chart?.getDataContext();
+    return !t.destroyed && t.price?.getData().length > 0 && context?.symbol === t.sym?.symbol
+      && context?.exchange === t.sym?.exchange && context?.interval === t.interval;
+  }));
+  const waitDialogClosed = () => page.waitForFunction(() => !document.querySelector('[role="dialog"]')
+    && getComputedStyle(document.body).pointerEvents !== 'none');
   const sendDepth = async (symbol, exchange, ltp) => {
     for (const socket of sockets) {
       try { socket.send(JSON.stringify({ type: 'market_data', symbol, exchange, ...(args['legacy-topic'] ? { topic: `${symbol}.${exchange}` } : {}), mode: 3, data: {
@@ -173,6 +182,62 @@ try {
     assert.equal(await terminal((t) => t.sym.symbol), 'BHEL');
     assert(report.requests.some((r) => r.path === '/api/v1/history' && r.body.interval === '5m'));
   });
+  if (args.branding === 'true') {
+    await check('host branding links follow disabled and custom chart branding', async () => {
+      const mark = await terminal(t => t.chart.brandingOptions());
+      assert(mark && mark.href === 'https://openalgo.in');
+      const link = page.getByRole('link', { name: mark.label, exact: true });
+      await link.waitFor({ state: 'visible' });
+      await terminal(t => t.chart.setBranding(false));
+      await link.waitFor({ state: 'detached' });
+      await terminal(t => t.chart.setBranding({ label: 'Research charts', href: 'https://example.com/research' }));
+      const custom = page.getByRole('link', { name: 'Research charts', exact: true });
+      await custom.waitFor({ state: 'visible' });
+      assert.equal(await custom.getAttribute('href'), 'https://example.com/research');
+      await terminal(t => t.chart.setBranding(true));
+      await link.waitFor({ state: 'visible' });
+      assert.equal(orderCounter, 0);
+    });
+    await check('optional watermark uses actual settings, persistence and current symbol context', async () => {
+      assert.equal(await terminal(t => t.chart.watermarkOptions().visible), false);
+      const openSettings = () => terminal(async t => t.cb.onChartSettings(await t.chartSettings()));
+      await openSettings();
+      await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+      const show = page.getByRole('checkbox', { name: 'Show watermark', exact: true });
+      assert.equal(await show.isChecked(), false);
+      await show.check();
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await waitDialogClosed();
+      assert.equal(await terminal(t => t.chart.watermarkOptions().visible), false);
+      await openSettings();
+      await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+      await show.check();
+      await page.getByRole('button', { name: 'Ok', exact: true }).click();
+      await waitDialogClosed();
+      await page.waitForFunction(() => window.__compatTerminals.some(t => !t.destroyed && t.chart?.watermarkOptions().visible));
+      assert.match(await terminal(t => t.chart.exportSVG()), /BHEL/);
+      await page.reload();
+      await waitReady();
+      assert.equal(await terminal(t => t.chart.watermarkOptions().visible), true);
+      await terminal(async (t, symbol) => t.loadSymbol(symbol), symbols[1]);
+      await waitReady();
+      assert.match(await terminal(t => t.chart.exportSVG()), /NIFTY29SEP26FUT/);
+      await terminal(t => t.applyChartSettings({ 'watermark.text': 'Research' }));
+      await terminal(t => t.setInterval('15m'));
+      await waitReady();
+      assert.match(await terminal(t => t.chart.exportSVG()), /Research/);
+      await terminal(t => { t.startReplay(); t.commitReplayPick(); });
+      await page.waitForFunction(() => window.__compatTerminals.some(t => !t.destroyed && t.replayState() !== null));
+      await terminal(t => t.applyChartSettings({ 'watermark.visible': false }));
+      assert.match(await terminal(t => t.chart.exportSVG()), /Replay/);
+      await terminal(t => t.stopReplay());
+      await terminal(t => t.applyChartSettings({ 'watermark.text': '', 'watermark.visible': false }));
+      await terminal(async (t, symbol) => { await t.loadSymbol(symbol); t.setInterval('5m'); }, symbols[0]);
+      await waitReady();
+      assert.equal(await terminal(t => t.chart.watermarkOptions().visible), false);
+      assert.equal(orderCounter, 0);
+    });
+  }
   if (args.navigation === 'true') {
     await check('trackpad, horizontal wheel and price-axis scaling retain host order authority', async () => {
       const before = await terminal(t => ({ range: t.chart.getVisibleLogicalRange(), spacing: t.chart.timeScale.barSpacing }));
@@ -234,6 +299,7 @@ try {
     assert.equal(orderCounter, 0);
     await page.keyboard.press('Escape');
     await page.locator('[data-slot="dialog-overlay"]').waitFor({ state: 'detached' });
+    await waitDialogClosed();
     await waitReady();
     await terminal((t) => { t.setArmed(true); t.placeCtx('BUY', 'MARKET'); });
     await page.waitForFunction(() => document.body.innerText.includes('fixture-1'));

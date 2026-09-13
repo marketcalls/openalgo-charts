@@ -90,6 +90,29 @@ describe('the frame', () => {
     expect(root.querySelector('.oac-layer')).not.toBeNull();
   });
 
+  it('keeps linked branding in host chrome current with chart branding', () => {
+    const { w, root } = make();
+    const link = root.querySelector('.oac-topbar__branding') as FakeElement;
+    expect(link).not.toBeNull();
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe('https://openalgo.in');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(link.getAttribute('aria-label')).toBe('Chart by OpenAlgo');
+
+    w.chart.setBranding(false);
+    expect(root.querySelector('.oac-topbar__branding')).toBeNull();
+
+    w.chart.setBranding({ href: 'https://charts.example.test', label: 'Charts provider' });
+    const customLink = root.querySelector('.oac-topbar__branding') as FakeElement;
+    expect(customLink.getAttribute('href')).toBe('https://charts.example.test');
+    expect(customLink.textContent).toBe('Charts provider');
+    expect(customLink.getAttribute('aria-label')).toBe('Charts provider');
+
+    const off = make({ branding: false } as WidgetOptions);
+    expect(off.root.querySelector('.oac-topbar__branding')).toBeNull();
+  });
+
   it('injects one stylesheet per document however many widgets share it', () => {
     const doc = fakeWidgetDocument();
     make({}, doc);

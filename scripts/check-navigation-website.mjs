@@ -288,6 +288,7 @@ try {
   panResults.push({ chart: 'gallery-candles', matchedPaintedRectangles: shifted.length,
     movement: { x: dx * panBefore.dpr, y: dy * panBefore.dpr } });
 
+  await page.goto(`${base}/docs/mobile/`);
   const navigation = page.locator('.oac-example').filter({
     has: page.locator(':scope > .oac-example__caption').filter({ hasText: 'Start at 360 px to use the mobile header and Draw sheet.' }),
   });

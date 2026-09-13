@@ -345,3 +345,40 @@ wrong place, and no amount of host bookkeeping fixes that from outside.
 
 `removePrimitive` also clears the anchor registration, so a removed primitive stays removed;
 before that was wired, the next pane change resurrected it.
+
+## Chart branding and optional text watermark (2.1.9)
+
+`createChart` now owns one OpenAlgo corner logo by default, including inside `createWidget`.
+Do not add the old manual default `LogoWatermark` as well. Use `branding: false` when a
+host deliberately owns all branding, or `branding: { src, label, href }` for a custom
+mark. `chart.setBranding(options)` changes it live and `chart.brandingOptions()` returns
+its current options or false. The engine handles completed clicks on its owned mark;
+manually attached `LogoWatermark` instances still use host click handlers.
+
+The separate text watermark defaults off. `ChartWatermarkOptions` extends the optional
+`TextWatermarkOptions` fields with `visible?: boolean`. Blank `text` uses the current
+`chart.getDataContext()` symbol and interval, so setDataContext must follow instrument
+changes. Custom text stays custom across context changes. Do not persist generated symbol
+text as a user's custom string.
+
+```ts
+const chart = createChart(el, { watermark: false })
+chart.setDataContext({ symbol: 'NIFTY', exchange: 'NSE', interval: '5m' })
+chart.setWatermarkOptions({ visible: true })
+chart.setWatermarkOptions({ text: 'Research', opacity: 0.08, fontSize: 64 })
+chart.setWatermarkOptions({ text: '' })
+chart.setWatermarkOptions(false)
+const preferences = chart.watermarkOptions()
+```
+
+The Appearance schema exposes `watermark.visible`, `watermark.text`, `watermark.color`,
+`watermark.opacity` and `watermark.fontSize`. Chart state saves these preferences, not
+host branding URLs or image objects. Old layouts default off. Keep the independent Replay
+mode mark: switching the optional watermark off must not hide the replay indicator.
+
+Validate actual desktop/mobile pixels and PNG/SVG export, both themes, pane add/maximize,
+context changes, restore/cancel and logo tap-versus-drag behavior. Background text must
+not intercept drawing/navigation or spill over the price axes. A custom image source
+still has the host's loading/CORS responsibilities; the default vector glyph loads no
+external image. Host UI supplies keyboard-accessible link access without covering chart
+input targets.

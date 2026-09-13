@@ -120,6 +120,6 @@ return {
 };`;
 
 export default function NavigationMobileDemo() {
-  return <RunnableExample height={560} tiers={['widget']} code={code} watermark={false}
+  return <RunnableExample height={560} tiers={['widget']} code={code}
     caption="Synthetic hourly bars. Start at 360 px to use the mobile header and Draw sheet. On a fine-pointer device, change width to compare the packaged layouts. A coarse pointer keeps mobile controls at either width. Show extrema sends a real wheel zoom through the chart, so Animation changes both the time zoom and price autoscale transition. The switch restores the widget layout and drawings; Reset view returns to the latest 80 bars." />;
 }

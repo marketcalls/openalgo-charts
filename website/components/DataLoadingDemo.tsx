@@ -8,11 +8,12 @@ const stage = document.createElement('div');
 stage.style.cssText = 'flex:1;min-height:0';
 el.append(controls, stage);
 const now = 1789093800;
-const bars = Array.from({ length: 360 }, (_, index) => {
-  const close = 23800 + Math.sin(index / 12) * 32;
-  return { time: now - (359 - index) * 60, open: close - 2,
-    high: close + 4, low: close - 5, close, volume: (index % 12 + 1) * 65 };
-});
+const price = value => Math.round((23800 + (value - 100) * 4) * 20) / 20;
+const bars = lib.generateBars(now - 359 * 60, 360, 60).map(bar => ({
+  ...bar, open: price(bar.open), high: price(bar.high),
+  low: price(bar.low), close: price(bar.close),
+  volume: Math.round(bar.volume / 65) * 65,
+}));
 let failNext = false;
 let empty = false;
 let requests = 0;
@@ -41,12 +42,19 @@ const source = {
   },
   subscribeBars(request, onBar, options) {
     reconnect = options.onResync;
-    let ticks = 0;
+    let seed = 0x31f2c7;
+    const random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
     const timer = setInterval(() => {
       if (empty) return;
       const last = bars[bars.length - 1];
-      const close = last.close + Math.sin(++ticks / 3) * 2;
-      onBar({ ...last, close, high: Math.max(last.high, close), low: Math.min(last.low, close) });
+      const close = Math.round((last.close + (random() - 0.5) * 2) * 20) / 20;
+      const live = { ...last, close, high: Math.max(last.high, close),
+        low: Math.min(last.low, close), volume: last.volume + (1 + Math.floor(random() * 6)) * 65 };
+      bars[bars.length - 1] = live;
+      onBar({ ...live });
     }, 800);
     return () => clearInterval(timer);
   },
@@ -79,6 +87,6 @@ controls.appendChild(counter);
 return widget;`;
 
 export default function DataLoadingDemo() {
-  return <RunnableExample height={440} tiers={['widget']} code={code} watermark={false}
-    caption="Simulated NIFTY around 23,800. Fail a refresh, then use Retry on the chart. Pause holds the display while live data continues; it does not start historical replay." />;
+  return <RunnableExample height={440} tiers={['widget']} code={code}
+    caption="Simulated NIFTY around 23,800 with irregular candles, changing volume and live price ticks. Fail a refresh, then use Retry on the chart. Pause holds the display while live data continues; it does not start historical replay." />;
 }

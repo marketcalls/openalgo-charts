@@ -55,7 +55,7 @@ describe('TextWatermark', () => {
     const wide = drawn(new TextWatermark({ text: long, fontSize: 64 }), rc(1200, 400));
     const narrow = drawn(new TextWatermark({ text: long, fontSize: 64 }), rc(200, 400));
     const sizeOf = (rec: RecordingContext): number =>
-      Number(/(\d+)px/.exec(rec.ops.find((o) => o.type === 'fillText')?.font ?? '')?.[1] ?? 0);
+      Number(/([\d.]+)px/.exec(rec.ops.find((o) => o.type === 'fillText')?.font ?? '')?.[1] ?? 0);
     expect(sizeOf(narrow)).toBeLessThan(sizeOf(wide));
     expect(sizeOf(narrow)).toBeGreaterThan(0);
   });
@@ -80,4 +80,24 @@ describe('TextWatermark', () => {
     w.setOptions({ text: 'Replay' });
     expect(drawn(w).ops.length).toBeGreaterThan(0);
   });
+});
+
+it('fits a short pane vertically and shrinks long text below ten pixels when needed', () => {
+  const short = drawn(new TextWatermark({ text: 'Research', fontSize: 64 }), rc(800, 24));
+  const text = short.ops.find((op) => op.type === 'fillText')!;
+  expect(Number(/([\d.]+)px/.exec(text.font!)![1])).toBeLessThanOrEqual(19.2);
+  const long = drawn(new TextWatermark({ text: 'A'.repeat(1000), fontSize: 64 }), rc(100, 100));
+  const small = long.ops.find((op) => op.type === 'fillText')!;
+  expect(Number(/([\d.]+)px/.exec(small.font!)![1])).toBeLessThan(10);
+});
+
+it('requests a repaint when a mounted text mark is restyled', () => {
+  const mark = new TextWatermark({ text: 'Replay' });
+  let updates = 0;
+  mark.attached({ requestUpdate: () => { updates++; } });
+  mark.setOptions({ color: '#123456' });
+  expect(updates).toBe(1);
+  mark.detached();
+  mark.setOptions({ color: '#abcdef' });
+  expect(updates).toBe(1);
 });

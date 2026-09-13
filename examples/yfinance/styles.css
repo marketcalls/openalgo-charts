@@ -144,7 +144,8 @@ body {
    max-width (not display) keeps the reveal continuous, and the toolbar to
    the right slides rather than jumping. */
 .brand { display: inline-flex; align-items: center; font-weight: 700; letter-spacing: .2px;
-  gap: 0; cursor: default; border-radius: 7px; }
+  gap: 0; cursor: default; border-radius: 7px; color: var(--tx); text-decoration: none; }
+.brand[href] { cursor: pointer; }
 .brand-mark { width: 22px; height: 22px; flex: none; display: grid; place-items: center; }
 .brand-mark svg { width: 20px; height: 20px; fill: currentColor; color: var(--acc); }
 .brand-name { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;

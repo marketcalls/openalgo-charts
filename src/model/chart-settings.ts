@@ -28,7 +28,7 @@
  * a host may have written down, so they stay put when the grouping above them
  * changes: a key names the option it writes, not the tab it is shown on.
  */
-import type { AxisChromeOptions, Chart, ChartEventOptions, ChartNavigationOptions } from '../core/chart';
+import type { AxisChromeOptions, Chart, ChartEventOptions, ChartNavigationOptions, ChartWatermarkOptions } from '../core/chart';
 import type { IndicatorInput } from './indicator-registry';
 import { getChartType } from './chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
@@ -101,6 +101,7 @@ export interface ChartSettingsState {
   navigation?: Partial<ChartNavigationOptions>;
   canvas?: CanvasOptions;
   statusLine?: LegendStatusLineOptions;
+  watermark?: ChartWatermarkOptions;
   trading?: TradingSettings;
   events?: ChartEventOptions;
   /**
@@ -612,6 +613,19 @@ function appearanceControls(chart: Chart): Control[] {
   const cross = (c: Chart): CrosshairOptions => c.canvasOptions().crosshair ?? {};
   const scales = (c: Chart): ScaleCanvasOptions => c.canvasOptions().scales ?? {};
   return [
+    boolCtl('watermark.visible', 'Show watermark', 'Watermark', false,
+      (c) => c.watermarkOptions().visible ?? false, (c, v) => c.setWatermarkOptions({ visible: v })),
+    {
+      input: { key: 'watermark.text', type: 'text', label: 'Text (blank uses symbol and interval)', group: 'Watermark', default: '' },
+      fields: [{ key: 'watermark.text', read: (c) => c.watermarkOptions().text ?? '', write: (c, v) => c.setWatermarkOptions({ text: String(v) }) }],
+    },
+    colorCtl('watermark.color', 'Color', 'Watermark', '#9aa4b2',
+      (c) => c.watermarkOptions().color ?? '#9aa4b2', (c, v) => c.setWatermarkOptions({ color: v })),
+    numCtl('watermark.opacity', 'Opacity', 'Watermark', 0.08, { min: 0, max: 1, step: 0.01 },
+      (c) => c.watermarkOptions().opacity ?? 0.08, (c, v) => c.setWatermarkOptions({ opacity: v })),
+    numCtl('watermark.fontSize', 'Text size', 'Watermark', 64, { min: 10, max: 200, step: 1 },
+      (c) => c.watermarkOptions().fontSize ?? 64, (c, v) => c.setWatermarkOptions({ fontSize: v })),
+
     boolCtl('canvas.grid.vertLines', 'Vert grid lines', 'Grid', true,
       (c) => c.gridOptions().vertLines, (c, v) => c.setGridOptions({ vertLines: v })),
     colorCtl('canvas.grid.vertColor', 'Vert color', 'Grid', t.grid,

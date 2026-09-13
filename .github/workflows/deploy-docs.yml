@@ -5,6 +5,7 @@ on:
     branches: [master, main]
     paths:
       - 'website/**'
+      - 'examples/phase11-profiles.html'
       - 'examples/market-profile/**'
       - 'examples/orderflow/**'
       - 'src/**'

@@ -19,6 +19,7 @@ export default {
   'symbol-comparison': 'Symbol Comparison',
   'chart-linking': 'Chart Linking',
   themes: 'Theming & Chart Options',
+  'branding-and-watermarks': 'Branding & Watermarks',
   'settings-and-menus': 'Settings & Menus',
   objects: 'Objects',
   indicators: 'Indicators',

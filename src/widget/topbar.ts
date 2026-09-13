@@ -224,6 +224,23 @@ export interface TopbarHandle {
   destroy(): void;
 }
 
+interface BrandingLinkOptions {
+  href?: string;
+  label?: string;
+}
+
+/** Read safe link metadata from the chart's active branding. */
+export function brandingLink(chart: WidgetContext['chart']): { href: string; label: string } | null {
+  const options = (chart as unknown as {
+    brandingOptions?(): false | BrandingLinkOptions;
+  }).brandingOptions?.();
+  if (!options || typeof options.href !== 'string' || !/^https?:\/\//i.test(options.href)) return null;
+  const label = typeof options.label === 'string' && options.label.trim() !== ''
+    ? options.label.trim()
+    : 'Chart branding';
+  return { href: options.href, label };
+}
+
 /** Hand `text` to the browser as a file. False when the runtime has no way to (no `Blob`, no object URLs). */
 export function downloadText(doc: Document, filename: string, text: string, mime: string): boolean {
   const g = globalThis as { Blob?: typeof Blob; URL?: typeof URL };
@@ -397,6 +414,13 @@ export function mountTopbar(ctx: WidgetContext, host: HTMLElement, opts: TopbarO
 
   host.appendChild(h(doc, 'span', 'oac-topbar__spacer'));
 
+  // The canvas mark can be activated by pointer. This host link gives the
+  // same destination to keyboard and assistive-technology users without
+  // placing transparent chrome over the chart.
+  const brandingSlot = h(doc, 'span', 'oac-topbar__branding-slot');
+  let brandingAnchor: HTMLAnchorElement | null = null;
+  host.appendChild(brandingSlot);
+
   if (opts.onObjects) {
     const objects = btn('Objects', 'oac-topbar__objects');
     objects.textContent = 'Objects';
@@ -484,7 +508,23 @@ export function mountTopbar(ctx: WidgetContext, host: HTMLElement, opts: TopbarO
     ctx.tips.refreshLabel(themeBtn);
     ctx.tips.refreshLabel(setBtn);
     if (indBtn !== null) ctx.tips.refreshLabel(indBtn);
+    const link = brandingLink(ctx.chart);
+    if (link === null) {
+      brandingAnchor?.remove();
+      brandingAnchor = null;
+    } else {
+      if (brandingAnchor === null) {
+        brandingAnchor = h(doc, 'a', 'oac-topbar__branding', {
+          target: '_blank', rel: 'noopener noreferrer',
+        });
+        brandingSlot.appendChild(brandingAnchor);
+      }
+      brandingAnchor.setAttribute('href', link.href);
+      brandingAnchor.textContent = link.label;
+      brandingAnchor.setAttribute('aria-label', link.label);
+    }
   };
+  const offBranding = ctx.chart.on('branding:changed', refresh);
   refresh();
 
   return {
@@ -492,6 +532,7 @@ export function mountTopbar(ctx: WidgetContext, host: HTMLElement, opts: TopbarO
     refresh,
     focusSymbol: () => { symInput.focus(); },
     destroy: () => {
+      offBranding();
       if (searchTimer !== 0) clearTimeout(searchTimer);
       closeResults();
       host.textContent = '';

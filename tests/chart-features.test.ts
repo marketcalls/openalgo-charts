@@ -26,6 +26,12 @@ function recordingDoc(): Document {
     if (tag === 'canvas') {
       el.width = 0; el.height = 0;
       const rec = new RecordingContext();
+      const drawImage = rec.drawImage.bind(rec);
+      rec.drawImage = (image: unknown, x: number, y: number): void => {
+        const source = image as HTMLCanvasElement;
+        if (source.width === 0 || source.height === 0) throw new Error('Cannot composite an empty canvas');
+        drawImage(image, x, y);
+      };
       el.__rec = rec;
       el.getContext = () => rec as unknown as CanvasRenderingContext2D;
     }
@@ -35,6 +41,29 @@ function recordingDoc(): Document {
 }
 
 describe('takeScreenshot composites every layer', () => {
+  it('exports only the visible pane when maximized and resumes the full stack when restored', () => {
+    const doc = recordingDoc();
+    const chart = new Chart(doc.createElement('div'), {
+      document: doc, pixelRatio: () => 2,
+      raf: { schedule: (cb) => { cb(); return 1; }, cancel: () => {} },
+    });
+    chart.applySize(800, 600);
+    chart.addSeries('candlestick').setData([bar(1000, 10), bar(1060, 11)]);
+    chart.addSeries('line', { paneIndex: 1 }).setData([bar(1000, 10), bar(1060, 11)]);
+    chart.maximizePane(1);
+    expect(chart.panes()[0].base.element.height).toBe(0);
+    const shot = chart.takeScreenshot() as unknown as { width: number; height: number; __rec: RecordingContext };
+    expect([shot.width, shot.height]).toEqual([1600, 1200]);
+    expect(shot.__rec.ops.filter((op) => op.type === 'drawImage').map((op) => op.args)).toEqual([[0, 0], [0, 0]]);
+    chart.maximizePane(1);
+    const restored = chart.takeScreenshot() as unknown as { __rec: RecordingContext };
+    expect(restored.__rec.count('drawImage')).toBe(4);
+    chart.applySize(0, 0);
+    const hidden = chart.takeScreenshot() as unknown as { __rec: RecordingContext };
+    expect(hidden.__rec.count('drawImage')).toBe(0);
+    chart.destroy();
+  });
+
   it('flattens all panes (base + overlay) into one device-px canvas', () => {
     const doc = recordingDoc();
     const container = doc.createElement('div') as unknown as Record<string, unknown>;

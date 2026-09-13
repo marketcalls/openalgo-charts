@@ -3,7 +3,7 @@
 // initialised, throws here and nowhere else: in the page the failure would
 // be a blank document.
 import { describe, it, expect } from 'vitest';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const SRC = fileURLToPath(new URL('../src/', import.meta.url));
@@ -35,7 +35,6 @@ const INIT = {
   'timezone.js': 'initTimezone',
   'toolbar.js': 'initToolbar',
   'volume.js': 'initVolume',
-  'watermark.js': 'initWatermark',
 };
 
 describe('demo modules', () => {
@@ -45,8 +44,23 @@ describe('demo modules', () => {
       'drawing.js', 'feed.js', 'hover.js', 'indicators.js', 'intervals.js', 'level-editor.js',
       'link.js', 'menus.js', 'orders.js', 'persist.js', 'properties.js', 'rail-flyout.js',
       'rail.js', 'replay.js', 'snapshot.js', 'split.js', 'status.js', 'text-editor.js',
-      'timezone.js', 'toolbar.js', 'transforms.js', 'ui.js', 'volume.js', 'watermark.js',
+      'timezone.js', 'toolbar.js', 'transforms.js', 'ui.js', 'volume.js',
     ]);
+  });
+
+  it('uses engine branding once and keeps both chart contexts current', () => {
+    const main = readFileSync(SRC + 'main.js', 'utf8');
+    const split = readFileSync(SRC + 'split.js', 'utf8');
+
+    expect(main).not.toContain("from './watermark.js'");
+    expect(main).not.toContain("id === 'watermark'");
+    const snapshot = main.indexOf('const decorations = chartDecorationsForRebuild(app.chart);');
+    expect(snapshot).toBeGreaterThan(-1);
+    expect(snapshot).toBeLessThan(main.indexOf('app.chart.destroy()'));
+    expect(main).toContain('...decorations,');
+    expect(main).toContain("app.chart.setDataContext({ symbol: app.req.symbol, interval: app.req.interval });");
+    expect(main).toContain("app.chart.on('branding:changed', renderToolbar)");
+    expect(split).toContain("app.chart2.setDataContext({ symbol: app.p2.symbol, interval: app.p2.interval });");
   });
 
   for (const file of MODULES) {

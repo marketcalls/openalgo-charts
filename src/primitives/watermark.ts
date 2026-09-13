@@ -1,15 +1,16 @@
 /**
  * Logo / brand watermark (ARCHITECTURE.md §8). Draws a small image (or an
- * already-decoded bitmap) faintly in a corner of the plot — the way charting
+ * already-decoded bitmap) faintly in a corner of the plot, the way charting
  * apps stamp a product/brand mark. Because it draws on the canvas it is captured
  * by `chart.takeScreenshot()`, and an optional `tint` recolors the opaque pixels
  * so a single-color logo reads on both dark and light themes.
  *
- * Source-agnostic: pass a `src` (URL or data URI) or a preloaded `image`. The
- * library ships no logo of its own, keeping the bundle lean.
+ * Pass a `src` (URL or data URI) or a preloaded `image` for custom artwork.
+ * Without a source, the original OpenAlgo glyph draws without a network request.
  */
 import type { IPrimitive, PrimitiveHit, PrimitiveHost, PrimitiveRenderContext, ZOrder } from './primitive';
 import { roundRectPath, withAlpha } from '../render/pill';
+import { drawOpenAlgoGlyph } from './openalgo-glyph';
 
 export type WatermarkPosition =
   | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
@@ -120,10 +121,12 @@ export class LogoWatermark implements IPrimitive {
   private _host: PrimitiveHost | null = null;
   private _img: (CanvasImageSource & ImageLike) | null = null;
   private _ready = false;
+  private _autoHeight: boolean;
   private _tintCanvas: (CanvasImageSource & { width: number; height: number }) | null = null;
   private _tintKey = '';
 
   public constructor(opts: LogoWatermarkOptions = {}) {
+    this._autoHeight = opts.height === undefined;
     this._opts = {
       position: opts.position ?? 'bottom-right',
       margin: opts.margin ?? 12,
@@ -169,6 +172,8 @@ export class LogoWatermark implements IPrimitive {
     const { padding, ...rest } = patch;
     this._opts = { ...this._opts, ...rest };
     if (padding !== undefined) this._opts.padding = resolvePadding(padding);
+    if (patch.height !== undefined) this._autoHeight = false;
+    if (patch.label !== undefined || patch.fontSize !== undefined) this._labelW = 0;
     this._tintCanvas = null;
     if (patch.image) { this._img = patch.image as CanvasImageSource & ImageLike; this._ready = true; }
     else if (patch.src !== undefined) { this._ready = false; this._img = null; this.attached(this._host as PrimitiveHost); }
@@ -181,17 +186,25 @@ export class LogoWatermark implements IPrimitive {
    * the pointer is still within the widened box below.
    */
   private _rect(rc: PrimitiveRenderContext): { x: number; y: number; w: number; h: number; logoW: number } | null {
-    if (!this._ready || this._img === null) return null;
-    const iw = this._img.naturalWidth ?? this._img.width;
-    const ih = this._img.naturalHeight ?? this._img.height;
+    if (!this._builtin() && (!this._ready || this._img === null)) return null;
+    const iw = this._img?.naturalWidth ?? this._img?.width ?? 1;
+    const ih = this._img?.naturalHeight ?? this._img?.height ?? 1;
     if (!iw || !ih) return null;
     const o = this._opts;
-    const logoW = o.height * (iw / ih);
-    // Reserve the revealed width so the mark does not shift as text appears.
-    const w = logoW + this._labelW * this._reveal;
-    const r = watermarkRect(o.position, o.margin, w, o.height, rc.plotWidth, rc.plotHeight);
+    const margin = Math.max(0, o.margin, o.padding.x, o.padding.y);
+    const availableW = rc.plotWidth - 2 * margin;
+    const availableH = rc.plotHeight - 2 * margin;
+    if (availableW <= 0 || availableH <= 0) return null;
+    const height = this._builtin() && this._autoHeight && rc.plotWidth < 480 ? 24 : o.height;
+    const h = Math.max(0, Math.min(height, availableH, availableW * ih / iw));
+    if (!Number.isFinite(h) || h <= 0) return null;
+    const logoW = h * (iw / ih);
+    const w = Math.min(availableW, logoW + this._labelW * this._reveal);
+    const r = watermarkRect(o.position, margin, w, h, rc.plotWidth, rc.plotHeight);
     return { ...r, logoW };
   }
+
+  private _builtin(): boolean { return this._opts.src === undefined && this._opts.image === undefined; }
 
   /**
    * The link to open, with attribution appended. A caller who supplied their
@@ -219,9 +232,13 @@ export class LogoWatermark implements IPrimitive {
     if (r === null) return null;
     // Match the plate the user can see, but never shrink below the old 4px
     // slack — a tightly padded mark still needs a forgiving target.
-    const padX = Math.max(this._opts.padding.x, 4);
-    const padY = Math.max(this._opts.padding.y, 4);
-    const inside = x >= r.x - padX && x <= r.x + r.w + padX && y >= r.y - padY && y <= r.y + r.h + padY;
+    const padX = Math.max(this._opts.padding.x, 4, (44 - r.w) / 2);
+    const padY = Math.max(this._opts.padding.y, 4, (44 - r.h) / 2);
+    const w = Math.min(rc.plotWidth, r.w + 2 * padX);
+    const h = Math.min(rc.plotHeight, r.h + 2 * padY);
+    const left = Math.max(0, Math.min(rc.plotWidth - w, r.x - padX));
+    const top = Math.max(0, Math.min(rc.plotHeight - h, r.y - padY));
+    const inside = x >= left && x <= left + w && y >= top && y <= top + h;
     return inside
       ? {
           externalId: this._opts.id,
@@ -233,7 +250,7 @@ export class LogoWatermark implements IPrimitive {
   }
 
   public draw(ctx: CanvasRenderingContext2D, rc: PrimitiveRenderContext): void {
-    if (!this._ready || this._img === null) return;
+    if (!this._builtin() && (!this._ready || this._img === null)) return;
     const o = this._opts;
     const dpr = rc.dpr;
 
@@ -252,7 +269,7 @@ export class LogoWatermark implements IPrimitive {
     const dx = Math.round(r.x * dpr);
     const dy = Math.round(r.y * dpr);
     const dw = Math.round(r.logoW * dpr);
-    const dh = Math.round(o.height * dpr);
+    const dh = Math.round(r.h * dpr);
 
     ctx.save();
     // Plate first, at full alpha: it is what makes the mark legible over
@@ -266,7 +283,7 @@ export class LogoWatermark implements IPrimitive {
     const plateX = Math.round((r.x - pad.x) * dpr);
     const plateY = Math.round((r.y - pad.y) * dpr);
     const plateW = Math.round((r.x + r.w + pad.x) * dpr) - plateX;
-    const plateH = Math.round((r.y + o.height + pad.y) * dpr) - plateY;
+    const plateH = Math.round((r.y + r.h + pad.y) * dpr) - plateY;
     const theme = rc.theme as typeof rc.theme | undefined;
     const plateBg = o.background ?? (theme ? withAlpha(theme.background, 0.82) : 'none');
     const plateBorder = o.borderColor ?? theme?.axisLine ?? 'none';
@@ -288,14 +305,19 @@ export class LogoWatermark implements IPrimitive {
     // label in an unrelated shade.
     const ink = this._ink(rc);
     const tint = o.label !== undefined ? ink : o.tint;
-    const src = tint ? this._tinted(ctx, dw, dh, tint) : this._img;
-    if (tint && src) ctx.drawImage(src, dx, dy);
-    else ctx.drawImage(this._img, dx, dy, dw, dh);
+    if (this._builtin()) {
+      ctx.fillStyle = ink;
+      drawOpenAlgoGlyph(ctx, dx, dy, dh);
+    } else {
+      const src = tint ? this._tinted(ctx, dw, dh, tint) : this._img;
+      if (tint && src) ctx.drawImage(src, dx, dy);
+      else if (this._img) ctx.drawImage(this._img, dx, dy, dw, dh);
+    }
 
     if (o.label !== undefined && this._reveal > 0.001) {
       // Clip to the revealed width so the text wipes out of the mark rather
       // than fading in place — the motion is what reads as "attached to it".
-      const shown = this._labelW * this._reveal * dpr;
+      const shown = (r.w - r.logoW) * dpr;
       ctx.beginPath();
       ctx.rect(dx + dw, dy, shown, dh);
       ctx.clip();

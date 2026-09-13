@@ -58,3 +58,8 @@ const orderflowHtml = readFileSync(resolve(here, '..', '..', 'examples', 'orderf
   .replaceAll("from '/dist/", "from '../dist/");
 writeFileSync(join(orderflowOutput, 'index.html'), orderflowHtml);
 console.log('[sync-lib] copied standalone order-flow demo into website/public/demos');
+
+// The profiles selector uses the same maintained pages at both entry points.
+const profilesHtml = readFileSync(resolve(here, '..', '..', 'examples', 'phase11-profiles.html'), 'utf8')
+  .replaceAll("from '../dist/", "from './dist/");
+writeFileSync(resolve(demoOutput, '..', 'phase11-profiles.html'), profilesHtml);

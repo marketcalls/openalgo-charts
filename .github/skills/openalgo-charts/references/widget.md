@@ -338,7 +338,7 @@ An empty or whitespace-only SSR `<style id="oac-widget-css" nonce="...">` is fil
 
 - `package.json` `exports['./widget']`: `types: ./dist/widget/index.d.ts`, `import: ./dist/openalgo-charts.widget.mjs`. Listed in `sideEffects` (importing registers the dialogs).
 - `rollup.config.js`: `openalgo-charts` and every `openalgo-charts/<tier>` are external for tier builds and emitted as sibling paths (`./openalgo-charts.mjs`, `./openalgo-charts.draw.mjs`), so `dist/` serves with no import map. The widget must never inline the base or the draw tier; `check-dts.mjs` fails a build whose `dist/widget/index.d.ts` declares `Chart` or `DrawingController`.
-- `.size-limit.json`: `Widget tier` row (the bundle alone, 37 kB budget) and `Widget terminal` row (base + draw + indicators + widget, 157 kB budget); `Everything` includes the widget. Measure with `npm run size`; never quote from memory.
+- `.size-limit.json`: `Widget tier` row (the bundle alone, 42 kB budget) and `Widget terminal` row (base + draw + indicators + widget, 173 kB budget); `Everything` includes the widget. Measure with `npm run size`; never quote from memory.
 - The standalone IIFE is base-only and cannot host the widget. Use native ESM from `dist/`.
 
 ## Pitfalls
@@ -364,3 +364,13 @@ Retry controls and context propagation. Same-context reload preserves the visibl
 time anchor; only source changes reset to the preferred initial window.
 `dataController.setPaused(true)` fences display writes for a custom replay owner.
 See [host-integration](host-integration.md) for unmount and replay ordering.
+
+## Branding and watermark defaults (2.1.9)
+
+The widget inherits `ChartOptions.branding` and `ChartOptions.watermark`. Its existing
+symbol/interval changes update `chart.setDataContext`, which supplies automatic watermark
+text. No second text store or manually attached logo is needed. The default corner mark
+is visible on both layouts, while the background watermark starts off. Appearance settings
+operate through the same chart schema and chart state used by bare-chart hosts. See
+[primitives-and-plugins](primitives-and-plugins.md#chart-branding-and-optional-text-watermark-219)
+for the APIs, migration and interaction checks.

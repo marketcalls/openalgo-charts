@@ -269,7 +269,8 @@ describe('settings reversibility', () => {
     const all = (bottom.top.ctx as unknown as RecordingContext).ops;
     // The recorder accumulates across frames, so read the latest one only.
     const ops = all.slice(all.map((o) => o.type).lastIndexOf('clearRect'));
-    const pill = ops.filter((o) => o.type === 'roundRect');
+    // The branding plate also uses roundRect, but lives inside the plot.
+    const pill = ops.filter((o) => o.type === 'roundRect' && o.args[1] >= bottom.priceScale.height);
     expect(pill).toHaveLength(1);
     // 18px tall, one px clear of the axis separator: the pill's geometry and
     // not the 16px square box `drawCrosshairTag` draws.

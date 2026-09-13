@@ -12,7 +12,7 @@
  * label. This one draws text, takes no interaction, and reports no hit, so it
  * never intercepts a click meant for the chart under it.
  */
-import type { IPrimitive, PrimitiveRenderContext, ZOrder } from './primitive';
+import type { IPrimitive, PrimitiveHost, PrimitiveRenderContext, ZOrder } from './primitive';
 
 export interface TextWatermarkOptions {
   /** The word itself. Kept short: it is read at a glance, not studied. */
@@ -38,6 +38,7 @@ export interface TextWatermarkOptions {
 const DEFAULT_FONT = '600 {size}px system-ui, -apple-system, "Segoe UI", sans-serif';
 
 export class TextWatermark implements IPrimitive {
+  private _host: PrimitiveHost | null = null;
   private _opts: Required<Omit<TextWatermarkOptions, 'color' | 'font'>>
     & Pick<TextWatermarkOptions, 'color' | 'font'>;
 
@@ -54,12 +55,15 @@ export class TextWatermark implements IPrimitive {
   }
 
   public zOrder(): ZOrder { return this._opts.zOrder; }
+  public attached(host: PrimitiveHost): void { this._host = host; }
+  public detached(): void { this._host = null; }
   public autoscaleInfo(): null { return null; }
   /** Never hit: the mark must not eat a click aimed at the chart beneath it. */
   public hitTest(): null { return null; }
 
   public setOptions(patch: Partial<TextWatermarkOptions>): void {
     this._opts = { ...this._opts, ...patch };
+    this._host?.requestUpdate();
   }
 
   public draw(ctx: CanvasRenderingContext2D, rc: PrimitiveRenderContext): void {
@@ -71,6 +75,9 @@ export class TextWatermark implements IPrimitive {
     if (w <= 0 || h <= 0) return;
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.clip();
     ctx.globalAlpha = o.opacity;
     ctx.fillStyle = o.color ?? '#9aa4b2';
     ctx.textAlign = 'center';
@@ -78,14 +85,14 @@ export class TextWatermark implements IPrimitive {
 
     // Measure at the requested size, then shrink to fit rather than clipping: a
     // half-visible word is worse than a small one, and panes get narrow.
-    const size = o.fontSize * dpr;
+    const size = Math.min(o.fontSize * dpr, h * 0.8);
     const face = (o.font ?? DEFAULT_FONT).replace('{size}', String(Math.round(size)));
     ctx.font = face;
     const natural = ctx.measureText(o.text).width;
     const room = w * 0.8;
     if (natural > room && natural > 0) {
-      const shrunk = Math.max(10 * dpr, size * (room / natural));
-      ctx.font = (o.font ?? DEFAULT_FONT).replace('{size}', String(Math.round(shrunk)));
+      const shrunk = Math.max(0.1, size * (room / natural));
+      ctx.font = (o.font ?? DEFAULT_FONT).replace('{size}', String(shrunk));
     }
     ctx.fillText(o.text, w / 2, h / 2);
     ctx.restore();

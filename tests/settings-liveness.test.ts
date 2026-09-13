@@ -62,7 +62,7 @@ interface Harness {
   frame(): string;
 }
 
-function mount(type: SeriesType): Harness {
+function mount(type: SeriesType, enableWatermark = true): Harness {
   // `_attachInput` bails when there is no window, and without its listeners the
   // chart never learns where the cursor is, so the crosshair block draws nothing.
   const doc = fakeDocument();
@@ -78,8 +78,12 @@ function mount(type: SeriesType): Harness {
     // nothing to tint while it is: turn it on so they are audited against a
     // plate that exists rather than skipped.
     statusLine: { background: true },
+    // Text styling needs visible content. The false fixture branch exercises
+    // the constructor default without passing a watermark override.
+    watermark: enableWatermark ? true : undefined,
   });
   chart.applySize(800, 600);
+  chart.setDataContext({ symbol: 'ACME', interval: '1m' });
   // A baseline splits its line and its fill at `baseValue`, which defaults to
   // 0: with prices around 110 every segment would fall above it and the below-
   // base colours would never be drawn, reporting live controls as dead. Put the
@@ -144,11 +148,14 @@ function mount(type: SeriesType): Harness {
       // A full invalidation. The synchronous raf paints inline, so the ops are
       // on the recorders by the time this returns.
       chart.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
-      return recs()
+      const recorded = recs()
         .map((r) => r.ops
           .map((o) => [o.type, o.args.join(','), o.fillStyle, o.strokeStyle, o.lineWidth, o.text, o.font].join('|'))
           .join('\n'))
         .join('\n##\n');
+      // The op recorder omits globalAlpha. SVG serializes the actual paint
+      // opacity, while recorded ops retain transient crosshair behavior.
+      return `${recorded}\n${chart.exportSVG()}`;
     },
   };
 }
@@ -168,6 +175,7 @@ function flipsFor(input: ChartSettingsInput, current: ChartSettingsValues): { ke
   const key = input.key;
   const now = current[key];
   switch (input.type) {
+    case 'text': return [{ key, value: now === 'Research' ? '' : 'Research' }];
     case 'boolean': return [{ key, value: now !== true }];
     case 'color': return [{ key, value: now === '#123456' ? '#654321' : '#123456' }];
     case 'select': {
@@ -298,6 +306,28 @@ describe('no settings control is dead', () => {
 describe('the off-frame controls, asserted where they do act', () => {
   beforeEach(() => vi.stubGlobal('window', {}));
   afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps watermark styling dormant by default and applies it when enabled', () => {
+    const h = mount('candlestick', false);
+    expect(readChartSettings(h.chart)['watermark.visible']).toBe(false);
+    const before = h.frame();
+    const style = {
+      'watermark.text': 'Research', 'watermark.color': '#123456',
+      'watermark.opacity': 0.25, 'watermark.fontSize': 40,
+    };
+    applyChartSettings(h.chart, style);
+    expect(readChartSettings(h.chart)).toMatchObject(style);
+    expect(h.frame()).toBe(before);
+    applyChartSettings(h.chart, { 'watermark.visible': true });
+    expect(h.frame()).not.toBe(before);
+    const svg = h.chart.exportSVG();
+    expect(svg).toContain('>Research</text>');
+    expect(svg).toContain('fill="#123456" opacity="0.25"');
+    expect(svg).toContain('font-size="40"');
+    applyChartSettings(h.chart, { 'watermark.visible': false });
+    expect(h.frame()).toBe(before);
+    h.chart.destroy();
+  });
 
   it("a hollow candle's up colour is read the moment borders are off", () => {
     const h = mount('hollow-candle');

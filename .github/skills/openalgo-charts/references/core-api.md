@@ -482,3 +482,21 @@ it receives instead of restating the shape:
 
 They were referenced by the public API long before they were exported, which
 meant a host writing its own settings dialog had to infer the shape or copy it.
+
+## Chart branding and optional watermark (2.1.9)
+
+`ChartOptions.branding` is `boolean | LogoWatermarkOptions`, default true.
+`setBranding` replaces the chart-owned mark configuration and `brandingOptions` returns
+its current configuration or false. Host branding does not belong in saved user layouts.
+
+`ChartOptions.watermark` is `boolean | ChartWatermarkOptions`, default false.
+`setWatermarkOptions` patches visibility/text/style, and `watermarkOptions` reads the
+preferences. `ChartWatermarkOptions` extends `Partial<TextWatermarkOptions>` with a
+`visible` switch. Automatic text reads the current data context. These settings are in
+`ChartSettingsState` and the Appearance schema. See the detailed examples and migration
+rules in [primitives-and-plugins](primitives-and-plugins.md).
+
+`BrandingChangedEvent = false | LogoWatermarkOptions` is the defensive snapshot emitted
+synchronously as `branding:changed` after `setBranding`. Host-accessible links subscribe
+to this event and unsubscribe on teardown, so disabling or replacing a logo cannot leave
+an old destination in the toolbar.

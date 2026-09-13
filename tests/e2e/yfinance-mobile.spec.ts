@@ -128,3 +128,35 @@ test('reduced motion makes wheel navigation settle in the input frame', async ({
   const second = await wheelSpacing('#chart2', 'chart2');
   expect(second.after).toBeCloseTo(second.before * wheelFactor, 8);
 });
+
+test('watermark and host branding survive chart-type and profile-mode rebuilds', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await openDemo(page);
+  expect(await page.evaluate(() => (window as any).__oac.chart.watermarkOptions().visible)).toBe(false);
+  await page.evaluate(() => {
+    const { chart } = (window as any).__oac;
+    chart.setWatermarkOptions({ visible: true, text: 'Research', opacity: 0.2, fontSize: 54 });
+    chart.setBranding({ label: 'Research charts', href: 'https://example.com/charts' });
+  });
+  for (const type of ['Line', 'Point & Figure']) {
+    await page.getByRole('button', { name: 'Chart type', exact: true }).click();
+    await page.getByRole('button', { name: type, exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__oac.chart.watermarkOptions().text)).toBe('Research');
+    expect(await page.evaluate(() => (window as any).__oac.chart.exportSVG())).toContain('Research');
+    await expect(page.getByRole('link', { name: 'Research charts', exact: true })).toBeVisible();
+  }
+  await page.getByRole('button', { name: 'P&F box sizing', exact: true }).click();
+  await page.getByRole('button', { name: 'P&F: 1% box', exact: true }).click();
+  expect(await page.evaluate(() => (window as any).__oac.chart.watermarkOptions())).toMatchObject({ visible: true, text: 'Research', opacity: 0.2, fontSize: 54 });
+  await page.evaluate(() => {
+    const { chart } = (window as any).__oac;
+    chart.setWatermarkOptions(false);
+    chart.setBranding(false);
+  });
+  await page.getByRole('button', { name: 'Chart type', exact: true }).click();
+  await page.getByRole('button', { name: 'Candles', exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 740 });
+  expect(await page.evaluate(() => (window as any).__oac.chart.watermarkOptions().visible)).toBe(false);
+  expect(await page.evaluate(() => (window as any).__oac.chart.brandingOptions())).toBe(false);
+  await expect(page.getByRole('link', { name: 'Research charts', exact: true })).toHaveCount(0);
+});

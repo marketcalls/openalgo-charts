@@ -2,6 +2,43 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.1.9
+
+2026-09-13
+
+### Added
+
+- Charts display the OpenAlgo corner logo by default, with responsive sizing,
+  theme contrast and vector exports. Hosts can replace or disable the mark with
+  `branding` and `chart.setBranding`.
+- An optional background watermark supports automatic symbol/interval text or
+  custom text. It is disabled by default and configurable through Appearance
+  settings, `watermark` and `chart.setWatermarkOptions`.
+- Watermark preferences persist independently of host branding and follow the
+  current data context. The widget, reference demo and OpenAlgo chart settings
+  share the same controls.
+
+### Fixed
+
+- The basic profiles example maps volume buckets to renderer values, restoring
+  its missing Volume Profile histogram bars. Its Market Profile and order-flow
+  selections now reuse the full current demos, exposing TPO letters, themes,
+  text coloring, lot display and the optional statistics table. The order-flow
+  logo moves to the top-left while table rows are visible, keeping labels readable.
+- Objects and managed-loading demos use irregular simulated OHLC candles and
+  changing volume. Navigation and mobile controls have a dedicated example in
+  the Mobile guide and are removed from the Examples page.
+- Website and reference-host examples use the shared logo defaults, avoiding
+  missing logos on widget/mobile charts and duplicate manual marks.
+- PNG export skips hidden and empty pane buffers, including maximized panes.
+- Logo gestures stay separate from drawing placement, including pinch release,
+  missed mouse releases and secondary pen buttons.
+
+The release build measures 76.16 KB base and 203.62 KB total Brotli.
+Budgets allow the default vector artwork, optional watermark and guarded gestures:
+77 KB base, 85 KB base plus trade, 173 KB widget terminal and 205 KB total.
+The chart-only import measures 48.96 KiB against a 50 KiB ceiling.
+
 ## 2.1.8
 
 2026-09-13

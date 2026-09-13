@@ -85,6 +85,7 @@ function pairs(tabInputs: readonly ChartSettingsInput[]): ChartSettingsColorPair
 /** A value the control does not currently hold, so a write is observable. */
 function mutate(input: IndicatorInput, current: ChartSettingsValue): ChartSettingsValue {
   switch (input.type) {
+    case 'text': return current === 'Research' ? '' : 'Research';
     case 'boolean': return current !== true;
     case 'color': return current === '#abcdef' ? '#123456' : '#abcdef';
     case 'number': {
