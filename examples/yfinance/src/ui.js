@@ -421,6 +421,14 @@ export const currentTheme = () => themeName;
 /** The engine palette that goes with the shell's current theme. */
 export const chartTheme = () => (themeName === 'light' ? lightTheme : darkTheme);
 
+/** Constructor options shared by both charts when the operating system requests less motion. */
+export function chartMotionOptions(view = globalThis.window) {
+  if (!view || typeof view.matchMedia !== 'function') return {};
+  return view.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ? { animZoom: false, animAutoscale: false }
+    : {};
+}
+
 export function setTheme(name, opts = {}) {
   themeName = THEMES.includes(name) ? name : 'dark';
   const root = document.documentElement;

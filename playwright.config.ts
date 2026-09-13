@@ -63,14 +63,19 @@ export default defineConfig({
   projects: [
     // The engine suite, against the static server. The demo spec is not in
     // it: that page needs /api/history, which serve.cjs does not answer.
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /(?:yfinance|widget-data-loading)\.spec\.ts/ },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /(?:yfinance(?:-mobile)?|widget-data-loading)\.spec\.ts/ },
     ...(['chromium', 'firefox', 'webkit'] as const).map(browserName => ({
       name: `widget-loading-${browserName}`,
-      testMatch: /(?:widget-data-loading|drawing-future|widget-objects)\.spec\.ts/,
+      testMatch: /(?:widget-data-loading|drawing-future|widget-objects|navigation-wheel|widget-mobile)\.spec\.ts/,
       use: { browserName, baseURL: 'http://127.0.0.1:4176' },
     })),
     // The demo, against its own server. Kept in the list even with no
     // Python, so the spec is found and can report itself skipped.
     { name: 'yfinance-demo', testMatch: /yfinance\.spec\.ts/, use: { ...devices['Desktop Chrome'], baseURL: DEMO_URL } },
+    ...(['chromium', 'firefox', 'webkit'] as const).map(browserName => ({
+      name: `yfinance-mobile-${browserName}`,
+      testMatch: /yfinance-mobile\.spec\.ts/,
+      use: { browserName, baseURL: DEMO_URL },
+    })),
   ],
 });

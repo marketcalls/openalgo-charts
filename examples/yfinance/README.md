@@ -234,6 +234,18 @@ An existing saved horizontal preference stays intact after upgrading; select
 Touch continues to pan both axes. Drag the time axis left to expand bar spacing or right
 to compress it.
 
+The demo inherits wheel behavior from the engine without host wiring. Pixel, line and
+page deltas are normalized and applied proportionally. A vertical wheel over the plot
+zooms time; horizontal input or Shift-wheel pans it. A wheel over the visible price axis
+scales price at the pointer and makes that scale manual. Browser pinch input reported as
+Ctrl-wheel or Meta-wheel zooms at the pointer. Plot drags remain two-axis by default.
+
+Automatic price ranges ease while navigation reveals new extrema. When the operating system
+requests reduced motion, both the main and split chart constructors disable zoom and autoscale
+animation. A manually panned or scaled price axis remains authoritative until Reset view or
+another explicit autoscale action. An older navigation animation cannot overwrite a
+programmatic viewport replacement, primary data replacement, reset or teardown.
+
 The same Navigation group offers **Default visible bars (0 = all)**. `0` fits all loaded
 bars; a positive value targets the newest N loaded bars plus four empty slots on the
 right, within the available data and bar-spacing limits. Changing it applies the new
@@ -246,6 +258,16 @@ panning. Hosts can set it through `createChart(el, { navigation: { defaultVisibl
 or `chart.setNavigationOptions(...)`; `chart.fitContent()` explicitly fits all loaded
 history. Navigation settings are included in the schema's read/apply helpers and chart
 state. A host that reapplies an explicit viewport after loading data controls that view.
+
+This example is a custom host around the DOM-free engine and draw tier. Its responsive
+controls belong to `examples/yfinance`; it does not use the packaged widget's
+`WidgetOptions.mobile`. At 900 CSS pixels or less, or with a coarse primary pointer, the
+desktop drawing rail yields to a bottom touch bar and the top toolbar becomes one scrollable
+row. Every compact control is at least 44 CSS pixels high. The native drawing picker exposes
+the registered tools, followed by Cursor, Undo, Redo, Magnet, Zoom out, Zoom in and Fit.
+Drawing actions use the existing controller and navigation uses the chart's public logical
+range and reset APIs. In split view the controls act on the last plot touched. Rotating or
+resizing changes only the CSS layout, so loaded bars and drawings stay in place.
 
 ## What each module proves
 
@@ -337,7 +359,8 @@ its own. From the package root:
 ```bash
 npm run test:demo                                             # the modules (also part of npm run verify)
 python examples/yfinance/server.py --self-test                # the server
-npx playwright test --project=yfinance-demo                   # the page, in a real browser against the fixture server
+npx playwright test --project=yfinance-demo                   # desktop page against the fixture server
+npx playwright test tests/e2e/yfinance-mobile.spec.ts         # compact touch flow in all configured browsers
 ```
 
 The specs cover what runs without a browser: every module evaluates outside a
@@ -352,7 +375,9 @@ are described under [Offline fixture mode](#offline-fixture-mode). Anything
 that draws is checked in a real browser against `index.html`, and the fixture
 server is what that browser talks to: `tests/e2e/yfinance.spec.ts` drives the
 page through the rail, the mouse and the transport, and reads the result back
-through the `?test=1` handle.
+through the `?test=1` handle. `tests/e2e/yfinance-mobile.spec.ts` adds fixture-mode touch
+drawing, undo, navigation, reduced-motion and portrait-to-landscape checks for the compact
+host controls.
 
 ## Notes
 

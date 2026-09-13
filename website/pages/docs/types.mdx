@@ -95,6 +95,8 @@ interface ChartOptions {
   now?: () => number;
   /** Ease a wheel zoom over a few frames. Default true; false is the single-frame step. */
   animZoom?: boolean;
+  /** Ease automatic price ranges during navigation. Defaults to animZoom. */
+  animAutoscale?: boolean;
   /** What a wheel zoom holds still: the bar under the cursor, or the latest bar. Default 'cursor'. */
   zoomAnchor?: 'cursor' | 'right';
   /** What a double-click on a pane does. Default 'reset'; 'maximize' toggles that pane to the whole stack. */

@@ -22,6 +22,16 @@ appears in the page title.
 | A depth ladder | [Depth of market](/openalgo-charts/api/classes/trade.DomLadder.html) | [Simulated live demo](/openalgo-charts/docs/depth-of-market/) |
 | Daily TPO profiles | [Market profile](/openalgo-charts/api/classes/profile.MarketProfile.html) | [Profile demo and themes](/openalgo-charts/docs/market-profile-examples/) |
 
+### Navigation and mobile controls in 2.1.8
+
+Wheel input respects pixel, line and page deltas. Horizontal input pans time; wheel input
+over a visible price axis scales that axis. `ChartOptions.animAutoscale` eases automatic
+price changes during navigation. `WidgetOptions.mobile` controls the responsive header,
+bottom bar and drawing sheets while sharing existing drawings and object state.
+See the [interaction guide](/openalgo-charts/docs/interactions/),
+[mobile guide](/openalgo-charts/docs/mobile/) and
+[interactive example](/openalgo-charts/examples/#navigation-and-mobile).
+
 ### Object management in 2.1.7
 
 `ChartObjects` shares inventory, supported actions and lifecycle notifications

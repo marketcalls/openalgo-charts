@@ -12,7 +12,7 @@ import { Callout } from 'nextra/components'
 with a top bar (symbol, interval, chart type, theme, settings, indicators, objects), a drawing rail
 down the left, a status line, the dialogs behind each of those buttons, keyboard shortcuts
 with a `?` panel that lists them, and optional persistence of the layout. It is the eighth
-loadable tier (**38.72 KB** Brotli), and it is the only one that builds DOM.
+loadable tier (**41.59 KB** Brotli), and it is the only one that builds DOM.
 
 <RunnableExample height={480} tiers={['widget']} caption="Pick a tool from the rail, open Indicators, change the chart type, right-click the chart, press ? for the shortcut list. No feed is wired here, so the bars go straight on widget.series." code={`const widget = lib.createWidget(el, {
   symbol: 'DEMO',
@@ -69,6 +69,10 @@ latest 100 bars on load and reset. Axes settings save these choices in the
 widget layout. The count changes the visible window without discarding history;
 0 fits all loaded bars. Mouse and pen pan time and price by default.
 Choose `mousePan: 'horizontal'` for time-only panning. Saved preferences are retained.
+Wheel input is proportional across pixel, line and page delta modes. Horizontal and
+Shift-wheel input pan time, wheel input over a visible price axis scales that axis at
+the pointer, and Ctrl-wheel or Meta-wheel pinch input zooms time at the pointer. See
+[Interactions](/docs/interactions).
 
 ```ts
 import { createWidget } from 'openalgo-charts/widget';
@@ -127,10 +131,43 @@ Dialogs respond to the actual widget container. At narrow widths the tab rail be
 a horizontal tab list, fields fit the available width and actions remain reachable
 while the body scrolls. This also applies to a small chart inside a wide desktop page.
 
+## Mobile widget controls
+
+The `mobile` option defaults to `'auto'`: compact controls activate when the widget
+container is at most 640 CSS px wide or its primary pointer is coarse. This keeps the
+controls on a phone in landscape. Use `'always'` for a permanently touch-oriented host
+or `'never'` to keep desktop chrome at every width.
+
+```ts
+const widget = createWidget('#terminal', {
+  mobile: 'auto',
+  rail: { tools: ['trend-line', 'horizontal-line', 'rectangle'] },
+});
+```
+
+The mobile header contains symbol entry and interval selection. Its bottom bar exposes
+Draw, Studies, Objects and More according to the same `topbar`, `rail` and `indicators`
+switches as desktop chrome. Drawing selection adds Properties, Lock or Unlock, and Delete.
+The Drawing sheet includes Finish, Cancel, Undo, Magnet and Stay while a tool is active.
+`rail.tools` restricts both layouts to the same allowed drawing ids.
+
+Both layouts drive one `DrawingController`, `ChartObjects` inventory, overlay stack,
+selection and undo history. A container resize changes the controls without replacing
+the chart or its drawings. The widget also honors `prefers-reduced-motion: reduce`: when
+the host omits `animZoom` or `animAutoscale`, their defaults become false. Explicit values
+remain authoritative.
+
+`mountMobile(ctx, options)` is exported for a host composing the widget pieces itself.
+It returns a `MobileHandle` with `el`, `active()`, `refresh()` and `destroy()`. The widget
+entry exports `MobileMode`, `MobileOptions` and `MobileHandle` as types. `createWidget`
+is the usual entry because it supplies the shared context and teardown. See
+[Mobile and Touch](/docs/mobile) and
+[Scales and Panes](/docs/scales-and-panes#navigation-and-autoscale-animation).
+
 ## Options
 
 `WidgetOptions` is `ChartOptions` plus the fields below. Every `ChartOptions` key
-(`timezone`, `grid`, `priceScale`, `axisChrome`, `renderer`, `animZoom` and the rest)
+(`timezone`, `grid`, `priceScale`, `axisChrome`, `renderer`, `animZoom`, `animAutoscale` and the rest)
 passes through to `createChart` unchanged.
 
 | Option | Type | What it does |
@@ -146,6 +183,7 @@ passes through to `createChart` unchanged.
 | `rail` | `boolean` \| `RailOptions` | The drawing rail. `false` hides it; `tools` restricts which registered tool ids appear (the order follows the rail's own groups); `favorites` seeds the pins when nothing is stored. |
 | `topbar` | `boolean` | The symbol, interval, chart type, indicators, capture, settings and theme controls. |
 | `statusline` | `boolean` | The status line under the chart. |
+| `mobile` | `'auto'` \| `'always'` \| `'never'` | Responsive widget controls. Default `'auto'`, active at a container width of 640 CSS px or less or when the primary pointer is coarse. |
 | `indicators` | `boolean` | The Indicators button and picker. Turn it off for a host that manages indicators itself. |
 | `persist` | `boolean` \| `string` | `true` saves the state under the `default` namespace (`oac-widget:default:state`) and restores it on the next `createWidget`; a string names the namespace, for more than one widget per origin. |
 | `storage` | `StorageLike` \| `null` | The store behind `persist`. Default: the page's `localStorage`. |
@@ -346,8 +384,8 @@ Budgets from `.size-limit.json`, Brotli, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 40 KB | 38.72 KB |
-| Widget terminal | base + draw + indicators + widget | 168 KB | 165.97 KB |
+| Widget tier | `openalgo-charts.widget.mjs` | 42 KB | 41.59 KB |
+| Widget terminal | base + draw + indicators + widget | 170 KB | 169.54 KB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.

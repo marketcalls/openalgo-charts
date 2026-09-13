@@ -11,8 +11,13 @@ Every live demo on this site is fully interactive. The points below apply to all
 
 ## Mouse
 
-- **Wheel**: zoom both axes around the cursor, eased over a few frames (`animZoom: false`
-  for the single-frame step); `zoomAnchor: 'right'` holds the latest bar still instead.
+- **Vertical wheel**: zoom the time axis proportionally around the cursor, eased over
+  a few frames (`animZoom: false` for the single-frame step). `zoomAnchor: 'right'`
+  holds the latest bar still for ordinary wheel input.
+- **Horizontal or Shift-wheel**: pan time. A dominant horizontal delta pans directly;
+  Shift maps a vertical-only wheel delta onto the horizontal axis.
+- **Wheel over a price axis**: scale the left or right price range under the pointer,
+  anchored at that pointer price. This puts that one scale in manual mode.
 - **Drag the plot**: mouse and pen pan time and price by default. Set
   `navigation.mousePan: 'horizontal'` to limit movement to time.
 - **Drag the price axis**: rescale price; **drag the time axis** left to expand bar spacing,
@@ -39,6 +44,19 @@ const chart = createChart(el, {
 chart.setNavigationOptions({ mousePan: 'horizontal' }); // optional time-only panning
 chart.navigationOptions();  // Readonly<ChartNavigationOptions>
 ```
+
+Wheel deltas can arrive in pixels, lines or pages. The chart converts lines to 16 CSS px
+and pages to the current chart dimension, then maps the resulting distance proportionally.
+A 100 px vertical movement retains the established 1.1 zoom step, while fine trackpad input
+produces a correspondingly smaller change. Browser pinch gestures reported as Ctrl-wheel or
+Meta-wheel zoom at the pointer even when `zoomAnchor: 'right'` is configured.
+
+`animAutoscale` smooths an autoscaled price range while navigation reveals new highs or lows.
+It defaults to the value of `animZoom`, so `animZoom: false` makes both transitions immediate
+unless `animAutoscale: true` is set explicitly. A manually panned or scaled price axis and a
+fixed range remain authoritative. `resetScale()` restores autoscale. Programmatic viewport
+replacement, primary data replacement, reset and destruction cancel pending navigation motion,
+so an older animation cannot overwrite the newer state.
 
 `defaultVisibleBars` controls the initial view and reset view: `0` (the default) fits all
 loaded bars, and a positive value targets the newest N loaded bars plus four empty bar
@@ -125,6 +143,10 @@ Touch works out of the box (`touch-action: none` on the container):
 - single-finger drag pans both axes, regardless of `navigation.mousePan`,
 - **two-finger pinch** zooms,
 - two-finger drag pans both axes.
+
+Trackpad pinch events that the browser exposes as Ctrl-wheel or Meta-wheel use the same
+proportional wheel path. This describes browser events rather than promising identical
+gesture hardware or operating-system behavior.
 
 ## Keyboard & accessibility
 

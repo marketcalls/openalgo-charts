@@ -118,6 +118,17 @@
       <div id="chart" role="region" aria-label="Price chart"></div>
       <div id="legend"></div>
 
+      <div class="mobilebar" id="mobilebar" role="toolbar" aria-label="Touch drawing and navigation controls">
+        <select id="mobile-draw" aria-label="Drawing tool"></select>
+        <button id="mobile-cursor" type="button">Cursor</button>
+        <button id="mobile-undo" type="button">Undo</button>
+        <button id="mobile-redo" type="button">Redo</button>
+        <button id="mobile-magnet" type="button" aria-pressed="false">Magnet off</button>
+        <button id="mobile-zoom-out" type="button">Zoom out</button>
+        <button id="mobile-zoom-in" type="button">Zoom in</button>
+        <button id="mobile-fit" type="button">Fit</button>
+      </div>
+
       <!-- What the stage says when there are no bars to draw. One overlay,
            three states (`data-state`): bars on their way, none for this
            request, or a request that failed and can be retried. A load in

@@ -278,6 +278,19 @@ export class PriceScale {
     this._autoScale = false;
   }
 
+  /** Scale around a screen coordinate, retaining its price in every scale mode. */
+  public scaleAtY(y: number, factor: number): void {
+    if (!this._scaled || this._height <= 0 || !Number.isFinite(factor) || factor <= 0) return;
+    const lo = this._t(this._min);
+    const hi = this._t(this._max);
+    const anchor = this._t(this.yToPrice(y));
+    const min = this._tInv(anchor + (lo - anchor) * factor);
+    const max = this._tInv(anchor + (hi - anchor) * factor);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || !(max > min)) return;
+    this.setPriceRange({ min, max });
+    this._autoScale = false;
+  }
+
   /**
    * Pan the visible range vertically by `dy` media px (dragging the plot up/down).
    * Works in transformed space so it's correct for log scales, and respects
@@ -305,16 +318,30 @@ export class PriceScale {
    * percent span. Log is the one that pads in price space and shows it, which
    * is long-standing behaviour and left alone here.
    */
-  public autoscale(low: number, high: number): void {
-    // A declared range outranks the measurement (see `setFixedRange`). The pane
-    // never reaches here while one is held (a fixed scale is manual), but this
-    // is public, and an axis whose band is declared must not be re-measured by
-    // whoever calls it.
+  public autoscale(low: number, high: number, progress = 1): boolean {
     if (this._fixedRange !== null) {
       this.setPriceRange(this._fixedRange);
-      return;
+      return false;
     }
-    this.setPriceRange(autoscaleRange(low, high, this._options.marginTop, this._options.marginBottom));
+    const target = autoscaleRange(low, high, this._options.marginTop, this._options.marginBottom);
+    const lo = this._t(this._min);
+    const hi = this._t(this._max);
+    const nextLo = this._t(target.min);
+    const nextHi = this._t(target.max);
+    const span = hi - lo;
+    const nextSpan = nextHi - nextLo;
+    const displacement = Math.max(Math.abs((nextLo - lo) / span), Math.abs((nextHi - hi) / span)) * this._height;
+    if (!this._scaled || progress >= 1 || !Number.isFinite(progress) || !(span > 0) || !(nextSpan > 0) || displacement < 0.1) {
+      this.setPriceRange(target);
+      return false;
+    }
+    const fraction = clamp(progress, 0, 1);
+    // Interpolate the projection, not the extent. Interpolating a narrow range
+    // towards a tall new candle spends most of the screen movement immediately.
+    const slope = (1 - fraction) / span + fraction / nextSpan;
+    const min = ((1 - fraction) * lo / span + fraction * nextLo / nextSpan) / slope;
+    this.setPriceRange({ min: this._tInv(min), max: this._tInv(min + 1 / slope) });
+    return true;
   }
 
   /**

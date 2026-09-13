@@ -1,7 +1,10 @@
 import { DrawingController, BUILTIN_DRAWING_TOOLS, drawingShortcuts } from '/dist/openalgo-charts.draw.mjs';
 import { el, inTextField } from './ui.js';
 import { clipboardPort, activeDraw, canClip, clipboardAction } from './clipboard.js';
-import { buildRail, syncRail, armCursor, setDrawLock, magnetMode, stayMode } from './rail.js';
+import {
+  buildRail, syncRail, syncMobileControls, observeMobileControls,
+  armCursor, setDrawLock, magnetMode, stayMode,
+} from './rail.js';
 import { autosave } from './persist.js';
 
 let app;
@@ -16,13 +19,14 @@ export function attachDrawing() {
   // re-asserts both on any controller it observes, so the seed only keeps
   // the first anchor after a rebuild from landing unsnapped.
   app.draw = new DrawingController(app.chart, { magnet: magnetMode(), stayInDrawingMode: stayMode(), clipboard: clipboardPort });
+  observeMobileControls(app.chart, app.draw);
   // The chord table comes from the tier, so the rail can only label its rows
   // once this point is reached.
   if (!Object.keys(app.shortcuts).length) {
     app.shortcuts = drawingShortcuts();
     buildRail();
   }
-  app.chart.on('draw:tool', ({ tool }) => { syncRail(tool); armCursor(el('chart'), tool); });
+  app.chart.on('draw:tool', ({ tool }) => { syncRail(tool); syncMobileControls(tool); armCursor(el('chart'), tool); });
   app.chart.on('draw:add', ({ drawing }) => { el('status').textContent = `drew ${drawing.tool}`; });
   // The properties bar follows the selection on its own (it subscribes to
   // the chart when the rail hands it the rebuilt one). What is left for the
@@ -39,6 +43,7 @@ export function attachDrawing() {
     app.chart.on(ev, autosave);
   }
   syncRail(app.draw.activeTool());
+  syncMobileControls(app.draw.activeTool());
 }
 
 export function fillToolPicker() {

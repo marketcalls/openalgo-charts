@@ -10,7 +10,7 @@ import { createChart, PaneLegend } from '/dist/openalgo-charts.mjs';
 // imported by the modules that call into them; the indicators tier is only
 // ever registered, so it is imported here.
 import '/dist/openalgo-charts.indicators.mjs';
-import { el, fmt, round2, initShell, chartTheme, setChartState, toast } from './ui.js';
+import { el, fmt, round2, initShell, chartTheme, chartMotionOptions, setChartState, toast } from './ui.js';
 import { initHover } from './hover.js';
 import { fillIntervalSelect, clampPeriod } from './intervals.js';
 import { initFeed, fetchBars, fetchNote, feedErrorState } from './feed.js';
@@ -36,7 +36,7 @@ import { initClipboard } from './clipboard.js';
 import { initMenus, openContextMenu } from './menus.js';
 import { initPersist, datasetKey, readLayout, applyLayout } from './persist.js';
 import { initToolbar, renderToolbar } from './toolbar.js';
-import { initRail, buildRail } from './rail.js';
+import { initRail, buildRail, initMobile } from './rail.js';
 import { mountPropertiesBar } from './properties.js';
 import { initDrawing, attachDrawing } from './drawing.js';
 
@@ -174,6 +174,7 @@ function render() {
     // A chart-type switch builds a new chart; the zone the user picked is
     // the demo's to carry across, like activeIndicators.
     timezone: app.chartTimezone,
+    ...chartMotionOptions(),
   });
   applyAxisChrome();
   applyStatusLineChoice();   // before the legends: a row added later obeys the switches
@@ -508,6 +509,7 @@ initToolbar(app);
 // so a bar docked to it comes along into chart-only full screen.
 initRail(app, { mountPropertiesBar });
 initDrawing(app);
+initMobile(app);
 fillIntervalSelect();
 
 buildRail();

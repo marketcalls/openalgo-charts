@@ -65,6 +65,8 @@ export {
 export type { WidgetThemeName, WidgetTokens, Rgba } from './tokens';
 
 export { WIDGET_CSS, WIDGET_STYLE_ID, injectWidgetStyles } from './styles';
+export { mountMobile } from './mobile';
+export type { MobileMode, MobileOptions, MobileHandle } from './mobile';
 
 // The dialog tier. Importing it registers the seven mounts with the shell's
 // registry, which is what lights up the top bar's settings and indicator

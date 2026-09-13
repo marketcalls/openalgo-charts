@@ -288,6 +288,32 @@ try {
   panResults.push({ chart: 'gallery-candles', matchedPaintedRectangles: shifted.length,
     movement: { x: dx * panBefore.dpr, y: dy * panBefore.dpr } });
 
+  const navigation = page.locator('.oac-example').filter({
+    has: page.locator(':scope > .oac-example__caption').filter({ hasText: 'Start at 360 px to use the mobile header and Draw sheet.' }),
+  });
+  await navigation.scrollIntoViewIfNeeded();
+  const widget = navigation.locator('.oac-widget');
+  await expect(widget).toHaveClass(/is-mobile/);
+  const retainedCanvas = await widget.locator('canvas').first().elementHandle();
+  await navigation.getByRole('button', { name: 'Width: 360 px', exact: true }).click();
+  await expect(widget).not.toHaveClass(/is-mobile/);
+  assert(await retainedCanvas.evaluate(canvas => canvas.isConnected), 'Width changes retain the same chart');
+  await navigation.getByRole('button', { name: 'Width: 760 px', exact: true }).click();
+  await expect(widget).toHaveClass(/is-mobile/);
+  await widget.locator('[data-mobile-action=draw]').click();
+  await expect(widget.locator('.oac-mobile__tool')).toHaveCount(3);
+  await widget.locator('[data-mobile-action=close]').click();
+  await navigation.getByRole('button', { name: 'Reset view', exact: true }).click();
+  const navigationBefore = await capture(widget, 'mobile-navigation-before');
+  await navigation.getByRole('button', { name: 'Show extrema', exact: true }).click();
+  await page.waitForTimeout(900);
+  const navigationAfter = await capture(widget, 'mobile-navigation-extrema');
+  assert.notEqual(navigationAfter, navigationBefore, 'The extrema reveal paints a new chart view');
+  await navigation.getByRole('button', { name: 'Animation: on', exact: true }).click();
+  await expect(widget.locator('canvas').first()).toBeVisible();
+  await navigation.getByRole('button', { name: 'Reset view', exact: true }).click();
+  results.push({ chart: 'mobile-navigation-example', retainedCanvas: true, permittedTools: 3, extremaVisible: true });
+
   assert.deepEqual(errors, [], 'The checked website pages must have no browser exceptions');
   console.log(JSON.stringify({
     checkedBundles: siteFiles.length, embeddedBundles: demoFiles.length,

@@ -3,6 +3,7 @@
  * Run only against an isolated OpenAlgo worktree with its own node_modules:
  * node scripts/check-openalgo-compat.mjs --frontend /tmp/openalgo/frontend
  * Add --objects true only when the host includes the shared Objects integration.
+ * Add --navigation true to validate the wheel routing introduced in 2.1.8.
  *
  * No backend is started. Vite proxies are removed and every API/WS is mocked.
  * The app source is unchanged; an entry wrapper records terminal instances so
@@ -172,6 +173,37 @@ try {
     assert.equal(await terminal((t) => t.sym.symbol), 'BHEL');
     assert(report.requests.some((r) => r.path === '/api/v1/history' && r.body.interval === '5m'));
   });
+  if (args.navigation === 'true') {
+    await check('trackpad, horizontal wheel and price-axis scaling retain host order authority', async () => {
+      const before = await terminal(t => ({ range: t.chart.getVisibleLogicalRange(), spacing: t.chart.timeScale.barSpacing }));
+      const orderCount = orderCounter;
+      const wheel = (t, input) => {
+        const r = t.container.getBoundingClientRect();
+        t.container.dispatchEvent(new WheelEvent('wheel', {
+          bubbles: true, cancelable: true,
+          clientX: r.left + (input.axis ? r.width - 5 : r.width / 2), clientY: r.top + r.height * 0.4,
+          deltaX: input.x, deltaY: input.y,
+        }));
+      };
+      await terminal(wheel, { x: 0, y: -1 });
+      await page.waitForTimeout(450);
+      const tiny = await terminal(t => t.chart.timeScale.barSpacing);
+      assert(Math.abs(tiny / before.spacing - 1.0009535561) < 1e-7);
+      const from = await terminal(t => t.chart.getVisibleLogicalRange().from);
+      await terminal(wheel, { x: 60, y: 0 });
+      await page.waitForTimeout(450);
+      assert.equal(await terminal(t => t.chart.timeScale.barSpacing), tiny);
+      assert((await terminal(t => t.chart.getVisibleLogicalRange().from)) > from);
+      const scale = await terminal(t => t.price.priceScale().priceRange());
+      await terminal(wheel, { x: 0, y: -100, axis: true });
+      await page.waitForTimeout(100);
+      const scaled = await terminal(t => t.price.priceScale().priceRange());
+      assert.equal(await terminal(t => t.chart.timeScale.barSpacing), tiny);
+      assert(scaled.max - scaled.min < scale.max - scale.min);
+      assert.equal(orderCounter, orderCount);
+      await terminal((t, range) => { t.chart.setAutoScale(true); t.chart.setVisibleLogicalRange(range); }, before.range);
+    });
+  }
   await check('depth-only subscription updates seeded candle and bid/ask', async () => {
     const before = await terminal((t) => ({ n: t.rawBars.length, bar: t.rawBars.at(-1) }));
     await sendDepth('BHEL', 'NSE', 111.25);

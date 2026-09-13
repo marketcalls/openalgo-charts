@@ -2,6 +2,67 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.1.8
+
+2026-09-13
+
+### Added
+
+- Wheel and trackpad input now scales proportionally after pixel, line and page
+  delta normalization. Horizontal input and Shift-wheel pan time; Ctrl-wheel and
+  Meta-wheel pinch input zoom at the pointer.
+- Wheel input over a visible left or right price axis scales that axis at the
+  pointer price. Manual and fixed price ranges remain authoritative, and plot
+  drags retain two-axis panning by default.
+- Optional `animAutoscale` smooths automatic price ranges as navigation reveals
+  new extrema. It defaults to `animZoom`; programmatic viewport replacement,
+  primary data replacement, reset and destruction cancel pending navigation motion.
+- `WidgetOptions.mobile` provides responsive packaged controls. `'auto'` activates
+  at a container width of 640 CSS px or less or when the primary pointer is coarse,
+  while `'always'` and `'never'` force a layout. The touch header, bottom controls and drawing sheets share the desktop
+  widget's drawing controller, object inventory, dialogs and overlay state.
+- `mountMobile`, `MobileMode`, `MobileOptions` and `MobileHandle` are exported from
+  `openalgo-charts/widget` for custom widget composition. The website includes an
+  interactive navigation and mobile example using the website's current library bundles.
+- The yfinance reference host adds a touch toolbar for drawing tools, Cursor,
+  Undo, Redo, Magnet, Zoom in, Zoom out and Fit. It retains the focused chart's
+  state across responsive layout changes, keeps replay controls clear of the
+  toolbar, and honors reduced motion in both the primary and split charts.
+
+### Fixed
+
+- Pending zoom and kinetic callbacks cannot overwrite a viewport reset or continue
+  after chart destruction, including resets triggered from navigation listeners.
+- Mobile drawing actions retain keyboard focus during refresh. Symbol searches
+  discard obsolete responses and keep their last result reachable in short charts.
+- Reference-host zoom buttons stop at scale limits without shifting the viewport;
+  touch Undo and Redo controls follow keyboard and controller changes.
+
+### Migration and validation
+
+- Existing hosts need no required option change. Set `animZoom: false` to retain
+  immediate wheel zoom and its matching immediate autoscale default, or set
+  `animAutoscale` separately. Set `mobile: 'never'` when a widget must keep desktop
+  chrome in a narrow container.
+- The widget disables omitted navigation animation options when the user prefers
+  reduced motion. Explicit host values remain authoritative.
+- Validation covers wheel delta modes, horizontal pan, left and right price axes,
+  pinch modifiers, autoscale transitions and cancellation, mobile mode changes,
+  allowed tools, shared drawing state, teardown, declarations, skill references
+  and the documentation website. Bundle budgets rise intentionally for the new
+  gesture and mobile-control code: 75 KB base, 83 KB base plus trade, 42 KB widget,
+  170 KB widget terminal and 202 KB total, with a 46 KiB chart-only ceiling.
+
+Validation: **4,376 unit tests** across 196 files and **228 demo tests** across
+15 files pass, alongside lint, TypeScript, build, declarations and size checks.
+All **847** skill coverage entries are present and TypeDoc has no warnings.
+The browser suite passes **127 tests**; one optional historical-render comparison
+is skipped without its baseline bundle. Website navigation, Objects, loading,
+depth, profile and orderflow checks pass. The packed candidate passes the OpenAlgo
+production build and **18 `/trading` browser workflows** using synthetic protocols.
+Measured Brotli: **74.00 KB** base, **41.59 KB** widget, **169.54 KB** widget
+terminal and **201.15 KB** all tiers. Touch checks use browser emulation.
+
 ## 2.1.7
 
 2026-09-11

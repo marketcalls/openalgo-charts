@@ -20,7 +20,8 @@ async function mount(page: Page): Promise<string[]> {
 }
 
 async function open(page: Page) {
-  const opener = page.locator('.oac-topbar__objects');
+  const opener = page.getByRole('button', { name: 'Objects', exact: true });
+  await expect(opener).toBeVisible();
   await opener.focus();
   await opener.press('Enter');
   const panel = page.locator('.oac-objects');

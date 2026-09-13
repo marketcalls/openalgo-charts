@@ -107,6 +107,26 @@ Dialogs fit the actual widget container, including a 350px pane on a wide page.
 Tabs adapt to a horizontal row, fields wrap and content scrolls inside the dialog
 while its actions remain reachable.
 
+## Mobile controls and navigation
+
+Since 2.1.8, `mobile: 'auto'` selects compact controls when the widget container is at
+most 640 CSS px wide or the primary pointer is coarse. Use `'always'` to force them or
+`'never'` to keep desktop controls. The mobile symbol header, interval picker, bottom
+bar and drawing sheets reuse the existing drawing controller, object inventory and
+dialogs. Changing layout retains drawings, selection and undo history; `rail.tools`
+restricts the same tool ids in both layouts.
+
+Vertical wheel input zooms time proportionally; dominant horizontal input and Shift-wheel
+pan time. A vertical wheel movement over a visible price axis scales that axis around
+the pointer price. Ctrl-wheel and Meta-wheel zoom time at the pointer inside the plot.
+`animAutoscale` eases automatic price ranges during navigation and defaults to `animZoom`.
+Manual and fixed price scales remain authoritative. Programmatic viewport replacement,
+primary data replacement, reset and destruction cancel pending navigation motion.
+
+The widget disables omitted `animZoom` and `animAutoscale` options when the user prefers
+reduced motion; explicit host settings win. A bare `createChart` host manages that
+preference and its own mobile controls. See the [mobile guide and live example](https://marketcalls.github.io/openalgo-charts/docs/mobile/).
+
 ## Options
 
 `WidgetOptions` is `ChartOptions` plus the fields below. Every `ChartOptions` key
@@ -125,6 +145,7 @@ to `createChart` unchanged.
 | `rail` | `boolean` \| `RailOptions` | The drawing rail. `false` hides it; `tools` restricts which registered tool ids appear (the order follows the rail's own groups); `favorites` seeds the pins when nothing is stored. |
 | `topbar` | `boolean` | The symbol, interval, chart type, indicators, capture, settings and theme controls. |
 | `statusline` | `boolean` | The status line under the chart. |
+| `mobile` | `'auto'` \| `'always'` \| `'never'` | Responsive touch controls; default `'auto'`. Observes container width and primary pointer capability. |
 | `indicators` | `boolean` | The Indicators button and picker. Turn it off for a host that manages indicators itself. |
 | `persist` | `boolean` \| `string` | `true` saves the state under the `default` namespace (`oac-widget:default:state`) and restores it on the next `createWidget`; a string names the namespace, for more than one widget per origin. |
 | `storage` | `StorageLike` \| `null` | The store behind `persist`. Default: the page's `localStorage`. |
@@ -261,8 +282,8 @@ Budgets from `.size-limit.json`, Brotli, enforced by `npm run size`:
 
 | Row | Files | Budget |
 |---|---|---|
-| Widget tier | `openalgo-charts.widget.mjs` | 40 kB |
-| Widget terminal | base + draw + indicators + widget | 168 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 42 KB |
+| Widget terminal | base + draw + indicators + widget | 170 KB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged. Measure, do not

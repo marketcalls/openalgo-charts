@@ -212,7 +212,9 @@ Details in [interactions](interactions.md); what matters here is which gesture l
 
 | Gesture | Effect | Leaves manual? |
 |---|---|---|
-| Wheel | `timeScale.zoomAtX(x, 1.1 or 1/1.1)`, eased by default; `zoomAnchor` selects cursor or right edge | no |
+| Vertical wheel over the plot | proportional `timeScale.zoomAtX`, eased by default; `zoomAnchor` selects cursor or right edge, except Ctrl/Meta pinch-style wheel always uses the pointer | no |
+| Horizontal wheel or Shift-wheel over the plot | time `scrollByPixels` | no |
+| Wheel over a visible price axis | scale that left or right range at the pointer price | **yes**, for that scale |
 | Drag inside the plot | time `setRightOffset` and vertical `panByPixels` on the pressed pane by default; `navigation.mousePan: 'horizontal'` limits mouse and pen to time | only when panning price; horizontal-only mouse/pen panning preserves autoscale |
 | Drag either price axis strip (right, or the reserved left column) | `setPriceRange` around the centre by `exp(dy * 0.005)` on **that strip's** scale, then `setAutoScale(false)` | **yes** |
 | Drag the time axis strip (bottom pane, last `timeAxisHeight` px) | `setBarSpacing(start * exp(-dx * 0.005))`: left expands, right compresses; preserves the logical right edge | no |
@@ -223,6 +225,11 @@ Details in [interactions](interactions.md); what matters here is which gesture l
 **Once a pane goes manual it stops tracking new data.** A live feed that keeps printing highs will run off the top of a pane whose axis the user dragged. Call `pane.priceScale.setAutoScale(true)` or `chart.resetScale()` to recover.
 
 **Both strips are draggable.** The gesture reads and writes the scale the strip actually draws, so dragging a left axis rescales the prices labelled there.
+
+`ChartOptions.animAutoscale` eases automatic price-range changes while navigation reveals
+new extrema. It defaults to `animZoom`. Manual and fixed scales bypass the transition.
+Programmatic viewport replacement, primary data replacement, reset and destruction cancel
+pending navigation motion so an earlier animation cannot overwrite newer state.
 
 ## One axis at a time
 

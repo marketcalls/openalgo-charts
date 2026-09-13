@@ -43,6 +43,7 @@ import { injectWidgetStyles } from './styles';
 import { mountDataStatus, type DataStatusHandle } from './data-status';
 import { attachContextMenu, DIALOG_CSS, mountIndicatorSettings, mountDrawingProperties, type OrderRequest, type PanelHandle } from './dialogs/index';
 import { mountObjectsPanel, OBJECTS_PANEL_CSS } from './objects-panel';
+import { mountMobile, type MobileHandle, type MobileMode } from './mobile';
 
 /** The intervals offered when the host names none: the registry's codes are appended. */
 export const DEFAULT_INTERVALS: readonly string[] = ['1m', '5m', '15m', '1h', '1d', '1w'];
@@ -74,6 +75,8 @@ export interface WidgetOptions extends Omit<ChartOptions, 'theme'> {
   rail?: boolean | RailOptions;
   topbar?: boolean;
   statusline?: boolean;
+  /** Narrow controls. Auto activates at 640 CSS px or less, or for a coarse primary pointer. Default auto. */
+  mobile?: MobileMode;
   /**
    * Keep the layout, the rail preferences, the symbol, the interval and the
    * theme between visits. `true` uses one shared namespace; a string names one,
@@ -163,7 +166,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 /** The options the shell consumes; the rest of `WidgetOptions` is the chart's. */
 const WIDGET_ONLY_KEYS: ReadonlyArray<keyof WidgetOptions> = [
   'feed', 'symbol', 'exchange', 'interval', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'statusline',
-  'loading', 'persist', 'storage', 'locale', 'indicators', 'symbolSearch', 'lookbackBars', 'now', 'onOrder', 'styleNonce',
+  'mobile', 'loading', 'persist', 'storage', 'locale', 'indicators', 'symbolSearch', 'lookbackBars', 'now', 'onOrder', 'styleNonce',
 ];
 
 /**
@@ -276,6 +279,7 @@ class WidgetImpl implements Widget {
   private _rail: RailHandle | null = null;
   private _topbar: TopbarHandle | null = null;
   private _statusline: StatuslineHandle | null = null;
+  private _mobile: MobileHandle | null = null;
   private _objectsPanel: PanelHandle | null = null;
   private readonly _intervals: string[];
 
@@ -364,6 +368,9 @@ class WidgetImpl implements Widget {
     // so a host keeps every engine option it had.
     const chartOpts = { ...options } as Record<string, unknown>;
     for (const k of WIDGET_ONLY_KEYS) delete chartOpts[k];
+    const reducedMotion = doc.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+    if (reducedMotion && chartOpts.animZoom === undefined) chartOpts.animZoom = false;
+    if (reducedMotion && chartOpts.animAutoscale === undefined) chartOpts.animAutoscale = false;
     this.chart = createChart(chartEl, { ...(chartOpts as ChartOptions), theme: this._chartTheme, document: doc });
     chartEl.setAttribute('aria-label', options.ariaLabel ?? 'Price chart');
     this._series = this.chart.addSeries(this._chartType as SeriesType);
@@ -439,6 +446,27 @@ class WidgetImpl implements Widget {
         indicatorsAvailable: () => widgetDialog('indicatorPicker') !== null,
       });
     }
+    this._mobile = mountMobile(this.context, {
+      mode: options.mobile,
+      container,
+      intervals: this._intervals,
+      topbar: options.topbar !== false,
+      rail: this._rail,
+      tools: typeof options.rail === 'object' ? options.rail.tools : undefined,
+      indicators: options.indicators !== false,
+      search: options.symbolSearch,
+      state: () => ({ symbol: this._symbol, exchange: this._exchange, interval: this._interval, chartType: this._chartType, theme: this._themeName }),
+      onSymbol: (symbol, exchange) => this.setSymbol(symbol, exchange),
+      onInterval: (code) => this.setInterval(code),
+      onChartType: (id) => this.setChartType(id),
+      onTheme: () => this.setTheme(this._themeName === 'dark' ? 'light' : 'dark'),
+      onSettings: (anchor) => this._openDialog('settings', anchor),
+      onIndicators: (anchor) => this._openDialog('indicatorPicker', anchor),
+      onObjects: (anchor) => this._openObjects(anchor),
+      onProperties: (anchor) => this._openDialog('drawingProperties', anchor),
+      settingsAvailable: () => widgetDialog('settings') !== null,
+      indicatorsAvailable: () => widgetDialog('indicatorPicker') !== null,
+    });
 
     this._installKeys();
     this._keymap.attach(doc);
@@ -495,7 +523,7 @@ class WidgetImpl implements Widget {
   public setSymbol(symbol: string, exchange?: string): void {
     const s = symbol.trim().toUpperCase();
     const ex = exchange ?? this._exchange;
-    if (s === this._symbol && ex === this._exchange) { this._topbar?.refresh(); return; }
+    if (s === this._symbol && ex === this._exchange) { this._topbar?.refresh(); this._mobile?.refresh(); return; }
     this._symbol = s;
     this._exchange = ex;
     this._keepView = false;
@@ -506,6 +534,7 @@ class WidgetImpl implements Widget {
     }
     this._statusline?.setSymbol(s, ex, this._interval);
     this._topbar?.refresh();
+    this._mobile?.refresh();
     this._scheduleSave();
     if (this._opts.feed) void this.reload();
     // Listeners last, so a host's own bug in one cannot leave the shell
@@ -518,7 +547,7 @@ class WidgetImpl implements Widget {
     const c = code.trim();
     if (c === '') throw new Error('openalgo-charts widget: interval code must not be empty');
     resolveInterval(c);
-    if (c === this._interval) { this._topbar?.refresh(); return; }
+    if (c === this._interval) { this._topbar?.refresh(); this._mobile?.refresh(); return; }
     this._interval = c;
     this._keepView = false;
     this._pendingView = null;
@@ -528,6 +557,7 @@ class WidgetImpl implements Widget {
     }
     this._statusline?.setSymbol(this._symbol, this._exchange, c);
     this._topbar?.refresh();
+    this._mobile?.refresh();
     this._scheduleSave();
     if (this._opts.feed) void this.reload();
     this._bus.emit('interval', { interval: c });
@@ -542,6 +572,7 @@ class WidgetImpl implements Widget {
     if (data.length > 0) this._series.setData(data);
     this._chartType = id;
     this._topbar?.refresh();
+    this._mobile?.refresh();
     this._statusline?.refresh();
     this._scheduleSave();
     this._bus.emit('layout', { reason: 'chartType', chartType: id });
@@ -555,6 +586,7 @@ class WidgetImpl implements Widget {
     this.root.dataset.theme = t.name;
     applyTokens(this.root, widgetTokens(t.theme, t.name));
     this._topbar?.refresh();
+    this._mobile?.refresh();
     this._scheduleSave();
     this._bus.emit('theme', { theme: t.name, chartTheme: t.theme });
   }
@@ -690,6 +722,7 @@ class WidgetImpl implements Widget {
       }
       this._statusline?.setSymbol(this._symbol, this._exchange, this._interval);
       this._topbar?.refresh();
+      this._mobile?.refresh();
       if (this._opts.feed) void this.reload();
       else {
         this._series.setData([]);
@@ -862,6 +895,8 @@ class WidgetImpl implements Widget {
     this._destroyed = true;
     this.dataController?.destroy();
     this._dataStatus.destroy();
+    this._mobile?.destroy();
+    this._mobile = null;
     if (this._saveTimer !== 0) { clearTimeout(this._saveTimer); this._saveTimer = 0; }
     for (const c of this._cleanups.splice(0)) c();
     this._topbar?.destroy();

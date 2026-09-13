@@ -2,7 +2,7 @@
 
 *When to read this: wiring or rebinding keyboard shortcuts, changing crosshair behaviour, supporting touch, arming a placement gesture, or making the chart keyboard-accessible.*
 
-Source of truth: `src/core/chart.ts` (`_attachInput` and the pointer/wheel/key handlers), `src/input/shortcuts.ts`, `src/input/kinetic.ts`, `src/input/touch.ts`, `src/input/crosshair.ts`, `src/primitives/time-navigator.ts`. Tests: `tests/shortcuts.test.ts`, `tests/interaction.test.ts`, `tests/pointer-button-guard.test.ts`, `tests/placement-mode.test.ts`, `tests/time-navigator.test.ts`.
+Source of truth: `src/core/chart.ts` (`_attachInput` and the pointer/wheel/key handlers), `src/input/wheel.ts`, `src/input/shortcuts.ts`, `src/input/kinetic.ts`, `src/input/touch.ts`, `src/input/crosshair.ts`, `src/primitives/time-navigator.ts`. Tests: `tests/wheel-navigation.test.ts`, `tests/price-scale-transitions.test.ts`, `tests/shortcuts.test.ts`, `tests/interaction.test.ts`, `tests/pointer-button-guard.test.ts`, `tests/placement-mode.test.ts`, `tests/time-navigator.test.ts`.
 
 Everything is built on Pointer Events, so mouse, touch and pen share one code path. Listeners are attached to the container in the constructor and removed in `destroy()`; `keydown` goes on `document` when available, else on the container.
 
@@ -11,8 +11,10 @@ Everything is built on Pointer Events, so mouse, touch and pen share one code pa
 | Gesture | Effect | Detail |
 |---|---|---|
 | Drag the plot | mouse, pen and touch pan time and price by default | `navigation.mousePan: 'horizontal'` limits mouse and pen to time; panning price switches the pressed pane to manual scaling, while horizontal-only panning preserves autoscale |
-| Wheel | zoom the time axis | factor `1.1` / `1/1.1`, eased by default; `animZoom: false` applies instantly. `zoomAnchor` selects cursor x or right edge. Always calls `preventDefault()` |
-| Drag the price axis (right strip) | rescale price | `exp(dy * 0.005)` about the range centre, then `setAutoScale(false)` |
+| Vertical wheel over the plot | zoom the time axis | proportional to normalized CSS-pixel distance, eased by default; `animZoom: false` applies instantly. `zoomAnchor` selects cursor x or right edge |
+| Horizontal wheel, dominant x delta or Shift-wheel | pan time | Shift maps a vertical-only delta onto x; Ctrl-wheel and Meta-wheel remain pinch-style zoom input |
+| Wheel over a price axis | scale that left or right price range | pointer price stays anchored and that one scale becomes manual |
+| Drag either price axis | rescale price | `exp(dy * 0.005)` about the range centre, then `setAutoScale(false)` |
 | Drag the time axis (bottom strip of the last pane) | left expands bar spacing; right compresses it | `barSpacing * exp(-dx * 0.005)`, preserving the logical right edge |
 | Drag a pane divider | redistribute height between the two adjacent panes | grab tolerance 4 px, cursor `row-resize`, summed weight preserved, neither side below `min(24, total/4)` px; emits `paneResized` on release |
 | Double-click | `doubleClick` option: `'reset'` (default) is `resetScale()`, the configured default view plus autoscale on every pane; `'maximize'` toggles `maximizePane` for the pane under the pointer; `'none'` only emits | suppressed while placement mode is on, or when a `dblclick` listener set `handled` on the event; the event carries `paneIndex`, `x`, `y` |
@@ -25,11 +27,31 @@ A press-and-release with under 3 px of movement is a click: `subscribeClick` fir
 
 **Only the primary mouse button starts a gesture.** Both `pointerdown` and the native `pointerup` filter `e.pointerType === 'mouse' && e.button !== 0`. Without the pointerup half, a right-click replays the previous left-click against stale coordinates and fires a phantom order (`tests/pointer-button-guard.test.ts`). Touch and pen contact with button 0 and are unaffected.
 
-**The wheel handler always prevents default.** A chart placed inline in a scrolling page traps the wheel; give it its own scroll region.
+`wheelPixels` converts DOM_DELTA_LINE to 16 CSS px and DOM_DELTA_PAGE to the chart
+width or height. `wheelLogFactor` preserves a 1.1 zoom for a 100 px notch and scales
+smaller input proportionally, clamped per event. A browser pinch reported as Ctrl-wheel
+or Meta-wheel zooms at the pointer even when `zoomAnchor: 'right'` is configured.
+
+**The wheel handler prevents default for non-zero normalized input.** A chart placed
+inline in a scrolling page traps wheel movement while the pointer is over it; give it its
+own scroll region when the page must retain wheel scrolling.
 
 Kinetic scrolling: a release faster than `triggerSpeed` decelerates as `velocity(t) = v0 · e^(−k·t)`. `DEFAULT_KINETIC_OPTIONS` is `friction: 0.0055` (1/ms, larger stops sooner), `minSpeed: 0.02` px/ms (animation ends), `triggerSpeed: 0.08` px/ms (slower flicks ignored). `KineticAnimation` uses no `Date` or `rAF` internally, so it is deterministic; the next `pointerdown` cancels it.
 
 Pinch: a second pointer aborts any single-pointer drag. Each frame compares two `pinchState` snapshots (`factor` (distance ratio) zooms time at the midpoint, `dx` pans time, `dy` pans the pinched pane's price scale) all in the same frame, so spreading while sliding zooms and pans at once.
+
+## Autoscale motion and cancellation
+
+`ChartOptions.animAutoscale` defaults to `animZoom` and eases an automatic price range
+while time navigation reveals new extrema. The range interpolation works in linear,
+logarithmic, percentage and indexed-to-100 modes. It does not override a manually panned
+or scaled axis, or a fixed range.
+
+Programmatic `setVisibleLogicalRange`, `fitContent`, `resetScale`, primary-series
+`setData` and `destroy` stop pending navigation motion before applying their own state.
+A new wheel tick folds its remaining zoom distance into the new target; a pointer press
+cancels the zoom glide so the direct gesture owns the viewport. There is no promised
+delay tied to realtime data, and browser or device event delivery may differ.
 
 ## Navigation options
 
@@ -159,6 +181,10 @@ The constructor sets `touch-action: none` on the container, so the browser does 
 **A scrollable ancestor can still swallow touch before the chart sees it.** Put `touch-action: none` on the scroll container too, or move the chart out of the native-scroll region.
 
 `window.devicePixelRatio` is read at startup and on every resize; override with `pixelRatio: () => 2` for fixed-density screenshots or headless environments.
+
+The packaged widget adds responsive mobile chrome; the engine itself remains DOM-free.
+See [widget](widget.md#mobile-controls) for the `'auto'`, `'always'` and `'never'` modes,
+shared drawing state and reduced-motion defaults.
 
 ## Accessibility
 

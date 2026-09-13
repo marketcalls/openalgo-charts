@@ -55,7 +55,12 @@ export class TimeScale {
   }
 
   public setBarSpacing(value: number): void {
-    this._barSpacing = clamp(value, this._minBarSpacing, this._maxBarSpacing);
+    this._barSpacing = this.constrainBarSpacing(value);
+  }
+
+  /** Bound a pending zoom target without changing the displayed viewport. */
+  public constrainBarSpacing(value: number): number {
+    return clamp(value, this._minBarSpacing, this._maxBarSpacing);
   }
 
   public get rightOffset(): number {

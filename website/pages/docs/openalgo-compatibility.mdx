@@ -112,6 +112,20 @@ production build, 408 trading tests and 13 browser workflows, plus a native
 future-drawing check on `/trading`. Crosshair candle time and OHLC remain null
 where no bar exists, so host tooltips keep their existing data contract.
 
+## Navigation compatibility in 2.1.8
+
+The packed 2.1.8 candidate passes the unchanged OpenAlgo `/trading` production build
+and 18 browser workflows. The navigation check exercises tiny trackpad input,
+horizontal wheel panning and wheel scaling on the price axis, while asserting that
+navigation creates no orders. Existing checks cover replay guards, quantity units,
+order context, persisted drawings, runtime indicators, profiles and independent panes.
+
+OpenAlgo builds its own interface around `createChart`. The new engine gestures apply
+after the package upgrade; the widget's mobile header and drawing sheets belong to
+`createWidget` and do not replace OpenAlgo's custom toolbar. Custom hosts choose their
+own controls and reduced-motion defaults. `animAutoscale` defaults to `animZoom`, and
+manual price ranges, future drawing anchors and plot clipping retain their contracts.
+
 These checks validate the inspected consumer and mocked protocol cases. They do
 not establish broker-specific data quality, exchange session alignment or exact
 trade volume when the upstream stream supplies only sampled prices.
@@ -124,7 +138,9 @@ candidate package installed. From the Charts repository:
 ```bash
 node scripts/check-openalgo-compat.mjs \
   --frontend /path/to/isolated-openalgo/frontend \
-  --label candidate-2.1.6 \
+  --label candidate-2.1.8 \
+  --objects true \
+  --navigation true \
   --probe-host true \
   --output /tmp/openalgo-compatibility.json
 ```

@@ -7,7 +7,7 @@ description: How OpenAlgo Charts is put together - seven layers from the public 
 
 import ArchitectureDiagram from '../../components/ArchitectureDiagram'
 
-OpenAlgo Charts 2.1.7 is a browser charting engine with no runtime dependencies.
+OpenAlgo Charts 2.1.8 is a browser charting engine with no runtime dependencies.
 Each pane has a base canvas for chart content and an overlay canvas for transient
 interaction. You can build your own interface or use the optional widget tier.
 
@@ -17,6 +17,7 @@ interaction. You can build your own interface or use the optional widget tier.
 
 | Area | Current architecture |
 |---|---|
+| Navigation | Version 2.1.8 normalizes wheel units, routes gestures by axis and eases automatic price projections. The widget adds touch controls that follow container width and pointer type. |
 | Data loading | Version 2.1.6 shares request scheduling, cache snapshots, history paging, stream repair and loading states across widget and custom hosts. |
 | Object management | Version 2.1.7 shares inventory and supported object actions across widgets and custom terminals. The Objects panel adapts to the chart's container size. |
 | Widget | Version 2.0 added `createWidget`: a packaged host with a toolbar, drawing rail, dialogs, shortcuts and persistence. |
@@ -89,8 +90,8 @@ tiers stay outside the base bundle.
 
 | Tier | Brotli | Contents |
 |---|--:|---|
-| `openalgo-charts` | 73.31 KB | Engine, 13 chart types, panes and scales, primitives, registries, chart state, linking, bar cache, trading overlay, SVG export, render backend port, feeds |
-| `openalgo-charts/widget` | 38.72 KB | Packaged interface controls through `createWidget`: top bar, drawing rail, status line, dialogs, right-click menu, keymap and persistence |
+| `openalgo-charts` | 74.00 KB | Engine, 13 chart types, panes and scales, primitives, registries, chart state, linking, bar cache, trading overlay, SVG export, render backend port, feeds |
+| `openalgo-charts/widget` | 41.59 KB | Packaged interface controls through `createWidget`: top bar, drawing rail, mobile controls, status line, dialogs, right-click menu, keymap and persistence |
 | `openalgo-charts/indicators` | 28.05 KB | 102 built-ins, shared TA helpers, and the Tier-2 external-data contract |
 | `openalgo-charts/draw` | 25.90 KB | 51 drawing tools, headless controller, clipboard, settings schema |
 | `openalgo-charts/profile` | 14.96 KB | Volume Profile, Market Profile (TPO), Footprint, order flow |
@@ -98,8 +99,8 @@ tiers stay outside the base bundle.
 | `openalgo-charts/webgl` | 6.38 KB | WebGL2 series backend, composited into the pane's canvas, 2D fallback for the session on context loss |
 | `openalgo-charts/transform` | 2.66 KB | Heikin Ashi, Renko, Range, Line Break, Point and Figure, Kagi |
 
-**197.58 KB Brotli** for every tier at once; a widget terminal (base + draw +
-indicators + widget, what one `createWidget` call loads) is 165.97 KB. Figures are
+**201.15 KB Brotli** for every tier at once; a widget terminal (base + draw +
+indicators + widget, what one `createWidget` call loads) is 169.54 KB. Figures are
 the measured `size-limit` output and are enforced in CI, so a change that grows a
 bundle past its budget fails the build.
 

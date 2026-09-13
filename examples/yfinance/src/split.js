@@ -1,9 +1,9 @@
 import * as engine from '/dist/openalgo-charts.mjs';
 import { createChart } from '/dist/openalgo-charts.mjs';
 import { DrawingController } from '/dist/openalgo-charts.draw.mjs';
-import { el, esc, fmt, UP, DOWN, chartTheme } from './ui.js';
+import { el, esc, fmt, UP, DOWN, chartTheme, chartMotionOptions } from './ui.js';
 import { clipboardPort } from './clipboard.js';
-import { armCursor, magnetMode, stayMode } from './rail.js';
+import { armCursor, magnetMode, stayMode, syncMobileControls, observeMobileControls } from './rail.js';
 import { fetchBars, fetchNote, feedErrorState } from './feed.js';
 import { INTERVALS, intervalLabel, intervalName, clampPeriod } from './intervals.js';
 import { tbtn, ticon, renderToolbar } from './toolbar.js';
@@ -134,6 +134,7 @@ export function buildChart2() {
     priceAxisWidth: 62,
     grid: { vertLines: el('vgrid').checked, horzLines: el('hgrid').checked },
     timezone: app.chartTimezone,
+    ...chartMotionOptions(),
   });
   price2 = app.chart2.addSeries('candlestick');
   price2.setData(bars2);
@@ -153,7 +154,11 @@ export function buildChart2() {
   // controller it later observes; the seed only keeps the first drawing on
   // this side from landing before that.
   app.draw2 = new DrawingController(app.chart2, { magnet: magnetMode(), stayInDrawingMode: stayMode(), clipboard: clipboardPort });
-  app.chart2.on('draw:tool', ({ tool }) => armCursor(el('chart2'), tool));
+  observeMobileControls(app.chart2, app.draw2);
+  app.chart2.on('draw:tool', ({ tool }) => {
+    armCursor(el('chart2'), tool);
+    if (app.focusPane === 2) syncMobileControls(tool);
+  });
   app.chart2.on('draw:add', () => { el('status').textContent = 'chart 2: ' + app.draw2.drawings().length + ' drawings'; });
   // No properties widget over here (it is glued to the main chart's box),
   // but the chords apply to whichever plot the pointer is over, so the

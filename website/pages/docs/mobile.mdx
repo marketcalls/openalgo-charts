@@ -9,6 +9,13 @@ import { Callout } from 'nextra/components'
 
 All input handling is built on the [Pointer Events API](https://www.w3.org/TR/pointerevents/), so the same input system serves mouse, touch, and stylus input. Touch retains two-axis panning; mouse and pen also pan both axes by default, with optional time-only movement through `navigation.mousePan: 'horizontal'`.
 
+The engine gestures below work in every host. The optional
+[`openalgo-charts/widget`](/docs/widget#mobile-widget-controls) tier also supplies a
+responsive header, bottom controls and drawing sheets.
+
+Try the [navigation and mobile example](/examples#navigation-and-mobile) to switch
+container widths, place drawings and compare animated and immediate autoscaling.
+
 ## Built-in touch gestures
 
 ### One-finger drag
@@ -25,6 +32,11 @@ Placing two fingers on the chart starts a pinch gesture. On every animation fram
 - **Midpoint translates vertically** -- pans the price scale of the touched pane.
 
 All four effects are computed in a single frame, so spreading fingers while sliding sideways zooms and pans simultaneously.
+
+Some browsers expose a trackpad pinch as Ctrl-wheel or Meta-wheel. The chart treats that
+as proportional time zoom at the pointer. Pixel, line and page wheel deltas are normalized
+before use. Hardware and browser event delivery can differ, so test the devices your host
+supports rather than assuming identical gestures everywhere.
 
 ### Double-tap to reset
 
@@ -74,6 +86,45 @@ For a fixed aspect ratio at any screen width:
   aspect-ratio: 16 / 9;
 }
 ```
+
+## Packaged mobile widget controls
+
+`WidgetOptions.mobile` accepts `'auto'`, `'always'` or `'never'`. The default is
+`'auto'`, which switches when the widget container is at most 640 CSS px wide or the
+primary pointer is coarse. It observes the container rather than the browser viewport,
+so a narrow chart in a wide dashboard receives the compact controls, and a phone retains
+them in landscape.
+
+```ts
+import { createWidget } from 'openalgo-charts/widget';
+
+const widget = createWidget('#terminal', {
+  mobile: 'auto',
+  rail: { tools: ['trend-line', 'horizontal-line', 'rectangle'] },
+});
+```
+
+When active, the desktop top bar, status line and drawing rail are replaced by a touch
+header and bottom bar. The header provides symbol entry and interval selection. The
+bottom bar provides Draw, Studies, Objects and More as enabled by `topbar`, `rail` and
+`indicators`. More contains theme, chart settings and chart type. Selecting a drawing
+shows Properties, Lock or Unlock, and Delete. While a tool is active, the Drawing sheet
+also provides Finish, Cancel, Undo, Magnet and Stay controls.
+
+The mobile and desktop controls use the same `DrawingController`, object inventory,
+selection, undo history, settings dialogs and overlay stack. Changing layout does not
+copy or reset drawings. `rail.tools` filters both the desktop rail and mobile Drawing
+sheet to the same allowed ids.
+
+The widget checks `prefers-reduced-motion: reduce` when it creates the chart. If the host
+did not set them, the widget disables both `animZoom` and `animAutoscale`. Explicit option
+values remain in force.
+
+For a custom packaged host, the widget entry also exports `mountMobile` and its
+`MobileMode`, `MobileOptions` and `MobileHandle` types. Most applications should use
+`createWidget`, which wires the handle to the shared widget context and destroys it with
+the rest of the chrome. See [The Widget Tier](/docs/widget#mobile-widget-controls) and
+[Scales and Panes](/docs/scales-and-panes#navigation-and-autoscale-animation).
 
 ## Crisp rendering
 

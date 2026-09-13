@@ -84,6 +84,7 @@ import type { Bar, SeriesDataItem } from '../model/bar';
 import { toBar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
 import { ZoomGlide } from '../input/zoom-glide';
+import { wheelPixels, wheelLogFactor } from '../input/wheel';
 import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
 import { ShortcutManager } from '../input/shortcuts';
 import type { ShortcutManagerOptions } from '../input/shortcuts';
@@ -230,6 +231,8 @@ export interface ChartOptions {
    * instruments. Off restores the single-frame step.
    */
   animZoom?: boolean;
+  /** Ease automatic price ranges during navigation. Defaults to animZoom (true). */
+  animAutoscale?: boolean;
   /**
    * What a wheel zoom holds still: the bar under the cursor, or the right edge
    * (the latest bar). Default `'cursor'`, which is what the chart has always
@@ -728,13 +731,17 @@ export class Chart {
   private _lastDragT = 0;
   private _dragVelocity = 0;
   private _kineticHandle: number | null = null;
+  private _kineticEpoch = 0;
   private _zoomHandle: number | null = null;
   /** The glide in flight, so a second wheel tick folds into it (see ZoomGlide.add). */
   private _zoomGlide: ZoomGlide | null = null;
   private _zoomGlideStart = 0;
   private _zoomGlideApplied = 0;
-  private _zoomGlideX = 0;
   private readonly _animZoom: boolean;
+  private readonly _animAutoscale: boolean;
+  private _autoscaleTime: number | null = null;
+  private _autoscaleFrames = 0;
+  private _navigationEpoch = 0;
   private readonly _zoomAnchor: ZoomAnchor;
   private readonly _doubleClick: DoubleClickAction;
   private readonly _firstDataId: { value: number | null } = { value: null };
@@ -846,6 +853,7 @@ export class Chart {
     this._shortcuts = sc === false ? null : (sc instanceof ShortcutManager ? sc : new ShortcutManager(sc ?? {}));
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
     this._animZoom = options.animZoom ?? true;
+    this._animAutoscale = options.animAutoscale ?? this._animZoom;
     this._zoomAnchor = options.zoomAnchor ?? 'cursor';
     this._doubleClick = options.doubleClick ?? 'reset';
     this._conflate = options.conflate ?? false;
@@ -916,7 +924,10 @@ export class Chart {
     this._attachInput();
     // A host that mutates the time scale directly (e.g. setVisibleLogicalRange to
     // preserve zoom across a data reload) still triggers a repaint.
-    this._timeScale.setChangeHandler(() => this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full)));
+    this._timeScale.setChangeHandler(() => {
+      this._stopNavigationMotion();
+      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    });
     this.applySize(container.clientWidth, container.clientHeight);
     this._remeasureHandle = this._raf.schedule(() => {
       this._remeasureHandle = null;
@@ -947,6 +958,7 @@ export class Chart {
 
   /** Restore a saved logical range (e.g. preserve the user's zoom across a data reload). */
   public setVisibleLogicalRange(range: LogicalRange): void {
+    this._stopNavigationMotion();
     const before = this._timeScale.visibleRange();
     this._timeScale.setVisibleLogicalRange(range);
     this._emitViewportIfMoved(before);
@@ -959,6 +971,7 @@ export class Chart {
 
   /** Fit all bars into view (no-arg convenience; bar count from the data). */
   public fitContent(): void {
+    this._stopNavigationMotion();
     if (this._dataLayer.length <= 0) return;
     const before = this._timeScale.visibleRange();
     this._timeScale.fitContent(this._dataLayer.length);
@@ -2315,6 +2328,7 @@ export class Chart {
   }
 
   private _setData(dataId: number, bars: readonly Bar[]): void {
+    if (dataId === this._firstDataId.value) this._stopNavigationMotion();
     this._dataLayer.setSeriesData(dataId, bars);
     // An indicator's plots are series in this same layer, so `baseIndex` is the
     // longest of *all* of them, this one included. Replacing the primary series
@@ -3189,13 +3203,20 @@ export class Chart {
     if (mask === null || mask.isEmpty()) return;
 
     const global = mask.globalLevel;
+    let easing = false;
+    const now = this._now();
+    const fraction = this._autoscaleTime === null || ++this._autoscaleFrames >= 90
+      ? 1 : 1 - Math.exp(-Math.max(1, now - this._autoscaleTime) / 80);
+    if (this._autoscaleTime !== null) this._autoscaleTime = now;
     for (let i = 0; i < this._panes.length; i++) {
       const pane = this._panes[i];
       const perPane = mask.paneInvalidation(i);
       const level = Math.max(global, perPane?.level ?? InvalidationLevel.None);
       const isBottom = i === this._bottomPaneIndex();
       const ctx = this._renderContext(isBottom);
-      if (level >= InvalidationLevel.Full || perPane?.autoScale) pane.autoscale(ctx);
+      if (level >= InvalidationLevel.Full || perPane?.autoScale || this._autoscaleTime !== null) {
+        easing = pane.autoscale(ctx, fraction) || easing;
+      }
       if (level >= InvalidationLevel.Light) pane.paintBase(ctx);
       if (level >= InvalidationLevel.Cursor && !this._overlayFrozen) {
         // Global crosshair: every pane draws the vertical line at the shared x;
@@ -3207,6 +3228,8 @@ export class Chart {
         pane.paintTop(cross, ctx);
       }
     }
+    if (easing) this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Light));
+    else this._autoscaleTime = null;
     // After the loop, not inside it: swapping a pane's backend while its
     // frame is half painted would hand the rest of that frame to a backend
     // that never began one. The device is shared, so one pane's answer is
@@ -3594,6 +3617,7 @@ export class Chart {
       return;
     }
     if (this._axisDrag === 'time') {
+      this._beginAutoscaleMotion();
       // Drag left to widen bars; drag right to show more bars in the same space.
       const dx = p.x - this._axisStartCoord;
       this._timeScale.setBarSpacing(this._axisStartSpacing * Math.exp(-dx * 0.005));
@@ -3626,6 +3650,7 @@ export class Chart {
       return;
     }
     if (this._dragging) {
+      this._beginAutoscaleMotion();
       const dx = p.x - this._dragStartX;
       if (Math.abs(dx) > 3 || Math.abs(p.y - this._dragStartY) > 3) this._pointerMoved = true;
       // horizontal: scroll time
@@ -3814,36 +3839,57 @@ export class Chart {
   };
 
   private readonly _onWheel = (e: WheelEvent): void => {
+    const delta = wheelPixels(e, this._width, this._height);
+    if (delta.x === 0 && delta.y === 0) return;
     this._unfreezeOverlay();
     e.preventDefault();
-    const logFactor = e.deltaY < 0 ? Math.log(1.1) : -Math.log(1.1);
-    // 'right' pins the latest bar: zoom about the right edge of the plot, so
-    // history stretches away from it instead of the cursor's bar staying put.
-    const focusX = this._zoomAnchor === 'right' ? this._timeScale.width : this._localPoint(e).x;
-
-    if (!this._animZoom || !ZoomGlide.shouldAnimate(logFactor)) {
+    this._stopKinetic();
+    const p = this._localPoint(e);
+    const onLeft = this._leftAxisWidth > 0 && p.x < this._leftAxisWidth;
+    const onRight = this._rightAxisWidth > 0 && p.x >= this._width - this._rightAxisWidth;
+    if (onLeft || onRight) {
+      if (delta.y === 0) return;
       this._stopZoomGlide();
+      const pane = this._panes[p.pane];
+      const scale = pane.scaleFor(this._axisScaleId(p.pane, onLeft ? 'left' : 'right'));
+      scale.scaleAtY(p.localY, Math.exp(-wheelLogFactor(delta.y)));
+      this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+      return;
+    }
+    if (!e.ctrlKey && !e.metaKey && (e.shiftKey || Math.abs(delta.x) > Math.abs(delta.y))) {
+      this._stopZoomGlide();
+      this._beginAutoscaleMotion();
+      this._timeScale.scrollByPixels(-(e.shiftKey && delta.x === 0 ? delta.y : delta.x));
+      this._maybeLoadHistory();
+      this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+      this._emitViewport('pan');
+      return;
+    }
+    if (delta.y === 0) return;
+    const focusX = this._zoomAnchor === 'right' && !e.ctrlKey && !e.metaKey
+      ? this._timeScale.width : Math.max(0, Math.min(this._timeScale.width, p.x - this._leftAxisWidth));
+    // Carry the unpainted distance across device changes and cursor movement.
+    // Bound the target now so input at a limit cannot accumulate invisible debt.
+    const remaining = this._zoomGlide === null ? 0 : this._zoomGlide.totalLogFactor - this._zoomGlideApplied;
+    const spacing = this._timeScale.barSpacing;
+    const target = this._timeScale.constrainBarSpacing(spacing * Math.exp(remaining + wheelLogFactor(delta.y)));
+    const logFactor = Math.log(target / spacing);
+    this._stopZoomGlide();
+    if (logFactor === 0) return;
+    if (!this._animZoom || !ZoomGlide.shouldAnimate(logFactor)) {
       this._applyZoom(focusX, logFactor);
       return;
     }
-    // A tick during a glide extends it rather than starting a new one, or a
-    // fast scroll would restart the ease on every notch and barely move.
-    // The lead lands on the event itself, so there is no input latency and a
-    // synchronous read of the viewport after a wheel sees it move.
     const lead = logFactor * ZoomGlide.leadFraction();
+    const epoch = this._navigationEpoch;
     this._applyZoom(focusX, lead);
-    const rest = logFactor - lead;
-
-    if (this._zoomGlide !== null && this._zoomGlideX === focusX) {
-      this._zoomGlide.add(rest, this._zoomGlideApplied, this._now() - this._zoomGlideStart);
-      return;
-    }
-    this._stopZoomGlide();
-    this._startZoomGlide(focusX, rest);
+    if (this._destroyed || epoch !== this._navigationEpoch) return;
+    this._startZoomGlide(focusX, logFactor - lead);
   };
 
   /** One zoom step, applied now. Shared by the instant path and each glide frame. */
   private _applyZoom(focusX: number, logFactor: number): void {
+    this._beginAutoscaleMotion();
     this._timeScale.zoomAtX(focusX, Math.exp(logFactor));
     this._maybeLoadHistory();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
@@ -3855,15 +3901,16 @@ export class Chart {
     this._zoomGlide = glide;
     this._zoomGlideStart = this._now();
     this._zoomGlideApplied = 0;
-    this._zoomGlideX = focusX;
     let frames = 0;
     const step = (): void => {
+      if (this._zoomGlide !== glide || this._destroyed) return;
       const elapsed = this._now() - this._zoomGlideStart;
       const applied = glide.appliedAt(elapsed);
       const delta = applied - this._zoomGlideApplied;
       this._zoomGlideApplied = applied;
       // A frame that moved nothing still costs a full-pane repaint, so skip it.
       if (delta !== 0) this._applyZoom(focusX, delta);
+      if (this._zoomGlide !== glide || this._destroyed) return;
       if (!glide.finished(elapsed) && ++frames < ZOOM_GLIDE_MAX_FRAMES) {
         this._zoomHandle = this._raf.schedule(step);
       } else {
@@ -3875,6 +3922,19 @@ export class Chart {
       }
     };
     this._zoomHandle = this._raf.schedule(step);
+  }
+
+  private _beginAutoscaleMotion(): void {
+    if (!this._animAutoscale || this._autoscaleTime !== null) return;
+    this._autoscaleTime = this._now() - 16;
+    this._autoscaleFrames = 0;
+  }
+
+  private _stopNavigationMotion(): void {
+    this._navigationEpoch++;
+    this._stopZoomGlide();
+    this._stopKinetic();
+    this._autoscaleTime = null;
   }
 
   private _stopZoomGlide(): void {
@@ -3891,6 +3951,7 @@ export class Chart {
    * Same as double-clicking the chart.
    */
   public resetScale(): void {
+    this._stopNavigationMotion();
     const before = this._timeScale.visibleRange();
     this._hasFitContent = this._fitDefaultView();
     for (const pane of this._panes) {
@@ -3930,6 +3991,7 @@ export class Chart {
     if (pts.length < 2 || this._pinch === null) return;
     const cur = pinchState(pts[0], pts[1]);
     const d = pinchDelta(this._pinch, cur);
+    this._beginAutoscaleMotion();
     if (d.factor !== 1) this._timeScale.zoomAtX(cur.cx, d.factor);                       // pinch → zoom time
     this._timeScale.setRightOffset(this._timeScale.rightOffset - d.dx / this._timeScale.barSpacing); // two-finger pan X
     this._panes[this._pinchPane]?.priceScale.panByPixels(d.dy);                          // two-finger pan Y
@@ -3973,12 +4035,16 @@ export class Chart {
     // the time window, and deliberately emit nothing (the payload is a time
     // range, and `_emitViewportIfMoved` sees no movement in it anyway).
     const pan = (bars: number): boolean => {
+      this._stopZoomGlide();
+      this._beginAutoscaleMotion();
       const before = ts.visibleRange();
       ts.setRightOffset(ts.rightOffset + bars);
       this._emitViewportIfMoved(before);
       return true;
     };
     const zoom = (factor: number): boolean => {
+      this._stopZoomGlide();
+      this._beginAutoscaleMotion();
       const before = ts.visibleRange();
       ts.zoomAtX(this._width / 2, factor);
       this._emitViewportIfMoved(before);
@@ -4143,6 +4209,8 @@ export class Chart {
    * unnoticed until a browser drove it.
    */
   private _startKinetic(velocity: number): void {
+    this._stopKinetic();
+    const epoch = this._kineticEpoch;
     const anim = new KineticAnimation(velocity);
     if (anim.durationMs <= 0) return;
     const start = this._now();
@@ -4155,10 +4223,12 @@ export class Chart {
     // ten seconds of frames is a ceiling no real animation reaches.
     let frames = 0;
     const step = (): void => {
+      if (epoch !== this._kineticEpoch || this._destroyed) return;
       const elapsed = this._now() - start;
       const dist = anim.distanceAt(elapsed);
       const delta = dist - lastDist;
       lastDist = dist;
+      this._beginAutoscaleMotion();
       this._timeScale.setRightOffset(this._timeScale.rightOffset - delta / this._timeScale.barSpacing);
       this._maybeLoadHistory();
       this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
@@ -4167,6 +4237,7 @@ export class Chart {
       // downstream (a linked chart, a host tracking the visible range) is left on
       // that window while this one coasts on for another few hundred milliseconds.
       this._emitViewport('pan');
+      if (epoch !== this._kineticEpoch || this._destroyed) return;
       if (!anim.finished(elapsed) && ++frames < KINETIC_MAX_FRAMES) {
         this._kineticHandle = this._raf.schedule(step);
       } else {
@@ -4177,6 +4248,7 @@ export class Chart {
   }
 
   private _stopKinetic(): void {
+    this._kineticEpoch++;
     if (this._kineticHandle !== null) {
       this._raf.cancel(this._kineticHandle);
       this._kineticHandle = null;
@@ -4201,8 +4273,7 @@ export class Chart {
       this._raf.cancel(this._remeasureHandle);
       this._remeasureHandle = null;
     }
-    this._stopKinetic();
-    this._stopZoomGlide();
+    this._stopNavigationMotion();
     for (const indicator of this._indicators.splice(0)) indicator.remove();
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;

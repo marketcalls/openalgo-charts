@@ -481,13 +481,14 @@ export class Pane {
   }
 
   /** Autoscale each active price scale from its own series (independent axes). */
-  public autoscale(ctx: PaneRenderContext): void {
+  public autoscale(ctx: PaneRenderContext, progress = 1): boolean {
+    let easing = false;
     const layout = this._layout(ctx);
     const range = ctx.timeScale.visibleRange();
     // Right scale also expands for primitives (price lines etc.).
-    this._autoscaleScale(this.priceScale, (s) => s.scaleId === 'right', true, ctx, layout.plotHeight, range);
-    if (this._leftScale) this._autoscaleScale(this._leftScale, (s) => s.scaleId === 'left', false, ctx, layout.plotHeight, range);
-    if (this._overlayScale) this._autoscaleScale(this._overlayScale, (s) => s.scaleId === '', false, ctx, layout.plotHeight, range);
+    easing = this._autoscaleScale(this.priceScale, (s) => s.scaleId === 'right', true, ctx, layout.plotHeight, range, progress) || easing;
+    if (this._leftScale) easing = this._autoscaleScale(this._leftScale, (s) => s.scaleId === 'left', false, ctx, layout.plotHeight, range, progress) || easing;
+    if (this._overlayScale) easing = this._autoscaleScale(this._overlayScale, (s) => s.scaleId === '', false, ctx, layout.plotHeight, range, progress) || easing;
     // After the measuring pass and before anything reads a range: a locked
     // scale is manual, so nothing above touched it, and the correction has to
     // land before the axis is labelled from it.
@@ -496,6 +497,7 @@ export class Pane {
     // painted yet. That is the only window in which a primitive can correct a
     // scale and still have the axis drawn from the corrected value.
     for (const p of this._primitives) p.afterAutoscale?.();
+    return easing;
   }
 
   private _autoscaleScale(
@@ -505,7 +507,8 @@ export class Pane {
     ctx: PaneRenderContext,
     plotHeight: number,
     range: { from: number; to: number },
-  ): void {
+    progress: number,
+  ): boolean {
     scale.setHeight(plotHeight);
     // Before the manual-range early-out on purpose: an axis-dragged scale still
     // has to label itself, and the gather loop below never runs for it. Guarded
@@ -514,7 +517,7 @@ export class Pane {
     if (mode === 'percentage' || mode === 'indexed-to-100') {
       scale.setBaseline(this._firstVisibleValue(match, ctx, range));
     }
-    if (!scale.autoScale) return; // manual (axis-dragged) range: leave it
+    if (!scale.autoScale) return false; // manual (axis-dragged) range: leave it
     let low = Infinity;
     let high = -Infinity;
     for (const s of this._series) {
@@ -535,7 +538,7 @@ export class Pane {
         }
       }
     }
-    if (low <= high) scale.autoscale(low, high);
+    return low <= high ? scale.autoscale(low, high, progress) : false;
   }
 
   /**

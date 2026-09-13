@@ -132,6 +132,33 @@ chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id
 chart.timeScale.fitContent(bars.length);
 return chart;`} />
 
+## Navigation and autoscale animation
+
+Wheel input changes scales in proportion to the normalized CSS-pixel distance. A vertical
+wheel movement zooms time. Horizontal movement, a dominant horizontal delta, or Shift-wheel
+pans time. When the pointer is over a visible left or right price axis, vertical wheel input
+scales that axis around the pointer price and puts it in manual mode.
+
+`animAutoscale` eases an automatic price range when a time-axis pan or zoom brings different
+extrema into view. It defaults to `animZoom` (true by default), but the two options can be
+set independently at chart construction:
+
+```ts
+const chart = createChart(el, {
+  animZoom: true,
+  animAutoscale: false,
+});
+```
+
+The animation never takes ownership from a manual or fixed scale. Price-axis wheel input,
+price-axis drag, vertical plot pan and two-finger vertical pan make the affected scale manual.
+Call `chart.resetScale()` or enable autoscale on that scale to resume automatic ranges.
+Programmatic viewport replacement, primary data replacement, reset and destruction cancel
+pending navigation motion before applying the newer state.
+
+See [Interactions](/docs/interactions) for wheel delta modes, modifier handling and touch,
+and [Mobile and Touch](/docs/mobile) for the packaged widget layout.
+
 ## Resizing, reordering & removing panes
 
 Pane heights are relative **weights**, not pixels. Only the ratio matters. Users drag the
