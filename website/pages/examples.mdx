@@ -428,7 +428,7 @@ const engine = new lib.OrderEngine({
   selectedAccount: () => accounts.selectedAccount(),
 });
 // The broker's order stream settles every order and command.
-broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ id: order.id, clientToken: info.clientToken, status: order.status }));
+broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
 
 const bars = stockBars(1700000000, 160, 300, 100, 41);
 const widget = lib.createWidget(host, {

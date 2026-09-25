@@ -39,7 +39,7 @@ export function createDesk(options = {}) {
     confirmCommand: (command) => { const ok = approvedCommand === command.kind; approvedCommand = null; return ok; },
     clock: options.now,
   });
-  broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ id: order.id, clientToken: info.clientToken, status: order.status }));
+  broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
   return {
     broker, accounts, engine,
     approveOrder: (req) => { approvedOrder = fingerprint(req); },

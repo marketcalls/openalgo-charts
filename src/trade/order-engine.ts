@@ -32,7 +32,7 @@
  */
 import { transition, isTerminal, type ClientOrderState, type OrderEvent } from './order-state-machine';
 import { validateOrder, validatePrice, validateQuantity, type OrderConstraints, type ValidationResult } from './validation';
-import type { OrderSide, OrderStatus, OrderType } from './types';
+import type { OrderRole, OrderSide, OrderStatus, OrderType } from './types';
 import { checkTradingCapability, type TradingCapabilities, type TradingCapabilityRequest, type TradingCapabilityResult, type TradingCapabilitySource } from 'openalgo-charts';
 import { checkTradingFeature, ORDER_DURATIONS, type OrderDuration, type TradingFeature, type TradingFeatureRequest, type TradingFeatureSource } from './features';
 
@@ -125,11 +125,18 @@ export type TradingCommand =
 
 export type OrderKind = 'order' | TradingCommandKind | 'bracket-stop' | 'bracket-target';
 
-/** One authoritative order row from the broker, with the client token it echoes when it has one. */
+/**
+ * One authoritative order row from the broker, with the client token it echoes
+ * when it has one. An `Order` row spreads into it as it is.
+ */
 export interface BrokerOrderUpdate {
   id: string;
   clientToken?: string;
   status: OrderStatus;
+  /** For a leg the provider placed and linked itself: the broker id of its entry. */
+  parentId?: string;
+  /** For such a leg: `sl` for the stop, `tp` for the target. With `parentId`, it finds a leg that echoes no token. */
+  role?: OrderRole;
 }
 
 /** Fields a modify may change. Whole-order feeds fill the rest from their cache. */
@@ -157,7 +164,12 @@ export interface OrderFeed {
   previewOrder?(req: PlaceRequest & { mode: TradeMode }): Promise<OrderPreview>;
   closePosition?(req: ClosePositionRequest & { mode: TradeMode }): Promise<CommandReceipt>;
   reversePosition?(req: ReversePositionRequest & { mode: TradeMode }): Promise<CommandReceipt>;
-  placeBracket?(req: BracketOrderRequest & { mode: TradeMode }): Promise<BracketReceipt>;
+  /**
+   * `legClientTokens` are the client tokens the engine gives the stop and
+   * target legs. A provider that echoes them on the legs' rows lets a bracket
+   * whose answer was lost be reconciled leg by leg.
+   */
+  placeBracket?(req: BracketOrderRequest & { mode: TradeMode; legClientTokens: { stopLoss: string; takeProfit: string } }): Promise<BracketReceipt>;
 }
 
 export type TradeMode = 'live' | 'analyzer';
@@ -282,7 +294,7 @@ export interface PlaceResult {
 
 export interface CommandResult extends PlaceResult {
   kind: TradingCommandKind;
-  /** Client ids of a bracket's legs, when the provider named them. */
+  /** Client ids of a bracket's legs the provider has named, in its receipt or on its order stream. */
   legs?: { stopLoss?: string; takeProfit?: string };
 }
 
@@ -313,9 +325,15 @@ interface Tracked {
   /** Account, exchange and symbol of the position a close or reverse acts on. */
   position?: string;
   legs?: { stopLoss?: string; takeProfit?: string };
+  /** A provider bracket's leg orders, kept so a leg first seen on the order stream can be adopted. */
+  legReqs?: Record<LegSuffix, TrackedRequest>;
   /** Counted once into the settled ring, so a repeated terminal event cannot double-count. */
   pruned?: boolean;
 }
+
+type LegSuffix = 'stop' | 'target';
+const LEG_SUFFIXES: readonly LegSuffix[] = ['stop', 'target'];
+const LEG_KEY = { stop: 'stopLoss', target: 'takeProfit' } as const;
 
 /** A position command whose outcome is not yet known holds the position against another. */
 const UNRESOLVED: ReadonlySet<IntentState> = new Set<IntentState>(['SUBMITTING', 'SUBMITTED', 'AMBIGUOUS', 'RECONCILING']);
@@ -562,16 +580,20 @@ export class OrderEngine {
    * same one may be offered again. Callers skip it when armed, so an armed
    * command reaches the feed in the same tick, as an armed order does.
    */
-  private async _confirmed(token: string, ask: (() => boolean | Promise<boolean>) | undefined): Promise<boolean> {
+  private async _confirmed(tokens: readonly string[], ask: (() => boolean | Promise<boolean>) | undefined): Promise<boolean> {
     let approved = false;
     try {
       approved = await (ask ? ask() : Promise.resolve(false));
     } catch (err) {
-      this._sentTokens.delete(token);
+      this._release(tokens);
       throw err;
     }
-    if (!approved) this._sentTokens.delete(token);
+    if (!approved) this._release(tokens);
     return approved;
+  }
+
+  private _release(tokens: readonly string[]): void {
+    for (const token of tokens) this._sentTokens.delete(token);
   }
 
   /**
@@ -774,7 +796,7 @@ export class OrderEngine {
     this._sentTokens.add(token);
     const finalReq: ClosePositionRequest = { ...req, clientToken: token };
     const ask = this._confirmCommand;
-    if (!this._armed && !await this._confirmed(token, ask ? () => ask({ kind, request: { ...finalReq } }) : undefined)) return blocked('not confirmed');
+    if (!this._armed && !await this._confirmed([token], ask ? () => ask({ kind, request: { ...finalReq } }) : undefined)) return blocked('not confirmed');
     const current = this._accountStill(finalReq) ?? this._permitCommand(kind, finalReq, feature, send !== undefined);
     if (current !== null) {
       this._sentTokens.delete(token);
@@ -823,8 +845,14 @@ export class OrderEngine {
     }
 
     const token = req.clientToken ?? this._idGen();
-    const duplicate = this._duplicate(token);
-    if (duplicate !== null) return { ...duplicate, kind: 'bracket' };
+    const legClientTokens = { stopLoss: `${token}:stop`, takeProfit: `${token}:target` };
+    // The legs' tokens go on the wire with the entry's, so any of the three
+    // already sent makes this a repeat.
+    const tokens = [token, legClientTokens.stopLoss, legClientTokens.takeProfit];
+    for (const claimed of tokens) {
+      const duplicate = this._duplicate(claimed);
+      if (duplicate !== null) return { ...duplicate, kind: 'bracket' };
+    }
     const place = this._feed.placeBracket;
     const permit = (): string | null => {
       const support = this._feature(this._featureRequest('brackets', req));
@@ -834,44 +862,57 @@ export class OrderEngine {
     };
     const refusal = this._account(req) ?? permit();
     if (refusal !== null) return blocked(refusal);
-    this._sentTokens.add(token);
+    for (const claimed of tokens) this._sentTokens.add(claimed);
     const finalReq: BracketOrderRequest = { ...req, price: v.price, triggerPrice: v.triggerPrice, stopLoss, takeProfit, clientToken: token };
     const ask = this._confirmCommand;
-    if (!this._armed && !await this._confirmed(token, ask ? () => ask({ kind: 'bracket', request: { ...finalReq } }) : undefined)) return blocked('not confirmed');
+    if (!this._armed && !await this._confirmed(tokens, ask ? () => ask({ kind: 'bracket', request: { ...finalReq } }) : undefined)) return blocked('not confirmed');
     const current = this._accountStill(finalReq) ?? permit();
     if (current !== null) {
-      this._sentTokens.delete(token);
+      this._release(tokens);
       return blocked(current);
     }
-    const tracked: Tracked = { clientId: token, kind: 'bracket', state: 'pending_place', intent: 'SUBMITTING', req: finalReq, writeRevision: 0 };
+    const exit: OrderSide = buy ? 'SELL' : 'BUY';
+    const leg = { symbol: req.symbol, exchange: req.exchange, side: exit, qty: req.qty, account: req.account };
+    const tracked: Tracked = {
+      clientId: token, kind: 'bracket', state: 'pending_place', intent: 'SUBMITTING', req: finalReq, writeRevision: 0,
+      legReqs: { stop: { ...leg, type: 'SL-M', triggerPrice: stopLoss }, target: { ...leg, type: 'LIMIT', price: takeProfit } },
+    };
     this._orders.set(token, tracked);
+    // The legs may already be known from the order stream, whatever the transport says.
+    const result = (reason?: string): CommandResult => ({
+      ...this._outcome(tracked, reason), kind: 'bracket', ...(tracked.legs === undefined ? {} : { legs: { ...tracked.legs } }),
+    });
     let receipt: BracketReceipt;
     try {
-      receipt = await place!.call(this._feed, { ...finalReq, mode: this._mode });
+      receipt = await place!.call(this._feed, { ...finalReq, mode: this._mode, legClientTokens });
     } catch (err) {
-      return { ...this._outcome(tracked, this._failed(tracked, err)), kind: 'bracket' };
+      const reason = this._failed(tracked, err);
+      if (isPreflightFailure(err)) this._release(tokens);
+      return result(reason);
     }
-    if (!nonEmpty(receipt?.orderId)) return { ...this._outcome(tracked, this._failed(tracked, new Error('the broker returned no order id'))), kind: 'bracket' };
+    if (!nonEmpty(receipt?.orderId)) return result(this._failed(tracked, new Error('the broker returned no order id')));
     this._submitted(tracked, receipt.orderId);
-    const exit: OrderSide = buy ? 'SELL' : 'BUY';
-    const leg = (suffix: 'stop' | 'target', brokerId: string | undefined): string | undefined => {
-      if (!nonEmpty(brokerId)) return undefined;
-      const clientId = `${token}:${suffix}`;
-      const row: Tracked = {
-        clientId, kind: suffix === 'stop' ? 'bracket-stop' : 'bracket-target', state: 'pending_place', intent: 'SUBMITTING', writeRevision: 0,
-        req: suffix === 'stop'
-          ? { symbol: req.symbol, exchange: req.exchange, side: exit, type: 'SL-M', qty: req.qty, triggerPrice: stopLoss, account: req.account }
-          : { symbol: req.symbol, exchange: req.exchange, side: exit, type: 'LIMIT', qty: req.qty, price: takeProfit, account: req.account },
-      };
+    for (const [suffix, brokerId] of [['stop', receipt.stopLossId], ['target', receipt.takeProfitId]] as const) {
+      if (nonEmpty(brokerId)) this._submitted(this._leg(tracked, suffix), brokerId);
+    }
+    return result();
+  }
+
+  /**
+   * The row for one leg of a provider bracket, made on first sight. The
+   * receipt names the legs when it arrives; the order stream or a read of the
+   * book can name them first, or instead, when the receipt was lost.
+   */
+  private _leg(parent: Tracked, suffix: LegSuffix): Tracked {
+    const clientId = `${parent.clientId}:${suffix}`;
+    let row = this._orders.get(clientId);
+    if (row === undefined) {
+      row = { clientId, kind: suffix === 'stop' ? 'bracket-stop' : 'bracket-target', state: 'pending_place', intent: 'SUBMITTING',
+        writeRevision: 0, req: { ...parent.legReqs![suffix] } };
       this._orders.set(clientId, row);
-      this._sentTokens.add(clientId);
-      this._submitted(row, brokerId);
-      return clientId;
-    };
-    const stopLossId = leg('stop', receipt.stopLossId);
-    const takeProfitId = leg('target', receipt.takeProfitId);
-    tracked.legs = { ...(stopLossId === undefined ? {} : { stopLoss: stopLossId }), ...(takeProfitId === undefined ? {} : { takeProfit: takeProfitId }) };
-    return { ...this._outcome(tracked), kind: 'bracket', legs: { ...tracked.legs } };
+    }
+    parent.legs = { ...parent.legs, [LEG_KEY[suffix]]: clientId };
+    return row;
   }
 
   /** One-click market order. Omitting `opts` is exactly the previous behaviour. */
@@ -1083,14 +1124,37 @@ export class OrderEngine {
    * its broker id and its outcome from the broker rather than from a guess.
    */
   public onBrokerOrder(update: BrokerOrderUpdate): void {
-    if (!this._byBroker.has(update.id) && update.clientToken !== undefined) {
-      const row = this._orders.get(update.clientToken);
+    if (!this._byBroker.has(update.id)) {
+      const row = this._unbound(update);
       if (row !== undefined && row.brokerId === undefined) {
         row.brokerId = update.id;
         this._byBroker.set(update.id, row.clientId);
       }
     }
     this.onBrokerUpdate(update.id, update.status);
+  }
+
+  /**
+   * The row a broker id not seen before belongs to: the one its echoed token
+   * names, or a leg of a bracket this engine sent, found by the leg's own
+   * token or by its entry and role. Adopting a leg on first sight is how a
+   * bracket whose answer was lost still gets legs that can be cancelled,
+   * modified and filled, whichever of its rows the broker reports first.
+   */
+  private _unbound(update: BrokerOrderUpdate): Tracked | undefined {
+    const token = update.clientToken;
+    if (token !== undefined) {
+      const row = this._orders.get(token);
+      if (row !== undefined) return row;
+      for (const suffix of LEG_SUFFIXES) {
+        const parent = token.endsWith(`:${suffix}`) && this._sentTokens.has(token) ? this._orders.get(token.slice(0, -suffix.length - 1)) : undefined;
+        if (parent?.legReqs !== undefined) return this._leg(parent, suffix);
+      }
+    }
+    const suffix = update.role === 'sl' ? 'stop' : update.role === 'tp' ? 'target' : undefined;
+    const parentId = update.parentId === undefined ? undefined : this._byBroker.get(update.parentId);
+    const parent = parentId === undefined ? undefined : this._orders.get(parentId);
+    return suffix !== undefined && parent?.legReqs !== undefined ? this._leg(parent, suffix) : undefined;
   }
 
   /**
@@ -1104,6 +1168,10 @@ export class OrderEngine {
     if (o === undefined || o.intent !== 'AMBIGUOUS') return false;
     this._orders.delete(clientId);
     this._sentTokens.delete(clientId);
+    // A bracket that never arrived took its legs' tokens nowhere either.
+    if (o.legReqs !== undefined) {
+      for (const suffix of LEG_SUFFIXES) if (!this._orders.has(`${clientId}:${suffix}`)) this._sentTokens.delete(`${clientId}:${suffix}`);
+    }
     if (o.brokerId !== undefined) this._byBroker.delete(o.brokerId);
     this._lastModifyAt.delete(clientId);
     this._pendingModify.delete(clientId);

@@ -73,7 +73,7 @@ interface OrderFeed {
   previewOrder?(req): Promise<OrderPreview>;              // read-only
   closePosition?(req: ClosePositionRequest & { mode }): Promise<CommandReceipt>;
   reversePosition?(req: ReversePositionRequest & { mode }): Promise<CommandReceipt>;
-  placeBracket?(req: BracketOrderRequest & { mode }): Promise<BracketReceipt>;
+  placeBracket?(req: BracketOrderRequest & { mode; legClientTokens: { stopLoss; takeProfit } }): Promise<BracketReceipt>;
 }
 interface PlaceRequest {
   symbol: string; exchange?: string; side: OrderSide; type: OrderType; qty: number;
@@ -231,7 +231,7 @@ Deterministic in-memory `OrderFeed` for tests and offline demos. Members: `onBoo
 
 - fills `MARKET` orders at the mark (`setMark(symbol, price)`, which `emitLtp` also sets), averages, realizes and flips positions per account (`accountPositions(id)`), records executions and order history with the echoed client token, duration and expiry;
 - reports balance, equity, margin used and available (margin is `|netQty| x avgPrice / leverage`), pushing snapshots to `subscribeAccount` on every change and mark;
-- cancels an unmarketable `IOC`/`FOK` limit at once, lapses a `GTD` order at its expiry, and links bracket legs itself (an entry fill starts them, a leg fill cancels its sibling);
+- cancels an unmarketable `IOC`/`FOK` limit at once, lapses a `GTD` order at its expiry, and links bracket legs itself (an entry fill starts them, a leg fill cancels its sibling), echoing on each leg the token in `legClientTokens`;
 - refuses like a server, with an error marked `rejected: true` (`isBrokerRejection`): unknown account, the other ledger's account (`mode` mismatch), an undeclared feature, no mark, missing margin, leverage above `maxLeverage`, a close larger than the position;
 - test hooks: `latency(operation, accountId)` holds any answer, `failNext(operation, 'reject' | 'timeout' | 'lost-response', reason?)` (`FakeBrokerOperation`, `FakeBrokerFailure`), `disconnect()` / `reconnect()` (streams get `onError`), `onOrderUpdate(cb)` the order stream with `FakeOrderInfo` (`accountId`, `clientToken`, `command`), and `muteOrderUpdates(true)` for a silent stream.
 
@@ -260,7 +260,7 @@ Snapshots are validated: a non-finite figure is an unreadable snapshot (`error`)
 - `closePosition({ symbol, qty? })` (`partialClose` feature when `qty` is set, validated against lot and freeze limits), `reversePosition({ symbol })` and `placeBracket({ ...PlaceRequest, stopLoss, takeProfit })` return `CommandResult` (`PlaceResult` plus `kind` and, for a bracket, `legs` client ids `<token>:stop` / `<token>:target`). Each has its own `clientToken`. They need the feature **and** the feed method; otherwise they are `BLOCKED` with a reason. **An opposite order is never sent instead.** `TradingCommand` is what `confirmCommand` approves when not `armed` (omitted declines, like the gate). The place flag and `modes` still apply (a host lock stops them); `orderTypes` does not apply to close or reverse.
 - A close or reverse whose outcome is unknown (`SUBMITTING`, `SUBMITTED`, `AMBIGUOUS`, `RECONCILING`) blocks another on the same account and symbol: `A previous close or reverse for X is unresolved; reconcile it with the broker first`.
 - A feed error marked `rejected: true` (`BrokerRejection`, `isBrokerRejection`) is the broker's explicit refusal: the row settles `SETTLED` with `brokerStatus` `rejected`; the token stays claimed. Any other non-preflight error is `AMBIGUOUS`, as for orders.
-- `onBrokerOrder({ id, clientToken?, status })` (`BrokerOrderUpdate`) applies an order-stream or book row by broker id, or binds an unknown id through the echoed client token: how an `AMBIGUOUS` write whose answer was lost gets its id and outcome. The broker's status replaces the terminal state the client guessed for an `AMBIGUOUS` row (`rejected` for a lost answer, `stale` for a row a snapshot missed), so one reported `pending` or `working` is a live order again: modifiable, cancellable, and never pruned as settled. A stream status that arrives before the transport answers outranks it. `releaseAmbiguous(clientId)` drops an `AMBIGUOUS` row after the host has established from the complete book that it never arrived. `orderKind(clientId)` (`OrderKind`), `bracketLegs(clientId)`. Close and reverse rows cannot be modified or cancelled (`onValidationError`).
+- `onBrokerOrder({ id, clientToken?, status, parentId?, role? })` (`BrokerOrderUpdate`; an `Order` row spreads into it, `onBrokerOrder({ ...order, clientToken })`) applies an order-stream or book row by broker id, or binds an unknown id through the echoed client token: how an `AMBIGUOUS` write whose answer was lost gets its id and outcome. The broker's status replaces the terminal state the client guessed for an `AMBIGUOUS` row (`rejected` for a lost answer, `stale` for a row a snapshot missed), so one reported `pending` or `working` is a live order again: modifiable, cancellable, and never pruned as settled. A stream status that arrives before the transport answers outranks it. `releaseAmbiguous(clientId)` drops an `AMBIGUOUS` row after the host has established from the complete book that it never arrived. A provider bracket's legs are adopted on first sight, whichever the broker reports first: by the leg token the engine sent in `legClientTokens` (`<token>:stop`, `<token>:target`, claimed with the entry token and refused as duplicates like it), or by `parentId` (the entry's broker id) and `role` (`sl`, `tp`). So a bracket whose answer was lost still gets legs that can be cancelled, modified and filled, and `bracketLegs(clientId)` names them. `orderKind(clientId)` (`OrderKind`). Close and reverse rows cannot be modified or cancelled (`onValidationError`).
 
 `OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and `leverage` pre-flight: OpenAlgo's placeorder has no such fields and one key is one account.
 
@@ -270,7 +270,7 @@ const broker = new FakeBroker({ accounts: [{ id: 'SBX-1', mode: 'analyzer', bala
 const accounts = new AccountManager({ feed: broker, mode: 'analyzer' });
 const engine = new OrderEngine({ feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05 },
   selectedAccount: () => accounts.selectedAccount() });
-broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ id: order.id, clientToken: info.clientToken, status: order.status }));
+broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
 await accounts.refresh();
 broker.setMark('SYN', 100);
 await engine.placeOrder({ symbol: 'SYN', side: 'BUY', type: 'MARKET', qty: 10, duration: 'DAY' });

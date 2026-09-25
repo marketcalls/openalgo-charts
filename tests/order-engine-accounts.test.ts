@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { OrderEngine, type OrderEngineOptions, type OrderFeed, type PlaceRequest } from '../src/trade/order-engine';
+import { OrderEngine, type BracketReceipt, type OrderEngineOptions, type OrderFeed, type PlaceRequest } from '../src/trade/order-engine';
 import { AccountManager } from '../src/trade/account';
 import { FakeBroker, type FakeAccountSeed, type FakeBrokerOperation } from '../src/trade/fake-broker';
 import { OpenAlgoTradeFeed } from '../src/feed/openalgo-trade';
@@ -38,8 +38,9 @@ function setup(options: { engine?: Partial<OrderEngineOptions>; broker?: Constru
     selectedAccount: () => accounts.selectedAccount(), clock: () => NOW, ...options.engine,
   });
   // The order stream is the authority: every status the broker reports reaches the engine,
-  // by the client token it echoes when it has one and by broker id otherwise.
-  broker.onOrderUpdate((order: Order, info) => engine.onBrokerOrder({ id: order.id, clientToken: info.clientToken, status: order.status }));
+  // by the client token it echoes when it has one and by broker id otherwise. The row
+  // itself carries a bracket leg's entry and role.
+  broker.onOrderUpdate((order: Order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
   return { broker, accounts, engine, hold };
 }
 
@@ -407,9 +408,13 @@ describe('provider-native brackets', () => {
   it('places the entry and both legs as one command, with native one-cancels-other', async () => {
     const { accounts, engine, broker } = setup();
     await accounts.refresh();
+    const bracket = vi.spyOn(broker, 'placeBracket');
     const result = await engine.placeBracket({ ...market({ clientToken: 'br' }), stopLoss: 95.02, takeProfit: 110 });
     expect(result).toMatchObject({ ok: true, kind: 'bracket', legs: { stopLoss: 'br:stop', takeProfit: 'br:target' } });
+    expect(bracket).toHaveBeenCalledWith(expect.objectContaining({ legClientTokens: { stopLoss: 'br:stop', takeProfit: 'br:target' } }));
     expect(engine.orderKind('br:stop')).toBe('bracket-stop');
+    // The stream described both legs while the command was out; those first reports are kept.
+    expect([engine.brokerStatus('br:stop'), engine.brokerStatus('br:target')]).toEqual(['working', 'working']);
     const legs = broker.orders().filter(order => order.parentId !== undefined);
     expect(legs.map(order => [order.role, order.type, order.triggerPrice ?? order.price])).toEqual([['sl', 'SL-M', 95], ['tp', 'LIMIT', 110]]);
     const target = legs.find(order => order.role === 'tp')!;
@@ -417,6 +422,89 @@ describe('provider-native brackets', () => {
     expect(engine.brokerStatus('br:target')).toBe('filled');
     expect(engine.brokerStatus('br:stop')).toBe('cancelled');
     expect(broker.accountPositions('SBX-1')).toEqual([]);
+  });
+
+  const entry = (clientToken: string) => ({ ...market({ clientToken }), type: 'LIMIT' as const, price: 99, stopLoss: 95, takeProfit: 110 });
+
+  it('adopts the legs of a bracket whose answer was lost from the broker history, in any order', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    broker.muteOrderUpdates(true);
+    broker.failNext('bracket', 'lost-response');
+    expect(await engine.placeBracket(entry('bx'))).toMatchObject({ ok: false, kind: 'bracket', intent: 'AMBIGUOUS' });
+    expect(engine.bracketLegs('bx')).toBeUndefined();
+    broker.muteOrderUpdates(false);
+
+    const history = await broker.getOrderHistory({ accountId: 'SBX-1' }, new AbortController().signal);
+    expect(history.map(row => row.clientToken)).toEqual(['bx:target', 'bx:stop', 'bx']);
+    // Newest first, so each leg arrives before its entry: its own token finds it.
+    for (const row of history) engine.onBrokerOrder({ ...row.order, clientToken: row.clientToken });
+    expect(engine.bracketLegs('bx')).toEqual({ stopLoss: 'bx:stop', takeProfit: 'bx:target' });
+    expect([engine.orderKind('bx:stop'), engine.orderKind('bx:target')]).toEqual(['bracket-stop', 'bracket-target']);
+    expect([engine.state('bx'), engine.intentState('bx'), engine.brokerStatus('bx')]).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+    expect([engine.state('bx:stop'), engine.intentState('bx:stop'), engine.brokerStatus('bx:stop')]).toEqual(['working', 'ACKNOWLEDGED', 'pending']);
+
+    // From here the legs are live orders: an entry fill starts them, and a stop fill
+    // settles the stop and cancels the target, all reaching the engine.
+    broker.fill(history[2].order.id);
+    expect(engine.brokerStatus('bx:target')).toBe('working');
+    broker.fill(history[1].order.id);
+    expect([engine.state('bx:stop'), engine.brokerStatus('bx:stop')]).toEqual(['filled', 'filled']);
+    expect([engine.state('bx:target'), engine.brokerStatus('bx:target')]).toEqual(['cancelled', 'cancelled']);
+    expect(broker.accountPositions('SBX-1')).toEqual([]);
+  });
+
+  it('adopts the legs from the order stream when only the answer was lost, and cancels one on request', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    broker.failNext('bracket', 'lost-response');
+    // The stream reported the entry before the answer was lost, so the command is known live.
+    const result = await engine.placeBracket(entry('bs'));
+    expect(result).toMatchObject({ ok: true, kind: 'bracket', legs: { stopLoss: 'bs:stop', takeProfit: 'bs:target' } });
+    const target = broker.orders().find(order => order.role === 'tp')!;
+    const cancel = vi.spyOn(broker, 'cancel');
+    await engine.cancelOrder('bs:target');
+    expect(cancel).toHaveBeenCalledWith(target.id);
+    expect(engine.brokerStatus('bs:target')).toBe('cancelled');
+    expect(broker.orders().some(order => order.id === target.id)).toBe(false);
+  });
+
+  it('adopts legs by their entry and role from a provider that echoes no leg token', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    broker.muteOrderUpdates(true);
+    broker.failNext('bracket', 'timeout');
+    // A timeout applies nothing, so this one has no legs anywhere.
+    expect(await engine.placeBracket(entry('bt'))).toMatchObject({ intent: 'AMBIGUOUS' });
+    expect(broker.orders()).toHaveLength(0);
+    broker.failNext('bracket', 'lost-response');
+    expect(await engine.placeBracket(entry('bp'))).toMatchObject({ intent: 'AMBIGUOUS' });
+    const history = await broker.getOrderHistory({ accountId: 'SBX-1' }, new AbortController().signal);
+    for (const row of [...history].reverse()) {
+      engine.onBrokerOrder({ ...row.order, clientToken: row.order.parentId === undefined ? row.clientToken : undefined });
+    }
+    expect(engine.bracketLegs('bp')).toEqual({ stopLoss: 'bp:stop', takeProfit: 'bp:target' });
+    expect(engine.brokerStatus('bp:target')).toBe('pending');
+    expect(engine.bracketLegs('bt')).toBeUndefined();
+  });
+
+  it('claims the leg tokens with the entry token, and frees all three only when nothing was sent', async () => {
+    const offline = Object.assign(new Error('offline'), { preflight: true });
+    const placeBracket = vi.fn(async (): Promise<BracketReceipt> => { throw offline; });
+    const feed: OrderFeed = { features: { brackets: true }, place: vi.fn(async () => ({ orderId: 'P1' })), modify: vi.fn(), cancel: vi.fn(), placeBracket };
+    const engine = new OrderEngine({ feed, armed: true, constraints: { tickSize: 0.05 } });
+    expect(await engine.placeOrder({ ...market({ clientToken: 'bq:stop' }), type: 'LIMIT', price: 99 })).toMatchObject({ ok: true });
+    expect(await engine.placeBracket(entry('bq'))).toMatchObject({ ok: false, kind: 'bracket', reason: 'duplicate clientToken (idempotent skip)' });
+    expect(await engine.placeBracket(entry('bf'))).toMatchObject({ ok: false, intent: 'BLOCKED', reason: 'offline' });
+    placeBracket.mockImplementationOnce(async () => { throw new Error('socket reset'); });
+    expect(await engine.placeBracket(entry('bf'))).toMatchObject({ ok: false, intent: 'AMBIGUOUS' });
+    expect(await engine.placeOrder({ ...market({ clientToken: 'bf:target' }), type: 'LIMIT', price: 99 }))
+      .toMatchObject({ ok: false, reason: 'duplicate clientToken (idempotent skip)' });
+    // The host has shown the bracket never arrived, so its legs' tokens are free with it.
+    expect(engine.releaseAmbiguous('bf')).toBe(true);
+    placeBracket.mockImplementationOnce(async () => ({ orderId: 'E1', stopLossId: 'S1', takeProfitId: 'T1' }));
+    expect(await engine.placeBracket(entry('bf'))).toMatchObject({ ok: true, legs: { stopLoss: 'bf:stop', takeProfit: 'bf:target' } });
+    expect(placeBracket).toHaveBeenCalledTimes(3);
   });
 
   it('refuses legs on the wrong side, and brackets a provider does not declare', async () => {

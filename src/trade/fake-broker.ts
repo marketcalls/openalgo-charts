@@ -379,7 +379,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
     return { commandId: order.id, orderIds: [order.id] };
   }
 
-  public async placeBracket(req: BracketOrderRequest & { mode: TradeMode }): Promise<BracketReceipt> {
+  public async placeBracket(req: BracketOrderRequest & { mode: TradeMode; legClientTokens?: { stopLoss: string; takeProfit: string } }): Promise<BracketReceipt> {
     if (!this._accountMode) throw refusal('bracket placement needs accounts');
     this._require('brackets', req);
     const ledger = this._ledgerFor(req.account, req.mode);
@@ -400,7 +400,12 @@ export class FakeBroker implements OrderFeed, AccountFeed {
         price: role === 'sl' ? 0 : req.takeProfit, ...(role === 'sl' ? { triggerPrice: req.stopLoss } : {}),
         status: waiting ? 'pending' : 'working', parentId: parent.id, role,
       };
-      this._meta.set(id, { accountId: ledger.seed.id, order, exchange: req.exchange, command: 'bracket', leverage: this._meta.get(parent.id)!.leverage, time: this._clock() });
+      // Each leg echoes the token the client gave it, so a lost answer can be reconciled leg by leg.
+      const clientToken = req.legClientTokens?.[role === 'sl' ? 'stopLoss' : 'takeProfit'];
+      this._meta.set(id, {
+        accountId: ledger.seed.id, order, exchange: req.exchange, command: 'bracket', leverage: this._meta.get(parent.id)!.leverage, time: this._clock(),
+        ...(clientToken === undefined ? {} : { clientToken }),
+      });
       this._orders.push(order);
       this._emit(order);
       legIds.push(id);

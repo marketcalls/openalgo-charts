@@ -34,7 +34,10 @@ All notable changes to OpenAlgo Charts.
   position against another; `onBrokerOrder` settles a write whose answer was
   lost through the client token the broker echoes, `releaseAmbiguous` frees one
   the host has shown never arrived, and a feed error marked `rejected: true`
-  (`isBrokerRejection`) settles as the broker's refusal.
+  (`isBrokerRejection`) settles as the broker's refusal. A bracket gives each
+  leg its own client token (`legClientTokens`), and `onBrokerOrder` adopts a
+  leg by that token or by its entry and role (`parentId`, `role`), so a bracket
+  whose answer was lost still has legs that can be cancelled and filled.
 - `FakeBroker({ accounts })` simulates all of it: per-account ledgers filled at
   a mark price, preview, `IOC`/`FOK` cancellation, `GTD` expiry, leverage
   limits, native close, reverse and linked bracket legs, server-side refusals,

@@ -140,7 +140,7 @@ still apply, so a host lock during replay stops them too.
 
 - **Authoritative outcome.** A command's intent reaches `SETTLED` only when the broker
   reports it, through `onBrokerUpdate(brokerId, status)` or
-  `onBrokerOrder({ id, clientToken, status })`. The second binds an unknown broker id
+  `onBrokerOrder({ id, clientToken, status, parentId, role })`. The second binds an unknown broker id
   through the client token the broker echoes, which is how a write whose answer was lost
   learns its outcome.
 - **Write ambiguity.** A transport failure leaves the command `AMBIGUOUS` with its token
@@ -151,6 +151,12 @@ still apply, so a host lock during replay stops them too.
   complete book that it never arrived.
 - **Server rejection.** A feed error marked `rejected: true` (`isBrokerRejection`) is the
   broker's explicit refusal and settles the command as rejected.
+- **Bracket legs.** The engine gives each leg a client token, `<token>:stop` and
+  `<token>:target`, and sends them to the feed as `legClientTokens`. A leg is adopted the
+  first time the broker reports it, by that token or by its entry's broker id and role
+  (`parentId`, `role`), so a bracket whose answer was lost still has legs the host can
+  cancel, modify and see filled. An `Order` row passes as it is:
+  `onBrokerOrder({ ...order, clientToken })`.
 - **Reconnect.** `beginReconcile()` and `onReconnect(presentIds)` treat commands like orders:
   an absent one becomes `AMBIGUOUS`, not cancelled.
 
@@ -180,7 +186,7 @@ chrome.
 const accounts = new lib.AccountManager({ feed: broker, mode: 'analyzer' });
 const engine = new lib.OrderEngine({ feed: broker, mode: 'analyzer', armed: true,
   constraints: { tickSize: 0.05 }, selectedAccount: () => accounts.selectedAccount() });
-broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ id: order.id, clientToken: info.clientToken, status: order.status }));
+broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
 
 const bars = lib.generateBars(1700000000, 160, 300);
 const widget = lib.createWidget(el, { symbol: 'NOVA', exchange: 'DEMO', interval: '5m', intervals: ['5m'],
