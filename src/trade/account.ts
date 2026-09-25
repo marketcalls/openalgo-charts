@@ -394,10 +394,16 @@ export class AccountManager implements AccountStateSource {
   /** Re-list and reload after a disconnect. The same as `refresh`, named for the call site. */
   public reconnect(): Promise<AccountSelectResult> { return this.refresh(); }
 
+  /**
+   * A position row carries its account only when the provider stamps one. A
+   * row naming another account is dropped and counted; one naming none is the
+   * selected account's, because that is the account the provider was asked for.
+   */
   public positions(): Promise<AccountReadResult<Position>> {
-    return this._read('accounts', (id, signal) => this._feed.getAccountPositions?.(id, signal), (row: unknown) => {
+    return this._read('accounts', (id, signal) => this._feed.getAccountPositions?.(id, signal), (row: unknown, accountId) => {
       const r = row as Partial<Position> | null;
-      return r !== null && typeof r === 'object' && nonEmpty(r.symbol) && Number.isFinite(r.netQty) && Number.isFinite(r.avgPrice) ? row as Position : null;
+      if (r === null || typeof r !== 'object' || (r.accountId !== undefined && r.accountId !== accountId)) return null;
+      return nonEmpty(r.symbol) && Number.isFinite(r.netQty) && Number.isFinite(r.avgPrice) ? row as Position : null;
     });
   }
 

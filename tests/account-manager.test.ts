@@ -251,6 +251,33 @@ describe('account history reads', () => {
     expect(await manager.orderHistory()).toMatchObject({ ok: false, unsupported: true, reason: 'Order history is not declared by this provider' });
   });
 
+  it('drops a position row that names another account, and keeps one that names none', async () => {
+    const feed: AccountFeed = {
+      features: { accounts: true },
+      listAccounts: async () => [{ id: 'A', mode: 'analyzer' }],
+      getAccountSnapshot: async () => ({ accountId: 'A', mode: 'analyzer', asOf: 1 }),
+      getAccountPositions: async () => [
+        { symbol: 'S', netQty: 1, avgPrice: 10, accountId: 'A' },
+        { symbol: 'T', netQty: 2, avgPrice: 5, accountId: 'Z' },
+        { symbol: 'U', netQty: 3, avgPrice: 1 },
+      ],
+    };
+    const manager = new AccountManager({ feed, mode: 'analyzer' });
+    await manager.refresh();
+    const read = await manager.positions();
+    expect(read).toMatchObject({ ok: true, accountId: 'A', dropped: 1 });
+    expect(read.ok && read.rows.map(row => row.symbol)).toEqual(['S', 'U']);
+  });
+
+  it('gets positions from the simulated provider stamped with their account', async () => {
+    const { broker } = heldBroker();
+    const manager = new AccountManager({ feed: broker, mode: 'analyzer' });
+    await manager.refresh();
+    broker.setMark('SYN', 100);
+    await broker.place({ symbol: 'SYN', side: 'BUY', type: 'MARKET', qty: 4, mode: 'analyzer', account: 'SBX-1' });
+    expect(await manager.positions()).toMatchObject({ ok: true, dropped: 0, rows: [{ symbol: 'SYN', netQty: 4, accountId: 'SBX-1' }] });
+  });
+
   it('stops notifying and aborts reads after destroy', async () => {
     const { broker, hold } = heldBroker();
     const manager = new AccountManager({ feed: broker, mode: 'analyzer' });

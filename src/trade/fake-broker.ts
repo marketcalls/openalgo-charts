@@ -471,7 +471,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
     this._account(accountId);
     await this._enter('positions', accountId);
     this._sweep();
-    return this.accountPositions(accountId);
+    return this.accountPositions(accountId).map(position => ({ ...position, accountId }));
   }
 
   public async getExecutions(query: AccountHistoryQuery, _signal?: AbortSignal): Promise<readonly Execution[]> {

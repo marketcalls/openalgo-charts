@@ -87,6 +87,10 @@ used and available, unrealized and realized P&L and leverage, stamped with the p
   account is never shown, and a pushed reading older than the one on screen is ignored.
 - **The ledgers stay apart.** An analyzer (sandbox) view lists only analyzer accounts, and a
   snapshot from the other ledger is refused rather than displayed.
+- **Rows for another account are dropped and counted.** Executions and order history rows
+  always name their account. A position row names one only when the provider sets
+  `Position.accountId`; a row without it is taken as the selected account's, since that is
+  the account the provider was asked for.
 - **Unreadable figures fail closed.** A non-finite balance makes the snapshot unreadable
   instead of showing zero.
 - **A dropped connection keeps the last figures, marked stale.** Call `disconnected()` (a

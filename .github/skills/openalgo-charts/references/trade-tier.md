@@ -38,7 +38,7 @@ interface Order {
   qty: number; filledQty: number; price: number;
   triggerPrice?: number; status: OrderStatus; parentId?: string; role?: OrderRole;
 }
-interface Position { symbol: string; netQty: number; avgPrice: number }  // netQty signed
+interface Position { symbol: string; netQty: number; avgPrice: number; accountId?: string }  // netQty signed
 ```
 
 `isWorking(o)` is true for `pending | working | partial`, the canonical "still live in the book" filter. Note these are *broker* statuses, distinct from the engine's `ClientOrderState` below.
@@ -247,7 +247,7 @@ Declared with `TradingFeatures` on `OrderFeed.features` / `AccountFeed.features`
 | `refresh()` / `reconnect()` | List accounts (other-mode accounts dropped), keep or choose the selection, load its snapshot, subscribe. Figures on screen stay until the answer |
 | `select(id)` | Aborts the previous snapshot and history reads, unsubscribes the old stream, clears the old figures, loads the new. A late answer for the old account resolves `{ ok: false, cancelled: true }` and is never shown |
 | `disconnected(reason?)` | Keeps the last figures as `stale` (or `error` when there were none) and abandons what is in flight. A stream's `onError` calls it |
-| `positions()`, `executions(query?)`, `orderHistory(query?)` | `AccountReadResult`: `{ ok: true, accountId, rows, dropped }` or `{ ok: false, reason, cancelled?, unsupported? }`. Rows for another account and unreadable rows are dropped and counted. `AccountHistoryQuery` filters `symbol`, `from`, `to` (UTC seconds), `limit` |
+| `positions()`, `executions(query?)`, `orderHistory(query?)` | `AccountReadResult`: `{ ok: true, accountId, rows, dropped }` or `{ ok: false, reason, cancelled?, unsupported? }`. Rows naming another account and unreadable rows are dropped and counted. Executions and history rows always name theirs; a position row names one only when the provider stamps `Position.accountId` (`FakeBroker` does), and one without it is taken as the selected account's, the account the provider was asked for. `AccountHistoryQuery` filters `symbol`, `from`, `to` (UTC seconds), `limit` |
 | `selectedAccount()`, `destroy()` | |
 
 Snapshots are validated: a non-finite figure is an unreadable snapshot (`error`), a snapshot naming another account or the other ledger is refused, and a pushed reading older than the one shown is ignored. `TradingAccount`, `Execution` and `OrderHistoryEntry` (`accountId`, `order`, `time`, `clientToken?`, `duration?`, `expiresAt?`, `command?`) are the row types.
