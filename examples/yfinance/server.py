@@ -19,10 +19,21 @@ History endpoint:
     GET /api/history?symbol=AAPL&interval=5m&from=<utc_seconds>&to=<utc_seconds>
 A success is the Bar array the chart consumes directly:
     [{ "time": <utc_seconds>, "open", "high", "low", "close", "volume" }, ...]
+
+Quote and news endpoints, for the watchlist and news panels (fixture mode only):
+    GET /api/quotes?symbols=AAPL,RELIANCE.NS
+        [{ "symbol", "exchange", "last", "previousClose", "bid", "ask", "volume", "time" }, ...]
+        An instrument the source does not know is left out, never answered with zeros.
+    GET /api/news?symbol=AAPL&limit=20&cursor=<from the previous page>
+        { "items": [{ "id", "headline", "source", "time", "summary", "url"? }], "nextCursor": <string or null> }
+Without --fixture both answer 501 not_available: this server has no live quote
+or news source, and a quote is never made up from the last bar.
+
 A failure is { "error": <message>, "code": <token> } with the matching status:
-    400 bad_symbol, bad_interval, bad_period, bad_range
+    400 bad_symbol, bad_interval, bad_period, bad_range, bad_limit, bad_cursor
     404 no_data (the source has no bars for that ask), not_found (no such endpoint)
     429 rate_limited (the source is throttling; Retry-After says when to retry)
+    501 not_available (quotes and news without --fixture)
     502 upstream_error (the source failed)
     503 not_installed (yfinance is missing and --fixture was not given)
 
@@ -33,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import math
 import os
@@ -380,6 +392,132 @@ def fixture_bars(req: HistoryRequest, now: int) -> list:
     return bars
 
 
+# ── fixture quotes and news ───────────────────────────────────────────────
+# Quotes move on a two-second step and news arrives on a per-symbol schedule,
+# both pure functions of (symbol, time) like the bars, so a pinned clock gives
+# the same bytes anywhere. A quote is the fixture level at its own time, not
+# the close of the last bar: the chart may show a daily candle that closed
+# hours before the quote was taken.
+QUOTE_STEP = 2
+MAX_QUOTE_SYMBOLS = 50
+NEWS_PERIOD = 5400
+NEWS_DEPTH = 60
+NEWS_MAX_LIMIT = 50
+NEWS_CURSOR_RE = re.compile(r"^[0-9]{1,9}:[0-9]{1,9}$")
+NEWS_SOURCES = ("Fixture Wire", "Sample Markets Desk", "Demo Newsroom")
+# One headline carries markup on purpose: a reader must show it as text.
+NEWS_HEADLINES = (
+    "{symbol} moves with its sector peers",
+    "{symbol} sets a date for quarterly results",
+    "Analysts revise estimates for {symbol}",
+    "{symbol} to present at an investor conference",
+    "Options activity rises in {symbol}",
+    "{symbol} files an exchange disclosure",
+    "Filing mentions <b>guidance</b> & outlook for {symbol}",
+)
+
+
+def parse_quotes_query(q: dict) -> list:
+    raw = (_first(q, "symbols") or "").strip()
+    symbols = [part.strip() for part in raw.split(",") if part.strip()]
+    if not symbols:
+        raise ApiError(400, "bad_symbol", "symbols is required: a comma-separated list, " + SYMBOL_RULE)
+    if len(symbols) > MAX_QUOTE_SYMBOLS:
+        raise ApiError(400, "bad_symbol", f"at most {MAX_QUOTE_SYMBOLS} symbols per request")
+    for symbol in symbols:
+        if not SYMBOL_RE.match(symbol):
+            raise ApiError(400, "bad_symbol", f"symbol {symbol[:40]!r} is not valid: " + SYMBOL_RULE)
+    return list(dict.fromkeys(symbols))
+
+
+def parse_news_query(q: dict) -> dict:
+    symbol = (_first(q, "symbol") or "").strip()
+    if not symbol or not SYMBOL_RE.match(symbol):
+        raise ApiError(400, "bad_symbol", f"symbol {symbol[:40]!r} is not valid: " + SYMBOL_RULE)
+    raw_limit = _first(q, "limit") or "20"
+    if not re.fullmatch(r"[0-9]{1,3}", raw_limit) or not 1 <= int(raw_limit) <= NEWS_MAX_LIMIT:
+        raise ApiError(400, "bad_limit", f"limit must be 1 to {NEWS_MAX_LIMIT}, got {raw_limit[:10]!r}")
+    cursor = _first(q, "cursor")
+    if cursor is not None and cursor != "" and not NEWS_CURSOR_RE.match(cursor):
+        raise ApiError(400, "bad_cursor", "cursor must be the nextCursor of a previous page")
+    return {"symbol": symbol, "limit": int(raw_limit), "cursor": cursor or None}
+
+
+def fixture_quotes(symbols: list, now: int) -> list:
+    """One quote per known symbol; the sentinels are unknown and left out."""
+    t = now - now % QUOTE_STEP
+    out = []
+    for symbol in symbols:
+        key = symbol.upper()
+        if key in FIXTURE_SENTINELS:
+            continue
+        last = fixture_level(key, t) * (1 + (_noise(key, t, "q") - 0.5) * 0.002)
+        # The previous weekday's close in the fixture session, whatever day it is now.
+        day = (t // DAY) * DAY - DAY
+        while _weekday(day) >= 5:
+            day -= DAY
+        previous = fixture_level(key, day + SESSION_CLOSE - 60)
+        spread = max(0.01, round(last * 0.0004, 2))
+        out.append({
+            "symbol": symbol, "exchange": "", "last": round(last, 2), "previousClose": round(previous, 2),
+            "bid": round(last - spread, 2), "ask": round(last + spread, 2),
+            "volume": int(50000 + _noise(key, t // 3600, "qv") * 2000000), "time": t,
+        })
+    return out
+
+
+def _news_draw(symbol: str, slot: int, salt: str) -> float:
+    """A stable number in [0, 1) per story slot. The bars' crc32 noise is correlated across
+    consecutive integers, which would give runs of one headline, so stories use a real digest."""
+    digest = hashlib.blake2b(f"{symbol}|{slot}|{salt}".encode(), digest_size=4).digest()
+    return int.from_bytes(digest, "big") / 2 ** 32
+
+
+def fixture_news(req: dict, now: int) -> dict:
+    """A page of news on a per-symbol schedule. The cursor is `slot:floor`, so later pages ignore the clock."""
+    symbol = req["symbol"].upper()
+    if symbol == "EMPTY":
+        return {"items": [], "nextCursor": None}
+    if symbol in FIXTURE_SENTINELS:
+        raise FIXTURE_SENTINELS[symbol]
+    seed = zlib.crc32(symbol.encode()) & 0xFFFFFFFF
+    phase = seed % NEWS_PERIOD
+    if req["cursor"] is None:
+        start = (now - phase) // NEWS_PERIOD
+        floor = start - NEWS_DEPTH
+    else:
+        start, floor = (int(part) for part in req["cursor"].split(":"))
+        start -= 1
+    items, slot = [], start
+    while slot > floor and len(items) < req["limit"]:
+        # Roughly three slots in five carry a story, so the gaps are irregular.
+        if _news_draw(symbol, slot, "has") < 0.6:
+            pick = int(_news_draw(symbol, slot, "h") * len(NEWS_HEADLINES))
+            headline = NEWS_HEADLINES[pick].format(symbol=req["symbol"])
+            item = {
+                "id": f"{symbol}-{slot}",
+                "headline": headline,
+                "source": NEWS_SOURCES[int(_news_draw(symbol, slot, "s") * len(NEWS_SOURCES))],
+                "time": slot * NEWS_PERIOD + phase + int(_news_draw(symbol, slot, "t") * 600),
+                "summary": f"Fixture story {slot} about {req['symbol']}. Synthetic text for the reference host; it is not market news.",
+            }
+            # The markup headline also carries a script link, which a reader must refuse to open.
+            if "<b>" in headline:
+                item["url"] = "javascript:alert(document.domain)"
+            elif _news_draw(symbol, slot, "u") >= 0.15:
+                item["url"] = f"https://example.com/news/{req['symbol']}/{slot}"
+            items.append(item)
+        slot -= 1
+    more = any(_news_draw(symbol, j, "has") < 0.6 for j in range(slot, floor, -1))
+    return {"items": items, "nextCursor": f"{slot + 1}:{floor}" if more and items else None}
+
+
+def unavailable(what: str):
+    def source(*args):
+        raise ApiError(501, "not_available", f"{what} are served only with --fixture: this server has no live source for them")
+    return source
+
+
 # ── the server ────────────────────────────────────────────────────────────
 
 def accepts_gzip(header: str | None) -> bool:
@@ -484,9 +622,17 @@ class Handler(SimpleHTTPRequestHandler):
     def _api(self, parsed):
         now = int(time.time())
         try:
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            # Quotes and news are live answers: never cached, by the browser or anyone else.
+            if parsed.path == "/api/quotes":
+                self._json(200, self.server.quotes(parse_quotes_query(query), now))
+                return
+            if parsed.path == "/api/news":
+                self._json(200, self.server.news(parse_news_query(query), now))
+                return
             if parsed.path != "/api/history":
                 raise ApiError(404, "not_found", f"no endpoint at {parsed.path[:80]}")
-            req = parse_history_query(parse_qs(parsed.query, keep_blank_values=True))
+            req = parse_history_query(query)
             bars = self.server.source(req, now)
             if not bars:
                 raise ApiError(404, "no_data", "no " + req.describe())
@@ -528,14 +674,17 @@ class DemoServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, source, quiet=False):
+    def __init__(self, address, source, quiet=False, quotes=None, news=None):
         self.source = source
         self.quiet = quiet
+        self.quotes = quotes or unavailable("quotes")
+        self.news = news or unavailable("news items")
         super().__init__(address, Handler)
 
 
 def make_server(host: str, port: int, fixture: bool = False, quiet: bool = False, source=None) -> DemoServer:
-    return DemoServer((host, port), source or (fixture_bars if fixture else yfinance_bars), quiet=quiet)
+    return DemoServer((host, port), source or (fixture_bars if fixture else yfinance_bars), quiet=quiet,
+                      quotes=fixture_quotes if fixture else None, news=fixture_news if fixture else None)
 
 
 def serve(server: DemoServer) -> None:
@@ -571,6 +720,7 @@ def main(argv=None) -> int:
     print(f"openalgo-charts yfinance demo -> http://{args.host}:{bound}/examples/yfinance/index.html")
     print(f"serving package root: {ROOT}")
     print("bars: " + ("synthetic fixture, no network" if args.fixture else "yfinance"), flush=True)
+    print("quotes and news: " + ("synthetic fixture" if args.fixture else "not available (start with --fixture)"), flush=True)
     serve(server)
     return 0
 
@@ -719,6 +869,96 @@ class SelfTest(unittest.TestCase):
         status, hdrs, body = self.json("/api/quote?symbol=AAPL")
         self.assertEqual((status, body["code"]), (404, "not_found"))
         self.assertTrue(hdrs["Content-Type"].startswith("application/json"))
+
+    # -- quotes and news -------------------------------------------------------
+    def test_quotes_answer_known_symbols_and_leave_unknown_ones_out(self):
+        status, hdrs, quotes = self.json("/api/quotes?symbols=AAPL,RELIANCE.NS,FAIL,AAPL")
+        self.assertEqual(status, 200)
+        self.assertEqual(hdrs["Cache-Control"], "no-store")
+        self.assertEqual([q["symbol"] for q in quotes], ["AAPL", "RELIANCE.NS"])
+        for q in quotes:
+            self.assertEqual(set(q), {"symbol", "exchange", "last", "previousClose", "bid", "ask", "volume", "time"})
+            self.assertEqual(q["exchange"], "")
+            self.assertLess(q["bid"], q["last"])
+            self.assertGreater(q["ask"], q["last"])
+            self.assertEqual(q["time"] % QUOTE_STEP, 0)
+            self.assertGreater(q["previousClose"], 0)
+
+    def test_quotes_are_a_pure_function_of_symbol_and_step(self):
+        pinned = 1_758_800_001
+        self.assertEqual(fixture_quotes(["INFY.NS"], pinned), fixture_quotes(["INFY.NS"], pinned - 1))
+        self.assertNotEqual(fixture_quotes(["INFY.NS"], pinned)[0]["last"], fixture_quotes(["INFY.NS"], pinned + 600)[0]["last"])
+        # The quote is taken at its own time: it is not the last daily bar's close.
+        bar = fixture_bars(HistoryRequest("INFY.NS", "1d", "1mo", None, pinned), pinned)[-1]
+        self.assertNotEqual(fixture_quotes(["INFY.NS"], pinned)[0]["last"], bar["close"])
+
+    def test_quote_requests_are_validated(self):
+        for path in ("/api/quotes", "/api/quotes?symbols=", "/api/quotes?symbols=AA%20PL",
+                     "/api/quotes?symbols=" + ",".join(f"S{i}" for i in range(MAX_QUOTE_SYMBOLS + 1))):
+            status, _, body = self.json(path)
+            self.assertEqual((status, body["code"]), (400, "bad_symbol"), path)
+
+    def test_news_pages_follow_the_cursor_to_the_end_without_repeats(self):
+        pinned = 1_758_800_000
+        first = fixture_news({"symbol": "AAPL", "limit": 20, "cursor": None}, pinned)
+        self.assertEqual(len(first["items"]), 20)
+        seen, page, pages = [], first, 1
+        while True:
+            times = [item["time"] for item in page["items"]]
+            self.assertEqual(times, sorted(times, reverse=True))
+            seen.extend(item["id"] for item in page["items"])
+            if page["nextCursor"] is None:
+                break
+            # Later pages depend on the cursor alone, not on the clock.
+            page = fixture_news({"symbol": "AAPL", "limit": 20, "cursor": page["nextCursor"]}, pinned + 99999)
+            pages += 1
+        self.assertGreater(pages, 1)
+        self.assertEqual(len(seen), len(set(seen)))
+        self.assertEqual(first, fixture_news({"symbol": "AAPL", "limit": 20, "cursor": None}, pinned))
+        status, hdrs, body = self.json("/api/news?symbol=AAPL&limit=5")
+        self.assertEqual((status, len(body["items"])), (200, 5))
+        self.assertEqual(hdrs["Cache-Control"], "no-store")
+        status, _, older = self.json("/api/news?symbol=AAPL&limit=5&cursor=" + body["nextCursor"])
+        self.assertEqual(status, 200)
+        self.assertLess(older["items"][0]["time"], body["items"][-1]["time"])
+
+    def test_news_headlines_vary_from_story_to_story(self):
+        page = fixture_news({"symbol": "AAPL", "limit": 20, "cursor": None}, 1_758_800_000)
+        headlines = [item["headline"] for item in page["items"]]
+        longest = run = 1
+        for previous, current in zip(headlines, headlines[1:]):
+            run = run + 1 if current == previous else 1
+            longest = max(longest, run)
+        self.assertLessEqual(longest, 3)
+        self.assertGreaterEqual(len(set(headlines)), 5)
+
+    def test_news_markup_headlines_carry_an_unsafe_link_for_the_reader_to_refuse(self):
+        found = []
+        for symbol in ("AAPL", "MSFT", "INFY.NS", "RELIANCE.NS", "TCS.NS"):
+            page = fixture_news({"symbol": symbol, "limit": 50, "cursor": None}, 1_758_800_000)
+            found += [item for item in page["items"] if "<b>" in item["headline"]]
+        self.assertTrue(found)
+        for item in found:
+            self.assertTrue(item["url"].startswith("javascript:"))
+
+    def test_news_sentinels_and_validation(self):
+        self.assertEqual(self.json("/api/news?symbol=EMPTY")[2], {"items": [], "nextCursor": None})
+        status, _, body = self.json("/api/news?symbol=FAIL")
+        self.assertEqual((status, body["code"]), (502, "upstream_error"))
+        for query, code in (("symbol=%3Cb%3E", "bad_symbol"), ("symbol=AAPL&limit=0", "bad_limit"),
+                            ("symbol=AAPL&limit=500", "bad_limit"), ("symbol=AAPL&cursor=abc", "bad_cursor")):
+            status, _, body = self.json("/api/news?" + query)
+            self.assertEqual((status, body["code"]), (400, code), query)
+
+    def test_quotes_and_news_are_not_made_up_without_the_fixture(self):
+        server, thread, base = _start(fixture=False)
+        try:
+            for path in ("/api/quotes?symbols=AAPL", "/api/news?symbol=AAPL"):
+                status, _, body = _get(base, path)
+                self.assertEqual((status, json.loads(body)["code"]), (501, "not_available"), path)
+        finally:
+            server.shutdown()
+            server.server_close()
 
     # -- error states ----------------------------------------------------------
     def test_sentinel_symbols_exercise_the_error_paths(self):

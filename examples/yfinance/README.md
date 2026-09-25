@@ -164,6 +164,22 @@ request's `Accept-Encoding` lists `gzip` with a non-zero quality; every JSON
 response carries `Vary: Accept-Encoding`. A history body goes to about a
 quarter of its size on the wire.
 
+**Quotes and news.** Two more endpoints feed the Watchlist and News panels, and only
+with `--fixture`. This server has no live quote or news source, so without the flag
+both answer 501 `not_available` rather than making a quote up from the last bar.
+
+```
+GET /api/quotes?symbols=AAPL,RELIANCE.NS          (at most 50, each passing the symbol rule)
+GET /api/news?symbol=AAPL&limit=20&cursor=<the previous page's nextCursor>
+```
+
+A quote is `{ symbol, exchange: "", last, previousClose, bid, ask, volume, time }`; an
+instrument the source does not know is left out of the answer, never answered with
+zeros. A news page is `{ items: [{ id, headline, source, time, summary, url? }],
+nextCursor }`, newest first, with `nextCursor` null on the last page. Both are
+`no-store`. A bad `limit` (1 to 50) is 400 `bad_limit`, a cursor that is not one of
+this server's is 400 `bad_cursor`.
+
 **Log line.** One line per request on stderr, `time client method path status
 bytes ms`, so a slow symbol or a 4xx storm is visible without a debugger.
 `--quiet` turns it off.
@@ -206,12 +222,25 @@ without breaking a network:
 The case does not matter (`fail` works too). Every other symbol that passes
 the validation rule gets bars.
 
+Quotes and news are deterministic too. A quote is the fixture level at its own
+two-second step, not the close of the last bar, with the previous weekday's
+session close as its reference. News arrives on a per-symbol schedule, about three
+stories in five 90-minute slots, 60 slots deep; the cursor names a slot, so older
+pages do not move with the clock. One headline template carries `<b>` markup and a
+`javascript:` link on purpose: the reader must show the first as text and refuse
+the second. `FAIL` and `BUSY` answer news with their errors and `EMPTY` with an
+empty page; all three are left out of quote answers.
+
 `python server.py --self-test` starts a fixture server on a free port in the
 process and checks the contract above: the bar shape and grid, determinism
 across two server instances, every validation and error path, that a bug in
 the source is a 500 with no traceback in the body, the cache and gzip
 headers, static serving, the log line, and that shutdown returns promptly and
-frees the port.
+frees the port. It also checks the quote and news endpoints: unknown symbols left
+out, quotes that are a pure function of symbol and step and differ from the last
+bar's close, news pages that follow the cursor to the end without repeats or
+clumped headlines, the markup and script-link item, validation, and the 501 answer
+without `--fixture`.
 
 ## Layout
 
@@ -465,6 +494,7 @@ exists to show one engine surface carrying real use, not just being present.
 | `chart-data-controls.js` | Capture a study checklist and visible time bounds, validate custom UTC bounds, and choose source or display alignment before download. |
 | `alerts.js` | The Alerts toolbar button opens the focused chart's lifecycle list and source editor. Price, study plots, supported drawing levels and registered candle conditions use the same controls as the packaged widget. Local notices display fired events; the demo does not send notifications or orders for an alert. |
 | `timeline.js` | The Events menu enables labelled sample events, clustering and group visibility. Click a marker to read its details. These are demonstration events, not a company calendar feed. |
+| `market-panels.js` | The Watchlist and News buttons open the widget's panels in each chart's dock. Named lists live in IndexedDB through the workspace tier's `WatchlistRepository`, one store for both charts, with a first list on a first visit. Quotes come from `/api/quotes` only, through one shared poll for every visible row's stream; a failed poll reports the stream as reconnecting, so the rows go stale until the next good answer. An arithmetic symbol has no quote and shows `n/a`. News pages come from `/api/news` with the server's cursor. Without `--fixture` the endpoints answer 501: the quote stream reports itself disconnected after one request and stops asking, so rows show no price, and the news panel shows the server's message. |
 
 ### Analysis and linking in 2.5.2
 

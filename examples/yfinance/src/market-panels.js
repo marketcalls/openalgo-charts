@@ -1,0 +1,134 @@
+// Watchlists and news for the reference host: named lists kept in IndexedDB,
+// quotes and news from this server's fixture endpoints. Nothing here reads a
+// bar: a row's price is a quote or nothing.
+//
+// The quote feed answers the panel's per-row streams from one shared poll of
+// /api/quotes, so ten visible rows cost one request per step, not ten. A poll
+// that fails reports the stream as reconnecting, which the panel shows as
+// stale; the next good poll reports it live again and the panel refetches.
+import {
+  WatchlistRepository, createIndexedDbWatchlistStorage, createMemoryWatchlistStorage,
+} from '/dist/openalgo-charts.workspace.mjs';
+import { referenceSymbolSearch } from './symbol-search.js';
+
+const POLL_MS = 2000;
+const NAMESPACE = 'yfinance';
+const FIRST_LIST = ['AAPL', 'MSFT', 'NVDA', 'RELIANCE.NS', 'INFY.NS', 'TCS.NS', '^NSEI', 'BTC-USD'];
+// The server's own symbol rule. An arithmetic expression (AAPL/MSFT) is not an
+// instrument the source can quote, so it stays unknown rather than failing the batch.
+const TICKER = /^\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,23}$/;
+
+async function answer(response) {
+  let body = null;
+  try { body = await response.json(); } catch { /* A body that is not JSON reports the status below. */ }
+  if (!response.ok) throw Object.assign(new Error(body?.error || `HTTP ${response.status}`), { status: response.status });
+  return body;
+}
+
+/** One shared poll behind every row's stream. `setOffline` and `stats` are for the demo's tests. */
+export function referenceQuoteFeed({ pollMs = POLL_MS, fetchImpl = (...args) => fetch(...args) } = {}) {
+  const rows = new Map();
+  const stats = { requests: 0, subscribes: 0, unsubscribes: 0 };
+  let status = 'connecting';
+  let timer = null;
+  let inFlight = false;
+  let offline = false;
+  // A 501 means this server has no quote source at all: disconnected, and not worth asking again.
+  let unavailable = false;
+  const keyOf = instrument => JSON.stringify([instrument.symbol, instrument.exchange]);
+
+  async function request(instruments, signal) {
+    const symbols = [...new Set(instruments.filter(i => i.exchange === '' && TICKER.test(i.symbol)).map(i => i.symbol))];
+    if (symbols.length === 0) return [];
+    stats.requests++;
+    if (offline) throw new Error('The quote server is unreachable');
+    return answer(await fetchImpl(`/api/quotes?symbols=${encodeURIComponent(symbols.join(','))}`, { signal, cache: 'no-store' }));
+  }
+  function report(next, error) {
+    if (next === status) return;
+    status = next;
+    for (const row of rows.values()) for (const handlers of row) handlers.onStatus?.(next, error);
+  }
+  function schedule(delay) {
+    if (timer === null && !inFlight && rows.size > 0 && !unavailable) timer = setTimeout(poll, delay);
+  }
+  async function poll() {
+    timer = null;
+    inFlight = true;
+    try {
+      const quotes = await request([...rows.keys()].map(key => { const [symbol, exchange] = JSON.parse(key); return { symbol, exchange }; }));
+      report('live');
+      for (const quote of quotes) for (const handlers of rows.get(keyOf(quote)) ?? []) handlers.onQuote(quote);
+    } catch (error) {
+      unavailable = error.status === 501;
+      report(unavailable ? 'disconnected' : 'reconnecting', error);
+    } finally {
+      inFlight = false;
+      schedule(pollMs);
+    }
+  }
+  return {
+    getQuotes: ({ instruments, signal }) => request(instruments, signal),
+    subscribeQuotes(instruments, handlers) {
+      stats.subscribes++;
+      const keys = instruments.map(keyOf);
+      for (const key of keys) {
+        if (!rows.has(key)) rows.set(key, new Set());
+        rows.get(key).add(handlers);
+      }
+      handlers.onStatus?.(status);
+      schedule(0);
+      return () => {
+        stats.unsubscribes++;
+        for (const key of keys) {
+          rows.get(key)?.delete(handlers);
+          if (rows.get(key)?.size === 0) rows.delete(key);
+        }
+        if (rows.size === 0 && timer !== null) { clearTimeout(timer); timer = null; }
+      };
+    },
+    subscribed: () => [...rows.keys()].map(key => JSON.parse(key)[0]),
+    stats: () => ({ ...stats }),
+    setOffline(on) { offline = Boolean(on); },
+  };
+}
+
+/** News pages from /api/news. The cursor is the server's, passed back untouched. */
+export const referenceNewsFeed = {
+  async getNews({ symbol, exchange, cursor, limit, signal }) {
+    if (exchange !== '' || !TICKER.test(symbol)) throw new Error('News follows one ticker, not an expression');
+    const params = new URLSearchParams({ symbol, limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    const page = await answer(await fetch(`/api/news?${params}`, { signal, cache: 'no-store' }));
+    return { items: page.items, nextCursor: page.nextCursor };
+  },
+};
+
+/**
+ * This host names an instrument by its ticker alone, which already carries
+ * the venue (RELIANCE.NS). Search results keep that identity, so a saved row
+ * matches the chart and the quote source.
+ */
+export const watchlistSymbolSearch = query => referenceSymbolSearch(query).map(({ exchange: _venue, ...hit }) => hit);
+
+let store = null;
+let quotes = null;
+
+/** The page's one list store, shared by both charts' panels. A first visit gets a list to try. */
+export function referenceWatchlists() {
+  if (store) return store;
+  const storage = typeof indexedDB === 'undefined' ? createMemoryWatchlistStorage()
+    : createIndexedDbWatchlistStorage(indexedDB, 'openalgo-yfinance-watchlists');
+  store = new WatchlistRepository(storage, NAMESPACE);
+  store.load().then(catalog => {
+    if (catalog.revision !== 0) return undefined;
+    return store.createList('Reference', FIRST_LIST.map(symbol => ({ symbol, exchange: '' })))
+      .then(list => store.setActiveList(list.id));
+  }).catch(() => { /* The panel reports a storage failure itself. */ });
+  return store;
+}
+
+export function referenceQuotes() {
+  quotes ??= referenceQuoteFeed();
+  return quotes;
+}

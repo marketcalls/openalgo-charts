@@ -2,6 +2,7 @@ import { ChartObjects } from '/dist/openalgo-charts.mjs';
 import {
   applyTokens, widgetTokens, mountPanelDock, mountDataWindow,
   createObjectsPanelContent, mountQuickEntry, mountDrawingProperties,
+  mountWatchlistPanel, mountNewsPanel,
 } from '/dist/openalgo-charts.widget.mjs';
 import { el, currentTheme, chartTheme, topOverlay } from './ui.js';
 import { capturePaneTarget } from './pane-target.js';
@@ -10,6 +11,7 @@ import { openChartSettings } from './chart-settings.js';
 import { autosave } from './persist.js';
 import { INTERVALS } from './intervals.js';
 import { referenceSymbolSearch } from './symbol-search.js';
+import { referenceWatchlists, referenceQuotes, referenceNewsFeed, watchlistSymbolSearch } from './market-panels.js';
 
 const DEFAULT_DOCK = { panel: null, width: 300 };
 let app;
@@ -61,6 +63,15 @@ export function attachInspection(host, pane = 1) {
       content.appendChild(panel.element);
       return panel;
     },
+    // Rows open their instrument through the same request path as the symbol box.
+    watchlist: content => mountWatchlistPanel({ ...ctx, symbolSearch: watchlistSymbolSearch }, content, {
+      store: referenceWatchlists(), quotes: referenceQuotes(),
+      onSelect: ({ symbol }) => {
+        const target = capturePaneTarget(host, pane);
+        if (target?.current() && target.chart === chart) host.changeRequest?.(target, { symbol });
+      },
+    }),
+    news: content => mountNewsPanel(ctx, content, { feed: referenceNewsFeed }),
     onChange: state => {
       if (disposing) return;
       host['inspectionState' + pane] = state;
