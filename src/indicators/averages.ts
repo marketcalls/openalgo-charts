@@ -354,13 +354,18 @@ export const MA_RIBBON: IndicatorDescriptor = {
 };
 
 /**
- * Triple EMA — `3 * (ema1 - ema2) + ema3`, which cancels the lag of a linear
+ * Triple EMA: `3 * ema1 - 3 * ema2 + ema3`, which cancels the lag of a linear
  * trend exactly rather than merely reducing it.
  *
  * Three chained EMAs, each running over a series that is already `na` for its
  * own warmup, so the first printed bar is `3 * length - 3` and not `length - 1`
  * — see `emaOfGapped`. `close` is hard-coded in the reference, so there is no
  * source setting.
+ *
+ * The three terms are added left to right, as the definition writes them, not
+ * regrouped as `3 * (ema1 - ema2) + ema3`: the two round differently in the last
+ * digits, and the grouped form can hide an overflowing term. Any absent term, or
+ * a sum that is not finite, leaves the bar absent (`nulls`).
  */
 export const TEMA: IndicatorDescriptor = {
   id: 'tema',
@@ -381,7 +386,7 @@ export const TEMA: IndicatorDescriptor = {
     const e1 = smaSeededEma(values, length);
     const e2 = emaOfGapped(e1, length);
     const e3 = emaOfGapped(e2, length);
-    return { tema: nulls(e1.map((v, i) => 3 * (v - e2[i]) + e3[i])) };
+    return { tema: nulls(e1.map((v, i) => 3 * v - 3 * e2[i] + e3[i])) };
   },
 };
 
@@ -430,7 +435,11 @@ export const TWAP: IndicatorDescriptor = {
     let count = 0;
     for (let i = 0; i < bars.length; i++) {
       if (restarts !== null && restarts[i]) { sum = 0; count = 0; }
-      sum += values[i];
+      // A bar with no price is a gap: it neither joins the sum nor counts as a
+      // bar, so it costs only its own reading instead of the rest of the session.
+      const value = values[i];
+      if (!Number.isFinite(value)) continue;
+      sum += value;
       count += 1;
       out[i] = sum / count;
     }

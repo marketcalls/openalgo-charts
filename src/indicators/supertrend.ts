@@ -8,13 +8,17 @@ import type { Bar } from '../model/bar';
 import { atr } from './atr';
 
 export interface SupertrendPoint {
-  /** The Supertrend band value, or NaN during ATR warmup. */
+  /** The Supertrend band value, or NaN during ATR warmup and on a bar with no true range. */
   value: number;
   /** -1 = uptrend (bullish), +1 = downtrend (bearish). */
   direction: -1 | 1;
 }
 
-/** Supertrend value + direction per bar. Warmup bars carry value=NaN. */
+/**
+ * Supertrend value + direction per bar. Warmup bars carry value=NaN, and so does
+ * a bar whose ATR is missing; the bands resume from where they stood on the next
+ * bar that has one.
+ */
 export function supertrend(bars: readonly Bar[], period = 10, multiplier = 3): SupertrendPoint[] {
   const n = bars.length;
   const out: SupertrendPoint[] = bars.map(() => ({ value: NaN, direction: 1 }));

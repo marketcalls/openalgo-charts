@@ -2,7 +2,7 @@
  * Tier-1 volume indicators, computed from the chart's own OHLCV.
  * Part of the lazy `openalgo-charts/indicators` tier.
  */
-import type { IndicatorDescriptor } from 'openalgo-charts';
+import type { Bar, IndicatorDescriptor } from 'openalgo-charts';
 import { nulls, sma, wma, rma, vwma, smaSeededEma, stdev } from './calc';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
@@ -16,6 +16,14 @@ const str = (s: Readonly<Record<string, unknown>>, k: string, d: string): string
   const v = s[k];
   return typeof v === 'string' && v !== '' ? v : d;
 };
+
+/**
+ * A bar's volume for a running total: a bar the feed gave no usable volume for
+ * traded nothing, as the flow studies read it. `?? 0` covered only an absent
+ * volume, so one NaN reached the total and blanked it for the rest of the history.
+ */
+const vol = (b: Bar): number =>
+  typeof b.volume === 'number' && Number.isFinite(b.volume) ? b.volume : 0;
 
 /** The selectable smoothing kernels of the "Smoothing" block. */
 const SMOOTHING_MA_TYPES: readonly { label: string; value: string }[] = [
@@ -123,7 +131,7 @@ export const OBV: IndicatorDescriptor = {
     let acc = 0;
     for (let i = 0; i < n; i++) {
       if (i > 0) {
-        const v = bars[i].volume ?? 0;
+        const v = vol(bars[i]);
         if (bars[i].close > bars[i - 1].close) acc += v;
         else if (bars[i].close < bars[i - 1].close) acc -= v;
       }
@@ -135,7 +143,7 @@ export const OBV: IndicatorDescriptor = {
     const mult = num(s, 'bbMult', 2);
     const ma = maType === 'None'
       ? new Array<number>(n).fill(NaN)
-      : smoothingMa(maType, out, bars.map((b) => b.volume ?? 0), maLength);
+      : smoothingMa(maType, out, bars.map(vol), maLength);
     // The band offset exists only for the Bollinger kernel, and an absent
     // offset makes both band columns absent too, which is how the reference
     // keeps the two plots and their fill hidden for every other type.
@@ -167,7 +175,7 @@ export const ADL: IndicatorDescriptor = {
       const span = b.high - b.low;
       // A doji bar (high === low) has an undefined money-flow multiplier;
       // the standard treatment is to contribute nothing.
-      if (span > 0) acc += (((b.close - b.low) - (b.high - b.close)) / span) * (b.volume ?? 0);
+      if (span > 0) acc += (((b.close - b.low) - (b.high - b.close)) / span) * vol(b);
       out[i] = acc;
     }
     return { adl: nulls(out) };
