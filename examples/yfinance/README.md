@@ -479,6 +479,7 @@ exists to show one engine surface carrying real use, not just being present.
 | `feed.js` | A `DataFeed` is one method. The bar cache wrapper (`withBarCache`) keys on symbol, exchange and interval, snaps `from` to the bar grid so a reload inside the same bar hits, stops `to` at the last seen bar while the venue is shut, and refetches only the forming bar. A 404, 429 or 5xx becomes a typed error (`NotFoundError`, `RateLimitedError`, `NetworkError`) with a deadline and one retry, so the readout can say "check the symbol" or "try again in a minute" rather than printing whatever the server wrote. A staleness badge says when the newest bar is older than the venue's clock allows. |
 | `intervals.js` | The interval registry accepts codes the built-in grammar does not (`1wk`, a calendar month, a quarter). Monthly and quarterly bars are folded from daily ones through `bucketStartOf`, so a month runs first-to-first in the chart's zone and February is 29 days long in 2024. Ranges are clamped to what the interval can serve. |
 | `indicators.js` | The picker is built from `registeredIndicators()`, so built-ins and the host's opt-in example appear grouped by category. The gear opens a form generated from the descriptor's `inputs`; the same code renders MACD, Bollinger or your own indicator. |
+| `history.js` | One undo timeline per chart through the widget tier's `ChartHistory`: a study added or removed (with its settings, pane and scale), its settings, the chart type, the price scales, pane moves, folds and heights, and drawings, in the order they were made. Ctrl+Z and Ctrl+Y, the toolbar's Undo and Redo, the rail and the mobile bar all walk it. The chart is rebuilt on every load and type switch, so the timeline lives on the app and each new chart is attached to it; the type switch itself is recorded as a command that rebuilds again. The chart settings dialog is one step per session, and a Cancel leaves none. Comparisons, the volume row and a loaded layout are the demo's own and go through `ignore`; a loaded layout starts a new timeline. No undo writes bars, fires an alert or places an order. |
 | `indicator-input-controls.js` | Validates typed drafts and connects shared symbol lookup and chart picking to the reference modal, preserving its Apply and Cancel behavior. |
 | `indicator-source.js` | Registers the Source signal sample and resolves source requests against the emitting chart and live instance. The read-only dialog shows the actual host factory and closes when its owner is removed or destroyed. |
 | `routed-study.js` | Registers the Routed signal sample: a momentum histogram in its own pane whose Buy and Sell plates and range box name the price pane (`overlay: true`), while its crossing dots and "Now" label (`plot: 'momentum'`) stay with the histogram. The Signals on price input sends the plates back to the study's pane. |
@@ -830,7 +831,9 @@ server is what that browser talks to: `tests/e2e/yfinance.spec.ts` drives the
 page through the rail, the mouse and the transport, and reads the result back
 through the `?test=1` handle. `tests/e2e/yfinance-mobile.spec.ts` adds fixture-mode touch
 drawing, undo, navigation, reduced-motion and portrait-to-landscape checks for the compact
-host controls.
+host controls. `tests/e2e/yfinance-history.spec.ts` walks a study from the picker, a line
+placed with two clicks, a price scale inverted from its axis menu and a chart-type rebuild
+back and forth with Ctrl+Z, Ctrl+Y and the rail's Redo.
 
 ## Notes
 
@@ -911,3 +914,20 @@ pane or asks `primaryPaneIndex()` for its order and price lines, volume,
 legends, price levels, replay marks, session marks, alert and order rows and
 axis chords, keeps `primaryPane` in its named-workspace allowlist, and forwards
 `plan.primaryPane` when it applies a template.
+
+### One undo timeline
+
+Ctrl+Z and Ctrl+Y (and Ctrl+Shift+Z) over a chart, the rail's Undo and Redo, and the
+mobile bar's Undo and Redo walk one timeline for the focused chart: a study added
+from the picker or removed from its chip or legend, its settings, the chart type,
+a price scale's mode, invert, auto-fit or placement from the axis menu, pane moves,
+folds and heights, the chart settings dialog (one step per session; Cancel leaves
+none) and drawings, in the order they were made. A study brought back returns to
+its pane, height and fold, with the drawings its pane held.
+
+The chart is rebuilt on every load and chart-type switch, and the timeline carries
+over: each new chart and drawing controller is attached to it. The chart type is a
+rebuild here, so the switch is recorded as a command that rebuilds with the type
+it replaced. Comparisons, the volume row and a loaded layout or workspace are the
+host's own and never steps; loading a layout or a workspace starts a new timeline.
+Undo never refetches or rewrites bars, fires an alert or places an order.

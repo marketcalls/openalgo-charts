@@ -9,6 +9,7 @@ import { CHART_TYPES, renderToolbar } from './toolbar.js';
 import { INTERVALS, PERIODS } from './intervals.js';
 import { withoutViewportSync } from './split.js';
 import { normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
+import { historyFor, withoutHistory } from './history.js';
 
 // Both read off their namespaces: a dist/ built before either shipped must
 // still read and write layouts, and a layout on such a build simply keeps
@@ -378,7 +379,15 @@ export function stripView(doc) {
  * is on the chart yet and the caller fetches (the way `load()` does, after
  * it has finished its own work). Returns the engine's restore report.
  */
-export function applyLayout(doc, { keepView = true, replaceComparisons = true } = {}) {
+export function applyLayout(doc, options = {}) {
+  // A layout is a new document, not a step: nothing it sets is recorded, and
+  // the timeline it replaces no longer leads anywhere.
+  const report = withoutHistory(1, () => applyLayoutNow(doc, options));
+  if (report.applied) historyFor(1)?.clear();
+  return report;
+}
+
+function applyLayoutNow(doc, { keepView = true, replaceComparisons = true } = {}) {
   if (!app.chart) return { applied: false, series: [], indicators: 0, reason: 'no chart' };
   const primary = app.chart;
   const primaryRequest = datasetKey(app.req);

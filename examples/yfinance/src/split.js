@@ -23,6 +23,7 @@ import { symbolStatus, exchangeOf, nameOf } from './status.js';
 import { axisMinMove } from './ticks.js';
 import { attachReplay, exitReplay, syncReplayAlertPause } from './replay.js';
 import { attachTimeline } from './timeline.js';
+import { attachHistory, historyFor } from './history.js';
 
 // 1.3 surfaces: chart linking, the bar cache and the interval registry.
 // Same namespace read for the same reason: this page must still draw
@@ -194,6 +195,8 @@ export function closeSplit() {
     if (app.linkGroup) app.linkGroup.remove(app.chart2);
     if (app.draw2) { app.draw2.destroy(); app.draw2 = null; }
     app.chart2.destroy();
+    // A split opened again is a new second chart, with nothing to take back yet.
+    historyFor(2)?.clear();
     app.chart2 = null; price2 = null; app.volume2 = null;
     app.symbolLegend2 = null; app.volLegend2 = null; app.volumeMA2 = null;
     app.volumeReadings2 = null;
@@ -338,6 +341,9 @@ export function buildChart2({ keepView = true, typeChanged = false, state } = {}
   joinLink();
   attachTimeline(app, 2, bars2);
   attachInspection(app, 2);
+  // Last, as on the main chart: the build is not a step, and the second
+  // chart's timeline carries over its rebuilds.
+  attachHistory(2);
 }
 
 export async function loadPane2() {
