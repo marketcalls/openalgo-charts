@@ -322,8 +322,6 @@ interface Tracked {
   /** New writes and broker reconciliation supersede older transport completions. */
   writeRevision: number;
   ocoPeer?: string;
-  /** Account, exchange and symbol of the position a close or reverse acts on. */
-  position?: string;
   legs?: { stopLoss?: string; takeProfit?: string };
   /** A provider bracket's leg orders, kept so a leg first seen on the order stream can be adopted. */
   legReqs?: Record<LegSuffix, TrackedRequest>;
@@ -748,8 +746,15 @@ export class OrderEngine {
       reverse === undefined ? undefined : req => reverse.call(this._feed, { ...req, mode: this._mode }));
   }
 
-  private _positionKey(req: PositionCommandRequest): string {
-    return JSON.stringify([req.account ?? '', req.exchange ?? '', req.symbol]);
+  /**
+   * Whether a tracked command acts on the position a new one names. An
+   * omitted exchange is whatever default the provider applies, so it matches
+   * any exchange: keyed on the literal field, one position asked for with and
+   * without its exchange let a second close out while the first was unresolved.
+   */
+  private static _samePosition(a: TrackedRequest, b: PositionCommandRequest): boolean {
+    return a.symbol === b.symbol && (a.account ?? '') === (b.account ?? '')
+      && (a.exchange === undefined || b.exchange === undefined || a.exchange === b.exchange);
   }
 
   /**
@@ -767,9 +772,8 @@ export class OrderEngine {
     const support = this._feature(this._featureRequest(feature, req));
     if (!support.supported) return support.reason;
     if (!implemented) return `${kind === 'close' ? 'Closing a position' : 'Reversing a position'} is not implemented by this feed`;
-    const key = this._positionKey(req);
     for (const row of this._orders.values()) {
-      if ((row.kind === 'close' || row.kind === 'reverse') && row.position === key && UNRESOLVED.has(row.intent)) {
+      if ((row.kind === 'close' || row.kind === 'reverse') && UNRESOLVED.has(row.intent) && OrderEngine._samePosition(row.req, req)) {
         return `A previous close or reverse for ${req.symbol} is unresolved; reconcile it with the broker first`;
       }
     }
@@ -805,7 +809,6 @@ export class OrderEngine {
     const tracked: Tracked = {
       clientId: token, kind, state: 'pending_place', intent: 'SUBMITTING', writeRevision: 0,
       req: { symbol: finalReq.symbol, exchange: finalReq.exchange, qty: finalReq.qty, account: finalReq.account },
-      position: this._positionKey(finalReq),
     };
     this._orders.set(token, tracked);
     try {

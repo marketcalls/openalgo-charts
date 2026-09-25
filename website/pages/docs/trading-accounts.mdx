@@ -146,7 +146,8 @@ still apply, so a host lock during replay stops them too.
   learns its outcome.
 - **Write ambiguity.** A transport failure leaves the command `AMBIGUOUS` with its token
   held. While a close or reverse on a position has no known outcome, another close or
-  reverse on it is refused. When the broker later reports the write, its status replaces
+  reverse on it is refused, whether or not either names the exchange (an omitted one is
+  the provider's default, so it may be the same position). When the broker later reports the write, its status replaces
   the client's guess: a working order is live again, and can be modified and cancelled.
   `releaseAmbiguous(clientId)` frees it once the host has established from the broker's
   complete book that it never arrived.

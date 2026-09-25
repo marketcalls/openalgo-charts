@@ -285,6 +285,32 @@ describe('explicit close, partial close and reverse', () => {
     expect(updates).toContain('rest');
   });
 
+  it('holds the position whether or not a command names its exchange', async () => {
+    const { engine, broker } = await long(10);
+    broker.muteOrderUpdates(true);
+    broker.failNext('close', 'lost-response');
+    expect(await engine.closePosition({ symbol: 'SYN', qty: 4, clientToken: 'bare' })).toMatchObject({ intent: 'AMBIGUOUS' });
+    const close = vi.spyOn(broker, 'closePosition');
+    const reverse = vi.spyOn(broker, 'reversePosition');
+    const unresolved = { ok: false, intent: 'BLOCKED', reason: 'A previous close or reverse for SYN is unresolved; reconcile it with the broker first' };
+    // An omitted exchange is the provider's default, so it may be this very position.
+    expect(await engine.closePosition({ symbol: 'SYN', exchange: 'NSE', qty: 4 })).toMatchObject(unresolved);
+    expect(await engine.reversePosition({ symbol: 'SYN', exchange: 'NSE' })).toMatchObject(unresolved);
+    expect(close).not.toHaveBeenCalled();
+    expect(reverse).not.toHaveBeenCalled();
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 6, avgPrice: 100 }]);
+  });
+
+  it('holds a position named with its exchange against a command that omits it', async () => {
+    const { engine, broker } = await long(10);
+    broker.muteOrderUpdates(true);
+    broker.failNext('close', 'lost-response');
+    expect(await engine.closePosition({ symbol: 'SYN', exchange: 'NSE', qty: 4 })).toMatchObject({ intent: 'AMBIGUOUS' });
+    expect(await engine.closePosition({ symbol: 'SYN', qty: 4 })).toMatchObject({ ok: false, intent: 'BLOCKED' });
+    // A different exchange named outright is a different position.
+    expect(await engine.closePosition({ symbol: 'SYN', exchange: 'BSE', qty: 1 })).toMatchObject({ ok: true });
+  });
+
   it('lets the host release an ambiguous command the broker never received', async () => {
     const { engine, broker } = await long(10);
     broker.failNext('reverse', 'timeout');
