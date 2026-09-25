@@ -216,7 +216,10 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 | `renderForm(host, controls, opts)` | function | One control renderer for every generated form: switch column, label, control column; `colorPair` on one row. Returns a `FormHandle`. |
 | `controlsFromInputs(inputs)` | function | `ChartSettingsInput[]` (the engine's settings schema) to `FormControl[]`. |
 | `controlsFromFields(fields)` | function | A drawing tool's `SettingsField[]` to `FormControl[]`. |
-| `mountIndicatorInputControls(ctx, options)` | function | Adds symbol lookup and chart picking to an existing indicator form. Returns `IndicatorInputControlsHandle` with `cancelPick`, `refresh` and `destroy`. |
+| `mountIndicatorInputControls(ctx, options)` | function | Adds symbol lookup and chart picking to an existing indicator form. Returns `IndicatorInputControlsHandle` with `cancelPick`, `refresh` and `destroy`. An action beside a disabled field is disabled with the field's reason; call `refresh()` after the form re-reads its conditions. |
+| `inputStates(inputs, values)` | function | (unreleased) `Map<key, InputState>` of `{ visible, active, dependsOn }` from each input's `visibleWhen` and `activeWhen`, cascading through inputs a condition reads. For a host that renders its own form. |
+| `inputConditionMet(condition, values)` | function | (unreleased) Whether one `IndicatorInputCondition` holds for a settings bag. Reads own keys only; a malformed condition counts as met. |
+| `InputState` | type | (unreleased) One input's `visible`, `active` and the `dependsOn` keys its `activeWhen` reads. |
 | `IndicatorInputControlsOptions`, `IndicatorInputControlsHandle` | types | Native typed-field host actions. |
 | `SettingsDialogOptions`, `IndicatorPickerOptions`, `IndicatorSettingsOptions`, `IndicatorSettingsTab`, `DrawingPropertiesOptions`, `LevelEditorOptions`, `TextEditorOptions`, `TextEditorHandle`, `ContextMenuHooks`, `ContextMenuOptions`, `MenuEntry`, `MenuItem`, `OrderRequest`, `PanelHandle`, `FormControl`, `FormKind`, `FormOptions`, `FormHandle` | types | |
 
@@ -227,6 +230,19 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 field error without committing invalid settings. Prices and timestamps preserve
 their numeric value; timestamps are absolute UTC seconds, including fractions.
 An ordinary `time` field retains its existing clock-string contract.
+
+(Unreleased) `FormControl` carries an input's `activeWhen`, `visibleWhen` and
+`inline`; `controlsFromInputs` threads them. `renderForm` re-reads them, and
+`FormOptions.unavailable`, after every edit and every `sync(values)`, so the host
+callback can depend on values too; its reason wins over "Depends on ...". A
+hidden control keeps its draft, `values()` still reports it, and `validate()`
+and `focusFirst()` skip hidden and disabled controls. A form with a condition
+adds a polite `role="status"` live region (`.oac-sr`) that says "Shown: ...",
+"Hidden: ...", "Available: ..." or "Unavailable: ...". Inline rows are
+`.oac-row--inline` with one `.oac-inline__item` per member; a dimmed member is
+`.oac-inline__item--off`. The new messages are localization keys:
+`Depends on {inputs}`, `Not used with the current settings`, `Shown: {inputs}`,
+`Hidden: {inputs}`, `Available: {inputs}`, `Unavailable: {inputs}`.
 
 `IndicatorInputControlsOptions` provides `instance`, `inputs`, `panel`,
 `field(key)` and atomic `onPatch(patch): boolean`. Optional `current()` fences

@@ -2,6 +2,32 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- Conditional study inputs. Every `IndicatorInput` (and a chart settings colour
+  pair) takes `visibleWhen` and `activeWhen`, an `IndicatorInputCondition` over
+  the other settings: `{ key, is }`, `{ key, isNot }` with one value or a list,
+  and `{ all }` or `{ any }` to combine them. A hidden input leaves the form and
+  the tab order; an inactive one stays readable, disabled, with a reason naming
+  what it depends on. Rules cascade through an input a condition reads. They are
+  presentation only: `calc` receives every setting, and a hidden value is kept.
+- Inline rows: consecutive inputs with the same `inline` id share one row, the
+  first one's label leading it, each member with its own label.
+- The widget's generated forms and the reference host's form re-read the rules
+  after every edit and every sync, announce what was shown, hidden, made
+  available or unavailable in a polite live region, and move focus off a control
+  that just left. A hidden or disabled draft never blocks OK or Apply: a valid
+  one is kept and saved, an invalid one is not written. Defaults resets hidden
+  inputs too, and Cancel restores the rows the original settings show. A pick
+  or search beside a disabled field is disabled with it.
+- `inputStates(inputs, values)`, `inputConditionMet(condition, values)` and the
+  `InputState` type in `openalgo-charts/widget`, for a host that renders its own
+  form; `FormOptions.unavailable` is now asked again after every edit and sync.
+- The widget tier grows by 1.47 kB Brotli (82.30 to 83.77 kB); the base engine
+  and the chart-only import are unchanged.
+
 ## 2.5.5
 
 2026-09-26
