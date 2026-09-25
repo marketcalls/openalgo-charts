@@ -699,8 +699,9 @@ study.setPriceScale(null);               // restore declared plot assignments
 All local plots, fills, levels, drawings and attached price primitives move in
 one transaction. Plot markers follow their series. Explicit `overlay: true`
 resources retain their price-pane placement and effective scale; price-anchored
-markers retain their primary-series binding. Tables and background shading stay
-in screen space. A fill whose endpoints would use different panes or scales
+markers retain their primary-series binding. Tables and untargeted background
+shading stay in screen space; a shading column that names a plot is bound to that
+plot's scale and moves with it. A fill whose endpoints would use different panes or scales
 rejects the request before any resource moves.
 Unplotted calculation columns used by a fill take that fill's local band scale.
 

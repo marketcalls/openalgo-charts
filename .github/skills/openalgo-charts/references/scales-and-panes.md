@@ -275,7 +275,8 @@ An explicit override applies to all local plots and their fills, levels, drawing
 and attached price primitives. Markers bound to plots follow those plots. Explicit
 `overlay: true` plots and fills retain their price-pane placement and effective
 scale; price-anchored markers keep their primary-series binding. Tables and
-background shading remain screen-space resources. Fill endpoints must share a
+untargeted background shading remain screen-space resources; a shading column
+naming a `plot` is bound to that plot's scale and moves with it. Fill endpoints must share a
 pane and scale, or the request returns false before changing anything. Unplotted
 calculation columns used by a fill resolve against that fill's local band scale.
 
@@ -333,8 +334,9 @@ Fills follow their common endpoint scale. Levels, unbound price drawings and
 attached price primitives follow the first local plot, as does study-owned range
 intent. A drawing that names a `plot` follows that plot's scale, and a price-pane
 drawing (`overlay: true`) follows the scale the price pane quotes prices on, the candles' own, without binding one. Plot markers,
-including marker groups that name a plot, follow their series. Tables and background shading remain
-in screen coordinates. Handles, data, settings and provider attachments survive
+including marker groups that name a plot, follow their series. A shading column naming a plot is
+bound to that plot's scale, and price-pane shading binds none. Tables and untargeted background
+shading remain in screen coordinates. Handles, data, settings and provider attachments survive
 assignment changes; no calculation or alert evaluation is required.
 
 Scale identity remains separate from column placement. Use

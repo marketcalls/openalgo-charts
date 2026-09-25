@@ -816,6 +816,43 @@ chart.addIndicator('demo-routed-signals');
 chart.timeScale.fitContent(bars.length);
 return chart;`} />
 
+### Shading the candles from a study pane
+
+The momentum histogram sits in its own pane, and the regime it measures shades the
+candles: that shading column names the price pane with `overlay: true`, so the up and
+down stretches read against the bars themselves, behind them. A second column names no
+target and marks the strongest readings behind the histogram, exactly as a plain
+`background` would. See [background targets](/docs/indicators#background-targets).
+
+<RunnableExample height={420} code={`lib.registerIndicator({
+  id: 'demo-routed-shading', name: 'Routed shading', category: 'Custom',
+  placement: 'pane',
+  inputs: [{ key: 'length', type: 'number', label: 'Length', default: 10, min: 2, max: 50, step: 1 }],
+  plots: [{ key: 'momentum', type: 'histogram', title: 'Momentum', style: { color: '#64748b' } }],
+  calc(bars, s) {
+    const n = Math.max(2, s.length | 0);
+    return { momentum: bars.map((b, i) => (i < n ? null : b.close - bars[i - n].close)) };
+  },
+  background({ values }) {
+    const m = values.momentum;
+    const peak = Math.max(...m.map((v) => Math.abs(v ?? 0)));
+    return [
+      // Behind the candles: which way momentum points, bar by bar.
+      { overlay: true, colors: m.map((v) => (v == null || v === 0 ? null
+        : v > 0 ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)')) },
+      // No target: the study's own pane, where the reading is strongest.
+      { colors: m.map((v) => (v != null && Math.abs(v) > peak * 0.6 ? 'rgba(79,140,255,0.18)' : null)) },
+    ];
+  },
+});
+
+const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addIndicator('demo-routed-shading');
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
 ### Curved study annotations
 
 The orange curve interpolates the same time and price anchors as the gray

@@ -2,6 +2,30 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- A study's background shading can name a target, the way its drawings and
+  markers can since 2.5.4. `background` may return a list of columns, typed as
+  `IndicatorBackgroundSpec` (`{ colors, overlay?, plot? }`), instead of one
+  colour per bar: `overlay: true` shades the price pane behind the candles and
+  binds no axis, and `plot: 'key'` shades that plot's pane, bound to the plot's
+  effective scale. Each target is a layer of its own, owned by the instance: it
+  follows `setPlotPriceScales`, `setPriceScale` and `moveIndicator` (price-pane
+  shading stays on the price pane), hides with the study, is released when a
+  pass returns no column for it and goes with the study or its pane. Shading
+  stacks after the study's marks and shapes, its own column first and then its
+  targets, price pane first; it paints behind every series, so it always sits
+  under the candles, plots, marks and shapes. One column per target: a second
+  column for the same target, a column without colours, colours mixed with
+  columns, an unknown plot, or `plot` with `overlay: true` throw before any
+  shading layer changes. The plain form, and a list whose one column names no
+  target, render exactly as before.
+- The reference host's Routed signal sample shades the candles by the sign of
+  its momentum, with a Momentum shading input that sends the shading to the
+  study's own pane or turns it off.
+
 ## 2.5.5
 
 2026-09-26
