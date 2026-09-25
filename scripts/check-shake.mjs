@@ -144,14 +144,16 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // when measured alone; their controllers, panels and grid chrome stay in the
 // optional tiers. The merged 2.5.4 build measures 74.43 KiB (76220 bytes);
 // allow 74.44 KiB.
-// The price pane is an identity rather than slot 0, so it can move below its
-// studies: the defaults that name it, the restore slot and its validation, the
-// legend corner, the remove and collapse guards, and the study, alert and
-// comparison lookups all ask where it sits. Measured 74.43 to 74.75 KiB (76220
-// to 76549 bytes, 0.32 KiB), with the base bundle 117.42 to 117.78 kB; the pane
-// menus stay in the widget and template remapping in the workspace tier. Allow
-// 74.76 KiB.
-const LIMIT_BYTES = 74.76 * 1024;
+// The price pane is an identity rather than slot 0, so a chart that opts in
+// (movablePrimaryPane) can move it below its studies: the defaults that name
+// it, the restore slot and its validation, the option's pin on every move, the
+// legend corner, the remove and collapse guards, the study, alert and
+// comparison lookups, and the saved drawings kept in step with pane moves for
+// a draw tier that loads later. Measured 74.43 to 74.97 KiB (76220 to 76771
+// bytes, 0.54 KiB), with the base bundle 117.42 to 118.01 kB; the pane menus
+// stay in the widget and template remapping in the workspace tier. Allow
+// 74.98 KiB.
+const LIMIT_BYTES = 74.98 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

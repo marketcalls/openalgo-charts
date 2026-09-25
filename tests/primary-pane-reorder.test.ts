@@ -8,6 +8,10 @@
  * move the price pane to the bottom of a three-pane stack first: that is the
  * arrangement in which every consumer that still meant "slot zero" when it
  * said "the price pane" lands on a study pane instead, visibly.
+ *
+ * Moving the price pane is opt-in (`movablePrimaryPane`), so the helpers here
+ * turn it on unless a test asks for the default; the default, a price pane
+ * pinned at the top exactly as before, has its own block below.
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import '../src/indicators/index';
@@ -65,12 +69,14 @@ const bars = (n: number, from = 0): Bar[] => Array.from({ length: n }, (_, k) =>
   return { time: 1700000000 + i * 60, open: c - 0.5, high: c + 1, low: c - 1, close: c, volume: 10 + i };
 });
 
-function makeChart(options: Partial<ChartOptions> = {}): { chart: Chart; el: FakeElement } {
+/** A measured chart; `movable` false leaves `movablePrimaryPane` out, the default a host gets. */
+function makeChart(options: Partial<ChartOptions> = {}, movable = true): { chart: Chart; el: FakeElement } {
   const doc = fakeDocument();
   const el = doc.createElement('div') as unknown as FakeElement;
   const chart = new Chart(el, {
     document: doc, pixelRatio: () => 1, shortcuts: false,
     raf: { schedule: (cb: (t: number) => void) => { cb(0); return 1; }, cancel: () => {} },
+    ...(movable ? { movablePrimaryPane: true } : {}),
     ...options,
   });
   chart.applySize(W, H);
@@ -79,8 +85,8 @@ function makeChart(options: Partial<ChartOptions> = {}): { chart: Chart; el: Fak
 }
 
 /** The price pane, an RSI pane and a MACD pane, in the order they were made. */
-function stacked(options: Partial<ChartOptions> = {}) {
-  const made = makeChart(options);
+function stacked(options: Partial<ChartOptions> = {}, movable = true) {
+  const made = makeChart(options, movable);
   const price = made.chart.addSeries('candlestick');
   price.setData(bars(120));
   const rsi = made.chart.addIndicator('rsi');
@@ -184,7 +190,65 @@ describe('moving the primary pane', () => {
     expect(y).toBeGreaterThan(tops(chart)[2]);
     expect(chart.coordinateToPrice(y)).toBeCloseTo(100, 6);
     expect(chart.priceAxisState()?.paneIndex).toBe(2);
-    expect(chart.priceAxisLayout().length).toBeGreaterThan(0);
+    // A second scale on the price pane only, so its axis layout differs from
+    // the study pane now at slot 0 and the default is seen to pick it.
+    chart.addSeries('line', { priceScaleId: 'left' }).setData(bars(10).map((bar) => ({ time: bar.time, value: bar.close })));
+    const own = chart.priceAxisLayout(2);
+    expect(own).not.toEqual(chart.priceAxisLayout(0));
+    expect(chart.priceAxisLayout()).toEqual(own);
+  });
+});
+
+describe('a chart that does not opt in keeps the price pane on top, the default', () => {
+  const press = (chart: Chart, id: string): boolean =>
+    (chart as unknown as { _handleLegendAction(id: string): boolean })._handleLegendAction(id);
+
+  it('reads the option back, off unless the host turns it on', () => {
+    expect(makeChart({}, false).chart.movablePrimaryPane()).toBe(false);
+    expect(makeChart({ movablePrimaryPane: false }).chart.movablePrimaryPane()).toBe(false);
+    expect(makeChart().chart.movablePrimaryPane()).toBe(true);
+  });
+
+  it('refuses every move that takes the price pane off the top, and still reorders the studies', () => {
+    const { chart, rsi, macd } = stacked({}, false);
+    const moves: unknown[] = [];
+    chart.on('paneMoved', (e) => moves.push(e));
+    expect(chart.movePane(0, 1)).toBe(false);
+    expect(chart.movePane(1, -1)).toBe(false);
+    expect(chart.setPrimaryPaneIndex(2)).toBe(false);
+    expect(chart.setPrimaryPaneIndex(1)).toBe(false);
+    expect(moves).toEqual([]);
+    expect(chart.primaryPaneIndex()).toBe(0);
+    // Study panes still swap among themselves, below the price pane.
+    expect(chart.movePane(1, 1)).toBe(true);
+    expect([chart.primaryPaneIndex(), rsi.paneIndex, macd.paneIndex]).toEqual([0, 2, 1]);
+  });
+
+  it('keeps the up control of the first study pane from displacing it, so an explicit 0 still reads a price', () => {
+    const { chart, rsi } = stacked({}, false);
+    const y = chart.priceToCoordinate(100, 0)!;
+    expect(chart.coordinateToPrice(y, 0)).toBeCloseTo(100, 6);
+    expect(press(chart, `indicator:${rsi.id}::up`)).toBe(true);
+    expect(rsi.paneIndex).toBe(1);
+    expect(chart.primaryPaneIndex()).toBe(0);
+    expect(chart.coordinateToPrice(y, 0)).toBeCloseTo(100, 6);
+    // The same control on a chart that opted in is how a trader moves it.
+    const opted = stacked();
+    press(opted.chart, `indicator:${opted.rsi.id}::up`);
+    expect([opted.rsi.paneIndex, opted.chart.primaryPaneIndex()]).toEqual([0, 1]);
+  });
+
+  it('refuses a saved layout that moved the price pane, before applying anything', () => {
+    const saved = JSON.parse(JSON.stringify(reordered().chart.getState()));
+    const { chart } = stacked({}, false);
+    const report = chart.restoreState({ ...saved, crosshairMode: 'magnet' });
+    expect(report.applied).toBe(false);
+    expect(report.reason).toMatch(/movablePrimaryPane/);
+    expect(chart.crosshairMode()).toBe('normal');
+    expect(chart.primaryPaneIndex()).toBe(0);
+    expect(chart.indicators().map((item) => [item.indicatorId, item.paneIndex])).toEqual([['rsi', 1], ['macd', 2]]);
+    // A version 2 state that keeps the price pane on top is one it can take.
+    expect(chart.restoreState({ version: 2, panes: chart.getState().panes, primaryPane: 0 }).applied).toBe(true);
   });
 });
 
@@ -503,6 +567,52 @@ describe('drawings, alerts and links follow the price pane', () => {
     expect(drawB.drawings()).toHaveLength(2);
   });
 
+  it('pastes a price-pane drawing onto the price pane wherever it now sits, on its own chart and on another', async () => {
+    let text = '';
+    const port = { writeText: async (value: string) => { text = value; }, readText: async () => text };
+    const a = reordered();
+    const b = stacked();
+    const drawA = new DrawingController(a.chart, { clipboard: port, clipboardFallbackToMemory: false });
+    const drawB = new DrawingController(b.chart, { clipboard: port, clipboardFallbackToMemory: false });
+    disposers.push(() => drawA.destroy(), () => drawB.destroy());
+    const t = bars(1, 30)[0].time;
+    const candlesLine = drawA.add({ tool: 'horizontal-line', paneIndex: 2, style: {}, points: [{ time: t, price: 101 }] });
+    const rsiLine = drawA.add({ tool: 'horizontal-line', paneIndex: 0, style: {}, points: [{ time: t, price: 50 }] });
+    expect(await drawA.copy([candlesLine.id, rsiLine.id])).toBe(true);
+    // Written price pane first, the way every earlier build wrote a price-pane
+    // drawing, so an older reader pastes it beside its own candles too.
+    const payload = JSON.parse(text) as Record<string, { drawings: { paneIndex: number }[] }>;
+    expect(payload['openalgo-charts/drawings'].drawings.map((d) => d.paneIndex)).toEqual([0, 1]);
+
+    // Onto a chart that keeps its price pane on top, RSI and MACD below it.
+    expect((await drawB.paste()).map((d) => d.paneIndex)).toEqual([0, 1]);
+    // Onto the same chart after its price pane went back to the top.
+    expect(a.chart.setPrimaryPaneIndex(0)).toBe(true);
+    expect(drawA.get(candlesLine.id)?.paneIndex).toBe(0);
+    expect((await drawA.paste()).map((d) => d.paneIndex)).toEqual([0, 1]);
+    // And from a price pane on top to one at the bottom.
+    expect(a.chart.setPrimaryPaneIndex(2)).toBe(true);
+    const fromB = drawB.add({ tool: 'horizontal-line', paneIndex: 0, style: {}, points: [{ time: t, price: 102 }] });
+    expect(await drawB.copy(fromB.id)).toBe(true);
+    expect((await drawA.paste()).map((d) => d.paneIndex)).toEqual([2]);
+  });
+
+  it('folds a study-pane drawing onto the last study pane of a chart with fewer, never onto its price pane', async () => {
+    let text = '';
+    const port = { writeText: async (value: string) => { text = value; }, readText: async () => text };
+    const a = reordered();
+    const small = makeChart();
+    small.chart.addSeries('candlestick').setData(bars(120));
+    small.chart.addIndicator('rsi');
+    expect(small.chart.setPrimaryPaneIndex(1)).toBe(true);
+    const drawA = new DrawingController(a.chart, { clipboard: port, clipboardFallbackToMemory: false });
+    const drawSmall = new DrawingController(small.chart, { clipboard: port, clipboardFallbackToMemory: false });
+    disposers.push(() => drawA.destroy(), () => drawSmall.destroy());
+    const macdLine = drawA.add({ tool: 'horizontal-line', paneIndex: 1, style: {}, points: [{ time: bars(1, 30)[0].time, price: 0 }] });
+    expect(await drawA.copy(macdLine.id)).toBe(true);
+    expect((await drawSmall.paste()).map((d) => d.paneIndex)).toEqual([0]);
+  });
+
   it('keeps the linked crosshair on every pane of a chart whose price pane moved', () => {
     const a = stacked();
     const b = stacked();
@@ -674,6 +784,17 @@ describe('saving and restoring the price pane position', () => {
     expect(chart.primaryPaneIndex()).toBe(2);
   });
 
+  it('refuses a price-pane slot in a version 1 state, the way a workspace document does', () => {
+    const { chart } = reordered();
+    const state = JSON.parse(JSON.stringify(chart.getState()));
+    const report = chart.restoreState({ ...state, version: 1, crosshairMode: 'magnet' });
+    expect(report.applied).toBe(false);
+    expect(report.reason).toMatch(/version 2/);
+    expect(chart.crosshairMode()).toBe('normal');
+    expect(chart.restoreState({ version: 1, panes: state.panes, primaryPane: 0 }).applied).toBe(false);
+    expect(chart.primaryPaneIndex()).toBe(2);
+  });
+
   it('carries the slot through a workspace document and refuses it in an old version', () => {
     const { chart } = reordered();
     const source = workspaceFixture();
@@ -752,6 +873,48 @@ describe('portable templates', () => {
     expect(draw.get(line.id)?.paneIndex).toBe(2);
   });
 
+  it('hands a draw tier that loads after a pruning restore the drawings in the slots the panes now hold', () => {
+    const source = reordered();
+    const draw = new DrawingController(source.chart);
+    draw.add({ tool: 'horizontal-line', paneIndex: 2, style: {}, points: [{ time: bars(1, 20)[0].time, price: 100 }] });
+    const saved = JSON.parse(JSON.stringify(source.chart.getState()));
+    draw.destroy();
+    // RSI is not registered where the layout is opened, so its pane above the price pane empties and goes.
+    saved.indicators = saved.indicators.map((item: { indicatorId: string }) =>
+      item.indicatorId === 'rsi' ? { ...item, indicatorId: 'primary-pane-not-registered' } : item);
+    const { chart } = makeChart();
+    chart.addSeries('candlestick').setData(bars(120));
+    expect(chart.restoreState(saved).applied).toBe(true);
+    expect(chart.panes()).toHaveLength(2);
+    expect(chart.primaryPaneIndex()).toBe(1);
+    // A move before the tier arrives is carried too.
+    expect(chart.setPrimaryPaneIndex(0)).toBe(true);
+    const late = new DrawingController(chart);
+    disposers.push(() => late.destroy());
+    expect(late.drawings().map((d) => d.paneIndex)).toEqual([0]);
+    expect(chart.panes()).toHaveLength(2);
+  });
+
+  it('does the same for a layout that keeps the price pane on top, on a chart that never opted in', () => {
+    const source = stacked({}, false);
+    const draw = new DrawingController(source.chart);
+    draw.add({ tool: 'horizontal-line', paneIndex: 2, style: {}, points: [{ time: bars(1, 20)[0].time, price: 0 }] });
+    draw.add({ tool: 'horizontal-line', paneIndex: 1, style: {}, points: [{ time: bars(1, 20)[0].time, price: 50 }] });
+    const saved = JSON.parse(JSON.stringify(source.chart.getState()));
+    draw.destroy();
+    saved.indicators = saved.indicators.map((item: { indicatorId: string }) =>
+      item.indicatorId === 'rsi' ? { ...item, indicatorId: 'primary-pane-not-registered' } : item);
+    const { chart } = makeChart({}, false);
+    chart.addSeries('candlestick').setData(bars(120));
+    expect(chart.restoreState(saved).applied).toBe(true);
+    expect(chart.indicators().map((item) => [item.indicatorId, item.paneIndex])).toEqual([['macd', 1]]);
+    const late = new DrawingController(chart);
+    disposers.push(() => late.destroy());
+    // The MACD drawing follows MACD up a slot; the one on the pane that went, goes with it.
+    expect(late.drawings().map((d) => [d.paneIndex, d.points[0].price])).toEqual([[1, 0]]);
+    expect(chart.panes()).toHaveLength(2);
+  });
+
   it('maps a legacy study list onto the price pane where it sits', () => {
     const planned = planIndicatorTemplate([
       { indicatorId: 'rsi', settings: {}, paneIndex: 0 },
@@ -793,24 +956,46 @@ describe('the widget pane menu', () => {
     expect(rows(chart, 0).get('pane-collapse')).toMatchObject({ label: 'Collapse pane' });
     expect(rows(chart, 2, { kind: 'time-scale', id: null }).has('pane-up')).toBe(false);
   });
+
+  it('greys the rows that would take a pinned price pane off the top', () => {
+    const { chart } = stacked({}, false);
+    const top = rows(chart, 0);
+    expect(top.get('pane-up')).toMatchObject({ disabled: true });
+    expect(top.get('pane-down')).toMatchObject({ disabled: true, note: 'price pane stays on top' });
+    const study = rows(chart, 1);
+    expect(study.get('pane-up')).toMatchObject({ disabled: true, note: 'price pane stays on top' });
+    expect(study.get('pane-down')?.disabled).not.toBe(true);
+    study.get('pane-down')!.run!();
+    expect(chart.primaryPaneIndex()).toBe(0);
+    expect(chart.indicators().map((item) => item.paneIndex)).toEqual([2, 1]);
+  });
 });
 
 describe('the packaged widget', () => {
   const widgets: Widget[] = [];
   afterEach(() => { for (const widget of widgets.splice(0)) widget.destroy(); });
-  const make = (): Widget => {
+  const make = (extra: { movablePrimaryPane?: boolean } = {}): Widget => {
     ensureWindowGlobal();
     const document = fakeWidgetDocument();
     const w = createWidget(fakeContainer(document) as unknown as HTMLElement, {
       document: document as unknown as Document, pixelRatio: () => 1,
       rail: false, panels: false, mobile: 'never', animZoom: false, animAutoscale: false,
       raf: { schedule: (cb) => { cb(); return 1; }, cancel() {} },
+      ...extra,
     });
     widgets.push(w);
     w.chart.applySize(W, H);
     w.series.setData(bars(120));
     return w;
   };
+
+  it('turns the option on for its chart, and a host can still turn it off', () => {
+    expect(make().chart.movablePrimaryPane()).toBe(true);
+    const pinned = make({ movablePrimaryPane: false });
+    pinned.chart.addIndicator('rsi');
+    expect(pinned.chart.movablePrimaryPane()).toBe(false);
+    expect(pinned.chart.setPrimaryPaneIndex(1)).toBe(false);
+  });
 
   it('reports a move of the price pane as a layout change and restores it in another widget', () => {
     const w = make();

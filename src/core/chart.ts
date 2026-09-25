@@ -403,6 +403,23 @@ export interface ChartOptions {
   branding?: boolean | LogoWatermarkOptions;
   /** Background text, off by default. Blank text follows setDataContext. */
   watermark?: boolean | ChartWatermarkOptions;
+  /**
+   * Let the primary price pane leave the top of the stack: below its studies
+   * through `movePane`, `setPrimaryPaneIndex`, a study pane's own up and down
+   * controls, or a restored layout that saved it lower down. Default false,
+   * which keeps the price pane pinned at slot 0 exactly as every earlier
+   * release did: `movePane` refuses to move or displace it,
+   * `setPrimaryPaneIndex` returns false, and `restoreState` refuses a layout
+   * that puts it anywhere else, so an explicit pane 0 always means the price.
+   *
+   * Opt-in because a host that passes 0 to mean the price pane (a price or
+   * order line, `coordinateToPrice(y, 0)` pricing a right-click order, a price
+   * alert check, `panes()[0]`) would read a study's units the moment a user
+   * moved a study above the candles. Before turning it on, drop those explicit
+   * zeros or ask `primaryPaneIndex()`, and follow `paneMoved`. Decided once,
+   * at construction; read it back with `movablePrimaryPane()`.
+   */
+  movablePrimaryPane?: boolean;
 }
 
 export interface AddSeriesOptions {
@@ -845,6 +862,8 @@ export class Chart {
   private _navigationEpoch = 0;
   private readonly _zoomAnchor: ZoomAnchor;
   private readonly _doubleClick: DoubleClickAction;
+  /** `movablePrimaryPane`: without it the price pane stays pinned at slot 0. */
+  private readonly _movablePrimaryPane: boolean;
   private readonly _firstDataId: { value: number | null } = { value: null };
   /** Handle + record of the primary price series (see `primarySeries`). */
   private _primary: { api: SeriesApi; record: SeriesRecord } | null = null;
@@ -1013,6 +1032,7 @@ export class Chart {
     this._animAutoscale = options.animAutoscale ?? this._animZoom;
     this._zoomAnchor = options.zoomAnchor ?? 'cursor';
     this._doubleClick = options.doubleClick ?? 'reset';
+    this._movablePrimaryPane = options.movablePrimaryPane === true;
     this._conflate = options.conflate ?? false;
     this._conflationFactor = options.conflationFactor ?? 1;
     // Resolved here, before the first pane, so an unregistered explicit choice
@@ -3027,6 +3047,15 @@ export class Chart {
     return this._crosshairSnapToBar;
   }
 
+  /**
+   * Whether the price pane may leave the top of the stack, see
+   * `ChartOptions.movablePrimaryPane`. False unless the host opted in, and
+   * while it is false the price pane stays at slot 0 for the life of the chart.
+   */
+  public movablePrimaryPane(): boolean {
+    return this._movablePrimaryPane;
+  }
+
   /** The active palette. Swap it with `setTheme`. */
   public theme(): ChartTheme {
     return this._theme;
@@ -3770,6 +3799,12 @@ export class Chart {
       if (slot && (!('value' in slot) || slot.value !== undefined)) {
         const at: unknown = slot.value;
         if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || !(at < (panes?.length ?? 0))) throw new Error('Invalid primary pane slot');
+        // The same rule a workspace document enforces: a version 1 reader
+        // trusts the version and would lay the price pane's scales on slot 0.
+        if (s.version < 2) throw new Error('A moved price pane needs chart version 2');
+        // The one switch: a chart that did not opt in keeps its price pane on
+        // top, and a layout that moved it would put every slot on the wrong pane.
+        if (at > 0 && !this._movablePrimaryPane) throw new Error('A moved price pane needs movablePrimaryPane');
         primaryPane = at;
       }
       if (s.alerts !== undefined) alerts = parseAlertsDocument(s.alerts);
@@ -4322,22 +4357,54 @@ export class Chart {
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._rehomeAnchored();
     this._syncLegendPanes();
+    this._remapSavedDrawings(slot => slot === index ? null : slot > index ? slot - 1 : slot);
     this.emit('paneRemoved', { paneIndex: index });
     return true;
   }
 
   /**
-   * Move a pane up or down one slot, swapping it with its neighbour. Any pane
-   * moves, the primary price pane included, and any pane can displace it: the
-   * price pane is an identity rather than a slot (see `primaryPaneIndex`), so
-   * everything that means "the price pane" follows it. Returns false for an
-   * unknown slot, a direction other than -1 or 1, or a move off either end.
+   * Keep the saved drawings' slots in step with a pane that moved or went,
+   * for the draw tier that has not loaded yet: it reads them from
+   * `drawingState()` whenever it arrives, and a stale slot would put a drawing
+   * on the wrong pane or recreate one that is gone. The slot is the draw
+   * tier's document and opaque here, so only its pane field is touched, on a
+   * copy, and a drawing on a removed pane goes with it, as the tier drops it.
+   * A tier that is listening writes its own document right after the event.
+   */
+  private _remapSavedDrawings(map: (slot: number) => number | null): void {
+    const saved = this._drawingState as { drawings?: unknown } | unknown[] | null | undefined;
+    const list = Array.isArray(saved) ? saved : Array.isArray(saved?.drawings) ? saved.drawings as unknown[] : null;
+    if (list === null) return;
+    const next = list.flatMap(entry => {
+      // An entry without a pane is on pane 0, the way the draw tier reads it.
+      const slot = (entry as { paneIndex?: unknown } | null)?.paneIndex ?? 0;
+      if (typeof entry !== 'object' || entry === null || !Number.isInteger(slot)) return [entry];
+      const to = map(slot as number);
+      return to === null ? [] : to === slot ? [entry] : [{ ...entry, paneIndex: to }];
+    });
+    this._drawingState = Array.isArray(saved) ? next : { ...saved, drawings: next };
+  }
+
+  /**
+   * Move a pane up or down one slot, swapping it with its neighbour.
+   *
+   * By default the primary price pane is pinned at the top, as it always was:
+   * a move that would take it off slot 0, or put a study pane above it, is
+   * refused, so a host that means the price pane when it passes 0 keeps
+   * meaning it. With `movablePrimaryPane` on, any pane moves, the price pane
+   * included, and any pane can displace it: the price pane is then an identity
+   * rather than a slot (see `primaryPaneIndex`), and everything that means
+   * "the price pane" follows it. Returns false for an unknown slot, a
+   * direction other than -1 or 1, a move off either end, or a pinned price pane.
    */
   public movePane(index: number, direction: -1 | 1): boolean {
     const target = index + direction;
     if ((direction !== -1 && direction !== 1) || !Number.isInteger(index)
       || index < 0 || target < 0 || index >= this._panes.length || target >= this._panes.length) return false;
     const panes = this._panes;
+    if (!this._movablePrimaryPane && (panes[index] === this._primaryPane || panes[target] === this._primaryPane)) return false;
+    // Before the event, so a drawing tier listening to it writes over this with its own.
+    this._remapSavedDrawings(slot => slot === index ? target : slot === target ? index : slot);
     [panes[index], panes[target]] = [panes[target], panes[index]];
     if (this._eventPane === index) this._eventPane = target;
     else if (this._eventPane === target) this._eventPane = index;
@@ -4366,7 +4433,8 @@ export class Chart {
    * every call that defaults to "the price pane" means: `addSeries`,
    * `addPriceLine`, `addEventMarkers`, `addPrimitive`, `tradeHost`, the
    * coordinate calls, comparisons, and a drawing magnet or price alert. It is
-   * 0 until something moves it; it is never removed and never collapsed.
+   * 0 until something moves it, and always 0 on a chart without
+   * `movablePrimaryPane`; it is never removed and never collapsed.
    */
   public primaryPaneIndex(): number {
     return this._primaryIndex();
@@ -4378,10 +4446,12 @@ export class Chart {
    * `movePane` with its own `paneMoved` event: drawings, alerts and anything a
    * host keys by slot follow it the way they follow any other move. Weights,
    * scales, a fold or a maximize stay with the panes that own them. Returns
-   * false for a slot that does not exist or the slot it already holds.
+   * false for a slot that does not exist or the slot it already holds, and
+   * always false on a chart built without `movablePrimaryPane`, where the price
+   * pane stays at the top: that option is the one switch for every move.
    */
   public setPrimaryPaneIndex(index: number): boolean {
-    if (this._destroyed || !Number.isInteger(index) || index < 0 || index >= this._panes.length) return false;
+    if (this._destroyed || !this._movablePrimaryPane || !Number.isInteger(index) || index < 0 || index >= this._panes.length) return false;
     let at = this._primaryIndex();
     if (at === index) return false;
     // A `paneMoved` listener may itself move panes, so the walk follows the

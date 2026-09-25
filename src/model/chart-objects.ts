@@ -240,6 +240,9 @@ export class ChartObjects {
   /** Pane targets include one new pane after the current stack. */
   public paneCount(): number { return this._chart.panes().length; }
 
+  /** The price pane's slot among the targets, so a list can name it wherever it sits. */
+  public primaryPaneIndex(): number { return this._chart.primaryPaneIndex(); }
+
   public canReorder(id: string, direction: -1 | 1): boolean {
     const row = this.get(id);
     if (!row?.capabilities.reorder || (direction !== -1 && direction !== 1)) return false;

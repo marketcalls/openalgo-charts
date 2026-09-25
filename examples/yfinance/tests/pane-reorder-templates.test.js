@@ -15,11 +15,16 @@ const bars = Array.from({ length: 80 }, (_, i) => {
   return { time: 1700000000 + i * 60, open: close, high: close + 1, low: close - 1, close };
 });
 
-/** The host's chart with RSI and MACD panes, and optionally the price pane moved to the bottom. */
+/**
+ * The host's chart with RSI and MACD panes, and optionally the price pane moved
+ * to the bottom. Built with `movablePrimaryPane`, as main.js and split.js build
+ * the host's charts.
+ */
 function mount(studies = ['rsi', 'macd'], bottom = true) {
   const document = fakeDocument();
   const chart = new Chart(document.createElement('div'), {
     document, pixelRatio: () => 1, shortcuts: false, raf: { schedule: () => 1, cancel: () => {} },
+    movablePrimaryPane: true,
   });
   charts.push(chart);
   chart.applySize(800, 500);

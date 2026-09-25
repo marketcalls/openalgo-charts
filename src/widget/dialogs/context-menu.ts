@@ -253,10 +253,12 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
   const pricePane = chart.primaryPaneIndex();
 
   // Order entry: only through a host hook, and only at a price when there is
-  // one. Off the plot the order rows would be offering to trade at nothing.
+  // one. Off the plot the order rows would be offering to trade at nothing,
+  // and off the price pane at a study's reading: an RSI of 58 is not a limit
+  // price, so a study pane offers the market rows alone.
   const onOrder = hooks.onOrder;
   if (onOrder !== undefined && target.kind !== 'time-scale') {
-    const price = e.price;
+    const price = e.paneIndex === pricePane ? e.price : null;
     const source = { ...ctx.symbol(), interval: ctx.interval() };
     const capability = (type: OrderRequest['type']): ReturnType<typeof checkTradingCapability> =>
       checkTradingCapability(hooks.tradingCapabilities, { operation: 'place', type, mode: hooks.tradingMode, ...ctx.symbol() });
@@ -351,19 +353,23 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
   }
 
   // The pane under the pointer: it moves up or down a slot, the price pane
-  // included, and a study pane folds to its header strip and opens again. The
-  // price pane stays open in any slot. A menu raised from a button names no
-  // pane, and the time axis belongs to the whole chart, so neither gets these.
+  // included when the chart lets it (`movablePrimaryPane`, on in the widget),
+  // and a study pane folds to its header strip and opens again. The price
+  // pane stays open in any slot. A menu raised from a button names no pane,
+  // and the time axis belongs to the whole chart, so neither gets these.
   if (target.kind !== 'time-scale' && !SYNTHETIC.has(e)) {
     const count = chart.panes().length, at = e.paneIndex;
     if (count > 1 && at >= 0 && at < count) {
       sep();
-      out.push({ id: 'pane-up', label: widgetText(ctx, 'Move pane up'),
-        disabled: at === 0, note: at === 0 ? widgetText(ctx, 'at the top') : undefined,
-        run: () => { chart.movePane(at, -1); } });
-      out.push({ id: 'pane-down', label: widgetText(ctx, 'Move pane down'),
-        disabled: at === count - 1, note: at === count - 1 ? widgetText(ctx, 'at the bottom') : undefined,
-        run: () => { chart.movePane(at, 1); } });
+      // A pinned price pane refuses a swap that moves or displaces it, so the
+      // row says so rather than doing nothing.
+      const pinned = (to: number): boolean => !chart.movablePrimaryPane() && (at === pricePane || to === pricePane);
+      const move = (id: string, label: 'Move pane up' | 'Move pane down', direction: -1 | 1, edge: boolean, where: 'at the top' | 'at the bottom'): MenuItem => {
+        const note = edge ? widgetText(ctx, where) : pinned(at + direction) ? widgetText(ctx, 'price pane stays on top') : undefined;
+        return { id, label: widgetText(ctx, label), disabled: note !== undefined, note, run: () => { chart.movePane(at, direction); } };
+      };
+      out.push(move('pane-up', 'Move pane up', -1, at === 0, 'at the top'));
+      out.push(move('pane-down', 'Move pane down', 1, at === count - 1, 'at the bottom'));
     }
     if (at !== pricePane && at >= 0 && at < count) {
       const folded = chart.paneCollapsed(at);

@@ -21,6 +21,13 @@
  * The payload body is a drawings document (`DrawingsDocument`), so a copy made
  * by a 1.9.x build (a version 1 body carrying the old style-bag text fields)
  * is upgraded by the same migration a saved layout goes through.
+ *
+ * A `paneIndex` in the payload counts the price pane as 0 and the study panes
+ * after it in their order, whatever slot the price pane holds on the chart it
+ * came from: `DrawingController` converts on copy and on paste, so a drawing
+ * copied beside the candles pastes beside the candles on a chart that keeps
+ * its price pane below its studies. On a chart with the price pane on top,
+ * the default, that is the chart's own slot, as it always was.
  */
 import type { Drawing, DrawingPoint, DrawingStyle, DrawingText, FibLevel } from './types';
 import { DRAWING_STATE_VERSION } from './types';

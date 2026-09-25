@@ -72,6 +72,8 @@ export type WidgetBuiltinMessage =
   | "Move pane down"
   | "at the top"
   | "at the bottom"
+  | "price pane stays on top"
+  | "Price pane"
   | "Axis settings..."
   | "Bar close"
   | "Bar close evaluates confirmed values. Intrabar touch can fire on a wick that is absent from final history."

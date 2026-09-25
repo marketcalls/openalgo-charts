@@ -27,14 +27,18 @@ async function route(page: Page, name: string) {
   await page.goto('/' + name);
 }
 
-/** A dark price pane with an RSI pane and a MACD pane under it; `bottom` then moves the price pane below both. */
-async function mount(page: Page, bottom: boolean) {
+/**
+ * A dark price pane with an RSI pane and a MACD pane under it; `bottom` then
+ * moves the price pane below both. `movable` false builds the chart the way a
+ * host that never opted in does, with the price pane pinned on top.
+ */
+async function mount(page: Page, bottom: boolean, movable = true) {
   await route(page, 'pane-reorder.html');
-  await page.evaluate(async ([up, down, rsiColor, move]) => {
+  await page.evaluate(async ([up, down, rsiColor, move, movablePrimaryPane]) => {
     const { createChart, darkTheme } = await import('/dist/openalgo-charts.mjs') as typeof Charts;
     await import('/dist/openalgo-charts.indicators.mjs');
     const chart = createChart(document.getElementById('c')!, {
-      theme: darkTheme, branding: false, animZoom: false, animAutoscale: false,
+      theme: darkTheme, branding: false, animZoom: false, animAutoscale: false, movablePrimaryPane,
     });
     const bars = Array.from({ length: 160 }, (_, i) => {
       const close = 100 + Math.sin(i / 6) * 8 + i * 0.05;
@@ -47,7 +51,7 @@ async function mount(page: Page, bottom: boolean) {
     const macd = chart.addIndicator('macd');
     if (move) chart.setPrimaryPaneIndex(2);
     window.__paneReorder = { chart, rsi, macd };
-  }, [UP, DOWN, RSI, bottom] as const);
+  }, [UP, DOWN, RSI, bottom, movable] as const);
   await paint(page);
 }
 
@@ -141,7 +145,7 @@ test('the price pane paints at the bottom of the stack, owns the time axis, and 
     const bars = old.primaryBars().slice();
     const style = old.primarySeriesInfo()!.style;
     old.destroy();
-    const chart = createChart(document.getElementById('c')!, { theme: darkTheme, branding: false, animZoom: false, animAutoscale: false });
+    const chart = createChart(document.getElementById('c')!, { theme: darkTheme, branding: false, animZoom: false, animAutoscale: false, movablePrimaryPane: true });
     chart.addSeries('candlestick', { style: { ...style } }).setData(bars);
     const report = chart.restoreState(JSON.parse(state));
     if (!report.applied) throw new Error(report.reason);
@@ -189,6 +193,33 @@ test('study rows move past the price pane from their own controls until it sits 
   expect(boxes[0].height).toBeCloseTo(30, 0);
   expect(await pixels(page, 0, RSI)).toBe(0);
   await page.screenshot({ path: info.outputPath('top-study-folded-price-bottom.png') });
+  expect(errors).toEqual([]);
+});
+
+test('without the option the up control of the first study leaves the price pane on top, where pane 0 still reads prices', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mount(page, false, false);
+  const probe = () => page.evaluate(() => {
+    const { chart, rsi } = window.__paneReorder;
+    const y = chart.priceToCoordinate(100, 0);
+    return { movable: chart.movablePrimaryPane(), primary: chart.primaryPaneIndex(), rsi: rsi.paneIndex,
+      price: y === null ? null : chart.coordinateToPrice(y, 0), refused: chart.setPrimaryPaneIndex(2) };
+  });
+  const before = await probe();
+  expect(before).toMatchObject({ movable: false, primary: 0, rsi: 1, refused: false });
+  expect(before.price).toBeCloseTo(100, 6);
+  const up = await rowControl(page, 'rsi', 'up');
+  await page.mouse.click(up.x, up.y);
+  await page.mouse.move(980, 690);
+  await paint(page);
+  const after = await probe();
+  expect(after).toMatchObject({ movable: false, primary: 0, rsi: 1, refused: false });
+  expect(after.price).toBeCloseTo(100, 6);
+  expect(await candles(page, 0)).toBeGreaterThan(200);
+  expect(await candles(page, 1)).toBe(0);
+  expect(await pixels(page, 1, RSI)).toBeGreaterThan(50);
+  await page.screenshot({ path: info.outputPath('pinned-price-pane-after-up.png') });
   expect(errors).toEqual([]);
 });
 
