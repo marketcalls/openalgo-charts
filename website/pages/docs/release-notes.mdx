@@ -8,6 +8,47 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.5.5
+
+2026-09-26
+
+### Added
+
+- Named **watchlists** with live quote rows and a **news** reader in the widget's
+  panel dock, over optional `QuoteFeed` and `NewsFeed` contracts beside `DataFeed`.
+  A quote row never shows a candle as a quote; news text is shown as text and
+  unsafe links are refused. Lists persist through `WatchlistRepository` in the
+  workspace tier.
+- **Account state and position commands** in the trade tier for brokers that
+  declare them: account selection with balances, equity and margin, order
+  preview, durations and expiry, native close, partial close, reverse and
+  provider brackets, each with its own idempotency and reconciliation. Nothing is
+  simulated: an undeclared operation is refused. The widget shows an account
+  summary when accounts exist.
+- An **opt-in movable price pane** (`movablePrimaryPane`): the price pane can sit
+  below its studies, and everything that means "the price pane" follows it.
+  Hosts that do not opt in see no change to pane 0.
+- **Drawings pinned to the screen** (`space: 'viewport'`) that stay put through
+  pan and zoom, keep inside the visible plot and round-trip in saved layouts.
+- **Price tick schedules**: price-dependent tick bands as instrument metadata,
+  followed by order validation, dragging and the depth-of-market ladder.
+
+### Calculations
+
+- ATR and the studies built on it, Supertrend, VWAP, TWAP, OBV,
+  Accumulation/Distribution, Parabolic SAR, CCI, Stochastic, Fisher Transform,
+  RVI, Mass Index, NVI, PVI and the True Strength family now resume after a
+  missing or non-finite input, so a gap costs only the bars it covers. Complete
+  data reads as before, apart from last-digit changes in TEMA, Stochastic and the
+  True Strength family, and the corrected Trend Strength Index.
+- The indicators page documents the thirteen numerical contract differences from
+  the companion scripting language, and how each built-in treats a missing volume.
+
+Saved layouts, drawings and workspaces from 2.5.4 load unchanged. No runtime
+dependencies or package tiers were added.
+
+See [Upgrading to 2.5.5](/docs/upgrading) and the [widget guide](/docs/widget).
+
 ## 2.5.4
 
 2026-09-25

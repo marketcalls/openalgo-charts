@@ -804,7 +804,7 @@ groups. Group changes participate in undo/redo. `ChartObjectDrawingGroup` is the
 base tier's structural view, avoiding an import from the draw tier.
 
 
-## Viewport-anchored drawings (unreleased)
+## Viewport-anchored drawings (2.5.5)
 
 A drawing's `space` says which coordinates its anchors are in. `'data'`, the
 default and never written out, is time and price: the drawing follows the bars.

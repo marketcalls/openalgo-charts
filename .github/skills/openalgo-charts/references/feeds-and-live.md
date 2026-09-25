@@ -471,7 +471,7 @@ may remain visible to another process. Direct cache calls are not coalesced;
 use the pool/controller. `MarketDepth.timeSec` preserves valid exchange timestamps;
 Depth frames with only book quantities do not supply executed-trade volume.
 
-## Quote and news contracts (unreleased)
+## Quote and news contracts (2.5.5)
 
 Optional provider contracts, types only in the base entry (no runtime bytes), for the
 widget's watchlist and news panels or a host's own. They are separate from `DataFeed`:

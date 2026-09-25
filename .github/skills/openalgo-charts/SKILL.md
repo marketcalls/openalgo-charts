@@ -68,7 +68,7 @@ Import only what you use. Each tier is a separate entry point, so a feature you 
 | `openalgo-charts/widget` | `createWidget`: the chart with a top bar, drawing rail, responsive mobile controls, status line, settings and indicator dialogs, drawing properties, event details, right-click menu, keymap and optional persistence. The only tier that ships DOM; imports the draw tier itself | 51.50 kB |
 | `openalgo-charts/workspace` | Portable workspace/template documents, asynchronous catalog repository and atomic IndexedDB adapter; no UI or market data | 6 kB |
 
-Limits are the CI-enforced budgets in `.size-limit.json`. This reference targets 2.5.4.
+Limits are the CI-enforced budgets in `.size-limit.json`. This reference targets 2.5.5.
 In a source checkout, run `npm run size` before quoting byte counts. In a consumer app,
 check the installed version and measure its actual imports with the app's bundler.
 Reference measurements and every budget row live in [bundling-and-tiers](references/bundling-and-tiers.md).
@@ -185,7 +185,7 @@ Detailed reference for each topic is in `references/`. Read the one that matches
 | A level or axis row with no data | `available(kind)`, `state.active` | render it disabled with its state visible | hiding the control |
 | Corner clock, bar-close countdown | `ChartOptions.axisChrome` | `{ sessionClock: true, barCountdown: true }`, plus a `clock` for a delayed feed | a DOM overlay positioned over the axis |
 | Named multi-chart layouts and templates | [workspaces](references/workspaces.md) | `WorkspaceRepository` plus a storage adapter; each pane carries `getState()` | treating a single chart snapshot as the whole host workspace |
-| Watchlists with live prices, or symbol news | [widget](references/widget.md#watchlist-and-news-panels-unreleased), [workspaces](references/workspaces.md#named-watchlists-unreleased) | `WatchlistRepository` plus a `QuoteFeed` and a `NewsFeed`, as the widget's `watchlist` and `news` options | pricing a row from the last candle, or rendering provider text as HTML |
+| Watchlists with live prices, or symbol news | [widget](references/widget.md#watchlist-and-news-panels-255), [workspaces](references/workspaces.md#named-watchlists-255) | `WatchlistRepository` plus a `QuoteFeed` and a `NewsFeed`, as the widget's `watchlist` and `news` options | pricing a row from the last candle, or rendering provider text as HTML |
 | React lifecycle | where the chart instance lives | create in an effect, hold in a ref, `chart.destroy()` on cleanup | chart instance in state |
 | Bundle size | which tiers are imported | drop the unused tier import | code-splitting the base |
 

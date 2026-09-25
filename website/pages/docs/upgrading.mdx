@@ -1,11 +1,48 @@
 ---
-title: Upgrading to 2.5.4
+title: Upgrading to 2.5.5
 description: Adopt workspace, open-interest, alert and host contracts while preserving existing integrations.
 ---
 
-# Upgrading to 2.5.4
+# Upgrading to 2.5.5
 
-Version 2.5.4 needs no migration. Saved layouts, drawing documents and workspace
+Version 2.5.5 needs no migration. Saved layouts, drawings and workspace
+documents from 2.5.4 load unchanged, and every new contract is optional.
+
+Check these points in your host:
+
+- Moving the price pane is off unless you opt in with `movablePrimaryPane` on
+  `createChart`, `createWidget` or `createChartGrid`. Without it pane 0 is the
+  price pane exactly as before. Before you opt in, replace every explicit `0`
+  that means the price pane with no pane argument or `chart.primaryPaneIndex()`,
+  follow `paneMoved`, and include `primaryPane` in any saved-state allowlist.
+  See [Opting in](/docs/scales-and-panes#opting-in).
+- A chart state that moved the price pane is written as version 2, and an older
+  engine refuses it rather than misplacing the price pane.
+- Running studies such as ATR, Supertrend, VWAP, OBV, A/D, Parabolic SAR, CCI,
+  Stochastic, RVI and TSI now resume after a missing or non-finite input
+  instead of going blank. Complete data reads as before, apart from last-digit
+  changes in TEMA, Stochastic, True Strength Index and the SMI Ergodic pair,
+  and the corrected Trend Strength Index. See the
+  [release notes](/docs/release-notes#255) and the Numerical contract section of
+  [Indicators](/docs/indicators).
+- `OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and
+  `leverage`, which OpenAlgo's order endpoint does not take, before any request.
+- A host that types a complete translation dictionary as
+  `Record<WidgetBuiltinMessage, string>` must add the new account summary, pane
+  move and drawing anchor messages; a translator that returns `undefined` keeps
+  the English text.
+
+New and optional: named watchlists (`WatchlistRepository`) with `QuoteFeed`
+rows and a `NewsFeed` reader in the widget dock, account state and native
+position commands for brokers that declare them (`AccountManager`,
+`TradingFeatures`, `previewOrder`, `closePosition`, `reversePosition`),
+price-dependent `TickSchedule` bands, and drawings pinned to the viewport
+(`space: 'viewport'`). See [Widget controls](/docs/widget), [Trading](/docs/trading),
+[Instruments](/docs/instruments) and [Drawing tools](/docs/drawing-tools).
+
+## Earlier upgrades
+
+Version 2.5.4 needed no migration. Saved layouts, drawing documents and workspace
 documents from 2.5.3 load unchanged; pane `collapsed`, drawing `policy` and a
 pane's `historyPeriod` are optional fields that older records simply omit.
 
@@ -35,8 +72,6 @@ A drawing UI of your own should route its edits through the drawing controller,
 which enforces policies, and pass `{ force: true }` only for the host's own
 changes. See [Chart grid](/docs/chart-grid), [Data loading](/docs/data-loading),
 [Scales and panes](/docs/scales-and-panes) and [Drawing tools](/docs/drawing-tools).
-
-## Earlier upgrades
 
 Version 2.5.3 adds the widget's Data and Objects dock, richer symbol lookup,
 direct typing, shared colour controls, and individual running-study removal.

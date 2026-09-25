@@ -343,13 +343,12 @@
     }
   ],
   "next": [
-    "Publish 2.5.4 through the release workflow, deploy the website and create the GitHub release.",
-    "Wave 2: fix the confirmed chart calculation defects (VWAP, ATR, PSAR, CCI, Stochastic, OBV and ADL, TWAP, TEMA, Fisher, seeded EMA smoothing, TSI, correlation) and document the remaining contract differences.",
-    "Correct the PVT step in both companion engines and publish the companion patch.",
-    "Complete the remaining native capabilities (primary pane reorder, action history, viewport annotations, stacking, study policies, watchlists, quotes and news, account and trading panels, series variants, tick schedules, output backgrounds, conditional inputs and atomic time and price picks); defer issue #22."
+    "Publish 2.5.5 through the release workflow, deploy the website and create the GitHub release.",
+    "Wave 2b: study protection policies (G06b), uniform stacking (H02), atomic time and price pick, alert-drag rounding to tick schedules and a plot rectangle accessor (single chart.ts writer); non-drawing action history (G07); series variants (P02); background output targets; conditional study inputs.",
+    "Defer issue #22."
   ],
   "release": {
-    "version": "2.5.4",
+    "version": "2.5.5",
     "authorized": true,
     "status": "verified-candidate",
     "steps": [
@@ -361,28 +360,34 @@
       "Create release and verify published artifacts"
     ],
     "companion": {
-      "version": "0.7.0",
+      "version": "0.7.2",
       "authorized": true,
       "status": "published-and-public-artifacts-verified",
       "requirement": "Compare all shipped numerical indicators with equivalent calculations in both language engines, fix confirmed deviations and publish both companion packages from one versioned source.",
       "sourceCommit": "f9ab00e4e9238b442ae0ad3639f52bc5dc45394b",
-      "releaseUrl": "https://github.com/marketcalls/openscript/releases/tag/v0.7.0",
+      "releaseUrl": "https://github.com/marketcalls/openscript/releases/tag/v0.7.2",
       "correctivePatch": {
         "version": "0.7.1",
         "status": "published-and-public-artifacts-verified",
         "reason": "A new finite-extreme ADX fixture exposes four Python-only differences after a selected directional change overflows. The published 0.7.0 version is immutable; the correction requires a new patch release and renewed package validation.",
         "releaseUrl": "https://github.com/marketcalls/openscript/releases/tag/v0.7.1",
         "published": "npm openalgo-script 0.7.1 and PyPI openscript 0.7.1 on 2026-09-25"
-      }
+      },
+      "published": "npm openalgo-script 0.7.2 and PyPI openscript 0.7.2 on 2026-09-25: overflow-safe running totals (pvt, vwap, vwapAnchor, ad, adOsc, cmf) and cmf engine agreement on negative window volume"
     },
     "scope": [
-      "Go to a date or range (widget goTo, DateNavigator, loadMore until)",
-      "Pane collapse to a header strip",
-      "Study drawing and marker output targets (overlay, plot)",
-      "Drawing policies: selectable, editable, persistent, listed",
-      "Chart grid (createChartGrid) and keyboard routing",
-      "Earlier reference-coverage capabilities and calculation corrections listed in CHANGELOG 2.5.4"
-    ]
+      "Indicator gap recovery (numeric batches A and B) and the documented numerical contract",
+      "Opt-in movable primary price pane (G04 part 2)",
+      "Viewport-pinned drawings (G05)",
+      "Price-dependent tick schedules (P03)",
+      "Named watchlists, quote rows and a news reader (H05)",
+      "Account state, order preview, durations and native position commands (P01)"
+    ],
+    "previous": {
+      "version": "2.5.4",
+      "status": "published",
+      "releaseUrl": "https://github.com/marketcalls/openalgo-charts/releases/tag/v2.5.4"
+    }
   },
   "validation": {
     "chartTests": 8228,
@@ -392,12 +397,12 @@
     "demoTestFiles": 50,
     "browserEvidence": "The merged 2.5.4 candidate runs 1118 browser cases across Chromium, Firefox and WebKit. Four stale expectations (navigation snapshot keys, the persistent legend count row, the external-study refetch after a history resync and a drawing-policy fixture whose two lines crossed at the click point) were corrected; the first three also failed on the pre-merge baseline, and the fourth arrived with the drawing-policy tests. Startup waits that time out under ten parallel browsers against one fixture server occur at the same rate on the pre-merge baseline. Read-only drawing selection and menu screenshots inspected.",
     "website": "63 static pages built successfully. All 1405 generated API files in the static output match the warning-free source API build byte-for-byte.",
-    "chartOnlyBrotliKiB": 74.43,
-    "chartOnlyBudgetKiB": 74.44,
-    "baseBrotliKB": 117.42,
-    "indicatorBrotliKB": 36.27,
-    "workspaceBrotliKB": 8.67,
-    "allTiersBrotliKB": 310.09,
+    "chartOnlyBrotliKiB": 75.07,
+    "chartOnlyBudgetKiB": 75.08,
+    "baseBrotliKB": 119.15,
+    "indicatorBrotliKB": 36.34,
+    "workspaceBrotliKB": 9.99,
+    "allTiersBrotliKB": 335.15,
     "budgetChange": "Wave-1 merges (go-to-date, pane collapse, output targets, drawing policies, chart grid) set every limit to the smallest two-decimal value that passes on the measured 2.5.4 build: base 117.42 kB (117419 bytes), base plus trade 125.43 kB, draw 42.53 kB, widget 71.34 kB, terminal 267.56 kB, all tiers 310.09 kB and chart-only 74.44 KiB (76220 bytes).",
     "review": "Independent typed-input review found reentrant destruction, pane-slot replacement and context changes during pick:end. Eight actual-chart regressions failed before capture lifetime fences and now pass. No additional blocker found in scalar validation, exchange defaults, restore preflight or public exports. A final host review reproduced four failures involving constructor and __proto__ exchange keys; safe own-property defaults, patches and staged collection now preserve them through selection, Defaults, Cancel and Apply.",
     "packageVerification": "Full verify passes lint, typecheck, 7826 unit tests, seven endurance checks, build, all 478 example-host tests, declaration identity, measured size budgets and optional-tier removal checks. The installed public companion 0.7.0 passes 18 compiled-program integration checks and public adapter typechecking. API documentation generates without warnings. The separately discovered Python extreme-directional defect is outside those integration fixtures and remains tracked for correction.",

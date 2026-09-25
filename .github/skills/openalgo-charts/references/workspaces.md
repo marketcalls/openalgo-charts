@@ -106,7 +106,7 @@ must survive JSON without losing symbols, accessors or extra array properties.
 Arbitrary free text is not secret-scanned.
 Do not execute imported text or assume namespace names provide authorization.
 
-## Named watchlists (unreleased)
+## Named watchlists (2.5.5)
 
 DOM-free named symbol lists in the same tier and with the same storage discipline as
 workspaces. Source of truth: `src/workspace/watchlists.ts`.

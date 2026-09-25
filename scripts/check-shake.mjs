@@ -160,7 +160,11 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // 76287 bytes (74.43 to 74.50 KiB). The setter's refusal of a band list and
 // the hand-off that seeds a layer built after Instrument.applyTo take it to
 // 76306 bytes (74.52 KiB); allow 74.52 KiB.
-const LIMIT_BYTES = 74.98 * 1024;
+// Together in 2.5.5, the movable price pane, the tick-schedule drag rounding and
+// the indicator gap recovery measure 75.07 KiB (76874 bytes); allow 75.08 KiB.
+// Watchlists, news, account state and viewport drawings live in the optional
+// tiers; the widget check below keeps the panels out of this import.
+const LIMIT_BYTES = 75.08 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

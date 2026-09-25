@@ -54,6 +54,13 @@ widget 71.33 kB; all tiers 310.09 kB. Registry counts are unchanged. The widget 
 names the grid and go-to panel, and the description names pane collapse, study
 output targets and drawing policies.
 
+Rechecked on 2.5.5: base 119.15 kB, indicators 36.34 kB, draw 44.87 kB, profile
+14.96 kB, transform 4.50 kB, trade 16.64 kB, workspace 9.99 kB, webgl 6.39 kB and
+widget 82.30 kB; all tiers 335.15 kB. Registry counts are unchanged. The trade chip
+names accounts, the workspace chip watchlists and the widget chip the watchlist and
+news panels; the description names the movable price pane, viewport drawings and
+tick schedules.
+
 Source references: `src/index.ts`, `src/feed/data-controller.ts`,
 `src/feed/instrument.ts`, `src/model/bar.ts`, `src/core/pane.ts`,
 `src/alerts/controller.ts`, `src/replay/group.ts`, `src/link/group.ts`,

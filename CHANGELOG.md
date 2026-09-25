@@ -2,7 +2,9 @@
 
 All notable changes to OpenAlgo Charts.
 
-## Unreleased
+## 2.5.5
+
+2026-09-26
 
 ### Added
 
@@ -68,123 +70,6 @@ All notable changes to OpenAlgo Charts.
   the other, and it offers the same rows on both right-click menus. The widget
   and the reference host keep the collapse row off the price pane in every slot
   and forward the price-pane slot when applying a template.
-
-### Changed
-
-- `CHART_STATE_VERSION` is 2, but `getState()` still writes 1 for a chart whose
-  price pane is on top. A host that checks a saved state against the constant
-  should refuse only a newer version (`version > CHART_STATE_VERSION`), as
-  `restoreState` does, not demand equality.
-- Drawings on the clipboard count their pane with the price pane first and the
-  study panes after it in order. On a chart that keeps its price pane on top,
-  which is every chart without the option, that is the slot it always was.
-
-### Fixed
-
-- A restore now hands the drawing tier its drawings before it prunes the study
-  panes it emptied, so a drawing kept through a template swap shifts with the
-  panes instead of recreating a pane at its old slot. The saved drawings a
-  draw tier reads when it loads later are shifted the same way, by every pane
-  removal or move before it arrives. A drawing on a study pane that the restore
-  prunes (the pane of a study not registered where the layout opens, say) is
-  dropped with that pane, where 2.5.4 recreated an empty pane at its old slot
-  to hold it. This applies whether or not the host opted in.
-- The widget's right-click menu offered Buy and Sell limit and stop rows over a
-  study pane, priced from that pane's scale: an RSI reading of 58.75 became a
-  limit price. A study pane now offers the market rows only.
-
-### Calculations
-
-- ATR treats a missing or overflowing true range as a gap. It seeds from the
-  first `period` consecutive finite true ranges, keeps its average across a gap
-  and resumes from it. A missing high or low now costs the ATR its own bar, and
-  a missing close the next bar, whose true range reads it, instead of every
-  later bar. A running overflow stays unavailable rather than restarting.
-  Finite results on complete data are unchanged bit for bit, as is the public
-  signature, which keeps the parity with the OpenAlgo atr function. Keltner
-  Channels, Chandelier Exit, Chande Kroll Stop, Median, HalfTrend and
-  Volatility Stop inherit the correction. Volatility Stop no longer falls back
-  to the unmultiplied true range for the rest of the history after one gap,
-  though a bar with no true range still restarts its stop at the source, as its
-  reference definition does.
-- `supertrend` and the Supertrend study leave a bar with no ATR or no close
-  absent, with the bands, the direction and the last accepted close unchanged.
-  A missing close has a finite ATR on its own bar, and comparing it as NaN
-  always flipped the trend; with the ATR now resuming, the flipped bands would
-  have carried into every later bar. The band step reads the last accepted
-  close, so a skipped bar's close cannot reset a band either.
-- VWAP leaves a bar with a missing price, or a NaN or infinite volume, absent and
-  its running totals untouched. One such bar no longer blanks the line and all
-  six bands until the next anchor restart, which on the continuous anchor was
-  never. An undefined volume still counts as nothing traded, and an anchor
-  restart on a missing bar still happens.
-- TWAP skips a missing or nonfinite price and divides by the bars it counted, so
-  a gap costs its own reading rather than the rest of the session.
-- On-Balance Volume and Accumulation/Distribution read a NaN or infinite volume
-  as nothing traded, as the money-flow studies already did, instead of losing
-  the running total for the rest of the history. OBV's VWMA smoothing weights
-  with the same volume.
-- Accumulation/Distribution leaves a bar missing its high, low or close, or
-  whose span or term overflows, absent with the total unchanged. A missing
-  close with a finite range blanked the line for the rest of the history, and a
-  missing high or low passed for a doji and printed the carried total.
-- Parabolic SAR steps over a bar missing its high, low or close and leaves the
-  stop, trend and acceleration as they were. It seeds from the first two
-  complete bars and clamps against the two complete bars before each step. The
-  clamp and reversal conventions are unchanged.
-- TEMA adds `3 * ema1 - 3 * ema2 + ema3` left to right instead of regrouping it
-  as `3 * (ema1 - ema2) + ema3`. Readings change only in their last digits, and a
-  bar whose terms overflow is absent rather than finite by cancellation.
-
-On complete data every finite reading of the studies above is exactly what 2.5.4
-returned, except TEMA's last-digit rounding. No public signature changed.
-- CCI has no reading on a window that holds a missing high, low or close, or
-  whose mean deviation overflows. It used to print 0 there for a whole window's
-  worth of bars, and the CCI-based average and its bands smoothed those invented
-  zeros. A genuinely flat window still reads 0.
-- Stochastic %K multiplies by 100 before dividing by the window range, the order
-  the definition fixes, so a reading can move in its last bit and %D follows. A
-  window whose range overflows has no reading instead of a flat 0, and neither
-  does one whose scaled distance overflows (above about 1.8e306).
-- Fisher Transform restarts both recursions on the bar after a missing midpoint,
-  as its documented rule says. The missing value used to enter the recursion and
-  leave the study blank for the rest of the history.
-- Relative Volatility Index and Mass Index hold their exponential averages across
-  a missing bar and resume on the next present one, instead of reseeding and
-  blanking the study for another 14 (RVI) or 9 (Mass Index) bars. The RVI's EMA
-  smoothing option follows the same rule. Inside the RVI's deviation warmup its
-  averages still restart as before, so complete data reads exactly as in 2.5.4
-  at every Length.
-- NVI and PVI hold their index across a missing close, as they already did after
-  a zero previous close, instead of losing the index and its average for the
-  rest of the history. Complete data is unchanged.
-- True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator multiply
-  the smoothed change by 100 before dividing, which can move readings in the last
-  bit. Above about 1.8e306 that product overflows and the bar is a gap, as in the
-  companion scripting language, where the former order still printed a reading.
-- Trend Strength Index and the exported `correlation` helper finish both window
-  means before forming any deviation, taking two passes oldest first. The former
-  single-pass sums cancelled at ordinary price levels: at 1e5 with 0.01 moves the
-  reading was about one percent off, and at 1e9 it had no value.
-- On a window of identical closes, Trend Strength Index and `correlation` read
-  what the arithmetic gives, as the companion scripting language does, so
-  availability there can differ from 2.5.4 in either direction. The window has
-  no reading when its deviations are all exactly zero, which happens when the
-  mean comes out exact: fourteen bars of 5, or of 0.1, where 2.5.4 printed
-  -1.2e-8. When the mean is inexact, as for three bars of 0.1 or fourteen of
-  2.01, the deviations are a few units in the last place and Trend Strength
-  reads exactly 0, where 2.5.4 printed nothing or its own residue (2.8e-8 for
-  fourteen bars of 2.01). Against a second series other than the bar index,
-  `correlation` reads within rounding of 0 there.
-
-### Documentation
-
-- The indicators page has a Numerical contract section: the thirteen documented
-  differences from the companion scripting language (missing observations in
-  extremes, missing volume, flat CCI windows, first-bar conventions, host
-  logarithms, units, the Aroon Oscillator, Parabolic SAR, overflow, signed zero,
-  Klinger, the RVI warmup and the PVO signal after a stretch with no volume),
-  and how each built-in treats a NaN volume.
 - Price-dependent tick schedules. `TickSchedule` validates an ordered list of
   `TickBand`s: the first band covers every lower price, zero and negative prices
   included, each later band starts at its inclusive `from`, and every boundary must
@@ -346,19 +231,141 @@ returned, except TEMA's last-digit rounding. No public signature changed.
   does, so the legs of a filled bracket stay live across any number of
   reconnects.
 
+### Changed
+
+- `CHART_STATE_VERSION` is 2, but `getState()` still writes 1 for a chart whose
+  price pane is on top. A host that checks a saved state against the constant
+  should refuse only a newer version (`version > CHART_STATE_VERSION`), as
+  `restoreState` does, not demand equality.
+- Drawings on the clipboard count their pane with the price pane first and the
+  study panes after it in order. On a chart that keeps its price pane on top,
+  which is every chart without the option, that is the slot it always was.
+- `OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and
+  `leverage` before any network call: OpenAlgo's placeorder has no such fields
+  and one key is one account.
+
 ### Fixed
 
+- A restore now hands the drawing tier its drawings before it prunes the study
+  panes it emptied, so a drawing kept through a template swap shifts with the
+  panes instead of recreating a pane at its old slot. The saved drawings a
+  draw tier reads when it loads later are shifted the same way, by every pane
+  removal or move before it arrives. A drawing on a study pane that the restore
+  prunes (the pane of a study not registered where the layout opens, say) is
+  dropped with that pane, where 2.5.4 recreated an empty pane at its old slot
+  to hold it. This applies whether or not the host opted in.
+- The widget's right-click menu offered Buy and Sell limit and stop rows over a
+  study pane, priced from that pane's scale: an RSI reading of 58.75 became a
+  limit price. A study pane now offers the market rows only.
 - `onBrokerUpdate` on a row the client had written off as `AMBIGUOUS` (a lost
   answer reads `rejected`, a row a reconnect snapshot missed reads `stale`) now
   takes the broker's status. An order the broker reports working is live
   again, so it can be modified and cancelled, and it is no longer pruned as if
   it had settled. A row the broker reports as pending counts as accepted.
 
-### Changed
+### Calculations
 
-- `OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and
-  `leverage` before any network call: OpenAlgo's placeorder has no such fields
-  and one key is one account.
+- ATR treats a missing or overflowing true range as a gap. It seeds from the
+  first `period` consecutive finite true ranges, keeps its average across a gap
+  and resumes from it. A missing high or low now costs the ATR its own bar, and
+  a missing close the next bar, whose true range reads it, instead of every
+  later bar. A running overflow stays unavailable rather than restarting.
+  Finite results on complete data are unchanged bit for bit, as is the public
+  signature, which keeps the parity with the OpenAlgo atr function. Keltner
+  Channels, Chandelier Exit, Chande Kroll Stop, Median, HalfTrend and
+  Volatility Stop inherit the correction. Volatility Stop no longer falls back
+  to the unmultiplied true range for the rest of the history after one gap,
+  though a bar with no true range still restarts its stop at the source, as its
+  reference definition does.
+- `supertrend` and the Supertrend study leave a bar with no ATR or no close
+  absent, with the bands, the direction and the last accepted close unchanged.
+  A missing close has a finite ATR on its own bar, and comparing it as NaN
+  always flipped the trend; with the ATR now resuming, the flipped bands would
+  have carried into every later bar. The band step reads the last accepted
+  close, so a skipped bar's close cannot reset a band either.
+- VWAP leaves a bar with a missing price, or a NaN or infinite volume, absent and
+  its running totals untouched. One such bar no longer blanks the line and all
+  six bands until the next anchor restart, which on the continuous anchor was
+  never. An undefined volume still counts as nothing traded, and an anchor
+  restart on a missing bar still happens.
+- TWAP skips a missing or nonfinite price and divides by the bars it counted, so
+  a gap costs its own reading rather than the rest of the session.
+- On-Balance Volume and Accumulation/Distribution read a NaN or infinite volume
+  as nothing traded, as the money-flow studies already did, instead of losing
+  the running total for the rest of the history. OBV's VWMA smoothing weights
+  with the same volume.
+- Accumulation/Distribution leaves a bar missing its high, low or close, or
+  whose span or term overflows, absent with the total unchanged. A missing
+  close with a finite range blanked the line for the rest of the history, and a
+  missing high or low passed for a doji and printed the carried total.
+- Parabolic SAR steps over a bar missing its high, low or close and leaves the
+  stop, trend and acceleration as they were. It seeds from the first two
+  complete bars and clamps against the two complete bars before each step. The
+  clamp and reversal conventions are unchanged.
+- TEMA adds `3 * ema1 - 3 * ema2 + ema3` left to right instead of regrouping it
+  as `3 * (ema1 - ema2) + ema3`. Readings change only in their last digits, and a
+  bar whose terms overflow is absent rather than finite by cancellation.
+- CCI has no reading on a window that holds a missing high, low or close, or
+  whose mean deviation overflows. It used to print 0 there for a whole window's
+  worth of bars, and the CCI-based average and its bands smoothed those invented
+  zeros. A genuinely flat window still reads 0.
+- Stochastic %K multiplies by 100 before dividing by the window range, the order
+  the definition fixes, so a reading can move in its last bit and %D follows. A
+  window whose range overflows has no reading instead of a flat 0, and neither
+  does one whose scaled distance overflows (above about 1.8e306).
+- Fisher Transform restarts both recursions on the bar after a missing midpoint,
+  as its documented rule says. The missing value used to enter the recursion and
+  leave the study blank for the rest of the history.
+- Relative Volatility Index and Mass Index hold their exponential averages across
+  a missing bar and resume on the next present one, instead of reseeding and
+  blanking the study for another 14 (RVI) or 9 (Mass Index) bars. The RVI's EMA
+  smoothing option follows the same rule. Inside the RVI's deviation warmup its
+  averages still restart as before, so complete data reads exactly as in 2.5.4
+  at every Length.
+- NVI and PVI hold their index across a missing close, as they already did after
+  a zero previous close, instead of losing the index and its average for the
+  rest of the history. Complete data is unchanged.
+- True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator multiply
+  the smoothed change by 100 before dividing, which can move readings in the last
+  bit. Above about 1.8e306 that product overflows and the bar is a gap, as in the
+  companion scripting language, where the former order still printed a reading.
+- Trend Strength Index and the exported `correlation` helper finish both window
+  means before forming any deviation, taking two passes oldest first. The former
+  single-pass sums cancelled at ordinary price levels: at 1e5 with 0.01 moves the
+  reading was about one percent off, and at 1e9 it had no value.
+- On a window of identical closes, Trend Strength Index and `correlation` read
+  what the arithmetic gives, as the companion scripting language does, so
+  availability there can differ from 2.5.4 in either direction. The window has
+  no reading when its deviations are all exactly zero, which happens when the
+  mean comes out exact: fourteen bars of 5, or of 0.1, where 2.5.4 printed
+  -1.2e-8. When the mean is inexact, as for three bars of 0.1 or fourteen of
+  2.01, the deviations are a few units in the last place and Trend Strength
+  reads exactly 0, where 2.5.4 printed nothing or its own residue (2.8e-8 for
+  fourteen bars of 2.01). Against a second series other than the bar index,
+  `correlation` reads within rounding of 0 there.
+
+On complete data ATR and the studies built on it, Supertrend, VWAP, TWAP,
+OBV, Accumulation/Distribution, Parabolic SAR, CCI, Fisher Transform, RVI,
+Mass Index, NVI and PVI read exactly as in 2.5.4. TEMA, Stochastic, True
+Strength Index and the SMI Ergodic pair can move in their last digit, and Trend
+Strength Index and `correlation` move where the former single pass cancelled.
+No public signature changed.
+
+### Documentation
+
+- The indicators page has a Numerical contract section: the thirteen documented
+  differences from the companion scripting language (missing observations in
+  extremes, missing volume, flat CCI windows, first-bar conventions, host
+  logarithms, units, the Aroon Oscillator, Parabolic SAR, overflow, signed zero,
+  Klinger, the RVI warmup and the PVO signal after a stretch with no volume),
+  and how each built-in treats a NaN volume.
+
+Saved layouts, drawings and workspace documents from 2.5.4 load unchanged.
+Moving the price pane is off unless a host opts in with `movablePrimaryPane`,
+and a host that does not opt in sees no change to pane 0. The quote, news,
+account and tick-schedule contracts are optional: a feed or broker that does
+not declare them keeps working as before. No runtime dependencies or package
+tiers were added.
 
 ## 2.5.4
 

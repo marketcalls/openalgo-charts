@@ -725,7 +725,7 @@ const report = grid.applyWorkspace(parseWorkspacePayload(fileText)); // { applie
 - Below `compactWidth` only the active cell shows, with a tab strip to switch; splitters
   hide. `CHART_GRID_CSS` is part of `WIDGET_COMPONENT_CSS`.
 
-## Watchlist and news panels (unreleased)
+## Watchlist and news panels (2.5.5)
 
 Two optional sources for the panel dock, beside Data and Objects. A tab (and the top bar
 and mobile More entries) appears only when its source is supplied, and each needs
