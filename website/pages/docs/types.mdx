@@ -163,10 +163,13 @@ invisible and unclickable.
 createChart(el, { legendOffset: { top: 40 } });   // clear a two-line overlay
 ```
 
-It follows whichever pane currently renders at that corner: normally pane 0,
-but maximizing a lower pane moves it there instead, so the offset moves with it.
-Other panes keep the default corner, since a short lower pane would have its
-legend, and its settings / close / move-pane buttons, pushed off it entirely.
+It follows the price pane, which is the top pane until a user moves it below
+its studies: a readout of the price belongs to the price pane, wherever it sits.
+Maximizing a study pane hides the price pane and puts the maximized one in that
+corner, so the offset moves with it. Other panes keep the default corner, since a
+short study pane would have its legend, and its settings / close / move-pane
+buttons, pushed off it entirely. A readout drawn as DOM over the price pane should
+follow `chart.panes()[chart.primaryPaneIndex()].element` after `paneMoved`.
 </Callout>
 
 Options passed to `createChart(container, options)`. All fields are optional; defaults are sensible for browser use.

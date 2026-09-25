@@ -373,8 +373,11 @@ A control exists only where the engine has something behind it. Every dialog is 
 from a schema the engine already ships: chart settings from `chartSettingsSchema`,
 indicator settings from the descriptor, drawing properties from `drawingSettingsSchema`,
 so a field appears only when the renderer reads it. The right-click menu draws its order
-rows only when `onOrder` is given, and offers **Collapse pane** or **Expand pane** only
-over a lower pane, since the price pane always stays open.
+rows only when `onOrder` is given, offers **Move pane up** and **Move pane down** over any
+pane when there are two or more, the price pane included (greyed at the top or bottom), and
+offers **Collapse pane** or **Expand pane** only over a study pane, since the price pane
+always stays open in whatever slot it sits. Moving the price pane below its studies is
+saved with the layout and reported as a `layout` event with reason `paneMoved`.
 </Callout>
 
 ## Live history and reconnect recovery

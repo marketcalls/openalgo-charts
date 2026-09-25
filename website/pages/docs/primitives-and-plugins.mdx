@@ -295,14 +295,21 @@ should stay at the chart's edge as indicator panes come and go. Pass a placement
 an index:
 
 ```ts
-chart.addPrimitive(mark, { anchor: 'chart-bottom' })   // or 'chart-top'
+chart.addPrimitive(mark, { anchor: 'chart-bottom' })   // or 'chart-top', or 'primary-pane'
 ```
 
 The engine re-homes it whenever a pane is added, removed, moved, maximized or collapsed.
 `'chart-bottom'` means the lowest open pane, since a collapsed pane draws only its legend
 row. Maximize is the case worth knowing about: it **hides** the other panes, so a mark
-pinned to pane 0 does not merely sit in the wrong place, it disappears with the pane. An
+pinned to the price pane does not merely sit in the wrong place, it disappears with the pane. An
 anchored primitive follows the visible edge.
+
+`'primary-pane'` is for furniture that describes the price, such as a symbol badge: it
+follows the price pane to whatever slot it is moved to (see
+[Moving the price pane](/docs/scales-and-panes#moving-the-price-pane-below-its-studies)), and
+the pane maximized over it while it is hidden. The chart's own background text and study
+count use it. A plain `addPrimitive(p)` with no second argument lands on the price pane
+too, and then moves with that pane like any pane primitive.
 
 Before this existed a host had to do it by hand, removing and re-adding the primitive on
 `chart.panes().length - 1` after anything that might have created a pane, and listening to

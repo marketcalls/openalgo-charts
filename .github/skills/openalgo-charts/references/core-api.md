@@ -76,7 +76,7 @@ does not need to be loaded again.
 | `legendOffset` | `{ top?, left? }` | `{ top: 6, left: 8 }` | Where indicator legend rows start in the top-most pane. |
 | `priceOnlyAutoScale` | `boolean` | `false` | Fit the primary series' actual scale using only that series. Does not enable auto-fit. |
 | `indicatorLegendCollapsed` | `boolean` | `false` | Suppress study legend rows while retaining plots and a count toggle. |
-| `crosshairMode` | `'normal' \| 'magnet'` | `'normal'` | `magnet` snaps to O/H/L/C, price pane only. |
+| `crosshairMode` | `'normal' \| 'magnet'` | `'normal'` | `magnet` snaps to O/H/L/C, price pane only, wherever it sits. |
 | `now` | `() => number` | `performance.now` | Time source for kinetic pan / navigator fade. |
 | `animZoom` | `boolean` | `true` | Ease a wheel zoom over a few frames (`ZoomGlide`, in log space) instead of landing the whole step on one. The first frame's step is applied on the event itself, so `barSpacing` has moved by the time anything reads it synchronously, and the glide lands on exactly the single-frame result. **On by default**, which a 1.9.x host sees as a change; `false` restores the single-frame step. Not re-appliable. |
 | `animAutoscale` | `boolean` | value of `animZoom` | Ease automatic price-range changes while navigation reveals new extrema. Manual and fixed scales remain authoritative. Programmatic viewport replacement, primary data replacement, reset and destruction cancel pending navigation motion. Not re-appliable. |
@@ -118,7 +118,7 @@ const vol = chart.addSeries('histogram', {
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `paneIndex` | `number` | `0` | Panes are created on demand; pane 0 gets weight 1, later panes 0.32. |
+| `paneIndex` | `number` | the price pane (`primaryPaneIndex()`) | Panes are created on demand; the first pane gets weight 1, later panes 0.32. |
 | `style` | `SeriesStyle` | `{}` | Merged over the chart type's `defaultStyle`. See [chart-types](chart-types.md). |
 | `priceScaleId` | `PriceScaleId` | `'right'` | Selects scale identity. `'right'` and `'left'` default to their named side; `''` and `overlay:name` default to hidden. `setPriceAxisPlacement` can expose or move any scale's column. |
 | `priceFormat` | `PriceFormat`: `{ type: 'price', precision?, minMove? } \| { type: 'volume' } \| { type: 'percent', precision? } \| { type: 'custom', formatter }` | none | Applied to the series' *price scale*, not the series. `percent` suffixes the value at `precision` decimals (default 2) and does **not** scale it, so 0.62 reads `0.62%`. The type is exported as `PriceFormat`, and `IndicatorPlot.priceFormat` takes the same union. |
@@ -470,7 +470,7 @@ The widget defaults to 8 CSS pixels per bar unless a count or spacing is supplie
 |---|---|---|
 | `timeToCoordinate(time)` | UTC seconds -> container x, media px | Interpolates and extrapolates past the right edge. |
 | `coordinateToTime(x)` | container x -> UTC seconds | |
-| `priceToCoordinate(price, paneIndex = 0)` | price -> container y, media px \| `null` | `null` when the pane does not exist or is collapsed to its header strip (`setPaneCollapsed`), which plots no price. Uses the pane's **readout** scale, which is the one its first visible price series maps to, so it is right on a pane whose axis was moved to the left strip. |
+| `priceToCoordinate(price, paneIndex = primaryPaneIndex())` | price -> container y, media px \| `null` | `null` when the pane does not exist or is collapsed to its header strip (`setPaneCollapsed`), which plots no price. Uses the pane's **readout** scale, which is the one its first visible price series maps to, so it is right on a pane whose axis was moved to the left strip. |
 | `coordinateToPrice(y, paneIndex = 0)` | container y -> price \| `null` | Same scale, and `null` on the same panes. |
 
 Both price conversions force an autoscale pass first, so they are correct before the first paint.

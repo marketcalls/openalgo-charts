@@ -668,7 +668,7 @@ draw.update(draw.selected()!, { style: { color, lineWidth, lineStyle, fillOpacit
 
 **A drawing renders only once it has `max(1, tool.points)` anchors.** A partially-placed `points: 0` shape lives in the preview slot, not the model, so it is absent from `toJSON()` until committed.
 
-**Magnet only applies to pane 0.** `_snap` returns the raw price for any other pane index, because O/H/L/C snapping has no meaning on an indicator pane.
+**Magnet only applies to the price pane,** in whatever slot the host keeps it (`chart.primaryPaneIndex()`, read through the optional `DrawingChartHost.primaryPaneIndex`; a host without it means slot 0). `_snap` returns the raw price for any other pane index, because O/H/L/C snapping has no meaning on an indicator pane.
 
 Related: [primitives-and-plugins](primitives-and-plugins.md) (the `IPrimitive` contract `DrawingLayer` implements), [events-and-state](events-and-state.md) (the bus and `getState`), [interactions](interactions.md) (placement mode, pan/zoom), [bundling-and-tiers](bundling-and-tiers.md) (lazy-loading the tier).
 

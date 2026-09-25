@@ -2,6 +2,53 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- The price pane can move below its studies. It is now an identity rather than
+  slot 0: `chart.primaryPaneIndex()` reads the slot it holds, and
+  `chart.setPrimaryPaneIndex(index)` moves it there one `movePane` step at a
+  time, one `paneMoved` event per step. `movePane` moves the price pane like any
+  other pane, and a study pane can displace it. Everything that meant "the price
+  pane" follows it: `addSeries`, `addPriceLine`, `addEventMarkers`, `setEvents`,
+  `addPrimitive` and `tradeHost` with no pane; `priceToCoordinate`,
+  `coordinateToPrice`, `priceAxisState` and `priceAxisLayout` with no pane;
+  `priceScaleOptions()`; on-chart studies and every `overlay` plot, band, table,
+  price-anchored mark and the instrument tick a study's `calc` sees;
+  comparisons, whose handle `paneIndex` now follows its pane; price alerts and
+  drawing alerts; the drawing magnet; a drawing link between charts that keep
+  their price panes in different slots; the magnet crosshair, a scale-targeted
+  pick and the `panUp` / `panDown` keys. The legend offset, the study count and
+  the background text sit on the price pane (the new primitive anchor
+  `'primary-pane'`); the time navigator and the brand mark stay on the bottom
+  open pane. The price pane is never removed and never collapses, in any slot,
+  so a chart always keeps one open pane; a study pane moved above it folds,
+  maximizes, prunes and carries its pane controls like any other.
+- A moved price pane is saved. `getState()` writes version 2 with `primaryPane`
+  only when the price pane is not on top, and writes every other layout as
+  version 1, unchanged, so an older reader still opens it and refuses a moved
+  one rather than laying the price pane's settings on a study pane.
+  `CHART_STATE_VERSION` is now 2. A layout without `primaryPane` restores with
+  the price pane on top; a slot that names no saved pane is refused before
+  anything is applied. Workspace documents accept a version 2 chart and refuse
+  `primaryPane` on version 1. Portable templates are written price pane first,
+  so they apply the same way whichever slot the price pane holds;
+  `planIndicatorTemplateState` keeps the destination's price pane in place and
+  returns `primaryPane` for the restore, and `planIndicatorTemplate` takes the
+  destination's price-pane slot as an optional sixth argument.
+- The widget's right-click menu moves the pane under the pointer up or down
+  (`pane-up`, `pane-down`), the price pane included, and the reference host's
+  right-click menus on both charts do the same. Both keep the collapse row off
+  the price pane in every slot and forward the price-pane slot when applying a
+  template.
+
+### Fixed
+
+- A restore now hands the drawing tier its drawings before it prunes the study
+  panes it emptied, so a drawing kept through a template swap shifts with the
+  panes instead of recreating a pane at its old slot.
+
 ## 2.5.4
 
 2026-09-25

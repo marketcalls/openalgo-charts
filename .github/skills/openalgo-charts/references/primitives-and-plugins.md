@@ -496,17 +496,22 @@ Related: [core-api](core-api.md) (`addPrimitive`, invalidation levels, the event
 ## Anchoring to the chart instead of a pane (1.6.0)
 
 ```ts
-chart.addPrimitive(mark, { anchor: 'chart-bottom' })   // or 'chart-top'
+chart.addPrimitive(mark, { anchor: 'chart-bottom' })   // or 'chart-top', or 'primary-pane'
 ```
 
 Pass a placement instead of a pane index and the engine re-homes the primitive whenever a
 pane is added, removed, moved, maximized or collapsed. Use it for anything that is chart furniture
 rather than pane furniture: a watermark, a corner clock, a brand mark. `'chart-bottom'`
 resolves to the lowest open pane, so a collapsed bottom pane, which draws only its legend
-row, hands the primitive to the pane above it.
+row, hands the primitive to the pane above it. `'chart-top'` is the top pane with a share of
+the chart. `'primary-pane'` follows the price pane to whatever slot it is moved to
+(`setPrimaryPaneIndex`), and the pane maximized over it while it is hidden: use it for
+furniture that describes the price, such as a symbol badge. The chart's own background
+text and study count use it. `addPrimitive(p)` with no second argument is a plain pane
+primitive on the price pane at the time of the call, and moves with that pane.
 
 Maximize is the reason this exists rather than a `paneAdded` listener. It HIDES the other
-panes, so a primitive pinned to pane 0 disappears with it instead of merely sitting in the
+panes, so a primitive pinned to the price pane disappears with it instead of merely sitting in the
 wrong place, and no amount of host bookkeeping fixes that from outside.
 
 `removePrimitive` also clears the anchor registration, so a removed primitive stays removed;

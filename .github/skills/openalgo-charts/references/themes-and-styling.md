@@ -149,7 +149,7 @@ series.applyOptions({ visible: false });          // hides it and drops it from 
 createChart(el, { legendOffset: { top: 34, left: 12 } });   // default { top: 6, left: 8 }
 ```
 
-Media px where **indicator** legend rows start inside the pane currently rendering at the chart's top-left (within 12 px of the top). Every other pane keeps `{ top: 6, left: 8 }`, and host-added `PaneLegend` rows are never repositioned. Raise it when the app draws its own symbol or OHLC overlay in that corner, otherwise indicator rows render underneath it and their buttons become unclickable. The offset follows a maximized lower pane into the corner.
+Media px where **indicator** legend rows start inside the price pane, wherever it sits (`primaryPaneIndex()`, the top pane unless the host moved it below its studies). Every other pane keeps `{ top: 6, left: 8 }`, and host-added `PaneLegend` rows are never repositioned. Raise it when the app draws its own symbol or OHLC overlay in the price pane's corner, otherwise indicator rows render underneath it and their buttons become unclickable. The offset follows a maximized study pane, which then fills the corner the price pane left. A host overlay drawn as DOM over the price pane should follow `panes()[primaryPaneIndex()].element` after a `paneMoved`.
 
 ## priceFormat
 
