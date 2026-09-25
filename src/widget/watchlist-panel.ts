@@ -38,6 +38,13 @@ export interface WatchlistPanelOptions {
   pollMs?: number;
   /** A row was chosen, by click or Enter. */
   onSelect?(instrument: InstrumentKey): void;
+  /**
+   * The instrument the host charts for an entry. The panel saves what it adds
+   * in this form, and compares entries with the chart through it, so a row is
+   * marked as, and refused as a repeat of, what choosing it would chart.
+   * Default: unchanged. The widget upper-cases the symbol, as its symbol box does.
+   */
+  normalize?(instrument: InstrumentKey): InstrumentKey;
   /** Price text for a row. Default: the locale's grouping with two to six decimals. */
   formatPrice?(value: number, instrument: InstrumentKey): string;
 }
@@ -187,6 +194,15 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
   }, { root: scroll }) : null;
 
   const current = (): Watchlist | null => catalog?.lists.find(item => item.id === listId) ?? null;
+  const canonical = (entry: InstrumentKey): InstrumentKey => {
+    if (options.normalize) {
+      try {
+        const next = options.normalize({ symbol: entry.symbol, exchange: entry.exchange });
+        if (typeof next?.symbol === 'string' && typeof next.exchange === 'string') return { symbol: next.symbol, exchange: next.exchange };
+      } catch { /* A host mapping that fails leaves the entry as saved. */ }
+    }
+    return { symbol: entry.symbol, exchange: entry.exchange };
+  };
   const price = (value: number, entry: InstrumentKey): string => {
     if (options.formatPrice) {
       try { return String(options.formatPrice(value, { ...entry })); } catch { /* A host formatter failing falls back to the default. */ }
@@ -401,7 +417,7 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
     caption.textContent = list?.name ?? text('title', 'Watchlist');
 
     const chartInstrument = ctx.symbol();
-    const inList = list?.entries.some(entry => sameInstrument(entry, chartInstrument)) === true;
+    const inList = list?.entries.some(entry => sameInstrument(canonical(entry), chartInstrument)) === true;
     addCurrent.textContent = chartInstrument.symbol === '' ? text('addChart', 'Add chart symbol') : text('addCurrent', 'Add {symbol}', { symbol: chartInstrument.symbol });
     addCurrent.disabled = chartInstrument.symbol === '' || inList || loadFailed;
     addCurrent.title = inList ? text('inList', 'Already in this list') : '';
@@ -411,7 +427,7 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
       const state = board.row(row.entry);
       const quote = state.quote;
       row.el.dataset.state = state.status;
-      if (sameInstrument(row.entry, chartInstrument)) row.el.setAttribute('aria-current', 'true');
+      if (sameInstrument(canonical(row.entry), chartInstrument)) row.el.setAttribute('aria-current', 'true');
       else row.el.removeAttribute('aria-current');
       const move = quote === null ? null : quoteChange(quote);
       write(row.last, quote !== null ? price(quote.last, row.entry)
@@ -467,9 +483,15 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
     }
   }
 
-  async function addEntry(entry: WatchlistEntry): Promise<void> {
+  async function addEntry(typed: WatchlistEntry): Promise<void> {
     showMessage('');
+    const entry = canonical(typed);
     const list = current();
+    // Another spelling of a listed instrument would chart the same thing from two rows.
+    if (list?.entries.some(item => sameInstrument(canonical(item), entry))) {
+      showMessage(text('duplicate', '{name} is already in this list', { name: describeEntry(entry) }));
+      return;
+    }
     try {
       if (list === null) {
         const created = await store.createList(text('defaultName', 'Watchlist'), [entry]);

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createWidget, type Widget, type WidgetOptions } from '../src/widget/widget';
 import { WatchlistRepository, createMemoryWatchlistStorage } from '../src/workspace/index';
 import type { NewsFeed, NewsRequest, QuoteFeed, QuoteStreamHandlers } from '../src/feed/types';
-import { fakeWidgetDocument, fakeContainer, ensureWindowGlobal, type FakeElement } from './helpers/fake-dom-widget';
+import { fakeWidgetDocument, fakeContainer, ensureWindowGlobal, fire, fireKey, type FakeElement } from './helpers/fake-dom-widget';
 
 const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
 const widgets: Widget[] = [];
@@ -71,6 +71,38 @@ describe('widget watchlist and news', () => {
     expect(s.streams.size).toBe(2);
     widget.destroy();
     expect(s.streams.size).toBe(0);
+  });
+
+  it('treats a row as the instrument the widget will chart, so case never splits one instrument in two', async () => {
+    const s = sources();
+    await s.store.createList('Mixed', [{ symbol: 'infy', exchange: 'NSE' }, { symbol: 'TCS', exchange: 'NSE' }]);
+    const { widget, root } = make({
+      watchlist: { store: s.store, quotes: s.quotes },
+      symbolSearch: () => [{ symbol: 'wipro', exchange: 'NSE' }],
+    });
+    widget.openWatchlist();
+    await flush();
+    const rows = () => root.querySelectorAll('.oac-watchlist tbody tr');
+    const entries = async () => (await s.store.load()).lists[0].entries;
+    // The widget charts INFY for this row, so it is the chart's own row and INFY is already listed.
+    expect(rows()[0].getAttribute('aria-current')).toBe('true');
+    expect((root.querySelector('.oac-watchlist__add-current') as FakeElement).disabled).toBe(true);
+    const input = root.querySelector('.oac-watchlist__add input') as FakeElement;
+    input.value = 'infy';
+    fireKey(input, 'Enter');
+    await flush();
+    expect(root.querySelector('.oac-watchlist__message')!.textContent).toBe('INFY on NSE is already in this list');
+    expect(await entries()).toEqual([{ symbol: 'infy', exchange: 'NSE' }, { symbol: 'TCS', exchange: 'NSE' }]);
+    // A search result is saved as the widget will chart it.
+    input.focus(); input.value = 'wi'; fire(input, 'input');
+    await new Promise(resolve => setTimeout(resolve, 250));
+    fireKey(input, 'Enter');
+    await flush();
+    expect(await entries()).toEqual([{ symbol: 'infy', exchange: 'NSE' }, { symbol: 'TCS', exchange: 'NSE' }, { symbol: 'WIPRO', exchange: 'NSE' }]);
+    (root.querySelectorAll('.oac-watchlist__open')[0] as FakeElement).click();
+    await flush();
+    expect(widget.symbol()).toBe('INFY');
+    expect(rows()[0].getAttribute('aria-current')).toBe('true');
   });
 
   it('opens news for the chart instrument and follows a symbol change', async () => {

@@ -67,7 +67,7 @@ export const STATE_KEY = 'state';
 export const WIDGET_STATE_VERSION = 1;
 
 /** Named lists and their quotes for the docked watchlist. A chosen row charts that instrument. */
-export type WidgetWatchlistOptions = Omit<WatchlistPanelOptions, 'onSelect'>;
+export type WidgetWatchlistOptions = Omit<WatchlistPanelOptions, 'onSelect' | 'normalize'>;
 /** The news source for the docked reader, which follows the chart's instrument. */
 export type WidgetNewsOptions = NewsPanelOptions;
 
@@ -567,8 +567,10 @@ class WidgetImpl implements Widget {
           host.appendChild(content.element);
           return content;
         },
+        // Rows name instruments as setSymbol will chart them, so case cannot split one instrument in two.
         watchlist: options.watchlist ? host => mountWatchlistPanel(this.context, host, {
           ...options.watchlist!, onSelect: instrument => this.setSymbol(instrument.symbol, instrument.exchange),
+          normalize: instrument => ({ symbol: instrument.symbol.trim().toUpperCase(), exchange: instrument.exchange }),
         }) : undefined,
         news: options.news ? host => mountNewsPanel(this.context, host, options.news!) : undefined,
         onChange: () => { this._bus.emit('layout', { reason: 'panels' }); this._scheduleSave(); },

@@ -743,7 +743,9 @@ widget.openNews();
 - `WidgetOptions.watchlist` (`WidgetWatchlistOptions`): `store` (a `WatchlistStore`,
   usually `WatchlistRepository`), `quotes?` (`QuoteFeed`), `staleAfterMs?` (default
   60000), `pollMs?` (snapshot-only sources, default 15000, 0 off), `formatPrice?(value,
-  instrument)`. Choosing a row calls `setSymbol(symbol, exchange)`. `WidgetOptions.news`
+  instrument)`. Choosing a row calls `setSymbol(symbol, exchange)`, and the widget
+  supplies the panel's `normalize` as setSymbol's upper-casing, so a lower-case entry is
+  the chart's own row and never a second copy of it. `WidgetOptions.news`
   (`WidgetNewsOptions`): `feed`, `pageSize?` (20), `staleAfterMs?` (300000), `maxItems?` (500).
 - `PanelDockId` adds `'watchlist'` and `'news'`; `PanelDockOptions` takes optional
   `watchlist(host)` and `news(host)` factories. `sanitizePanelDockState` keeps both ids;
@@ -754,8 +756,12 @@ widget.openNews();
   change from the provider's `previousClose`. List select, New, Rename and Delete (inline
   forms, confirm before delete), an Add input (the host's `symbolSearch` when there is
   one; typed text is uppercased and saved on the chart's exchange), and "Add {symbol}"
-  for the chart's instrument. Remove per row; Alt+ArrowUp/Down reorders in list order
-  with the revision it was computed from; ArrowUp/Down moves between rows.
+  for the chart's instrument. `normalize?(instrument)` maps an entry to the instrument
+  the host charts for it (default unchanged): adds are saved in that form, an add
+  matching a listed entry that way is refused as already listed, and the current-row
+  marker and "Add {symbol}" compare through it. Remove per row; Alt+ArrowUp/Down
+  reorders in list order with the revision it was computed from, one move at a time so
+  a held key lands every step; ArrowUp/Down moves between rows.
 - Rows take prices only from `quotes`. Without it every row is `unavailable` and shows
   `n/a`. Row `data-state` is a `QuoteRowStatus`: `loading`, `live`, `delayed`,
   `snapshot`, `stale`, `unavailable`, `error`; the status line reads the
