@@ -2,6 +2,42 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Calculations
+
+- ATR treats a missing or overflowing true range as a gap. It seeds from the
+  first `period` consecutive finite true ranges, keeps its average across a gap
+  and resumes from it, so one missing high, low or close costs only the bars it
+  covers instead of every later bar. A running overflow stays unavailable rather
+  than restarting. Finite results on complete data are unchanged bit for bit, as
+  is the public signature, which keeps the parity with the OpenAlgo atr
+  function. `supertrend`, Keltner Channels, Chandelier Exit, Chande Kroll Stop,
+  Median, HalfTrend and Volatility Stop inherit the correction; Volatility Stop
+  no longer falls back to the unmultiplied true range for the rest of the
+  history after one gap.
+- VWAP leaves a bar with a missing price, or a NaN or infinite volume, absent and
+  its running totals untouched. One such bar no longer blanks the line and all
+  six bands until the next anchor restart, which on the continuous anchor was
+  never. An undefined volume still counts as nothing traded, and an anchor
+  restart on a missing bar still happens.
+- TWAP skips a missing or nonfinite price and divides by the bars it counted, so
+  a gap costs its own reading rather than the rest of the session.
+- On-Balance Volume and Accumulation/Distribution read a NaN or infinite volume
+  as nothing traded, as the money-flow studies already did, instead of losing
+  the running total for the rest of the history. OBV's VWMA smoothing weights
+  with the same volume.
+- Parabolic SAR steps over a bar missing its high, low or close and leaves the
+  stop, trend and acceleration as they were. It seeds from the first two
+  complete bars and clamps against the two complete bars before each step. The
+  clamp and reversal conventions are unchanged.
+- TEMA adds `3 * ema1 - 3 * ema2 + ema3` left to right instead of regrouping it
+  as `3 * (ema1 - ema2) + ema3`. Readings change only in their last digits, and a
+  bar whose terms overflow is absent rather than finite by cancellation.
+
+On complete data every finite reading of the studies above is exactly what 2.5.4
+returned, except TEMA's last-digit rounding. No public signature changed.
+
 ## 2.5.4
 
 2026-09-25

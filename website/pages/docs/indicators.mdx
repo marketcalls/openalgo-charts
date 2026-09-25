@@ -57,6 +57,12 @@ you want to compute a value and plot it yourself. They use Wilder semantics to m
 `openalgo.ta`; the `*Series` helpers return `Bar[]` with `NaN` in warmup slots, which the
 line renderer skips as whitespace.
 
+`atr` seeds from the first `period` consecutive finite true ranges. A missing high, low or
+close gives its true range a `NaN` slot, the average is kept, and the next finite true range
+carries on from it, so a gap costs only the bars it covers. On complete data the values are
+the Wilder recurrence exactly, bit for bit. `supertrend` inherits this: a bar with no ATR
+has a `NaN` value and the bands resume on the next bar.
+
 ```ts
 import {
   ema, emaSeries,            // EMA: raw values, and a plottable line series
@@ -223,6 +229,19 @@ For `cpr`, every high and low in the prior period must be finite. One nonfinite
 extreme invalidates that period until the next existing session or calendar
 boundary; a complete subsequent period recovers. Only the final close is used.
 This does not change the existing schedule, display controls or pivot formulas.
+
+A missing input costs the running studies only the bars it covers:
+
+| Study | A bar with a missing input |
+|---|---|
+| `atr`, and the studies that read it: `keltner-channel`, `chandelier-exit`, `chande-kroll-stop`, `median`, `halftrend`, `volatility-stop`, `supertrend` | A missing high, low or close leaves that true range out. The average is kept and resumes on the next complete bar; a leading gap moves the first reading later. |
+| `vwap` | A missing price, or a NaN or infinite volume, leaves the bar absent and the totals untouched. An undefined volume is a bar that traded nothing. |
+| `twap` | A missing price is skipped and not counted. |
+| `obv`, `adl` | A NaN or infinite volume counts as nothing traded, so the bar prints the carried total. |
+| `parabolic-sar` | A bar missing its high, low or close is skipped with the stop, trend and acceleration unchanged. The seed is the first two complete bars, and the clamp reads the two complete bars before each step. |
+| `tema` | Absent when any of its three averages is, or when `3 * ema1 - 3 * ema2 + ema3`, added left to right, is not finite. |
+
+`vwap` and `twap` still restart on a missing bar that opens a new anchor period.
 
 ## VWAP
 
