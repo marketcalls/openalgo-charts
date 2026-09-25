@@ -9,6 +9,7 @@
 import {
   WatchlistRepository, createIndexedDbWatchlistStorage, createMemoryWatchlistStorage,
 } from '/dist/openalgo-charts.workspace.mjs';
+import { WidgetStorage } from '/dist/openalgo-charts.widget.mjs';
 import { referenceSymbolSearch } from './symbol-search.js';
 
 const POLL_MS = 2000;
@@ -142,4 +143,31 @@ export function referenceWatchlists() {
 export function referenceQuotes() {
   quotes ??= referenceQuoteFeed();
   return quotes;
+}
+
+function pageStorage() {
+  try { return typeof globalThis.localStorage?.getItem === 'function' ? globalThis.localStorage : null; } catch { return null; }
+}
+
+function memoryStorage() {
+  const values = new Map();
+  return { getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, String(value)); }, removeItem: key => { values.delete(key); } };
+}
+
+/**
+ * Where the panels keep their own preferences, such as the watchlist's sort.
+ * This host rebuilds a chart's dock whenever a symbol loads, and the alert
+ * context the dock borrows stores nothing, so without this choosing a row
+ * would drop the sort the row was chosen from.
+ */
+export function panelStorage(local = pageStorage()) {
+  return new WidgetStorage('yfinance-panels', local ?? memoryStorage());
+}
+
+let panels = null;
+
+/** The page's one panel store, shared by both charts; memory for the page's life when storage is blocked. */
+export function referencePanelStorage() {
+  panels ??= panelStorage();
+  return panels;
 }

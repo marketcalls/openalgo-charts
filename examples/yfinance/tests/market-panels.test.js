@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { referenceQuoteFeed, referenceNewsFeed, watchlistSymbolSearch } from '../src/market-panels.js';
+import { referenceQuoteFeed, referenceNewsFeed, watchlistSymbolSearch, panelStorage, referencePanelStorage } from '../src/market-panels.js';
 
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
 
@@ -122,5 +122,23 @@ describe('reference news feed', () => {
     const hit = watchlistSymbolSearch('reliance').find(item => item.symbol === 'RELIANCE.NS');
     expect(hit).toBeDefined();
     expect(hit.exchange).toBeUndefined();
+  });
+});
+
+describe('reference panel storage', () => {
+  it('keeps the watchlist sort where a rebuilt dock finds it again', () => {
+    const saved = new Map();
+    const local = { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) };
+    // Each symbol load rebuilds the dock, and with it the panel: a new storage over the same page store.
+    expect(panelStorage(local).set('watchlist-sort', { key: 'percent', direction: 'descending' })).toBe(true);
+    expect(panelStorage(local).get('watchlist-sort')).toEqual({ key: 'percent', direction: 'descending' });
+    expect([...saved.keys()]).toEqual(['oac-widget:yfinance-panels:watchlist-sort']);
+  });
+
+  it('falls back to one page-lifetime store when the page has none', () => {
+    const shared = referencePanelStorage();
+    expect(referencePanelStorage()).toBe(shared);
+    expect(shared.set('watchlist-sort', { key: 'symbol', direction: 'ascending' })).toBe(true);
+    expect(referencePanelStorage().get('watchlist-sort')).toEqual({ key: 'symbol', direction: 'ascending' });
   });
 });

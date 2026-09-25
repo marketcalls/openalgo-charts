@@ -42,9 +42,14 @@ test('the reference watchlist shows fixture quotes, charts a chosen row and goes
   await expect(panel.locator('tr[data-symbol="AAPL/MSFT"] .oac-watchlist__last')).toHaveText('n/a');
   await page.screenshot({ path: info.outputPath('reference-watchlist.png') });
 
+  // Sort, then chart a row: the host rebuilds the dock for the new symbol, and the sort stays.
+  const percent = panel.locator('th[data-sort="percent"]');
+  await percent.getByRole('button').click();
+  await expect(percent).toHaveAttribute('aria-sort', 'descending');
   await panel.getByRole('button', { name: 'RELIANCE.NS', exact: true }).click();
   await page.waitForFunction(() => (window as any).__oac.app.req?.symbol === 'RELIANCE.NS' && !(window as any).__oac.app.loading);
   await expect(panel.locator('tr[aria-current="true"]')).toHaveAttribute('data-symbol', 'RELIANCE.NS');
+  await expect(percent).toHaveAttribute('aria-sort', 'descending');
   // This host rebuilds its chart for a new symbol, and the dock's panel with it:
   // held quotes go stale only once the new panel has some to hold.
   await expect(panel.locator('tr[data-symbol="AAPL"]')).toHaveAttribute('data-state', 'live', { timeout: 10000 });

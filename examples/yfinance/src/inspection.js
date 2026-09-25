@@ -11,7 +11,7 @@ import { openChartSettings } from './chart-settings.js';
 import { autosave } from './persist.js';
 import { INTERVALS } from './intervals.js';
 import { referenceSymbolSearch } from './symbol-search.js';
-import { referenceWatchlists, referenceQuotes, referenceNewsFeed, watchlistSymbolSearch } from './market-panels.js';
+import { referenceWatchlists, referenceQuotes, referenceNewsFeed, referencePanelStorage, watchlistSymbolSearch } from './market-panels.js';
 
 const DEFAULT_DOCK = { panel: null, width: 300 };
 let app;
@@ -64,7 +64,8 @@ export function attachInspection(host, pane = 1) {
       return panel;
     },
     // Rows open their instrument through the same request path as the symbol box.
-    watchlist: content => mountWatchlistPanel({ ...ctx, symbolSearch: watchlistSymbolSearch }, content, {
+    // The sort lives in the page's panel store: this dock is rebuilt on every symbol load.
+    watchlist: content => mountWatchlistPanel({ ...ctx, symbolSearch: watchlistSymbolSearch, storage: referencePanelStorage() }, content, {
       store: referenceWatchlists(), quotes: referenceQuotes(),
       onSelect: ({ symbol }) => {
         const target = capturePaneTarget(host, pane);
