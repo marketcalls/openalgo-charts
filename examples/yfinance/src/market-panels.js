@@ -33,21 +33,33 @@ export function referenceQuoteFeed({ pollMs = POLL_MS, fetchImpl = (...args) => 
   let timer = null;
   let inFlight = false;
   let offline = false;
-  // A 501 means this server has no quote source at all: disconnected, and not worth asking again.
-  let unavailable = false;
+  // A 501 means this server has no quote source at all. Its error answers every
+  // later snapshot and poll here, so the page asks exactly once.
+  let unavailable = null;
   const keyOf = instrument => JSON.stringify([instrument.symbol, instrument.exchange]);
 
   async function request(instruments, signal) {
     const symbols = [...new Set(instruments.filter(i => i.exchange === '' && TICKER.test(i.symbol)).map(i => i.symbol))];
     if (symbols.length === 0) return [];
+    if (unavailable) throw unavailable;
     stats.requests++;
     if (offline) throw new Error('The quote server is unreachable');
-    return answer(await fetchImpl(`/api/quotes?symbols=${encodeURIComponent(symbols.join(','))}`, { signal, cache: 'no-store' }));
+    try {
+      return await answer(await fetchImpl(`/api/quotes?symbols=${encodeURIComponent(symbols.join(','))}`, { signal, cache: 'no-store' }));
+    } catch (error) {
+      if (error?.status === 501) giveUp(error);
+      throw error;
+    }
   }
   function report(next, error) {
     if (next === status) return;
     status = next;
     for (const row of rows.values()) for (const handlers of row) handlers.onStatus?.(next, error);
+  }
+  function giveUp(error) {
+    unavailable = error;
+    if (timer !== null) { clearTimeout(timer); timer = null; }
+    report('disconnected', error);
   }
   function schedule(delay) {
     if (timer === null && !inFlight && rows.size > 0 && !unavailable) timer = setTimeout(poll, delay);
@@ -60,8 +72,7 @@ export function referenceQuoteFeed({ pollMs = POLL_MS, fetchImpl = (...args) => 
       report('live');
       for (const quote of quotes) for (const handlers of rows.get(keyOf(quote)) ?? []) handlers.onQuote(quote);
     } catch (error) {
-      unavailable = error.status === 501;
-      report(unavailable ? 'disconnected' : 'reconnecting', error);
+      if (!unavailable) report('reconnecting', error);
     } finally {
       inFlight = false;
       schedule(pollMs);
@@ -76,7 +87,7 @@ export function referenceQuoteFeed({ pollMs = POLL_MS, fetchImpl = (...args) => 
         if (!rows.has(key)) rows.set(key, new Set());
         rows.get(key).add(handlers);
       }
-      handlers.onStatus?.(status);
+      handlers.onStatus?.(status, unavailable ?? undefined);
       schedule(0);
       return () => {
         stats.unsubscribes++;

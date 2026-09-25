@@ -370,6 +370,28 @@ describe('watchlist panel', () => {
     r.panel.destroy();
   });
 
+  it('does not call values stale when a broken source never showed one', async () => {
+    const handlers: QuoteStreamHandlers[] = [];
+    const feed: QuoteFeed = {
+      getQuotes: async () => { throw new Error('quotes are served only with --fixture'); },
+      subscribeQuotes(_instruments, stream) { handlers.push(stream); stream.onStatus?.('disconnected'); return () => {}; },
+    };
+    const r = await rig({ quotes: feed, lists: [['Tech', [nse('INFY')]]] });
+    const status = () => r.host.querySelector('.oac-watchlist__status')!.textContent;
+    expect(r.cell(r.rows()[0], 'last').textContent).toBe('n/a');
+    expect(status()).toBe('Quotes disconnected.');
+    handlers[0].onStatus!('reconnecting');
+    await flush();
+    expect(status()).toBe('Reconnecting to quotes.');
+    // Once a value is on screen, the warning is about it.
+    handlers[0].onStatus!('live');
+    handlers[0].onQuote({ symbol: 'INFY', exchange: 'NSE', last: 1500 });
+    handlers[0].onStatus!('disconnected');
+    await flush();
+    expect(status()).toBe('Quotes disconnected. Values shown are stale.');
+    r.panel.destroy();
+  });
+
   it('repaints once when its snapshots age into stale, then does no work while the board sits idle', async () => {
     vi.useFakeTimers();
     const feed: QuoteFeed = { getQuotes: async ({ instruments }) => instruments.map(i => ({ ...i, last: 100, previousClose: 99 })) };

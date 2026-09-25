@@ -377,14 +377,17 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
     }[state];
   }
 
+  const shown = (): boolean => [...rows.values()].some(row => board.row(row.entry).quote !== null);
+
   function statusText(state: QuoteBoardStatus): string {
     switch (state) {
       case 'unavailable': return text('status.unavailable', 'No quote source. Rows show symbols only.');
       case 'snapshot': return text('status.snapshot', 'Snapshot quotes');
       case 'connecting': return text('status.connecting', 'Connecting to quotes');
       case 'live': return text('status.live', 'Live quotes');
-      case 'reconnecting': return text('status.reconnecting', 'Reconnecting. Quotes shown may be stale.');
-      case 'disconnected': return text('status.disconnected', 'Quotes disconnected. Values shown are stale.');
+      // The stale warning is about values on screen; with none shown it would be false.
+      case 'reconnecting': return shown() ? text('status.reconnecting', 'Reconnecting. Quotes shown may be stale.') : text('status.reconnectingEmpty', 'Reconnecting to quotes.');
+      case 'disconnected': return shown() ? text('status.disconnected', 'Quotes disconnected. Values shown are stale.') : text('status.disconnectedEmpty', 'Quotes disconnected.');
       case 'error': return text('status.error', 'Quotes could not refresh: {error}', { error: board.error() ?? '' });
       default: return '';
     }

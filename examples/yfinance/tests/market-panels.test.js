@@ -68,6 +68,21 @@ describe('reference quote feed', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('after a 501 answers every later ask itself: no snapshot request, and new rows start disconnected', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(async () => response({ error: 'quotes are served only with --fixture', code: 'not_available' }, 501));
+    const feed = referenceQuoteFeed({ pollMs: 1000, fetchImpl });
+    // The panel asks for a snapshot as rows scroll into view, before any poll has run.
+    await expect(feed.getQuotes({ instruments: [{ symbol: 'AAPL', exchange: '' }] })).rejects.toThrow('only with --fixture');
+    await expect(feed.getQuotes({ instruments: [{ symbol: 'MSFT', exchange: '' }] })).rejects.toThrow('only with --fixture');
+    const status = [];
+    feed.subscribeQuotes([{ symbol: 'NVDA', exchange: '' }], { onQuote: () => {}, onStatus: v => status.push(v) });
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(feed.getQuotes({ instruments: [{ symbol: 'TCS.NS', exchange: '' }] })).rejects.toThrow('only with --fixture');
+    expect(status).toEqual(['disconnected']);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('stops polling once the last row unsubscribes', async () => {
     vi.useFakeTimers();
     const s = server();
