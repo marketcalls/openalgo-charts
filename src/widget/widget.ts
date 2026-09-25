@@ -53,6 +53,8 @@ import { mountQuickEntry, type QuickEntryHandle } from './quick-entry';
 import { WIDGET_COMPONENT_CSS } from './component-styles';
 import { DateNavigator, timeBuckets, type DateNavigationResult, type DateNavigationTarget, type HistoryReach } from './date-navigator';
 import { openDateNavigation } from './date-navigation-dialog';
+import { mountWatchlistPanel, type WatchlistPanelOptions } from './watchlist-panel';
+import { mountNewsPanel, type NewsPanelOptions } from './news-panel';
 
 /** The intervals offered when the host names none: the registry's codes are appended. */
 export const DEFAULT_INTERVALS: readonly string[] = ['1m', '5m', '15m', '1h', '1d', '1w'];
@@ -64,11 +66,23 @@ export const SAVE_DEBOUNCE_MS = 250;
 export const STATE_KEY = 'state';
 export const WIDGET_STATE_VERSION = 1;
 
+/** Named lists and their quotes for the docked watchlist. A chosen row charts that instrument. */
+export type WidgetWatchlistOptions = Omit<WatchlistPanelOptions, 'onSelect'>;
+/** The news source for the docked reader, which follows the chart's instrument. */
+export type WidgetNewsOptions = NewsPanelOptions;
+
 export interface WidgetOptions extends Omit<ChartOptions, 'theme'> {
   /** Docked Data and Objects panels. False retains the original Objects dialog. Default true. */
   panels?: boolean;
   /** Unclaimed letters and digits open symbol and interval entry on the focused chart. Default true. */
   typingNavigation?: boolean;
+  /**
+   * A docked watchlist: named lists from a store (a `WatchlistRepository` from
+   * `openalgo-charts/workspace`), with prices only from `quotes`. Needs `panels`.
+   */
+  watchlist?: WidgetWatchlistOptions;
+  /** A docked reader for the chart instrument's news. Needs `panels`. */
+  news?: WidgetNewsOptions;
   /** Event marker clicks open details. Set false to provide a host-owned view. */
   eventDetails?: false | EventDetailsPopupOptions;
   /** Where bars come from. Without one the chart shows what the host sets on `widget.series` itself. */
@@ -189,6 +203,10 @@ export interface Widget {
   openDataWindow(): boolean;
   /** Open trader alerts and their lifecycle states. False after destruction. */
   openAlerts(): boolean;
+  /** Open the docked watchlist. False without a `watchlist` source, with panels off, or after destruction. */
+  openWatchlist(): boolean;
+  /** Open the docked news reader. False without a `news` source, with panels off, or after destruction. */
+  openNews(): boolean;
   getState(): WidgetState;
   restoreState(state: unknown): WidgetRestoreReport;
   /** Load (or reload) bars from the feed for the current symbol and interval. */
@@ -216,7 +234,7 @@ const WIDGET_ONLY_KEYS: ReadonlyArray<keyof WidgetOptions> = [
   'mobile', 'loading', 'persist', 'storage', 'locale', 'translate', 'indicators', 'symbolSearch', 'lookbackBars', 'now', 'onOrder', 'styleNonce',
   'tradingCapabilities', 'tradingMode', 'tradingLocked',
   'eventDetails',
-  'panels', 'typingNavigation', 'keyboardRoute',
+  'panels', 'typingNavigation', 'keyboardRoute', 'watchlist', 'news',
 ];
 
 /**
@@ -549,6 +567,10 @@ class WidgetImpl implements Widget {
           host.appendChild(content.element);
           return content;
         },
+        watchlist: options.watchlist ? host => mountWatchlistPanel(this.context, host, {
+          ...options.watchlist!, onSelect: instrument => this.setSymbol(instrument.symbol, instrument.exchange),
+        }) : undefined,
+        news: options.news ? host => mountNewsPanel(this.context, host, options.news!) : undefined,
         onChange: () => { this._bus.emit('layout', { reason: 'panels' }); this._scheduleSave(); },
       });
     }
@@ -582,6 +604,8 @@ class WidgetImpl implements Widget {
         onObjects: (anchor) => this._openObjects(anchor),
         onDataWindow: options.panels === false ? undefined : () => this._dock?.toggle('data'),
         onAlerts: (anchor) => this._openAlerts(anchor),
+        onWatchlist: this._docked('watchlist') ? () => this._dock?.toggle('watchlist') : undefined,
+        onNews: this._docked('news') ? () => this._dock?.toggle('news') : undefined,
         onGoTo: (anchor) => this._openGoTo(anchor),
         settingsAvailable: () => widgetDialog('settings') !== null,
         indicatorsAvailable: () => widgetDialog('indicatorPicker') !== null,
@@ -607,6 +631,8 @@ class WidgetImpl implements Widget {
       onObjects: (anchor) => this._openObjects(anchor),
       onDataWindow: options.panels === false ? undefined : () => this._dock?.toggle('data'),
       onAlerts: (anchor) => this._openAlerts(anchor),
+      onWatchlist: this._docked('watchlist') ? () => this._dock?.open('watchlist') : undefined,
+      onNews: this._docked('news') ? () => this._dock?.open('news') : undefined,
       onGoTo: (anchor) => this._openGoTo(anchor),
       onProperties: (anchor) => this._openDialog('drawingProperties', anchor),
       onCapture: (anchor) => this._topbar?.openCapture(anchor),
@@ -752,6 +778,19 @@ class WidgetImpl implements Widget {
     return true;
   }
   public openAlerts(): boolean { return this._openAlerts(); }
+  public openWatchlist(): boolean { return this._openDocked('watchlist'); }
+  public openNews(): boolean { return this._openDocked('news'); }
+
+  /** Whether the dock carries this source: the option was given and panels are on. */
+  private _docked(panel: 'watchlist' | 'news'): boolean {
+    return this._opts.panels !== false && this._opts[panel] !== undefined;
+  }
+
+  private _openDocked(panel: 'watchlist' | 'news'): boolean {
+    if (this._destroyed || !this._dock || !this._docked(panel)) return false;
+    this._dock.open(panel);
+    return true;
+  }
   public openDateNavigation(): boolean { return this._openGoTo(); }
 
   private _openGoTo(anchor?: HTMLElement): boolean {

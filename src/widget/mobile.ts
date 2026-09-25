@@ -30,6 +30,8 @@ export interface MobileOptions {
   onObjects(anchor: HTMLElement): boolean;
   onDataWindow?(anchor: HTMLElement): void | boolean;
   onAlerts?(anchor: HTMLElement): boolean;
+  onWatchlist?(anchor: HTMLElement): void | boolean;
+  onNews?(anchor: HTMLElement): void | boolean;
   onCapture?(anchor: HTMLElement): void;
   onGoTo?(anchor: HTMLElement): void | boolean;
   onProperties(anchor: HTMLElement): boolean;
@@ -271,6 +273,9 @@ export function mountMobile(ctx: WidgetContext, opts: MobileOptions): MobileHand
           close();
           opts.onCapture?.(anchor);
         }));
+        for (const [key, label, handler] of [['watchlist', 'Watchlist', opts.onWatchlist], ['news', 'News', opts.onNews]] as const) {
+          if (handler) body.appendChild(makeAction(key, widgetText(ctx, `schema.ui.dock.${key}`, {}, label), () => { close(); handler(anchor); }));
+        }
         if (opts.onAlerts) body.appendChild(makeAction('alerts', widgetText(ctx, 'Alerts'), () => {
           close();
           opts.onAlerts?.(anchor);

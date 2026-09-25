@@ -208,6 +208,10 @@ export interface TopbarOptions {
   /** Open the docked data window, omitted without a handler. */
   onDataWindow?(anchor: HTMLElement): void | boolean;
   onAlerts?(anchor: HTMLElement): boolean;
+  /** Open the docked watchlist, omitted without a handler (the host supplied no lists). */
+  onWatchlist?(anchor: HTMLElement): void | boolean;
+  /** Open the docked news reader, omitted without a handler (the host supplied no news source). */
+  onNews?(anchor: HTMLElement): void | boolean;
   /** Open the date and range navigation panel, omitted without a handler. */
   onGoTo?(anchor: HTMLElement): void | boolean;
   settingsAvailable(): boolean;
@@ -398,6 +402,13 @@ export function mountTopbar(ctx: WidgetContext, host: HTMLElement, opts: TopbarO
     data.textContent = widgetText(ctx, 'schema.ui.dataWindow', {}, 'Data');
     data.addEventListener('click', () => { opts.onDataWindow?.(data); });
     host.appendChild(data);
+  }
+  for (const [key, label, handler] of [['watchlist', 'Watchlist', opts.onWatchlist], ['news', 'News', opts.onNews]] as const) {
+    if (!handler) continue;
+    const control = btn(widgetText(ctx, `schema.ui.dock.${key}`, {}, label), `oac-topbar__${key}`);
+    control.textContent = widgetText(ctx, `schema.ui.dock.${key}`, {}, label);
+    control.addEventListener('click', () => { handler(control); });
+    host.appendChild(control);
   }
   if (opts.onAlerts) {
     const alerts = btn(widgetText(ctx, 'Alerts'), 'oac-topbar__alerts');

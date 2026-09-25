@@ -9,8 +9,10 @@ import { COLOR_PICKER_CSS } from './color-picker';
 import { INDICATOR_PICKER_CSS } from './dialogs/indicator-picker';
 import { DATE_NAVIGATION_CSS } from './date-navigation-dialog';
 import { CHART_GRID_CSS } from './grid-styles';
+import { WATCHLIST_PANEL_CSS } from './watchlist-panel';
+import { NEWS_PANEL_CSS } from './news-panel';
 
 /** Shared first-mount styles keep embedded hosts and full widgets identical under CSP. */
 export const WIDGET_COMPONENT_CSS = DIALOG_CSS + OBJECTS_PANEL_CSS + EVENT_DETAILS_CSS
   + DATA_WINDOW_CSS + PANEL_DOCK_CSS + SYMBOL_PICKER_CSS + QUICK_ENTRY_CSS + COLOR_PICKER_CSS + INDICATOR_PICKER_CSS + DATE_NAVIGATION_CSS
-  + CHART_GRID_CSS;
+  + CHART_GRID_CSS + WATCHLIST_PANEL_CSS + NEWS_PANEL_CSS;

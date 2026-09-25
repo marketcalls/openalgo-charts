@@ -28,7 +28,7 @@ export { widgetText } from './localization';
 export type { WidgetBuiltinMessage, WidgetMessageKey, WidgetMessageValues, WidgetMessageParameters, WidgetTranslator, WidgetTranslationOptions } from './localization';
 
 export { createWidget, stripView, resolveTheme, loadWindow, DEFAULT_INTERVALS, DEFAULT_LOOKBACK_BARS, SAVE_DEBOUNCE_MS, STATE_KEY, WIDGET_STATE_VERSION } from './widget';
-export type { Widget, WidgetOptions, WidgetState, WidgetChartState, WidgetRestoreReport, WidgetEventName } from './widget';
+export type { Widget, WidgetOptions, WidgetState, WidgetChartState, WidgetRestoreReport, WidgetEventName, WidgetWatchlistOptions, WidgetNewsOptions } from './widget';
 export { createChartGrid, CHART_GRID_PRESETS } from './grid';
 export type { ChartGrid, ChartGridOptions, ChartGridCell, ChartGridLayout, ChartGridPreset, ChartGridApplyReport, ChartGridEvents, ChartGridEventName } from './grid';
 export { CHART_GRID_CSS } from './grid-styles';
@@ -38,6 +38,14 @@ export { readDataWindow, mountDataWindow, DATA_WINDOW_CSS } from './data-window'
 export type { DataWindowRow, DataWindowSection, DataWindowSnapshot, DataWindowOptions, DataWindowHandle } from './data-window';
 export { mountPanelDock, sanitizePanelDockState, PANEL_DOCK_CSS } from './panel-dock';
 export type { PanelDockId, PanelDockState, PanelDockContent, PanelDockOptions, PanelDockHandle } from './panel-dock';
+export { mountWatchlistPanel, WATCHLIST_PANEL_CSS } from './watchlist-panel';
+export type { WatchlistPanelOptions, WatchlistPanelHandle, WatchlistSort, WatchlistSortKey } from './watchlist-panel';
+export { mountNewsPanel, safeNewsUrl, NEWS_PANEL_CSS } from './news-panel';
+export type { NewsPanelOptions, NewsPanelHandle } from './news-panel';
+export { QuoteBoard, quoteChange } from './quote-board';
+export type { QuoteBoardOptions, QuoteBoardStatus, QuoteRow, QuoteRowStatus } from './quote-board';
+export { NewsReader } from './news-reader';
+export type { NewsReaderOptions, NewsSnapshot, NewsStatus } from './news-reader';
 export { mountSymbolPicker, safeSymbolIconUrl, SYMBOL_PICKER_CSS } from './symbol-picker';
 export type { SymbolPickerOptions, SymbolPickerHandle } from './symbol-picker';
 export { mountQuickEntry, QUICK_ENTRY_CSS } from './quick-entry';
