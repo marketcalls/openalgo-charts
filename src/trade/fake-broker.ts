@@ -282,6 +282,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
     const lose = meta === undefined ? false : await this._enter('modify', meta.accountId);
     const o = this._orders.find((x) => x.id === orderId);
     if (o === undefined) throw new Error('unknown order');
+    if (meta !== undefined) this._live(o);
     if (patch.price !== undefined) o.price = patch.price;
     if (patch.triggerPrice !== undefined) o.triggerPrice = patch.triggerPrice;
     if (patch.qty !== undefined) o.qty = patch.qty;
@@ -296,6 +297,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
     const meta = this._meta.get(orderId);
     const lose = meta === undefined ? false : await this._enter('cancel', meta.accountId);
     const o = this._orders.find((x) => x.id === orderId);
+    if (o !== undefined && meta !== undefined) this._live(o);
     this._orders = this._orders.filter((x) => x.id !== orderId);
     if (o !== undefined && meta !== undefined) {
       this._close(o, 'cancelled');
@@ -540,6 +542,17 @@ export class FakeBroker implements OrderFeed, AccountFeed {
     if (failure.failure === 'reject') throw refusal(failure.reason ?? `${operation} refused`);
     if (failure.failure === 'timeout') throw new Error(`FakeBroker: ${failure.reason ?? `${operation} timed out`}`);
     return true;
+  }
+
+  /**
+   * A server refuses to change an order that is already over. Market and
+   * command orders stay in the book as filled, so without this a late cancel
+   * rewrote a fill as cancelled while its execution and position stayed.
+   */
+  private _live(order: Order): void {
+    if (order.status !== 'working' && order.status !== 'pending' && order.status !== 'partial') {
+      throw refusal(`order ${order.id} is already ${order.status}`);
+    }
   }
 
   private _lost(operation: FakeBrokerOperation): never {

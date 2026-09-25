@@ -195,7 +195,8 @@ no network. It fills market orders at a mark price (`setMark`, or `emitLtp`), ke
 balances, margin, positions, executions and order history per account, cancels an
 unmarketable `IOC` or `FOK` order at once, lapses a `GTD` order at its expiry, and links
 bracket legs itself. It refuses the way a server would: an unknown account, the other
-ledger, an undeclared feature, missing margin or a close larger than the position. Test
+ledger, an undeclared feature, missing margin, a close larger than the position, or a
+cancel or modify of an order that has already filled. Test
 hooks hold (`latency`), fail or lose (`failNext`) any answer, drop the connection
 (`disconnect`, `reconnect`) and mute the order stream (`muteOrderUpdates`). While the
 connection is down a call never leaves, and fails as a pre-flight failure, so the engine

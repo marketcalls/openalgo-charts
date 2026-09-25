@@ -112,6 +112,21 @@ describe('FakeBroker account ledgers', () => {
     expect(broker.accountPositions('A')).toEqual([{ symbol: 'S', netQty: 1, avgPrice: 100 }]);
   });
 
+  it('refuses to cancel or modify an order that has already filled, as a server would', async () => {
+    const broker = new FakeBroker({ accounts: SEEDS });
+    broker.setMark('S', 100);
+    const filled = await broker.place({ symbol: 'S', side: 'BUY', type: 'MARKET', qty: 10, mode: 'analyzer' });
+    await expect(broker.cancel(filled.orderId)).rejects.toMatchObject({ rejected: true, message: 'FakeBroker: order B1 is already filled' });
+    await expect(broker.modify(filled.orderId, { price: 1 })).rejects.toMatchObject({ rejected: true });
+    const status = async (id: string) => (await broker.getOrderHistory({ accountId: 'A' }, signal())).find(row => row.order.id === id)?.order;
+    expect(await status(filled.orderId)).toMatchObject({ status: 'filled', price: 100 });
+    expect(broker.accountPositions('A')).toEqual([{ symbol: 'S', netQty: 10, avgPrice: 100 }]);
+    // A resting order still cancels.
+    const resting = await broker.place({ symbol: 'S', side: 'BUY', type: 'LIMIT', price: 90, qty: 1, mode: 'analyzer' });
+    await broker.cancel(resting.orderId);
+    expect(await status(resting.orderId)).toMatchObject({ status: 'cancelled' });
+  });
+
   it('expires a GTD order at its expiry and filters history by symbol, time and limit', async () => {
     let now = 1000;
     const broker = new FakeBroker({ accounts: SEEDS, now: () => now });

@@ -100,6 +100,19 @@ describe('request schema: account, duration, expiry and leverage', () => {
     expect(history.ok && history.rows.find(row => row.clientToken === 'g1')).toMatchObject({ duration: 'GTD', expiresAt: NOW + 3600, order: { status: 'working' } });
   });
 
+  it('never lets a cancel rewrite a filled order in the broker history', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    // Without the stream the engine still reads the market order as working.
+    broker.muteOrderUpdates(true);
+    await engine.placeOrder(market({ clientToken: 'm1' }));
+    expect(engine.state('m1')).toBe('working');
+    await engine.cancelOrder('m1');
+    const history = await accounts.orderHistory();
+    expect(history.ok && history.rows.map(row => row.order.status)).toEqual(['filled']);
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 10, avgPrice: 100 }]);
+  });
+
   it('lets the duration change what the broker does with a resting order', async () => {
     const { accounts, engine, broker } = setup();
     await accounts.refresh();
