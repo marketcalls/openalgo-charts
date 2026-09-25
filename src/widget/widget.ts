@@ -53,6 +53,8 @@ import { mountQuickEntry, type QuickEntryHandle } from './quick-entry';
 import { WIDGET_COMPONENT_CSS } from './component-styles';
 import { DateNavigator, timeBuckets, type DateNavigationResult, type DateNavigationTarget, type HistoryReach } from './date-navigator';
 import { openDateNavigation } from './date-navigation-dialog';
+import { mountAccountSummary } from './account-summary';
+import type { AccountStateSource } from 'openalgo-charts/trade';
 
 /** The intervals offered when the host names none: the registry's codes are appended. */
 export const DEFAULT_INTERVALS: readonly string[] = ['1m', '5m', '15m', '1h', '1d', '1w'];
@@ -120,6 +122,12 @@ export interface WidgetOptions extends Omit<ChartOptions, 'theme'> {
   tradingMode?: TradingCapabilityRequest['mode'];
   /** Locks order entry during host replay selection or workspace transitions. */
   tradingLocked?: () => boolean;
+  /**
+   * Account state for the status line, usually a trade-tier `AccountManager`.
+   * Omitted shows no account; a source whose provider declares no accounts is
+   * shown disabled with the reason. It only reads and switches accounts.
+   */
+  account?: AccountStateSource;
   /** Host CSP nonce for the widget and dialog stylesheet, assigned before insertion. */
   styleNonce?: string;
   /**
@@ -214,7 +222,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const WIDGET_ONLY_KEYS: ReadonlyArray<keyof WidgetOptions> = [
   'feed', 'symbol', 'exchange', 'interval', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'statusline',
   'mobile', 'loading', 'persist', 'storage', 'locale', 'translate', 'indicators', 'symbolSearch', 'lookbackBars', 'now', 'onOrder', 'styleNonce',
-  'tradingCapabilities', 'tradingMode', 'tradingLocked',
+  'tradingCapabilities', 'tradingMode', 'tradingLocked', 'account',
   'eventDetails',
   'panels', 'typingNavigation', 'keyboardRoute',
 ];
@@ -566,6 +574,10 @@ class WidgetImpl implements Widget {
     if (options.statusline !== false) {
       this._statusline = mountStatusline(this.context, statusEl, { locale: options.locale });
       this._statusline.setSymbol(this._symbol, this._exchange, this._interval);
+      if (options.account !== undefined) {
+        const summary = mountAccountSummary(this.context, statusEl, { source: options.account, locale: options.locale });
+        this._cleanups.push(() => summary.destroy());
+      }
     }
     if (options.topbar !== false) {
       this._topbar = mountTopbar(this.context, topbarEl, {

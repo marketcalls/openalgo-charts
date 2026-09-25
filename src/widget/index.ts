@@ -75,6 +75,8 @@ export type { TopbarOptions, TopbarHandle, TopbarState, SymbolMatch, SymbolSearc
 
 export { mountStatusline, priceDigits, MIN_PRICE_DIGITS } from './statusline';
 export type { StatuslineOptions, StatuslineHandle } from './statusline';
+export { mountAccountSummary, ACCOUNT_SUMMARY_CSS } from './account-summary';
+export type { AccountSummaryOptions, AccountSummaryHandle } from './account-summary';
 
 export { mountToasts, TOAST_MS, TOAST_MAX, TOAST_LEAVE_MS } from './toast';
 export type { Toaster, ToastHandle, ToastKind, ToastOptions } from './toast';
