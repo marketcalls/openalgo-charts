@@ -1,6 +1,8 @@
 import type { Chart } from '../core/chart';
 import { tryResolveInterval } from './intervals';
 import { isValidTimezone, parseSessionSpec, utcSecondsToZonedParts, zonedWallClockToUtcSeconds, type SessionSpec } from './time';
+import { TickSchedule, type TickBand } from './tick-schedule';
+import { applyInstrumentTicks } from '../core/trading-controller';
 
 export interface InstrumentCalendar {
   /** HHMM-HHMM[:days], with opening weekdays 1 (Sunday) through 7. */
@@ -14,8 +16,14 @@ export interface InstrumentMetadata {
   readonly symbol: string;
   readonly exchange: string;
   readonly timezone: string;
+  /** The minimum move: with `tickBands`, the schedule's common grid. */
   readonly priceTick: number;
   readonly pricePrecision: number;
+  /**
+   * Price-dependent ticks, supplied by the host from its venue's rules. Absent
+   * means one tick at every price, which is `priceTick`.
+   */
+  readonly tickBands?: readonly TickBand[];
   /** In the order adapter's units. This is a grid, never a lot conversion factor. */
   readonly quantityStep: number;
   readonly intervals: readonly string[];
@@ -87,12 +95,17 @@ function metadata(input: unknown): InstrumentMetadata {
     for (const [key, value] of Object.entries(values)) { date(key); exceptions[key] = sessions(value); }
   }
   if (raw.hasOpenInterest !== undefined && typeof raw.hasOpenInterest !== 'boolean') return fail('invalid OI capability');
+  const bands = raw.tickBands === undefined ? undefined : new TickSchedule(raw.tickBands as readonly TickBand[]);
+  // One number for the axis and the old tickSize readers, so it has to be the
+  // grid every band lies on; a coarser one would move valid prices.
+  if (bands && bands.minMove !== priceTick) return fail(`price tick ${priceTick} must equal the schedule's minimum move ${bands.minMove}`);
   return Object.freeze({
     symbol: text(raw.symbol, 'symbol'), exchange: text(raw.exchange, 'exchange'), timezone,
     priceTick, pricePrecision: precision, quantityStep: positive(raw.quantityStep, 'quantity step'),
     intervals: Object.freeze(intervals),
     calendar: Object.freeze({ sessions: sessions(calendar.sessions), exceptions: Object.freeze(exceptions) }),
     ...(raw.hasOpenInterest === undefined ? {} : { hasOpenInterest: raw.hasOpenInterest }),
+    ...(bands ? { tickBands: bands.bands } : {}),
   });
 }
 
@@ -111,11 +124,18 @@ function boundary(day: Date, minute: number, timezone: string): number {
 /** Validated, detached rules. Construction does not change global intervals or chart defaults. */
 export class Instrument {
   public readonly metadata: InstrumentMetadata;
+  /**
+   * The validated `tickBands`, or null for a constant tick. A constant tick
+   * has no schedule, so it keeps a single snapping rule, `priceTick`, on every
+   * path: the order constraints, chart drags and anything the host builds.
+   */
+  public readonly tickSchedule: TickSchedule | null;
   private readonly _sessions: readonly SessionSpec[];
   private readonly _exceptions: ReadonlyMap<string, readonly SessionSpec[]>;
 
   public constructor(input: unknown) {
     this.metadata = metadata(input);
+    this.tickSchedule = this.metadata.tickBands ? new TickSchedule(this.metadata.tickBands) : null;
     this._sessions = this.metadata.calendar.sessions.map(item => parseSessionSpec(item)!);
     this._exceptions = new Map(Object.entries(this.metadata.calendar.exceptions ?? {})
       .map(([key, value]) => [key, value.map(item => parseSessionSpec(item)!)]));
@@ -158,11 +178,16 @@ export class Instrument {
     if (previous && (previous.symbol !== m.symbol || previous.exchange !== m.exchange || previous.interval !== interval)
       && chart.primaryBars().length) return fail('clear previous source bars before applying metadata');
     chart.setTimezone(m.timezone);
+    // The scale holds one tick, so a schedule gives it the common grid: the
+    // axis then prints every band and its own snap never moves a valid price.
     chart.setPriceScaleOptions({ minMove: m.priceTick });
     // Oscillators and volume use their own units, even when their panes already exist.
     // The primary series can use a left or hidden scale instead of the chart default.
     series.priceScale().setOptions({ minMove: m.priceTick });
     series.priceScale().setPriceFormatter(value => this.formatPrice(value));
     chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest });
+    // Drags snap by the same schedule the order constraints carry, and a
+    // constant tick clears the one an earlier instrument left.
+    applyInstrumentTicks(chart, this.tickSchedule);
   }
 }

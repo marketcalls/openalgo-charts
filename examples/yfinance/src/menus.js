@@ -1,5 +1,6 @@
 import * as engine from '/dist/openalgo-charts.mjs';
-import { el, fmt, round2, esc, inTextField } from './ui.js';
+import { el, fmt, esc, inTextField } from './ui.js';
+import { snapPrice } from './ticks.js';
 import { ticon } from './toolbar.js';
 import { openSettings } from './indicators.js';
 import { openChartSettings } from './chart-settings.js';
@@ -134,7 +135,7 @@ export function openContextMenu(e, pane = 1) {
   // Off the plot (on a scale) there is no price, so the order rows would be
   // offering to trade at nothing.
   const tradable = e.paneIndex === pricePane(app.chart) && e.price != null && app.currentBars.length > 0;
-  ctxPrice = tradable ? round2(e.price) : 0;
+  ctxPrice = tradable ? snapPrice(app.ticks, e.price) : 0;
   for (const b of ctxMenu.querySelectorAll('button[data-type]')) {
     b.hidden = !tradable;
     const verb = b.getAttribute('data-side') === 'BUY' ? 'Buy' : 'Sell';

@@ -1,4 +1,5 @@
 import { el, fmt, round2, rupee } from './ui.js';
+import { snapPrice, tickNote } from './ticks.js';
 
 let app;
 export function initOrders(a) { app = a; }
@@ -70,10 +71,21 @@ export function placeOrder(side, type, price) {
   if (!executionAllowed()) return;
   const qty = Math.max(1, Number(el('qty').value) || 1);
   if (type === 'MARKET') { fillMarket(side, qty); return; } // executes into a position
-  const o = { id: app.nextOrderId++, side, type, price: round2(price), qty, product: el('product').value };
+  const o = { id: app.nextOrderId++, side, type, price: snapPrice(app.ticks, price), qty, product: el('product').value };
   o.line = app.chart ? orderLine(o) : null;
   app.orders.push(o);
-  el('status').textContent = `${side} ${type} ${qty} ${app.req.symbol} @ ${fmt(o.price)} (${o.product}) - drag the line to modify`;
+  el('status').textContent = `${side} ${type} ${qty} ${app.req.symbol} @ ${fmt(o.price)} (${o.product})${tickNote(app.ticks, o.price)} - drag the line to modify`;
+  saveState();
+}
+// A dragged order line (id = "order:<n>") takes the price the pointer is on,
+// rounded the way the instrument quotes it, so crossing a band boundary
+// changes the step the line moves in.
+export function repriceOrder(id, price) {
+  const o = app.orders.find((x) => `order:${x.id}` === id);
+  if (!o || !o.line) return;
+  o.price = snapPrice(app.ticks, price);
+  o.line.setPrice(o.price);
+  el('status').textContent = `${o.side} ${o.type} order -> ${fmt(o.price)}${tickNote(app.ticks, o.price)}`;
   saveState();
 }
 export function attachOrderLines() { for (const o of app.orders) o.line = orderLine(o); } // on chart rebuild
@@ -88,7 +100,7 @@ export function fillMarket(side, qty) {
   if (!executionAllowed()) return;
   if (!app.currentBars.length) return;
   const last = app.currentBars[app.currentBars.length - 1];
-  const price = round2(last.close);
+  const price = snapPrice(app.ticks, last.close);
   const signed = side === 'BUY' ? qty : -qty;
   if (!app.position || app.position.netQty === 0) {
     app.position = { netQty: signed, avgPrice: price };

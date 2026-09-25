@@ -76,3 +76,37 @@ helper returns existing `OrderConstraints` with that grid and the price tick.
 It does not multiply units by a lot size. Hosts can add current price-band/freeze
 constraints. Client checks remain advisory; the broker retains execution authority.
 `hasOpenInterest` stays true, false or unknown independently of zero/missing bars.
+
+## Price-dependent ticks
+
+`tickBands` declares a tick that changes with price, supplied by the host from its
+venue's rules; the library ships none. The first band has no `from` and covers every
+lower price, zero and negative prices included. Each later band starts at its `from`
+(inclusive, strictly ascending), and every `from` must be a multiple of the ticks on
+both sides of it, so a boundary is itself a valid price. Ticks are positive with at
+most 12 decimals, and a schedule has 1 to 64 bands. Invalid bands throw
+`Invalid tick schedule: ...` naming the band.
+
+```ts
+const banded = new Instrument({ ...metadata, priceTick: 0.01,
+  tickBands: [{ tick: 0.02 }, { from: 20, tick: 0.05 }] }); // synthetic rules
+const ticks = banded.tickSchedule; // TickSchedule | null, null for a constant tick
+if (ticks !== null) ticks.round(20.03); // 20.05, an exact decimal
+```
+
+`instrument.tickSchedule` is the validated `TickSchedule`: `round` gives the nearest
+valid price, a written halfway price rounding up; `tickAt` gives the tick in force,
+the upper band's at an exact boundary; `step` moves whole ticks across boundaries.
+It is null for a constant tick, which keeps one snapping rule, `priceTick`, on every
+path. With bands, `priceTick` must equal the schedule's `minMove`, the common grid of
+every band, and `applyTo` sets that as the price scale's `minMove`.
+`orderConstraintsForInstrument` adds `tickSchedule` to the constraints, so
+`validatePrice`, `OrderEngine.placeOrder` and `OrderEngine.requestModify` snap on the
+band each price lands in and check price limits after snapping.
+
+`applyTo` also hands the same schedule to `chart.trading`, so dragged order and
+bracket lines snap to it. It does not build the trading layer (that would take the
+host's drag subscription); a layer built later starts from it. Applying a
+constant-tick instrument clears it, so after a symbol switch no drag snaps to the
+previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to
+override it. For a depth ladder, pass the schedule as `DomLadder`'s `tickSchedule`.

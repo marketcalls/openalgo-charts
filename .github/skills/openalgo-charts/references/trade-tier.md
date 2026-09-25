@@ -2,7 +2,10 @@
 
 `orderConstraintsForInstrument(instrument)` maps a validated base `Instrument` to
 the existing `OrderConstraints`: price tick, quantity grid and fractional quantity
-support. Steps remain in the adapter's order units, without multiplying lots.
+support, plus `tickSchedule` when the metadata carries `tickBands` (a constant
+tick returns the same three fields as before, and its `instrument.tickSchedule`
+is null). Steps remain in the adapter's order
+units, without multiplying lots.
 Use `validateQuantity`/`validatePrice` for advisory checks and add host price-band
 or freeze limits when available. See [instrument metadata](../../../../docs/instruments.md).
 
@@ -131,14 +134,27 @@ Note the asymmetry: in `modify_pending`, `reject` means "the amend failed, the o
 
 ```ts
 interface PriceBand { lower: number; upper: number }
-interface OrderConstraints { tickSize: number; priceBand?: PriceBand; freezeQty?: number }
-interface ValidationResult { ok: boolean; reason?: string; price?: number }
+interface OrderConstraints { tickSize: number; tickSchedule?: TickSchedule | null; priceBand?: PriceBand; freezeQty?: number; lotSize?: number; allowFractionalQty?: boolean }
+interface ValidationResult { ok: boolean; reason?: string; code?: ValidationCode; price?: number }
 
 withinPriceBand(price, band): boolean            // inclusive on both bounds
 validateOrder(price, qty, c): ValidationResult
 ```
 
 Check order: `qty <= 0` -> reject; `qty > freezeQty` -> reject; snap with `roundToTick(price, tickSize)`; band check runs on the **snapped** price. On success `price` holds the snapped value, always use `result.price`, not your input. `roundToTick` is `Math.round(value / step) * step` and returns raw floats (`100.05000000000001`), so format for display and never compare with `===`.
+
+### Price-dependent ticks
+
+`tickSchedule` replaces the constant snap: `validatePrice` rounds with `tickSchedule.round(price)`, which returns exact decimals (`===` is safe), the nearer valid price at any price-to-tick ratio, and rounds a written halfway price up. Null, like absent, keeps the constant `tickSize` snap. `tickSize` is then read only by older code; give it `tickSchedule.minMove`. The price band still runs on the snapped price, so a price inside the limits as typed can snap outside them and be refused. `OrderEngine.placeOrder` (typed prices, triggers included) and `requestModify` (drags, a stop-limit's carried trigger included) both go through it. A plain band list in place of a `TickSchedule` throws a `TypeError` naming `new TickSchedule(bands)`.
+
+```ts
+import { TickSchedule } from 'openalgo-charts';
+const ticks = new TickSchedule([{ tick: 0.01 }, { from: 10, tick: 0.05 }, { from: 100, tick: 0.1 }]);
+validatePrice(10.03, { tickSize: ticks.minMove, tickSchedule: ticks }); // { ok: true, price: 10.05 }
+validatePrice(9.996, { tickSize: ticks.minMove, tickSchedule: ticks }); // { ok: true, price: 10 }
+```
+
+Band rules (`src/feed/tick-schedule.ts`): the first band has no `from` and covers every lower price, zero and negatives included; each later `from` is inclusive and strictly ascending; every `from` must be a multiple of the ticks on both sides of it; ticks are positive with at most 12 decimals; 1 to 64 bands. Anything else throws `Invalid tick schedule: ...` naming the band. An exact boundary takes the upper band's tick (`tickAt(10) === 0.05`); `step(price, n)` moves whole ticks across bands, down from a boundary on the band below. A floor such as "no negative prices" is a price band, not a tick rule. Real venue schedules come from the host; the library ships none.
 
 `OrderEngine.placeOrder` skips the price path entirely when `req.price` is undefined and only checks `qty > 0`. **A `MARKET` order bypasses the freeze-quantity check.**
 
@@ -183,11 +199,11 @@ tc.onLtp('RELIANCE', 2950);        // pushes into every bound primitive
 ## `DomLadder`
 
 ```ts
-interface DomLadderOptions { tickSize: number; width: number; groupBy: number; maxRows: number; rowHeight: number }
+interface DomLadderOptions { tickSize: number; tickSchedule?: TickSchedule | null; width: number; groupBy: number; maxRows: number; rowHeight: number }
 const DEFAULT_DOM_LADDER_OPTIONS = { tickSize: 0.05, width: 96, groupBy: 1, maxRows: 60, rowHeight: 14 };
 ```
 
-A right-docked depth strip drawn on the overlay (`zOrder: 'top'`), price-aligned to the pane's price scale. Input is one method: `setDepth(depth: MarketDepth)`, called on every book update. `tier()` returns the current `LadderTier`. Rows hit-test as `ladder-bid:<price>` / `ladder-ask:<price>` with a `pointer` cursor, route them to a place-order flow.
+A right-docked depth strip drawn on the overlay (`zOrder: 'top'`), price-aligned to the pane's price scale. With `tickSchedule` (an instrument whose tick changes with price) every row is a price its own band allows and `groupBy` counts whole ticks of that band (a fraction rounds down, so 2.5 groups by 2, where the constant path would make rows 2.5 ticks apart and off the tick grid), so a ladder across a boundary changes step there and `tickSize` is unused. A band list in its place throws a `TypeError` at construction. Input is one method: `setDepth(depth: MarketDepth)`, called on every book update. `tier()` returns the current `LadderTier`. Rows hit-test as `ladder-bid:<price>` / `ladder-ask:<price>` with a `pointer` cursor, route them to a place-order flow.
 
 `MarketDepth` (from `src/feed/types.ts`) is `{ bids: DepthLevel[]; asks: DepthLevel[]; ltp: number; ltq?: number }` with `DepthLevel = { price: number; qty: number; orders?: number }`. Length is whatever the broker streams, **5 to 200 levels**.
 
@@ -196,7 +212,7 @@ Pure helpers, exported for custom rendering and tests:
 | Function | Signature | Notes |
 |---|---|---|
 | `ladderCapability` | `(depth) => LadderTier` | `0` levels -> `'none'`; `<= 5` -> `'compact'`; else `'deep'` |
-| `buildRows` | `(depth, tickSize, groupBy = 1) => LadderRow[]` | Merges bids+asks into `{ price, bidQty, askQty }`, bucketed to `tickSize * groupBy`, sorted high->low. Total qty is preserved across aggregation |
+| `buildRows` | `(depth, tickSize: number \| TickSchedule, groupBy = 1) => LadderRow[]` | Merges bids+asks into `{ price, bidQty, askQty }`, bucketed to `tickSize * groupBy`, sorted high->low. Total qty is preserved across aggregation. With a `TickSchedule` (any non-null object takes this path; a number or numeric string keeps the constant one), each level lands on its band's nearest valid price and a group spans `groupBy` whole ticks of that band, a fraction rounding down, never labelled past a boundary |
 | `visibleRows` | `(rows, priceToY, plotHeight, rowHeight, maxRows) => LadderRow[]` | Culls off-screen rows (±1 row), then keeps the `maxRows` nearest the vertical centre, re-sorted high->low |
 
 Depth arrives through the feed's optional `subscribeDepth(req, onDepth)`, `OpenAlgoLiveDataFeed` implements it over WS mode `'Depth'`.

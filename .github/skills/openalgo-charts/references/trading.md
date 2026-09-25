@@ -149,6 +149,7 @@ Markers snap to the **nearest bar index**, not an exact time; sub-bar fill preci
 | `getPositions()` / `getOrders()` / `getTrades()` | Current entities |
 | `clear()` | Removes every line and the marker primitive |
 | `setSettings(settings)` / `getSettings()` | Colours; see below |
+| `setTickSchedule(schedule \| null)` | Snap dragged order and bracket lines, and the `newPrice` their events carry, to a `TickSchedule`; anything else throws a `TypeError`; see below |
 | `on(event, cb)` | Returns an unsubscribe function |
 | `off(event, cb)` | `cb` is required here (unlike `chart.off`) |
 
@@ -172,6 +173,8 @@ Six events, all emitted from `src/core/trading-controller.ts`. Names carry the `
 `_emit` fans out to the controller's own listeners and then mirrors through `host.emit?.(...)`, which is `Chart.emit`. A `chart.on` listener that throws is swallowed; a `chart.trading.on` listener that throws propagates.
 
 **A plain click on a *draggable* order pill emits `trading:order_modify` as well as `trading:order_click`.** A press on an `ns-resize` primitive arms the drag, so pointer-up runs `_dragEndCb` (emitting `order_modify` with `newPrice` = the price under the cursor, a few pixels off the line) before `_clickCb`. Guard the handler: `if (Math.abs(newPrice - previousPrice) < tickSize) return;`. Position pills and cancel segments are unaffected, neither arms a drag.
+
+**Drag prices are raw pointer prices unless a schedule is set.** `chart.trading.setTickSchedule(new TickSchedule(bands))` rounds the dragged line's preview and the `newPrice` of `trading:order_modify` and `trading:bracket_modify` to the band the release lands in: 0.01 below 100 and 0.05 from 100 turns a release at 100.33 into 100.35 and one at 99.874 into 99.87. `Instrument.applyTo` sets it from `instrument.tickSchedule`, on a layer that exists or one built later, and a constant-tick instrument clears it, so a symbol switch never leaves the previous bands on a drag; call `setTickSchedule` after `applyTo` to override. A one-band schedule snaps a constant tick; give `validatePrice` the same schedule, or its `roundToTick` result (`100.05000000000001`) will not equal the dragged `100.05`. `null`, the default, keeps the raw price. Validate with `validatePrice` before sending either way; price limits are not checked here.
 
 `trading:bracket_modify` gives you `parentId`, not the child order id. Keep your own `parentId + bracketRole -> orderId` map if the broker amends by order id.
 

@@ -446,6 +446,36 @@ Data-driven positions, orders, TP/SL brackets, and fill markers via
 <TradeMarkersCard />
 </div>
 
+## Price-dependent ticks
+
+Drag the buy order across the dotted line at 100. Below it the price moves in 0.01
+steps; from 100 up it moves in 0.05 steps, and the release reports the snapped price.
+The rules here are synthetic: a host supplies its venue's schedule. See
+[Instrument metadata](/docs/instruments#price-dependent-ticks) for the band rules and
+[validation](/docs/trading#price-dependent-ticks) for typed prices and price limits.
+
+<RunnableExample height={420} code={`const chart = lib.createChart(el);
+// Synthetic rules, not any venue's: 0.01 below 100 and 0.05 from 100.
+const ticks = new lib.TickSchedule([{ tick: 0.01 }, { from: 100, tick: 0.05 }]);
+chart.setPriceScaleOptions({ minMove: ticks.minMove });
+const bars = Array.from({ length: 90 }, (_, i) => {
+  const open = ticks.round(100 + Math.sin(i / 7) * 1.4);
+  const close = ticks.round(100 + Math.sin((i + 1) / 7) * 1.4);
+  return { time: 1700000000 + i * 300, open, close,
+    high: ticks.round(Math.max(open, close) + 0.18), low: ticks.round(Math.min(open, close) - 0.18) };
+});
+chart.addSeries('candlestick').setData(bars);
+chart.addPriceLine({ price: 100, color: '#8892a6', lineStyle: 'dotted', id: 'boundary',
+  leftLabel: 'tick 0.05 from here, 0.01 below' }, 0);
+chart.trading.setTickSchedule(ticks);
+const order = { id: 'entry', type: 'limit', side: 'buy', price: 99.62, size: 10 };
+chart.trading.setOrders([order]);
+chart.trading.on('trading:order_modify', (event) => {
+  chart.trading.upsertOrder({ ...order, price: event.newPrice });
+});
+chart.fitContent();
+return chart;`} />
+
 ## Open interest and instrument rules
 
 Open Interest draws a separate line pane; Open Interest Change draws a separate

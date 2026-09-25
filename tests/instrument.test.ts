@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Instrument, type InstrumentMetadata } from '../src/feed/instrument';
 import { orderConstraintsForInstrument } from '../src/trade/instrument';
 import { validatePrice, validateQuantity } from '../src/trade/validation';
@@ -177,5 +177,132 @@ describe('instrument chart and quantity integration', () => {
     expect(validateQuantity(0.0035, constraints).code).toBe('QTY_STEP');
     expect(validatePrice(0.123456789, constraints).price).toBeCloseTo(0.12345679, 10);
     expect(orderConstraintsForInstrument(new Instrument({ ...cash(), quantityStep: 75 })).lotSize).toBe(75);
+  });
+});
+
+describe('instrument tick schedules', () => {
+  // Synthetic rules: 0.02 below 20 and 0.05 from 20. Neither tick divides the
+  // other, so the common grid (0.01) is the only honest minimum move.
+  const banded = (): InstrumentMetadata => ({
+    ...cash(), symbol: 'BANDED', priceTick: 0.01, tickBands: [{ tick: 0.02 }, { from: 20, tick: 0.05 }],
+  });
+
+  it('keeps a constant-tick profile byte-identical, with one snapping rule and no schedule', () => {
+    const instrument = new Instrument(cash());
+    expect(instrument.metadata).not.toHaveProperty('tickBands');
+    expect(Object.keys(orderConstraintsForInstrument(instrument))).toEqual(['tickSize', 'lotSize', 'allowFractionalQty']);
+    expect(orderConstraintsForInstrument(instrument)).toEqual({ tickSize: 0.05, lotSize: 1, allowFractionalQty: false });
+    // A one-band schedule here would be a second rule: its 100.05 against the
+    // 100.05000000000001 the order engine's constant tick sends, so a preview
+    // made with it would never equal the amended price.
+    expect(instrument.tickSchedule).toBeNull();
+    expect(validatePrice(100.07, orderConstraintsForInstrument(instrument)).price).toBe(100.05000000000001);
+  });
+
+  it('accepts any constant tick the metadata accepts, as it did before schedules', () => {
+    // Base metadata takes a tick this large at precision 0; building a schedule
+    // for it would throw, although the caller configured nothing new.
+    const coarse = new Instrument({ ...cash(), priceTick: 1e16, pricePrecision: 0 });
+    expect(coarse.metadata.priceTick).toBe(1e16);
+    expect(coarse.tickSchedule).toBeNull();
+  });
+
+  it('detaches, freezes and applies a banded schedule to validation', () => {
+    const source = banded();
+    const bands = source.tickBands as { from?: number; tick: number }[];
+    const instrument = new Instrument(source);
+    bands[1].tick = 1;
+    expect(instrument.metadata.tickBands).toEqual([{ tick: 0.02 }, { from: 20, tick: 0.05 }]);
+    expect(Object.isFrozen(instrument.metadata.tickBands)).toBe(true);
+    expect(instrument.tickSchedule!.bands).toEqual(instrument.metadata.tickBands);
+    const constraints = orderConstraintsForInstrument(instrument);
+    expect(constraints.tickSchedule).toBe(instrument.tickSchedule);
+    expect(constraints.tickSize).toBe(0.01);
+    expect(validatePrice(19.97, constraints).price).toBe(19.98);
+    expect(validatePrice(20.03, constraints).price).toBe(20.05);
+    // One rule: the schedule the constraints validate with is the instrument's.
+    for (const price of [19.97, 19.99, 20, 20.025, 20.03, 20.07]) {
+      expect(validatePrice(price, constraints).price).toBe(instrument.tickSchedule!.round(price));
+    }
+  });
+
+  it('sets the price scale minimum move to the common grid of the schedule and formats every band', () => {
+    const c = chart(); c.addIndicator('rsi');
+    const oscillator = { ...c.panes()[1].priceScale.options };
+    const instrument = new Instrument(banded());
+    instrument.applyTo(c, '1m');
+    const scale = c.primarySeries()!.priceScale();
+    // 0.01, finer than either band's tick: 20.05 is no multiple of 0.02.
+    expect(scale.options.minMove).toBe(instrument.tickSchedule!.minMove);
+    expect(scale.options.minMove).toBe(0.01);
+    // A valid price in the coarse band survives the scale's own snap.
+    expect(scale.snapToTick(20.05)).toBeCloseTo(20.05, 10);
+    expect(scale.format(20.05)).toBe('20.05');
+    expect(c.panes()[1].priceScale.options).toEqual(oscillator);
+  });
+
+  it.each<[string, Record<string, unknown>, RegExp]>([
+    ['a price tick that is not the common grid', { priceTick: 0.02 }, /price tick 0\.02 must equal the schedule's minimum move 0\.01/],
+    ['a price tick finer than the common grid', { priceTick: 0.005, pricePrecision: 3 }, /price tick 0\.005 must equal the schedule's minimum move 0\.01/],
+    ['unordered bands', { tickBands: [{ tick: 0.02 }, { from: 40, tick: 0.05 }, { from: 20, tick: 0.1 }] }, /ascending/],
+    ['a lower bound on the first band', { tickBands: [{ from: 0, tick: 0.01 }] }, /bands\[0\] covers every lower price/],
+    ['bands that are not a list', { tickBands: { tick: 0.01 } }, /1 to 64 bands/],
+  ])('rejects %s before use', (_label, patch, message) => {
+    expect(() => new Instrument({ ...banded(), ...patch })).toThrow(message);
+  });
+});
+
+describe('instrument ticks on chart drags', () => {
+  const banded = (): InstrumentMetadata => ({
+    ...cash(), symbol: 'BANDED', priceTick: 0.01, tickBands: [{ tick: 0.02 }, { from: 20, tick: 0.05 }],
+  });
+  /** The chart's drag release, as the trading layer subscribed to it. */
+  function release(spy: { mock: { calls: unknown[][] } }): (id: string, price: number) => void {
+    const calls = spy.mock.calls;
+    const end = calls[calls.length - 1][1] as (id: string, price: number, time: number) => void;
+    return (id, price) => end(id, price, 0);
+  }
+
+  it('hands the schedule to a trading layer built after the instrument was applied', () => {
+    const c = chart();
+    const drags = vi.spyOn(c, 'subscribeDrag');
+    new Instrument(banded()).applyTo(c, '1m');
+    // Applying an instrument must not build the layer: it would take the host's drag subscription.
+    expect(c.hasTrading()).toBe(false);
+    const modify = vi.fn();
+    c.trading.on('trading:order_modify', modify);
+    c.trading.setOrders([{ id: 'o1', type: 'limit', side: 'buy', price: 19.98, size: 1 }]);
+    release(drags)('ord:o1', 20.031);
+    expect(modify).toHaveBeenLastCalledWith({ orderId: 'o1', newPrice: 20.05, previousPrice: 19.98 });
+  });
+
+  it('replaces the schedule on a symbol switch and clears it for a constant tick', () => {
+    const c = chart();
+    const drags = vi.spyOn(c, 'subscribeDrag');
+    const modify = vi.fn();
+    c.trading.on('trading:order_modify', modify);
+    c.trading.setOrders([{ id: 'o1', type: 'limit', side: 'buy', price: 19.98, size: 1 }]);
+    const end = release(drags);
+    new Instrument(banded()).applyTo(c, '1m');
+    end('ord:o1', 20.031);
+    // The next symbol trades on a constant tick: its drags report the pointer's
+    // price, as they always have, not the previous instrument's bands.
+    new Instrument(cash()).applyTo(c, '1m');
+    end('ord:o1', 20.031);
+    new Instrument(banded()).applyTo(c, '1m');
+    end('ord:o1', 19.971);
+    expect(modify.mock.calls.map(([event]) => event.newPrice)).toEqual([20.05, 20.031, 19.98]);
+  });
+
+  it('lets the host override the instrument after applying it', () => {
+    const c = chart();
+    const drags = vi.spyOn(c, 'subscribeDrag');
+    const modify = vi.fn();
+    c.trading.on('trading:order_modify', modify);
+    c.trading.setOrders([{ id: 'o1', type: 'limit', side: 'buy', price: 19.98, size: 1 }]);
+    new Instrument(banded()).applyTo(c, '1m');
+    c.trading.setTickSchedule(null);
+    release(drags)('ord:o1', 20.031);
+    expect(modify).toHaveBeenLastCalledWith(expect.objectContaining({ newPrice: 20.031 }));
   });
 });

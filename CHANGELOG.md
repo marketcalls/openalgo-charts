@@ -185,6 +185,34 @@ returned, except TEMA's last-digit rounding. No public signature changed.
   logarithms, units, the Aroon Oscillator, Parabolic SAR, overflow, signed zero,
   Klinger, the RVI warmup and the PVO signal after a stretch with no volume),
   and how each built-in treats a NaN volume.
+- Price-dependent tick schedules. `TickSchedule` validates an ordered list of
+  `TickBand`s: the first band covers every lower price, zero and negative prices
+  included, each later band starts at its inclusive `from`, and every boundary must
+  be a multiple of the ticks on both sides, so a boundary is itself a valid price.
+  Invalid bands throw `Invalid tick schedule: ...` naming the band. `round` returns
+  the nearest valid price as an exact decimal (a written halfway price rounds up),
+  `tickAt` gives the upper band's tick at an exact boundary, `step` moves whole ticks
+  across boundaries, and `minMove` is the common grid of every band.
+  `InstrumentMetadata.tickBands` carries a host-supplied schedule; `priceTick` must
+  then equal its `minMove`, which `applyTo` gives the price scale, and
+  `instrument.tickSchedule` is the validated schedule (null for a constant tick, which
+  keeps its one `priceTick` rule). `OrderConstraints.tickSchedule` makes
+  `validatePrice`, `OrderEngine.placeOrder` and `OrderEngine.requestModify` snap each
+  price in its own band before checking price limits, and
+  `orderConstraintsForInstrument` fills it from `tickBands`.
+  `chart.trading.setTickSchedule` snaps dragged order and bracket lines and the
+  `newPrice` their modify events carry; it refuses anything but a `TickSchedule` or
+  null. `applyTo` hands the trading layer the instrument's schedule, including a layer
+  built later, and a constant-tick instrument clears the previous one on a symbol
+  switch. `DomLadder` takes a `tickSchedule` option and `buildRows` a schedule in place
+  of the tick size, so a ladder across a boundary shows the prices each band allows
+  and groups whole ticks of that band (a fractional `groupBy` rounds down). Without a
+  schedule every path is unchanged: constant `tickSize` snapping and ladder rows, the
+  same constraints object for a constant-tick instrument, and raw pointer prices from
+  `chart.trading`. No venue's schedule ships as a default. The reference host's
+  fixture server adds a synthetic `BANDED` instrument (0.01 below 100, 0.05 from 100),
+  described as instrument metadata, whose right-click orders, dragged order lines,
+  market fills and bracket legs snap in the band they land in.
 
 ## 2.5.4
 

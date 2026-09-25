@@ -15,7 +15,7 @@ import { DEFAULT_PRICE_SCALE_OPTIONS } from 'openalgo-charts';
 |---|---|---|---|
 | `marginTop` | `number` | `0.1` | Fraction of **pane height** kept empty above the data band. |
 | `marginBottom` | `number` | `0.1` | Fraction of **pane height** kept empty below the data band. |
-| `minMove` | `number` | `0` | Instrument tick size (e.g. `0.05`). `0` infers precision from the visible range. **A chart-wide setter withholds this from a pane that does not quote the instrument**: see below. |
+| `minMove` | `number` | `0` | Instrument tick size (e.g. `0.05`); for a `TickSchedule`, its `minMove`, the grid every band lies on. `0` infers precision from the visible range. **A chart-wide setter withholds this from a pane that does not quote the instrument**: see below. |
 | `minPrecision` | `number` | `0` | Least decimals a scale with no tick prints. Set to 2 on every study pane; ignored once `minMove` is set. |
 | `mode` | `'linear' \| 'logarithmic' \| 'percentage' \| 'indexed-to-100'` | `'linear'` | `logarithmic` maps through `log10`, clamped at `1e-10`. The last two rebase against a baseline, below. |
 | `inverted` | `boolean` | `false` | Price increases downward. |

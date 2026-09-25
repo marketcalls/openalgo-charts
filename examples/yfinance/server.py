@@ -257,6 +257,20 @@ FIXTURE_SENTINELS = {
     "EMPTY": ApiError(404, "no_data", "fixture: EMPTY has no bars"),
     "BUSY": ApiError(429, "rate_limited", "fixture: BUSY is always rate limited", {"Retry-After": "30"}),
 }
+# One symbol is an instrument with a price-dependent tick, so the reference
+# host has one to show: it trades around 100, on a 0.01 grid below 100 and a
+# 0.05 grid from 100. The host hands the same rules to the library as its own
+# metadata (src/ticks.js). Synthetic, not any venue's schedule.
+BANDED = "BANDED"
+BANDED_BOUNDARY = 100.0
+
+
+def banded_price(v: float) -> float:
+    """v on BANDED's grid, halves rounding up. Monotonic, so high and low stay outside open and close."""
+    tick = 0.05 if v >= BANDED_BOUNDARY else 0.01
+    return round(math.floor(v / tick + 0.5) * tick, 2)
+
+
 # Bars sit in a 09:15 to 15:30 IST session, spelled in UTC. IST is this
 # library's default zone and has no daylight saving, so the window is the
 # same number every day of the year.
@@ -327,13 +341,15 @@ def _noise(symbol: str, t: int, salt: str) -> float:
 def fixture_level(symbol: str, t: int) -> float:
     """The synthetic close at time t: a base per symbol, a slow drift and three waves whose periods the symbol picks."""
     seed = zlib.crc32(symbol.encode()) & 0xFFFFFFFF
-    base = 20 + seed % 2000
+    banded = symbol == BANDED
+    # BANDED holds still around its boundary instead of drifting off it.
+    base = 100 if banded else 20 + seed % 2000
     slow = DAY * (40 + seed % 50)
     mid = DAY * (7 + (seed >> 8) % 20)
     fast = 3600 * (3 + (seed >> 16) % 30)
     phase = ((seed >> 4) % 628) / 100
     years = (t - 1_600_000_000) / 31_557_600
-    drift = years * 0.02 * (seed % 7 - 3)
+    drift = 0 if banded else years * 0.02 * (seed % 7 - 3)
     wave = 0.12 * math.sin(2 * math.pi * t / slow + phase) \
         + 0.05 * math.sin(2 * math.pi * t / mid + 2 * phase) \
         + 0.02 * math.sin(2 * math.pi * t / fast + 3 * phase)
@@ -368,12 +384,13 @@ def fixture_bars(req: HistoryRequest, now: int) -> list:
         high = max(open_, close) + _noise(symbol, t, "h") * 0.004 * close
         low = min(open_, close) - _noise(symbol, t, "l") * 0.004 * close
         volume = int(1000 + _noise(symbol, t, "v") * 100000 * (1 + 30 * span / close))
+        price = banded_price if symbol == BANDED else (lambda v: round(v, 2))
         bars.append({
             "time": t,
-            "open": round(open_, 2),
-            "high": round(high, 2),
-            "low": round(low, 2),
-            "close": round(close, 2),
+            "open": price(open_),
+            "high": price(high),
+            "low": price(low),
+            "close": price(close),
             "volume": volume,
         })
         prev_close = close
@@ -731,6 +748,22 @@ class SelfTest(unittest.TestCase):
         status, hdrs, body = self.json("/api/history?symbol=BUSY")
         self.assertEqual((status, body["code"]), (429, "rate_limited"))
         self.assertEqual(hdrs["Retry-After"], "30")
+
+    def test_banded_symbol_trades_on_its_tick_schedule_across_the_boundary(self):
+        _, _, bars = self.json("/api/history?symbol=banded&interval=1d&from=1700000000&to=1730000000")
+        prices = [b[k] for b in bars for k in ("open", "high", "low", "close")]
+        self.assertTrue(any(p < BANDED_BOUNDARY for p in prices) and any(p >= BANDED_BOUNDARY for p in prices))
+        for p in prices:
+            cents = round(p * 100)
+            self.assertAlmostEqual(p * 100, cents, places=6)
+            if p >= BANDED_BOUNDARY:
+                self.assertEqual(cents % 5, 0, p)
+        for b in bars:
+            self.assertLessEqual(b["low"], min(b["open"], b["close"]))
+            self.assertGreaterEqual(b["high"], max(b["open"], b["close"]))
+        self.assertEqual(banded_price(99.996), 100.0)
+        self.assertEqual(banded_price(100.024), 100.0)
+        self.assertEqual(banded_price(100.025), 100.05)
 
     def test_upstream_errors_map_to_429_or_502_without_a_traceback(self):
         class YFRateLimitError(Exception):

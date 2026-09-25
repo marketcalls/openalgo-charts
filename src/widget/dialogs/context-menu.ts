@@ -39,7 +39,11 @@ import { mountAlertEditor, mountAlertsPanel } from './alerts';
 export interface OrderRequest {
   side: 'BUY' | 'SELL';
   type: 'MARKET' | 'LIMIT' | 'SL';
-  /** The price under the pointer; null for a market order raised off the plot. */
+  /**
+   * The price under the pointer, not snapped to the instrument's tick or
+   * tick schedule, which the widget does not know; round it (`validatePrice`
+   * does) before sending. Null for a market order raised off the plot.
+   */
   price: number | null;
   paneIndex: number;
 }

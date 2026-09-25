@@ -218,7 +218,7 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 | `IndicatorInputControlsOptions`, `IndicatorInputControlsHandle` | types | Native typed-field host actions. |
 | `SettingsDialogOptions`, `IndicatorPickerOptions`, `IndicatorSettingsOptions`, `IndicatorSettingsTab`, `DrawingPropertiesOptions`, `LevelEditorOptions`, `TextEditorOptions`, `TextEditorHandle`, `ContextMenuHooks`, `ContextMenuOptions`, `MenuEntry`, `MenuItem`, `OrderRequest`, `PanelHandle`, `FormControl`, `FormKind`, `FormOptions`, `FormHandle` | types | |
 
-`OrderRequest` is `{ side: 'BUY' | 'SELL'; type: 'MARKET' | 'LIMIT' | 'SL'; price: number | null; paneIndex: number }`; `price` is null for a market order.
+`OrderRequest` is `{ side: 'BUY' | 'SELL'; type: 'MARKET' | 'LIMIT' | 'SL'; price: number | null; paneIndex: number }`; `price` is null for a market order. Otherwise it is the pointer's price, not snapped to the instrument's tick or `TickSchedule` (the widget knows neither), so round it, for example with `validatePrice`, before sending.
 
 `FormKind` includes `symbol`, `session`, `multiline`, `price` and `timestamp`.
 `FormHandle.validate()` checks drafts and `setError(key, message)` reports a
