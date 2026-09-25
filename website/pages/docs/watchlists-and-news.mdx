@@ -37,9 +37,11 @@ const widget = createWidget('#chart', {
 widget.openWatchlist();
 ```
 
-Choosing a row charts that instrument, on its own exchange. `openWatchlist()` and
-`openNews()` return false when the source was not supplied, when `panels` is off, or
-after `destroy()`.
+Choosing a row charts that instrument, on its own exchange. The widget charts every
+symbol upper-cased, so the panel treats a row as the instrument it will chart: a
+lower-case entry is the chart's own row, and its upper-case twin is refused as already
+listed. `openWatchlist()` and `openNews()` return false when the source was not
+supplied, when `panels` is off, or after `destroy()`.
 
 ## Named lists
 
@@ -65,8 +67,11 @@ changed in another session" and reloads the saved lists.
 
 `createIndexedDbWatchlistStorage` compares and writes in one IndexedDB transaction.
 `createMemoryWatchlistStorage` keeps lists for the life of the page, for tests and
-previews. A server-backed store can implement the `WatchlistStore` contract directly.
-Corrupt stored data is reported, never replaced.
+previews. A server-backed store can implement the `WatchlistStore` contract directly:
+the repository's methods without `duplicateList`, which the panel never calls. Its
+`subscribe` listeners must run before a change's promise resolves, as the repository's
+do, because the panel computes a queued move from the catalog they deliver. Corrupt
+stored data is reported, never replaced.
 
 ## Quote rows
 
@@ -89,19 +94,23 @@ const myQuoteFeed: QuoteFeed = {
   as rows scroll into view and releases each as it leaves. Switching lists, hiding
   the page, closing or switching the panel, and `destroy()` release them all.
 - **Stale is visible.** While a stream reports `reconnecting` or `disconnected`, its
-  quotes are shown muted and underlined, and the status line says they may be stale.
+  quotes are shown muted and underlined, and the status line says they may be stale;
+  with no value on screen it says only that quotes are reconnecting or disconnected.
   When it is live again the panel asks for fresh snapshots. A source without
   `subscribeQuotes` is polled every `pollMs` (15 seconds by default) while rows are
-  visible, and a snapshot older than `staleAfterMs` (60 seconds) is stale.
+  visible, and a snapshot older than `staleAfterMs` (60 seconds) is stale. The panel
+  waits only for the next row that can still age into stale, so a quiet board holds
+  no timer and repaints nothing.
 - **Change figures need a reference.** Change and percent change come from the
   provider's `previousClose`; without one they stay blank.
 - **Sorting holds still.** Sort by symbol, last, change or percent change from the
   column headers; a third click returns to list order. Ties keep list order and
   unknown values sink in either direction. While the pointer or focus is on the rows,
-  prices update in place but rows do not move.
+  prices update in place but rows do not move. The sort outlives a panel switch.
 
 Keyboard: ArrowUp and ArrowDown move between rows, Enter charts a row, and
-Alt+ArrowUp or Alt+ArrowDown reorders it in list order.
+Alt+ArrowUp or Alt+ArrowDown reorders it in list order, one saved move at a time, so
+a held key lands every step.
 
 ## The news reader
 
@@ -132,7 +141,8 @@ what the provider returns.
 ## Custom hosts
 
 A host with its own chrome can mount the same panels into its own dock, as the yfinance
-reference host does with `mountPanelDock`:
+reference host does with `mountPanelDock` (its grid view instead passes `watchlist` and
+`news` to `createChartGrid`, which hands them to every chart):
 
 ```ts
 import {
@@ -151,7 +161,9 @@ const dock = mountPanelDock(ctx, stage, {
 });
 ```
 
-Or use the DOM-free controllers under your own view: `QuoteBoard` (`setVisible`,
+`mountWatchlistPanel` also takes `normalize(instrument)`, the instrument your host
+charts for an entry, when your symbol box folds case or otherwise renames what it
+opens. Or use the DOM-free controllers under your own view: `QuoteBoard` (`setVisible`,
 `row`, `status`) keeps streams to the instruments you mark visible and reports each
 row's `live`, `delayed`, `snapshot`, `stale`, `loading`, `unavailable` or `error` state;
 `NewsReader` (`setInstrument`, `refresh`, `loadMore`, `snapshot`) owns paging,

@@ -765,7 +765,9 @@ widget.openNews();
 - Rows take prices only from `quotes`. Without it every row is `unavailable` and shows
   `n/a`. Row `data-state` is a `QuoteRowStatus`: `loading`, `live`, `delayed`,
   `snapshot`, `stale`, `unavailable`, `error`; the status line reads the
-  `QuoteBoardStatus`. Only rows an `IntersectionObserver` reports on screen hold a
+  `QuoteBoardStatus`, and warns that values are stale only when one is on screen. The
+  board holds one timer, for the next visible snapshot to age past `staleAfterMs`; a
+  row behind a live stream never ages, so an idle board holds none. Only rows an `IntersectionObserver` reports on screen hold a
   stream; a list switch, a hidden page, closing or switching the panel, and `destroy`
   release them. Sorting by header (`WatchlistSort`, `WatchlistSortKey`: `list`, `symbol`,
   `last`, `change`, `percent`; a third click returns to list order) is stable, sinks
