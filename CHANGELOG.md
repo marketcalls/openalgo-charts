@@ -8,14 +8,22 @@ All notable changes to OpenAlgo Charts.
 
 - ATR treats a missing or overflowing true range as a gap. It seeds from the
   first `period` consecutive finite true ranges, keeps its average across a gap
-  and resumes from it, so one missing high, low or close costs only the bars it
-  covers instead of every later bar. A running overflow stays unavailable rather
-  than restarting. Finite results on complete data are unchanged bit for bit, as
-  is the public signature, which keeps the parity with the OpenAlgo atr
-  function. `supertrend`, Keltner Channels, Chandelier Exit, Chande Kroll Stop,
-  Median, HalfTrend and Volatility Stop inherit the correction; Volatility Stop
-  no longer falls back to the unmultiplied true range for the rest of the
-  history after one gap.
+  and resumes from it. A missing high or low now costs the ATR its own bar, and
+  a missing close the next bar, whose true range reads it, instead of every
+  later bar. A running overflow stays unavailable rather than restarting.
+  Finite results on complete data are unchanged bit for bit, as is the public
+  signature, which keeps the parity with the OpenAlgo atr function. Keltner
+  Channels, Chandelier Exit, Chande Kroll Stop, Median, HalfTrend and
+  Volatility Stop inherit the correction. Volatility Stop no longer falls back
+  to the unmultiplied true range for the rest of the history after one gap,
+  though a bar with no true range still restarts its stop at the source, as its
+  reference definition does.
+- `supertrend` and the Supertrend study leave a bar with no ATR or no close
+  absent, with the bands, the direction and the last accepted close unchanged.
+  A missing close has a finite ATR on its own bar, and comparing it as NaN
+  always flipped the trend; with the ATR now resuming, the flipped bands would
+  have carried into every later bar. The band step reads the last accepted
+  close, so a skipped bar's close cannot reset a band either.
 - VWAP leaves a bar with a missing price, or a NaN or infinite volume, absent and
   its running totals untouched. One such bar no longer blanks the line and all
   six bands until the next anchor restart, which on the continuous anchor was
@@ -27,6 +35,10 @@ All notable changes to OpenAlgo Charts.
   as nothing traded, as the money-flow studies already did, instead of losing
   the running total for the rest of the history. OBV's VWMA smoothing weights
   with the same volume.
+- Accumulation/Distribution leaves a bar missing its high, low or close, or
+  whose span or term overflows, absent with the total unchanged. A missing
+  close with a finite range blanked the line for the rest of the history, and a
+  missing high or low passed for a doji and printed the carried total.
 - Parabolic SAR steps over a bar missing its high, low or close and leaves the
   stop, trend and acceleration as they were. It seeds from the first two
   complete bars and clamps against the two complete bars before each step. The

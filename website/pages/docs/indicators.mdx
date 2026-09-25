@@ -57,11 +57,14 @@ you want to compute a value and plot it yourself. They use Wilder semantics to m
 `openalgo.ta`; the `*Series` helpers return `Bar[]` with `NaN` in warmup slots, which the
 line renderer skips as whitespace.
 
-`atr` seeds from the first `period` consecutive finite true ranges. A missing high, low or
-close gives its true range a `NaN` slot, the average is kept, and the next finite true range
-carries on from it, so a gap costs only the bars it covers. On complete data the values are
-the Wilder recurrence exactly, bit for bit. `supertrend` inherits this: a bar with no ATR
-has a `NaN` value and the bands resume on the next bar.
+`atr` seeds from the first `period` consecutive finite true ranges. A true range is missing
+when its own bar has no high or low, and when the bar before it has no close, so a missing
+close costs the ATR the next bar rather than its own. A missing true range is a `NaN` slot,
+the average is kept, and the next finite true range carries on from it. On complete data the
+values are the Wilder recurrence exactly, bit for bit. `supertrend` is `NaN` on a bar with no
+ATR or no close, and such a bar leaves the bands, the direction and the last close it used as
+they stood, so the next complete bar carries on from them and no flip is ever decided on a
+missing value.
 
 ```ts
 import {
@@ -230,14 +233,18 @@ extreme invalidates that period until the next existing session or calendar
 boundary; a complete subsequent period recovers. Only the final close is used.
 This does not change the existing schedule, display controls or pivot formulas.
 
-A missing input costs the running studies only the bars it covers:
+A missing input costs the running studies only the bars it covers, except where a row says
+otherwise:
 
 | Study | A bar with a missing input |
 |---|---|
-| `atr`, and the studies that read it: `keltner-channel`, `chandelier-exit`, `chande-kroll-stop`, `median`, `halftrend`, `volatility-stop`, `supertrend` | A missing high, low or close leaves that true range out. The average is kept and resumes on the next complete bar; a leading gap moves the first reading later. |
+| `atr`, and the studies that read it: `keltner-channel`, `chandelier-exit`, `chande-kroll-stop`, `median`, `halftrend` | A missing high or low leaves that bar's true range out, and a missing close the next bar's, which reads it. The average is kept and resumes on the next finite true range; a leading gap moves the first reading later. A study that also runs a window, such as `chande-kroll-stop` or `median`, loses the bars whose window holds the gap. |
+| `supertrend` | A bar with no ATR or no close is absent and leaves the bands, the direction and the last accepted close as they were. A missing close costs its own bar and the next, and no flip is decided on it. |
+| `volatility-stop` | The ATR under it resumes as above, but the stop does not hold across a gap: a bar with no true range restarts it at the source, as the reference definition does, and a missing source restarts it after the gap. Its level, and sometimes its side, then differ from complete data for some bars. |
 | `vwap` | A missing price, or a NaN or infinite volume, leaves the bar absent and the totals untouched. An undefined volume is a bar that traded nothing. |
 | `twap` | A missing price is skipped and not counted. |
-| `obv`, `adl` | A NaN or infinite volume counts as nothing traded, so the bar prints the carried total. |
+| `obv` | A NaN or infinite volume counts as nothing traded, so the bar prints the carried total. A missing close adds nothing on its own bar or on the next, which compares with it; both print the carried total. |
+| `adl` | A NaN or infinite volume counts as nothing traded, so the bar prints the carried total. A bar missing its high, low or close, or whose span or term overflows, is absent and the total stays where it was. |
 | `parabolic-sar` | A bar missing its high, low or close is skipped with the stop, trend and acceleration unchanged. The seed is the first two complete bars, and the clamp reads the two complete bars before each step. |
 | `tema` | Absent when any of its three averages is, or when `3 * ema1 - 3 * ema2 + ema3`, added left to right, is not finite. |
 
@@ -2347,7 +2354,7 @@ return chart;`} />
 
 | Field | Type | Meaning |
 |---|---|---|
-| `value` | `number` | The band price level. `NaN` during ATR warmup (first `period - 1` bars). |
+| `value` | `number` | The band price level. `NaN` during ATR warmup (the first `period - 1` bars on complete data) and on a bar with no ATR or no close, which leaves the bands and direction as they were. |
 | `direction` | `-1` or `1` | `-1` = uptrend: band is support below price (bullish). `1` = downtrend: band is resistance above price (bearish). |
 
 `supertrendSeries` converts that array into `{ up: Bar[], down: Bar[] }`. The `up` series
@@ -2418,16 +2425,17 @@ atr(
 ): number[]
 ```
 
-Smooths `trueRange` output using Wilder's formula. The first output lands at index
-`period - 1` (a plain average of the first `period` true ranges); from there each value is
-`(prev * (period - 1) + tr[i]) / period`. Slots before `period - 1` are `NaN`, which the
-line renderer skips as whitespace.
+Smooths `trueRange` output using Wilder's formula. On complete data the first output lands
+at index `period - 1` (a plain average of the first `period` true ranges); from there each
+value is `(prev * (period - 1) + tr[i]) / period`. Slots before `period - 1` are `NaN`, which
+the line renderer skips as whitespace. A missing true range is a `NaN` slot that keeps the
+average, and the next finite one carries on from it; a gap before the seed moves it later.
 
 ```ts
 import { atr, trueRange } from 'openalgo-charts';
 
-const rawTR   = trueRange(highs, lows, closes);   // finite for every bar, no warmup
-const atrVals = atr(highs, lows, closes, 14);     // NaN for bars 0-12, then Wilder ATR
+const rawTR   = trueRange(highs, lows, closes);   // complete data: finite for every bar, no warmup
+const atrVals = atr(highs, lows, closes, 14);     // complete data: NaN for bars 0-12, then Wilder ATR
 ```
 
 <Callout type="info">

@@ -569,7 +569,8 @@ function emaSeries(bars: readonly Bar[], period: number): Bar[]
 function rsi(values: readonly number[], period?: number /* default 14 */): number[]
 function rsiSeries(bars: readonly Bar[], period?: number /* default 14 */): Bar[]
 
-// ATR -- Wilder ATR; first ATR value lands at index period-1, earlier slots NaN
+// ATR -- Wilder ATR; on complete data the first value lands at index period-1, earlier slots NaN;
+// a missing true range is a NaN slot, and the average resumes from where it stood
 function trueRange(high: readonly number[], low: readonly number[], close: readonly number[]): number[]
 function atr(high: readonly number[], low: readonly number[], close: readonly number[], period?: number /* default 14 */): number[]
 
