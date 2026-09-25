@@ -90,7 +90,8 @@ most 12 decimals, and a schedule has 1 to 64 bands. Invalid bands throw
 ```ts
 const banded = new Instrument({ ...metadata, priceTick: 0.01,
   tickBands: [{ tick: 0.02 }, { from: 20, tick: 0.05 }] }); // synthetic rules
-banded.tickSchedule.round(20.03); // 20.05, an exact decimal
+const ticks = banded.tickSchedule; // TickSchedule | null, null for a constant tick
+if (ticks !== null) ticks.round(20.03); // 20.05, an exact decimal
 ```
 
 `instrument.tickSchedule` is the validated `TickSchedule`: `round` gives the nearest

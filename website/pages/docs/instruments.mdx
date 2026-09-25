@@ -77,9 +77,13 @@ const banded = new Instrument({
   priceTick: 0.01, pricePrecision: 2, quantityStep: 1, intervals: ['1m', 'D'],
   calendar: { sessions: ['0915-1530:23456'] },
 });
-banded.tickSchedule.round(19.97);   // 19.98
-banded.tickSchedule.round(20.03);   // 20.05
-banded.tickSchedule.tickAt(20);     // 0.05
+// Typed TickSchedule | null: null for a constant-tick instrument.
+const ticks = banded.tickSchedule;
+if (ticks !== null) {
+  ticks.round(19.97);   // 19.98
+  ticks.round(20.03);   // 20.05
+  ticks.tickAt(20);     // 0.05
+}
 validatePrice(20.03, orderConstraintsForInstrument(banded)).price; // 20.05
 ```
 
