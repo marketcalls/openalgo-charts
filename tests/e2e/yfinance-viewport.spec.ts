@@ -87,3 +87,35 @@ test('the pin toggle keeps a box in place through a pan, and unpinning returns i
   expect(back.points).toHaveLength(2);
   expect(errors).toEqual([]);
 });
+
+test('the pin toggle says why a drawing on a folded pane did not move, and pins it once the pane is open', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const { id, paneIndex } = await page.evaluate(() => {
+    const app = (window as any).__oac.app;
+    const bars = app.currentBars;
+    const study = app.chart.addIndicator('rsi', { length: 14 });
+    const a = bars[bars.length - 40];
+    const b = bars[bars.length - 20];
+    const drawing = app.draw.add({ tool: 'rectangle', paneIndex: study.paneIndex, style: { color: '#ff00ff', lineWidth: 4 },
+      points: [{ time: a.time, price: 65 }, { time: b.time, price: 35 }] });
+    app.draw.select(drawing.id);
+    return { id: drawing.id, paneIndex: study.paneIndex };
+  });
+  expect(paneIndex).toBeGreaterThan(0);
+  expect(await page.evaluate(p => (window as any).__oac.app.chart.setPaneCollapsed(p, true), paneIndex)).toBe(true);
+  const pin = page.locator('#propbar [data-path="space"]');
+  await expect(pin).toBeVisible();
+  await pin.click();
+  await expect(page.locator('#toasts .toast__msg')).toHaveText(['A drawing can be pinned only while its pane is on screen']);
+  await expect(pin).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(i => (window as any).__oac.app.draw.get(i).space, id)).toBeUndefined();
+  await page.screenshot({ path: info.outputPath('host-pin-refused.png') });
+  expect(await page.evaluate(p => (window as any).__oac.app.chart.setPaneCollapsed(p, false), paneIndex)).toBe(true);
+  await page.evaluate(i => (window as any).__oac.app.draw.select(i), id);
+  await pin.click();
+  await expect(pin).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(i => (window as any).__oac.app.draw.get(i).space, id)).toBe('viewport');
+  await expect(page.locator('#toasts .toast__msg')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});

@@ -13,7 +13,7 @@ import {
   drawingSettingsSchema, readDrawingSettings, applyDrawingSettings, getDrawingTool, chromeIconSvg,
   formatRatio, gannLabel, cloneLevels, DEFAULT_FIB,
 } from '/dist/openalgo-charts.draw.mjs';
-import { el, inTextField } from './ui.js';
+import { el, inTextField, toast } from './ui.js';
 import { attachTip } from './hover.js';
 import { openTextEditor, EDITOR_CSS } from './text-editor.js';
 import { buildLevelEditor, LEVEL_CSS } from './level-editor.js';
@@ -827,7 +827,16 @@ export function mountPropertiesBar(app, anchorEl) {
         title: values().space === 'viewport' ? 'Pinned to the screen' : 'Pin to the screen',
         sub: values().space === 'viewport' ? 'Click to follow the bars again' : 'Stays put when the chart pans or zooms',
         side: 'top',
-      }), () => apply({ space: values().space === 'viewport' ? 'data' : 'viewport' }));
+      }), () => {
+        const want = values().space === 'viewport' ? 'data' : 'viewport';
+        apply({ space: want });
+        // The controller converts nothing on a pane folded to its strip or
+        // hidden behind a maximized one, and the toggle reads the model back,
+        // so a click that changed nothing says why.
+        if (drawingsOf().some((d) => (d.space || 'data') !== want)) {
+          toast('info', `A drawing can be ${want === 'viewport' ? 'pinned' : 'unpinned'} only while its pane is on screen`);
+        }
+      });
       pin.dataset.path = 'space';
       const paint = () => {
         const on = values().space === 'viewport';

@@ -59,6 +59,30 @@ describe('the pin toggle on the properties bar', () => {
     back.points.forEach((p, i) => { expect(p.time).toBeCloseTo(original[i].time, 6); expect(p.price).toBeCloseTo(original[i].price, 9); });
   });
 
+  it('says why the drawing did not move when its pane has no plot on screen, both ways', () => {
+    const toasts = () => document.querySelectorAll('.toast__msg').map((n) => n.textContent);
+    const onScreen = chart.panes;
+    // A pane folded to its strip, or hidden behind a maximized one, has no height.
+    const fold = () => { chart.panes = () => [{ priceToY, yToPrice: (y) => (500 - y) / 2, priceScale: { height: 0 } }]; };
+    const r = rect(draw);
+    draw.select(r.id);
+    fold();
+    q('[data-path="space"]').click();
+    expect(draw.get(r.id).space).toBeUndefined();
+    expect(q('[data-path="space"]').getAttribute('aria-pressed')).toBe('false');
+    expect(toasts()).toEqual(['A drawing can be pinned only while its pane is on screen']);
+    // On screen again, the same click pins it and says nothing.
+    chart.panes = onScreen;
+    q('[data-path="space"]').click();
+    expect(draw.get(r.id).space).toBe('viewport');
+    expect(toasts()).toHaveLength(1);
+    fold();
+    q('[data-path="space"]').click();
+    expect(draw.get(r.id).space).toBe('viewport');
+    expect(q('[data-path="space"]').getAttribute('aria-pressed')).toBe('true');
+    expect(toasts()[1]).toBe('A drawing can be unpinned only while its pane is on screen');
+  });
+
   it('is left off the bar for a tool that cannot be pinned', () => {
     const l = line(draw);
     draw.select(l.id);
