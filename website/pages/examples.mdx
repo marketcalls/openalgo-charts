@@ -433,8 +433,8 @@ Every option and event is on [The Widget Tier](/docs/widget).
 
 Named lists with live quote rows, and the news for the chart's symbol, in the same
 panel as Data and Objects. Only the rows on screen hold a quote stream. Sort by a
-column, open a row to chart it, or switch to **News** and open an item. Unreleased:
-see [Watchlists & News](/docs/watchlists-and-news).
+column, open a row to chart it, or switch to **News** and open an item. See
+[Watchlists & News](/docs/watchlists-and-news).
 
 <RunnableExample height={560} tiers={['widget']} caption="Simulated quotes, bars and headlines. One simulated exchange prices both the chart and the rows, and the rows take their prices only from the quote source, never from a candle." code={`${STOCK_BARS_SOURCE}
 const names = ['NOVA', 'ORBIT', 'PULSE', 'QUILL', 'RIDGE', 'SOLAR', 'TIDAL', 'UMBRA'];
@@ -503,7 +503,9 @@ const widget = lib.createWidget(el, {
   watchlist: { store, quotes },
   news: { feed: news, pageSize: 8 },
 });
-widget.openWatchlist();
+// Open the list beside the chart. At 640 px and below the panel is a full sheet
+// over the chart, so leave it for the reader to open from the Watchlist button.
+if (el.clientWidth > 640) widget.openWatchlist();
 return widget;`} />
 
 ## Objects and compact dialogs

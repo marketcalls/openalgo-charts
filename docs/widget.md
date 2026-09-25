@@ -114,7 +114,7 @@ while its actions remain reachable.
 The panel dock can carry two more panels beside Data and Objects: a Watchlist of
 named lists with quote rows, and a News reader for the chart's instrument. Each is
 optional, and its tab, top bar button and mobile More entry appear only when the host
-supplies its source. Both need `panels` on. This is unreleased on the main branch.
+supplies its source. Both need `panels` on. Added in 2.5.5.
 
 ```ts
 import { createWidget } from 'openalgo-charts/widget';

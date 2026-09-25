@@ -259,7 +259,7 @@ protocol to provide this guarantee; aborting only its HTTP response is insuffici
 
 The same tier keeps named symbol lists with the same storage discipline as the
 workspace catalog. It is DOM-free; the widget tier's Watchlist panel, or a host's own
-view, reads it. This is unreleased on the main branch.
+view, reads it. Added in 2.5.5.
 
 ```ts
 import {

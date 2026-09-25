@@ -81,7 +81,7 @@ The time axis is gapless (weekends, holidays, and session breaks collapse) so a 
 
 Drag deltas are computed in data space too (`p.time - start.from.time`), so translating a shape keeps it on the same bars.
 
-The one exception is a drawing pinned to the screen (`space: 'viewport'`), whose anchors are fractions of its pane's plot in a field of their own, `viewportPoints`. Its time and price are never overloaded with pixels. See [Viewport-anchored drawings](#viewport-anchored-drawings-unreleased).
+The one exception is a drawing pinned to the screen (`space: 'viewport'`), whose anchors are fractions of its pane's plot in a field of their own, `viewportPoints`. Its time and price are never overloaded with pixels. See [Viewport-anchored drawings](#viewport-anchored-drawings-255).
 
 ## Anchored analysis drawings
 
