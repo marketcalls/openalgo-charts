@@ -44,6 +44,9 @@ export function initGridView(doc = document) {
     // Touch devices get the phone controls in each chart; a mouse keeps the
     // desktop bar even when a chart in a four-way split is narrow.
     mobile: coarse ? 'auto' : 'never',
+    // Nothing here passes pane 0 for the price, so a chart may keep its price
+    // pane below its studies, and a layout the main page saved that way opens.
+    movablePrimaryPane: true,
   });
   // A first visit shows four different instruments rather than one repeated.
   if (fresh && handed === null) grid.cells().forEach((cell, i) => cell.widget.setSymbol(FIRST_VISIT[i] || 'AAPL'));

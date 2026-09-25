@@ -56,6 +56,37 @@ test('the grid view loads four instruments, switches presets and links, and keep
   expect(errors).toEqual([]);
 });
 
+test('the grid view lets a chart put its price pane below a study, and a reload keeps it there', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(ORIGIN + '/examples/yfinance/grid.html?test=1');
+  await page.waitForFunction(() => (window as any).__grid?.cells().length === 4);
+  await expect.poll(() => loaded(page), { timeout: 20_000 }).toBe(true);
+  // The grid view opts in, as the main page does, so a layout either one saves opens in the other.
+  expect(await grid(page, g => g.cells().map((cell: any) => cell.widget.chart.movablePrimaryPane()))).toEqual([true, true, true, true]);
+  await grid(page, g => { g.cells()[0].widget.chart.addIndicator('rsi'); });
+  const box = await grid(page, g => {
+    const r = g.cells()[0].widget.chart.panes()[0].element.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await page.mouse.click(box.x, box.y, { button: 'right' });
+  const row = page.locator('.oac-ctx__row[data-act="pane-down"]');
+  await expect(row).toBeVisible();
+  await expect(row).not.toHaveAttribute('aria-disabled', 'true');
+  await row.click();
+  await expect.poll(() => grid(page, g => g.cells()[0].widget.chart.primaryPaneIndex())).toBe(1);
+  await expect.poll(() => grid(page, g => g.cells()[0].widget.chart.indicators()[0].paneIndex)).toBe(0);
+  await page.screenshot({ path: info.outputPath('yfinance-grid-price-below.png') });
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('oac-widget:yfinance-grid:grid') ?? '{}').panes?.[0].chart.primaryPane)).toBe(1);
+  await page.reload();
+  await page.waitForFunction(() => (window as any).__grid?.cells().length === 4);
+  expect(await grid(page, g => g.cells()[0].widget.chart.primaryPaneIndex())).toBe(1);
+  expect(await grid(page, g => g.cells()[0].widget.chart.indicators().map((item: any) => [item.indicatorId, item.paneIndex]))).toEqual([['rsi', 0]]);
+  await expect.poll(() => loaded(page), { timeout: 20_000 }).toBe(true);
+  await page.screenshot({ path: info.outputPath('yfinance-grid-price-below-reloaded.png') });
+  expect(errors).toEqual([]);
+});
+
 test('a saved grid the page cannot restore is kept and reported, not overwritten', async ({ page }) => {
   await page.goto(ORIGIN + '/examples/yfinance/grid.html?test=1');
   await page.waitForFunction(() => (window as any).__grid?.cells().length === 4);

@@ -859,9 +859,10 @@ pastes beside the candles on either chart, wherever each keeps its price pane.
 
 The engine keeps the price pane pinned on top unless a chart is built with
 `movablePrimaryPane: true`, which both of this host's charts are (`main.js`,
-`split.js`). That option is a promise that nothing in the host passes pane `0`
-to mean the price pane: this host names no pane or asks `primaryPaneIndex()` for
-its order and price lines, volume, legends, price levels, replay marks, session
-marks, alert and order rows and axis chords, keeps `primaryPane` in its
-named-workspace allowlist, and forwards `plan.primaryPane` when it applies a
-template.
+`split.js`), and so is every chart of its grid view (`grid.js`); the widget
+leaves the option off unless a host passes it. That option is a promise that
+nothing in the host passes pane `0` to mean the price pane: this host names no
+pane or asks `primaryPaneIndex()` for its order and price lines, volume,
+legends, price levels, replay marks, session marks, alert and order rows and
+axis chords, keeps `primaryPane` in its named-workspace allowlist, and forwards
+`plan.primaryPane` when it applies a template.
