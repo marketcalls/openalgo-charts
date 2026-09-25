@@ -770,7 +770,9 @@ widget.openNews();
   release them. Sorting by header (`WatchlistSort`, `WatchlistSortKey`: `list`, `symbol`,
   `last`, `change`, `percent`; a third click returns to list order) is stable, sinks
   unknowns in both directions, and holds row order while the pointer or focus is in the
-  rows. Conflicts show "The watchlists changed in another session" and reload the store.
+  rows. The sort is read from and written to `ctx.storage` (`watchlist-sort`), and kept
+  per store in memory as well, so it outlives a panel switch when that storage keeps
+  nothing. Conflicts show "The watchlists changed in another session" and reload the store.
 - `mountNewsPanel(ctx, host, NewsPanelOptions)` returns a `NewsPanelHandle` (`el`,
   `initialFocus`, `refresh()`, `destroy()`). It follows the chart's `data:context`
   instrument (an interval change is the same instrument), cancels the previous request

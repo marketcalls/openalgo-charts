@@ -70,6 +70,12 @@ const keyOf = (entry: InstrumentKey): string => JSON.stringify([entry.symbol, en
 const describeEntry = (entry: InstrumentKey): string => entry.exchange === '' ? entry.symbol : `${entry.symbol} on ${entry.exchange}`;
 const sameInstrument = (a: InstrumentKey, b: InstrumentKey): boolean => a.symbol === b.symbol && a.exchange === b.exchange;
 
+/**
+ * The last sort per list store, for a context whose storage keeps nothing: the
+ * dock rebuilds the panel on every switch, and the sort should outlive that.
+ */
+const lastSort = new WeakMap<WatchlistStore, WatchlistSort>();
+
 function readSort(raw: unknown): WatchlistSort {
   const value = raw as Partial<WatchlistSort> | null;
   const key = value?.key;
@@ -168,7 +174,7 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
   // ── state ────────────────────────────────────────────────────────────
   let catalog: WatchlistCatalog | null = null;
   let listId: string | null = null;
-  let sort = readSort(ctx.storage?.get(SORT_KEY));
+  let sort = readSort(ctx.storage?.get(SORT_KEY) ?? lastSort.get(store) ?? null);
   let formMode: 'create' | 'rename' | null = null;
   let pointerHold = false, focusHold = false;
   let order: string[] = [];
@@ -365,6 +371,7 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
       : sort.direction === first ? { key, direction: first === 'ascending' ? 'descending' : 'ascending' }
         : { key: 'list', direction: 'ascending' };
     ctx.storage?.set(SORT_KEY, sort);
+    lastSort.set(store, sort);
     paint();
     syncVisible();
   }

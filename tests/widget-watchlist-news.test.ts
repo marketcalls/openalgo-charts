@@ -105,6 +105,21 @@ describe('widget watchlist and news', () => {
     expect(rows()[0].getAttribute('aria-current')).toBe('true');
   });
 
+  it('keeps the watchlist sort when the panel is switched away and back without persistence', async () => {
+    const s = sources();
+    await s.store.createList('Tech', [{ symbol: 'INFY', exchange: 'NSE' }, { symbol: 'TCS', exchange: 'NSE' }]);
+    const { widget, root } = make({ watchlist: { store: s.store, quotes: s.quotes } });
+    widget.openWatchlist();
+    await flush();
+    const percent = () => root.querySelector('.oac-watchlist th[data-sort="percent"]') as FakeElement;
+    (percent().querySelector('button') as FakeElement).click();
+    expect(percent().getAttribute('aria-sort')).toBe('descending');
+    widget.openDataWindow();
+    widget.openWatchlist();
+    await flush();
+    expect(percent().getAttribute('aria-sort')).toBe('descending');
+  });
+
   it('opens news for the chart instrument and follows a symbol change', async () => {
     const s = sources();
     const { widget, topButton, root } = make({ news: { feed: s.news } });
