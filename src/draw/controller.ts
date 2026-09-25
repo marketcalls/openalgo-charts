@@ -85,6 +85,12 @@ export interface DrawingChartHost {
    * pane the chart maps no price for, one collapsed to its header strip.
    */
   panes?(): readonly unknown[];
+  /**
+   * Optional. Slot of the price pane, the one pane whose drawings the magnet
+   * snaps to candle prices and a drawing link shares. It moves when a host
+   * puts the price pane below its studies; without it the price pane is slot 0.
+   */
+  primaryPaneIndex?(): number;
 }
 
 /** The pane-local price projection a chart pane carries, in media px. */
@@ -1698,7 +1704,7 @@ export class DrawingController {
    */
   private _snapPoint(point: DrawingPoint, paneIndex: number): DrawingPoint | null {
     const mode = this._opts.magnet;
-    if (mode === 'off' || paneIndex !== 0) return null;
+    if (mode === 'off' || paneIndex !== (this._chart.primaryPaneIndex?.() ?? 0)) return null;
     const bar = this._lastBar;
     if (bar === null) return null;
     const values = [bar.open, bar.high, bar.low, bar.close];

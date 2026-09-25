@@ -45,7 +45,7 @@ export interface StatuslineHandle {
  */
 export const MIN_PRICE_DIGITS = 2;
 export function priceDigits(chart: Chart): number {
-  const pane = chart.panes()[0];
+  const pane = chart.panes()[chart.primaryPaneIndex()];
   if (pane === undefined) return MIN_PRICE_DIGITS;
   const p = pane.priceScale.precision();
   return Number.isFinite(p) ? Math.max(MIN_PRICE_DIGITS, Math.min(8, Math.round(p))) : MIN_PRICE_DIGITS;

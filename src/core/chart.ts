@@ -55,8 +55,6 @@ interface PreparedIndicatorRestore {
   descriptors: ReadonlyMap<string, IndicatorDescriptor>;
 }
 type PreservedScaleFormats = ReadonlyMap<Pane, ReadonlySet<PriceScaleId>>;
-/** How close to the chart top counts as "in the host's corner", in media px. */
-const LEGEND_TOP_EPS = 12;
 
 /**
  * How fast a drag's remembered velocity fades while the pointer is still down,
@@ -246,11 +244,12 @@ export interface ChartOptions {
    * land underneath and their settings / close buttons become invisible and
    * unclickable.
    *
-   * It follows whichever pane currently renders at that corner, which is
-   * normally pane 0 — but maximizing a lower pane parks the others at a
-   * placeholder weight, so the maximized pane moves into the same corner and
-   * inherits the offset. Every other pane keeps the default corner, because a
-   * short lower pane would have its legend pushed off it entirely.
+   * It follows the primary price pane, which is at the top until something
+   * moves it below its studies: a readout of the price belongs to the price
+   * pane, wherever it sits. Maximizing a study pane hides the price pane, so
+   * the maximized pane, now in the same corner, inherits the offset. Every
+   * other pane keeps the default corner, because a short study pane would
+   * have its legend pushed off it entirely.
    *
    * Defaults to `{ top: 6, left: 8 }`.
    */
@@ -407,7 +406,11 @@ export interface ChartOptions {
 }
 
 export interface AddSeriesOptions {
-  /** Target pane index (0 = price). Higher panes are created on demand. */
+  /**
+   * Target pane index. Omitted means the primary price pane wherever it sits
+   * (slot 0 until something moves it, see `Chart.primaryPaneIndex`). Higher
+   * panes are created on demand.
+   */
   paneIndex?: number;
   /** Style overrides merged onto the chart type's defaults. */
   style?: SeriesStyle;
@@ -727,6 +730,13 @@ export class Chart {
   private readonly _pixelRatio: () => number;
   private _theme: ChartTheme;
   private readonly _panes: Pane[] = [];
+  /**
+   * The primary price pane, held by identity. It is the pane the chart is
+   * built with, and it can sit in any slot: `_panes` is the visual order, so
+   * "the price pane" is wherever this is, never simply slot 0. See
+   * `primaryPaneIndex`.
+   */
+  private _primaryPane!: Pane;
   private readonly _loop: RenderLoop;
   /** The frame scheduler, kept for the one-shot re-measure after construction. */
   private readonly _raf: { schedule: RafScheduler; cancel: RafCanceller };
@@ -893,8 +903,12 @@ export class Chart {
   /** Native double clicks can join a consumed count press to a newly empty plot row. */
   private _lastPressOnIndicatorToggle = false;
   private _previousPressOnIndicatorToggle = false;
-  /** Pane holding the primary price series (only this pane gets magnet snapping). */
-  private _firstPaneIndex = 0;
+  /**
+   * Pane holding the primary price series (only this pane gets magnet
+   * snapping). By identity, for the reason `_primaryPane` is: a move changes
+   * its slot and nothing else about it.
+   */
+  private _firstPane: Pane | null = null;
   private _historyLoader: (() => void) | null = null;
   private _loadingHistory = false;
   private _clickCb: ((externalId: string) => void) | null = null;
@@ -1376,7 +1390,7 @@ export class Chart {
     const dataId = this._dataLayer.createSeries();
     const provenance = new SeriesProvenance(dataId);
     this._seriesProvenance.set(dataId, provenance);
-    const paneIndex = options.paneIndex ?? 0;
+    const paneIndex = options.paneIndex ?? this._primaryIndex();
     this._ensurePane(paneIndex);
     const record = createSeriesRecord(dataId, type, options.style, options.priceScaleId ?? 'right');
     // A pane starts quoting the instrument the moment the host plots a price on
@@ -1388,7 +1402,7 @@ export class Chart {
     const isPrimary = claimPrimary && this._firstDataId.value === null && getChartType(type).isPriceSeries;
     if (isPrimary) {
       this._firstDataId.value = dataId;
-      this._firstPaneIndex = paneIndex;
+      this._firstPane = this._panes[paneIndex];
     }
     this._panes[paneIndex].addSeries(record);
     this._recomputeAxisColumns(); // reserve/free the axis columns
@@ -1524,17 +1538,20 @@ export class Chart {
     scale.setPriceFormatter((v) => v.toFixed(digits));
   }
 
-  /** Add a horizontal price line (order/SL/TP/alert/level) to a pane. */
-  public addPriceLine(opts: PriceLineOptions, paneIndex = 0): PriceLine {
+  /**
+   * Add a horizontal price line (order/SL/TP/alert/level) to a pane. Omitting
+   * the pane means the primary price pane, wherever it sits.
+   */
+  public addPriceLine(opts: PriceLineOptions, paneIndex?: number): PriceLine {
     const line = new PriceLine(opts);
-    this._addPrimitive(paneIndex, line);
+    this._addPrimitive(paneIndex ?? this._primaryIndex(), line);
     return line;
   }
 
-  /** Add an earnings/dividend/split event-marker strip to a pane. */
-  public addEventMarkers(paneIndex = 0, options: Partial<EventMarkersOptions> = {}): EventMarkers {
+  /** Add an earnings/dividend/split event-marker strip to a pane, the primary price pane by default. */
+  public addEventMarkers(paneIndex?: number, options: Partial<EventMarkersOptions> = {}): EventMarkers {
     const em = new EventMarkers(options);
-    this._addPrimitive(paneIndex, em);
+    this._addPrimitive(paneIndex ?? this._primaryIndex(), em);
     return em;
   }
 
@@ -1544,15 +1561,16 @@ export class Chart {
    * full list here is what lets `setEventOptions` (the settings dialog's Events
    * switches) turn a type off and back on without the host re-supplying data.
    */
-  public setEvents(events: readonly ChartEvent[], paneIndex = 0): void {
+  public setEvents(events: readonly ChartEvent[], paneIndex?: number): void {
     const markers = this._ensureEventMarkers();
     markers.setEvents(events);
     this._events = markers.events();
-    if (paneIndex !== this._eventPane) {
+    const target = paneIndex ?? this._primaryIndex();
+    if (target !== this._eventPane) {
       this.removePrimitive(markers);
-      this._addPrimitive(paneIndex, markers);
+      this._addPrimitive(target, markers);
     }
-    this._eventPane = paneIndex;
+    this._eventPane = target;
     this._syncEvents();
   }
 
@@ -1587,6 +1605,9 @@ export class Chart {
   private _ensureEventMarkers(): EventMarkers {
     if (this._eventMarkers === null) {
       this._eventMarkers = new EventMarkers();
+      // A strip is born on the price pane wherever that sits; the slot a
+      // previous strip was moved to means nothing once there is no strip.
+      this._eventPane = this._primaryIndex();
       this._addPrimitive(this._eventPane, this._eventMarkers);
       this.on('click', payload => {
         const click = payload as ChartClickEvent;
@@ -1634,7 +1655,7 @@ export class Chart {
     validateIndicatorInputs(descriptor.inputs, validatedSettings);
     const plotPriceScaleIds = options.plotPriceScaleIds === undefined ? undefined : parseIndicatorPlotPriceScales(descriptor, options.plotPriceScaleIds);
     validateIndicatorScaleAssignment(descriptor, options.priceScaleId, plotPriceScaleIds,
-      options.paneIndex ?? (descriptor.placement === 'onchart' ? 0 : this._panes.length));
+      options.paneIndex ?? (descriptor.placement === 'onchart' ? this._primaryIndex() : this._panes.length), this._primaryIndex());
     this._flushIndicators();
     const reserved = new Set([...this._indicatorReservedIds, ...this._indicators.map(item => item.id)]);
     for (const edges of planIndicatorDependencies(this._indicators.map(item => item.dependencyNode())).dependencies.values()) {
@@ -1730,7 +1751,7 @@ export class Chart {
     this.emit('objects:change', {});
     // Retain a pane holding drawings or host visuals even after its last plot moves.
     const source = this._panes[previous];
-    if (previous > 0 && source.series().length === 0 && source.primitives().every(primitive => primitive === this._timeNav || this._anchored.some(entry => entry.primitive === primitive))) this.removePane(previous);
+    if (source !== this._primaryPane && source.series().length === 0 && source.primitives().every(primitive => primitive === this._timeNav || this._anchored.some(entry => entry.primitive === primitive))) this.removePane(previous);
     this._reorderIndicatorResources();
     this._recomputeAxisColumns();
     this._relayout();
@@ -1788,7 +1809,7 @@ export class Chart {
     const i = this._indicators.findIndex((x) => x.id === instanceId);
     if (i < 0) {
       const pane = failedOwnedPane === undefined ? undefined : this._panes[failedOwnedPane];
-      if (failedOwnedPane !== undefined && failedOwnedPane > 0 && pane?.series().length === 0 && pane.primitives().every(primitive => primitive === this._timeNav || this._anchored.some(entry => entry.primitive === primitive))) this.removePane(failedOwnedPane);
+      if (failedOwnedPane !== undefined && pane !== undefined && pane !== this._primaryPane && pane.series().length === 0 && pane.primitives().every(primitive => primitive === this._timeNav || this._anchored.some(entry => entry.primitive === primitive))) this.removePane(failedOwnedPane);
       return;
     }
     const { indicatorId, paneIndex } = this._indicators[i];
@@ -1802,8 +1823,10 @@ export class Chart {
     // in the legend's close handler, so only the on-chart × pruned the pane — a
     // host removing the same indicator from its own UI left it behind, and
     // `getState` then persisted the orphan, so every reload restored a blank
-    // region. Doing it here means every caller behaves the same.
-    if (paneIndex > 0 && this._panes[paneIndex]?.series().length === 0) this.removePane(paneIndex);
+    // region. Doing it here means every caller behaves the same. The price
+    // pane stays whatever emptied it, and it can sit in any slot.
+    const pane = this._panes[paneIndex];
+    if (pane !== undefined && pane !== this._primaryPane && pane.series().length === 0) this.removePane(paneIndex);
   }
 
   /** Optional instrument identity supplied by the host, never inferred from bars. */
@@ -1930,7 +1953,7 @@ export class Chart {
     const text = o.text?.trim() ? o.text : [this._dataContext?.symbol, this._dataContext?.interval].filter(Boolean).join(' ');
     if (this._watermark === null) {
       this._watermark = new TextWatermark({ ...o, text });
-      this.addPrimitive(this._watermark, { anchor: 'chart-top' });
+      this.addPrimitive(this._watermark, { anchor: 'primary-pane' });
     } else this._watermark.setOptions({ ...o, text });
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
   }
@@ -2050,6 +2073,9 @@ export class Chart {
         } : state;
       },
       nextPaneIndex: (): number => this._panes.length,
+      // Read at every call, never kept: a study resolves its price-pane plots,
+      // bands, tables and marks against wherever the price pane sits now.
+      primaryPaneIndex: (): number => this._primaryIndex(),
       // The calendar a session anchor resets on and the calendar the axis is
       // labelled in have to be the same one, or a VWAP restarts in the middle
       // of the afternoon the axis is showing.
@@ -2106,9 +2132,9 @@ export class Chart {
       // Answered per pane, so a pane that does not quote the instrument says
       // undefined (see `_scalePatchFor`). That is what the legend beside that
       // axis wants; an indicator's `calc` wants the instrument's own tick, and
-      // asks pane 0 for it.
+      // asks the price pane for it.
       tickSize: (paneIndex: number): number | undefined => {
-        const pane = this._panes[paneIndex] ?? this._panes[0];
+        const pane = this._panes[paneIndex] ?? this._primaryPane;
         const min = pane?.priceScale.options.minMove ?? 0;
         // 0 is the scale's "infer from the visible range" sentinel, not a tick.
         return min > 0 ? min : undefined;
@@ -2123,7 +2149,7 @@ export class Chart {
         // Declared, not measured: the scale remembers the band so a later
         // auto-fit request comes back to it instead of re-measuring an
         // oscillator against its own values (see `PriceScale.setFixedRange`).
-        const shared = paneIndex === 0 || this._indicators.filter(item => item.paneIndex === paneIndex).length > 1;
+        const shared = pane === this._primaryPane || this._indicators.filter(item => item.paneIndex === paneIndex).length > 1;
         pane.priceScale.setFixedRange(shared ? null : range);
         if (range === null) pane.priceScale.setAutoScale(true);
       },
@@ -2510,9 +2536,12 @@ export class Chart {
     this._emitViewport(resized ? 'zoom' : 'pan');
   }
 
-  /** Public: attach any primitive (indicators, profiles, custom overlays) to a pane. */
-  public addPrimitive(primitive: IPrimitive, where: number | PrimitivePlacement = 0): void {
-    if (typeof where === 'number') { this._addPrimitive(where, primitive); return; }
+  /**
+   * Public: attach any primitive (indicators, profiles, custom overlays) to a
+   * pane, the primary price pane when none is named, or to a chart anchor.
+   */
+  public addPrimitive(primitive: IPrimitive, where?: number | PrimitivePlacement): void {
+    if (where === undefined || typeof where === 'number') { this._addPrimitive(where ?? this._primaryIndex(), primitive); return; }
     // Chart furniture: a brand mark, a corner clock. It belongs to the CHART,
     // not to whichever pane happens to be last, so the engine re-homes it as
     // panes come and go instead of every host writing its own placeWatermark().
@@ -2522,16 +2551,31 @@ export class Chart {
 
   /** The pane a chart anchor currently resolves to. */
   private _anchorTarget(anchor: PrimitiveAnchor): number {
-    return anchor === 'chart-bottom' ? this._bottomPaneIndex(true) : this._topPaneIndex();
+    if (anchor === 'chart-bottom') return this._bottomPaneIndex(true);
+    return anchor === 'primary-pane' ? this._priceCornerIndex() : this._topPaneIndex();
+  }
+
+  /**
+   * The pane that wears the price pane's furniture: the primary pane while it
+   * is on screen, else the pane at the top, which is the one maximized over
+   * it. A host's symbol line and OHLC readout describe the price, so they,
+   * the study count, the background text and the legend offset belong with
+   * the price pane wherever it sits, and the price pane is hidden only while
+   * another pane fills the chart in its place.
+   */
+  private _priceCornerIndex(): number {
+    const primary = this._primaryIndex();
+    return this._layoutWeight(primary) > 0 ? primary : this._topPaneIndex();
   }
 
   /**
    * Move every chart-anchored primitive to the pane its anchor now names.
    *
-   * Called after anything that changes which pane sits at an edge: a pane added,
-   * removed, moved, or maximized. Maximize matters most and is the case a host
-   * cannot easily handle itself: it HIDES the other panes, so a mark pinned to
-   * pane 0 vanishes with it rather than merely sitting in the wrong place.
+   * Called after anything that changes which pane sits at an edge or holds the
+   * price: a pane added, removed, moved, collapsed or maximized. Maximize matters
+   * most and is the case a host cannot easily handle itself: it HIDES the other
+   * panes, so a mark pinned to the price pane vanishes with it rather than
+   * merely sitting in the wrong place.
    */
   private _rehomeAnchored(): void {
     if (this._anchored.length === 0) return;
@@ -2555,16 +2599,17 @@ export class Chart {
    * doesn't exist or is collapsed to its header strip, which plots no price.
    * The inverse is `coordinateToPrice`.
    */
-  public priceToCoordinate(price: number, paneIndex = 0): number | null {
+  public priceToCoordinate(price: number, paneIndex = this._primaryIndex()): number | null {
     const pane = this._mappedPane(paneIndex);
     return pane && this._paneLayout()[paneIndex].top + pane.priceToY(price);
   }
 
   /**
    * Map a container-relative media-px Y back to a price on a pane (inverse of
-   * priceToCoordinate). Null where that is, for the same panes.
+   * priceToCoordinate). Null where that is, for the same panes. Both default
+   * to the primary price pane wherever it sits.
    */
-  public coordinateToPrice(y: number, paneIndex = 0): number | null {
+  public coordinateToPrice(y: number, paneIndex = this._primaryIndex()): number | null {
     const pane = this._mappedPane(paneIndex);
     return pane && pane.yToPrice(y - this._paneLayout()[paneIndex].top);
   }
@@ -2682,10 +2727,10 @@ export class Chart {
    * Record that a pane quotes the instrument, and hand it the tick it was not
    * given while it did not.
    *
-   * Pane 0 is one from birth. Any other pane starts out an indicator's, so a
-   * host adding a second symbol to a pane of its own has to be able to promote
-   * one after the fact, or the comparison would lose the tick-sized axis it has
-   * always had.
+   * The primary pane is one from birth. Any other pane starts out an
+   * indicator's, so a host adding a second symbol to a pane of its own has to
+   * be able to promote one after the fact, or the comparison would lose the
+   * tick-sized axis it has always had.
    */
   private _claimPricePane(pane: Pane): void {
     if (this._pricePanes.has(pane)) return;
@@ -2699,9 +2744,9 @@ export class Chart {
     }
   }
 
-  /** The primary pane's price-scale options (what the Scales tab reads). */
+  /** The primary pane's price-scale options (what the Scales tab reads), wherever it sits. */
   public priceScaleOptions(): PriceScaleOptions {
-    return { ...this._panes[0].priceScale.options };
+    return { ...this._primaryPane.priceScale.options };
   }
 
   /**
@@ -2749,7 +2794,7 @@ export class Chart {
    * or the side a menu was raised on before anything was plotted there. That is
    * a row to render disabled with its state visible, not one to leave out.
    */
-  public priceAxisState(paneIndex = 0, scaleId: PriceScaleId = 'right'): PriceAxisState | null {
+  public priceAxisState(paneIndex = this._primaryIndex(), scaleId: PriceScaleId = 'right'): PriceAxisState | null {
     const pane = this._panes[paneIndex];
     if (pane === undefined) return null;
     const scale = pane.scaleFor(scaleId);
@@ -2787,7 +2832,7 @@ export class Chart {
   }
 
   /** Active price columns in pane CSS coordinates, ordered nearest the plot on each side. */
-  public priceAxisLayout(paneIndex = 0): readonly PriceAxisSlot[] {
+  public priceAxisLayout(paneIndex = this._primaryIndex()): readonly PriceAxisSlot[] {
     return this._priceAxisPane(paneIndex)?.axisSlots(this._renderContext(paneIndex))
       .map(slot => ({ ...slot, x: slot.x + this._leftAxisWidth })) ?? [];
   }
@@ -3170,12 +3215,14 @@ export class Chart {
    */
   private _restackLegends(): void {
     const rowByPane = new Map<number, number>();
-    const top = this._topPaneIndex(), count = this._indicators.length;
+    const top = this._priceCornerIndex(), count = this._indicators.length;
     const leads = new Map<number, PaneLegend>();
     for (const { legend, paneIndex } of this._legends) if (this._studyLegends.has(legend) && !leads.has(paneIndex)) leads.set(paneIndex, legend);
-    // A lower pane's first study row carries the pane controls, open or folded,
+    // A study pane's first study row carries the pane controls, open or folded,
     // whether a removal, a move or a host row above it made it first, and no
-    // other study row does. On a strip its collapse control is the only way
+    // other study row does. The price pane's rows never do, in any slot: its
+    // rows are on-chart studies, and a row's controls would read as moving or
+    // folding that study. On a strip its collapse control is the only way
     // back: the row goes first, above any row the host placed there, and
     // compact rows leave it showing. A strip is one row tall, so a row below
     // it neither draws nor answers the pointer: it would start inside the
@@ -3191,14 +3238,16 @@ export class Chart {
         this._indicatorLegendRow = row++;
         reserved = true;
       }
-      const collapsed = this._collapsed.has(this._panes[entry.paneIndex]);
-      entry.legend.setOptions(owned ? { row, collapsed, actions: leadActions(entry.legend.options().actions, entry.paneIndex > 0 && leads.get(entry.paneIndex) === entry.legend) } : { row });
+      const pane = this._panes[entry.paneIndex];
+      const collapsed = this._collapsed.has(pane);
+      entry.legend.setOptions(owned ? { row, collapsed, actions: leadActions(entry.legend.options().actions,
+        pane !== undefined && pane !== this._primaryPane && leads.get(entry.paneIndex) === entry.legend) } : { row });
       rowByPane.set(entry.paneIndex, row + (!folded && entry.legend.options().visible !== false ? 1 : 0));
     }
     if (!reserved) this._indicatorLegendRow = rowByPane.get(top) ?? 0;
     if (count > 0 && this._indicatorLegendToggle === null) {
       this._indicatorLegendToggle = new IndicatorLegendToggle();
-      this.addPrimitive(this._indicatorLegendToggle, { anchor: 'chart-top' });
+      this.addPrimitive(this._indicatorLegendToggle, { anchor: 'primary-pane' });
     } else if (count === 0 && this._indicatorLegendToggle !== null) {
       const toggle = this._indicatorLegendToggle;
       this._indicatorLegendToggle = null;
@@ -3208,35 +3257,34 @@ export class Chart {
   }
 
   /**
-   * Apply `legendOffset` to whichever pane currently renders at the chart's
-   * top-left, rather than a fixed index.
+   * Apply `legendOffset` to the price pane wherever it sits, and to the pane
+   * maximized over it while it is hidden, rather than to a fixed index.
    *
-   * The offset describes a region of the *chart* the host has covered with its
-   * own overlay — a symbol line, an OHLC readout. Normally that is pane 0, but
-   * maximizing a lower pane parks the others at a placeholder weight, so the
-   * maximized pane ends up rendering in that same corner. Pinning the offset to
-   * pane 0 left it drawing its legend straight through the host's readout.
+   * The offset describes the corner a host covers with its own readout of the
+   * price: a symbol line, an OHLC row. That readout belongs to the price pane,
+   * so it moves with it when the pane is moved below its studies. Maximizing a
+   * study pane hides the price pane, and the maximized pane then renders in
+   * the corner the host overlay covers; pinning the offset to one index left
+   * it drawing its legend straight through the host's readout.
    *
    * Host-added legend rows are left alone: the host positions its own.
    */
   private _syncLegendOffsets(): void {
-    const layout = this._paneLayout();
+    const corner = this._priceCornerIndex(), primary = this._primaryIndex();
     const height = paneLegendRowHeight({ iconSize: this._legendIconSize });
     const defaultToggleTop = this._legendOffset.top + this._indicatorLegendRow * height;
     let toggleTop = defaultToggleTop;
     for (const entry of this._legends) {
       const options = entry.legend.options();
-      if (this._studyLegends.has(entry.legend) || entry.paneIndex !== this._topPaneIndex()
+      if (this._studyLegends.has(entry.legend) || entry.paneIndex !== corner
         || options.visible === false || (options.row ?? 0) >= this._indicatorLegendRow) continue;
       toggleTop = Math.max(toggleTop, (options.top ?? DEFAULT_LEGEND_TOP) + ((options.row ?? 0) + 1) * paneLegendRowHeight(options));
     }
     for (const entry of this._legends) {
       if (!this._studyLegends.has(entry.legend)) continue;
-      // Rounding can leave the top pane a fraction of a pixel down, so "at the
-      // top" is a tolerance rather than an equality.
-      const atTop = (layout[entry.paneIndex]?.top ?? Number.POSITIVE_INFINITY) <= LEGEND_TOP_EPS;
+      const covered = entry.paneIndex === corner || entry.paneIndex === primary;
       entry.legend.setOptions(
-        atTop
+        covered
           ? { top: this._legendOffset.top + (this._indicatorLegendToggle ? toggleTop - defaultToggleTop : 0), left: this._legendOffset.left }
           : { top: DEFAULT_LEGEND_TOP, left: DEFAULT_LEGEND_LEFT },
       );
@@ -3245,10 +3293,15 @@ export class Chart {
       left: this._legendOffset.left, top: toggleTop, height });
   }
 
-  /** A host for the (lazy-loaded) trade layer to attach/detach its primitives on a pane. */
-  public tradeHost(paneIndex = 0): { addPrimitive(p: IPrimitive): void; removePrimitive(p: IPrimitive): void } {
+  /**
+   * A host for the (lazy-loaded) trade layer to attach/detach its primitives
+   * on a pane. Without an index it follows the primary price pane, resolved at
+   * each attach, so an order line drawn after the price pane moved still lands
+   * beside the candles.
+   */
+  public tradeHost(paneIndex?: number): { addPrimitive(p: IPrimitive): void; removePrimitive(p: IPrimitive): void } {
     return {
-      addPrimitive: (p: IPrimitive): void => this._addPrimitive(paneIndex, p),
+      addPrimitive: (p: IPrimitive): void => this._addPrimitive(paneIndex ?? this._primaryIndex(), p),
       removePrimitive: (p: IPrimitive): void => this.removePrimitive(p),
     };
   }
@@ -3392,13 +3445,16 @@ export class Chart {
   private _addPane(weight = 1): Pane {
     const pane = new Pane(this._doc, this._newBackend());
     pane.weight = weight;
-    // Pane 0 quotes the instrument by construction: it is where `addSeries`
-    // puts a series that names no pane, and it exists before any host has said
-    // what goes on it. Every later pane is made for an indicator, so it holds
-    // its own units until a price series lands on it (`_claimPricePane`), and
-    // inherits the chart-wide defaults without the instrument's tick.
-    if (this._panes.length === 0) this._pricePanes.add(pane);
-    else {
+    // The first pane is the primary one and quotes the instrument by
+    // construction: it is where `addSeries` puts a series that names no pane,
+    // and it exists before any host has said what goes on it. Every later
+    // pane is made for an indicator, so it holds its own units until a price
+    // series lands on it (`_claimPricePane`), and inherits the chart-wide
+    // defaults without the instrument's tick.
+    if (this._panes.length === 0) {
+      this._pricePanes.add(pane);
+      this._primaryPane = pane;
+    } else {
       // Independent of whether a host ever declares a tick. Most do not, and an
       // oscillator on a chart with no tick at all still has to print a reading
       // fine enough to compare against its own levels.
@@ -3490,7 +3546,7 @@ export class Chart {
     const paneIndex = fields.paneIndex?.value as PickOptions['paneIndex'];
     const priceScaleId = fields.priceScaleId?.value as PickOptions['priceScaleId'];
     if (paneIndex !== undefined && (!Number.isSafeInteger(paneIndex) || paneIndex < 0 || !this._panes[paneIndex])) throw new RangeError('Invalid pick pane');
-    const targetPane = paneIndex ?? (priceScaleId !== undefined ? this._firstPaneIndex : undefined);
+    const targetPane = paneIndex ?? (priceScaleId !== undefined ? this._firstPaneSlot() : undefined);
     if (priceScaleId !== undefined && (kind !== 'price' || !this._validPriceScaleId(priceScaleId)
       || !Object.prototype.hasOwnProperty.call(this._panes[targetPane!]?.scaleStates() ?? {}, priceScaleId))) throw new RangeError('Invalid pick scale');
     return beginPickResolved(this, kind, cb, payload => {
@@ -3589,8 +3645,15 @@ export class Chart {
       }
     });
 
+    const primary = this._primaryIndex();
     const state: ChartState & ChartSettingsState & { timezone: string } = {
-      version: CHART_STATE_VERSION,
+      // Version 2 only when the price pane has moved. Every pane index in a
+      // state is a visual slot, and a reader older than `primaryPane` would
+      // put the price pane's scales, studies and drawings on whatever pane
+      // holds slot 0; refusing the newer version is the right answer for it.
+      // A layout with the price pane in place is written exactly as it always
+      // was, so every existing reader still opens it.
+      version: primary > 0 ? CHART_STATE_VERSION : 1,
       // Saved unconditionally, including the default: a layout restored after
       // the default itself changes should still read the hours it was saved with.
       timezone: this._timezone,
@@ -3617,6 +3680,7 @@ export class Chart {
       priceOnlyAutoScale: this._priceOnlyAutoScale,
       indicatorLegendCollapsed: this._indicatorLegendCollapsed,
       panes,
+      ...(primary > 0 ? { primaryPane: primary } : {}),
       series,
       indicators: this._indicators.map((i) => ({
         indicatorId: i.indicatorId,
@@ -3659,6 +3723,7 @@ export class Chart {
 
     let alerts: AlertsDocument | undefined;
     let panes: PaneState[] | undefined;
+    let primaryPane: number | undefined;
     let studies: PreparedIndicatorRestore | undefined;
     const preservedFormats = new Map<Pane, Set<PriceScaleId>>();
     const reservedIds = new Set<string>();
@@ -3698,6 +3763,14 @@ export class Chart {
       if (s.panes !== undefined) {
         if (!Array.isArray(s.panes)) throw new Error('Invalid pane list');
         panes = s.panes.map(pane => parsePaneState(pane, true));
+      }
+      // Checked with the rest, before anything is applied: a slot that names no
+      // saved pane would put the price pane's scales on a study pane.
+      const slot = Object.getOwnPropertyDescriptor(s, 'primaryPane');
+      if (slot && (!('value' in slot) || slot.value !== undefined)) {
+        const at: unknown = slot.value;
+        if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || !(at < (panes?.length ?? 0))) throw new Error('Invalid primary pane slot');
+        primaryPane = at;
       }
       if (s.alerts !== undefined) alerts = parseAlertsDocument(s.alerts);
       if (s.indicators !== undefined) {
@@ -3742,7 +3815,10 @@ export class Chart {
           }
           if (descriptor) {
             validateIndicatorInputs(descriptor.inputs, spec.settings);
-            validateIndicatorScaleAssignment(descriptor, spec.priceScaleId, spec.plotPriceScaleIds, spec.paneIndex);
+            // Against the slot the price pane will hold once the layout lands:
+            // an old layout puts it at the top, a partial one leaves it be.
+            validateIndicatorScaleAssignment(descriptor, spec.priceScaleId, spec.plotPriceScaleIds, spec.paneIndex,
+              panes === undefined ? this._primaryIndex() : primaryPane ?? 0);
           }
           return descriptor ? [{ id: spec.instanceId!, descriptor, settings: spec.settings }] : [];
         });
@@ -3764,7 +3840,7 @@ export class Chart {
       if (generation !== this._restoreGeneration) {
         return { applied: false, series: [], indicators: 0, reason: 'superseded by a newer chart restore' };
       }
-      const report = this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, studies, preservedFormats));
+      const report = this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats));
       if (report.applied && generation === this._restoreGeneration && (previousPriceOnly !== this._priceOnlyAutoScale
         || previousLegendCollapsed !== this._indicatorLegendCollapsed)) {
         this.emit('objects:change', {});
@@ -3781,7 +3857,7 @@ export class Chart {
   }
 
   private _restoreState(s: ChartState & ChartSettingsState & { timezone?: unknown }, alerts: AlertsDocument | undefined,
-    reservedIds: Set<string>, panes: PaneState[] | undefined, studies: PreparedIndicatorRestore | undefined,
+    reservedIds: Set<string>, panes: PaneState[] | undefined, primaryPane: number, studies: PreparedIndicatorRestore | undefined,
     preservedFormats: PreservedScaleFormats): RestoreReport {
 
     // Old locks describe the outgoing ranges, not the settings about to be restored.
@@ -3812,17 +3888,21 @@ export class Chart {
 
     // The panes themselves first: the indicators below are placed by index, so
     // the panes have to exist and be weighted before they are rebuilt. Their
-    // price scales are *not* set here, see below.
-    panes?.forEach((ps, i) => {
-      this._ensurePane(i);
-      this._panes[i].weight = ps.weight;
-    });
+    // price scales are *not* set here, see below. The price pane goes to its
+    // saved slot before anything is applied by index, and a layout that names
+    // no slot is one from before the price pane could move: its slot is 0.
+    if (panes) {
+      for (let i = 0; i < panes.length; i++) this._ensurePane(i);
+      this.setPrimaryPaneIndex(primaryPane);
+      panes.forEach((ps, i) => { this._panes[i].weight = ps.weight; });
+    }
     if (panes || studies) {
-      // A layout that does not fold a pane opens it, and pane 0 never folds.
-      // That covers a pane it does not list at all: rebuilt studies land on
-      // the existing panes and would otherwise open inside a stale strip.
+      // A layout that does not fold a pane opens it, and the price pane never
+      // folds, in whatever slot. That covers a pane it does not list at all:
+      // rebuilt studies land on the existing panes and would otherwise open
+      // inside a stale strip.
       this._panes.forEach((pane, i) => {
-        if (i > 0 && panes?.[i]?.collapsed) this._collapsed.add(pane);
+        if (pane !== this._primaryPane && panes?.[i]?.collapsed) this._collapsed.add(pane);
         else this._collapsed.delete(pane);
       });
       this._relayout();
@@ -3900,16 +3980,25 @@ export class Chart {
       });
     }
 
+    // Drawings name panes by slot, in the layout the state describes, which is
+    // the one standing now. They go on before the pruning below, so a pane the
+    // restore then empties and removes shifts them with every other pane
+    // (`paneRemoved`) instead of leaving them on slots that have moved. The
+    // case that needs it: a host that swaps studies keeps its drawings, and a
+    // study pane above the price pane empties, which moves the price pane up.
+    this._drawingState = s.drawings;
+    this.emit('drawings:restore', s.drawings ?? []);
+
     // Unavailable studies leave empty panes, but a live study can have no plot
     // series. Keep its pane and host primitives; chart furniture alone does not
     // occupy a pane. Walk backwards so removal keeps the remaining indices valid.
-    for (let i = this._panes.length - 1; i > 0; i--) {
+    // A study pane above the price pane is as prunable as one below it.
+    for (let i = this._panes.length - 1; i >= 0; i--) {
       const pane = this._panes[i];
-      if (pane.series().length === 0 && !this._indicators.some(study => study.paneIndex === i)
+      if (pane !== this._primaryPane && pane.series().length === 0 && !this._indicators.some(study => study.paneIndex === i)
         && pane.primitives().every(primitive => primitive === this._timeNav || this._anchored.some(entry => entry.primitive === primitive))) this.removePane(i);
     }
 
-    this._drawingState = s.drawings;
     this._alertState = alerts;
     this._recomputeAxisColumns();
     if (s.barSpacing !== undefined) this._timeScale.setBarSpacing(s.barSpacing);
@@ -3920,7 +4009,6 @@ export class Chart {
       if (this._panes.includes(pane)) pane.setRatioLock(id, true, reference.barSpacing, reference.height);
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
-    this.emit('drawings:restore', s.drawings ?? []);
     this.emit('alerts:restore', alerts ?? { version: 1, alerts: [] });
     this.emit('objects:change', {});
     return { applied: true, series: s.series ?? [], indicators };
@@ -4180,21 +4268,26 @@ export class Chart {
 
   /**
    * Remove a pane, everything drawn in it, and any indicator that lives there.
-   * Pane 0 (price) is never removable — removing it would leave the chart with
-   * no time axis owner.
+   * The primary price pane is never removable, in whatever slot it sits:
+   * removing it would leave the chart with no price series to describe and
+   * nothing for a series, a price line or an on-chart study to default to. A
+   * study pane is removable in any slot, the top one included.
    *
-   * Returns false when the index is out of range or is pane 0.
+   * Returns false when the index is out of range or names the primary pane.
    */
   public removePane(index: number): boolean {
-    if (index <= 0 || index >= this._panes.length) return false;
-    if (this._eventPane === index && this._eventMarkers !== null) {
-      this.removePrimitive(this._eventMarkers);
-      this._eventPane = 0;
-      this._addPrimitive(0, this._eventMarkers);
-      this.emit('events:change', undefined);
-    } else if (this._eventPane > index) {
-      this._eventPane -= 1;
+    if (!Number.isInteger(index) || index < 0 || index >= this._panes.length || this._panes[index] === this._primaryPane) return false;
+    if (this._eventPane === index) {
+      // The strip goes home to the price pane, before the slots shift.
+      const home = this._primaryIndex();
+      if (this._eventMarkers !== null) {
+        this.removePrimitive(this._eventMarkers);
+        this._addPrimitive(home, this._eventMarkers);
+        this.emit('events:change', undefined);
+      }
+      this._eventPane = home;
     }
+    if (this._eventPane > index) this._eventPane -= 1;
     // Indicators own their series, so let them tear themselves down first —
     // otherwise their series rows would outlive the pane holding them.
     for (let i = this._indicators.length - 1; i >= 0; i--) {
@@ -4234,13 +4327,16 @@ export class Chart {
   }
 
   /**
-   * Move a pane up or down one slot. Pane 0 (price) is pinned — it owns the
-   * primary series and the shared price context — so a move that would displace
-   * it is refused.
+   * Move a pane up or down one slot, swapping it with its neighbour. Any pane
+   * moves, the primary price pane included, and any pane can displace it: the
+   * price pane is an identity rather than a slot (see `primaryPaneIndex`), so
+   * everything that means "the price pane" follows it. Returns false for an
+   * unknown slot, a direction other than -1 or 1, or a move off either end.
    */
   public movePane(index: number, direction: -1 | 1): boolean {
     const target = index + direction;
-    if (index <= 0 || target <= 0 || index >= this._panes.length || target >= this._panes.length) return false;
+    if ((direction !== -1 && direction !== 1) || !Number.isInteger(index)
+      || index < 0 || target < 0 || index >= this._panes.length || target >= this._panes.length) return false;
     const panes = this._panes;
     [panes[index], panes[target]] = [panes[target], panes[index]];
     if (this._eventPane === index) this._eventPane = target;
@@ -4264,6 +4360,52 @@ export class Chart {
   }
 
   /**
+   * Where the primary price pane sits in the stack, counted from the top. The
+   * primary pane is the one the chart is built with. It holds the price series
+   * a host adds without naming a pane and the on-chart studies, and it is what
+   * every call that defaults to "the price pane" means: `addSeries`,
+   * `addPriceLine`, `addEventMarkers`, `addPrimitive`, `tradeHost`, the
+   * coordinate calls, comparisons, and a drawing magnet or price alert. It is
+   * 0 until something moves it; it is never removed and never collapsed.
+   */
+  public primaryPaneIndex(): number {
+    return this._primaryIndex();
+  }
+
+  /**
+   * Move the primary price pane to another slot, for example below its
+   * studies. It goes one adjacent move at a time, so each step is an ordinary
+   * `movePane` with its own `paneMoved` event: drawings, alerts and anything a
+   * host keys by slot follow it the way they follow any other move. Weights,
+   * scales, a fold or a maximize stay with the panes that own them. Returns
+   * false for a slot that does not exist or the slot it already holds.
+   */
+  public setPrimaryPaneIndex(index: number): boolean {
+    if (this._destroyed || !Number.isInteger(index) || index < 0 || index >= this._panes.length) return false;
+    let at = this._primaryIndex();
+    if (at === index) return false;
+    // A `paneMoved` listener may itself move panes, so the walk follows the
+    // pane rather than counting steps, and gives up rather than chase one
+    // that keeps moving it back.
+    for (let steps = 0; at !== index; steps++) {
+      if (steps > 2 * this._panes.length || !this.movePane(at, index > at ? 1 : -1)) return false;
+      at = this._primaryIndex();
+    }
+    return true;
+  }
+
+  /** The primary pane's slot; 0 once the chart is torn down and there are no panes. */
+  private _primaryIndex(): number {
+    return Math.max(0, this._panes.indexOf(this._primaryPane));
+  }
+
+  /** Slot of the pane holding the primary series, the price pane before there is one. */
+  private _firstPaneSlot(): number {
+    const slot = this._firstPane === null ? -1 : this._panes.indexOf(this._firstPane);
+    return slot < 0 ? this._primaryIndex() : slot;
+  }
+
+  /**
    * Expand one pane to fill the chart, hiding the others. Calling it again (or
    * on another pane) puts the stack back exactly as it was, since the stored
    * weights were never disturbed.
@@ -4274,7 +4416,7 @@ export class Chart {
     this._relayout();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     // Maximize is the case a host cannot work around: it HIDES the other panes,
-    // so chrome pinned to pane 0 disappears rather than merely sitting wrong.
+    // so chrome pinned to the price pane disappears rather than merely sitting wrong.
     this._rehomeAnchored();
     this.emit('paneMaximized', { paneIndex: this._maximizedPane });
     return true;
@@ -4295,14 +4437,20 @@ export class Chart {
    * axis; nothing else in it paints or answers the pointer, and no coordinate
    * conversion maps a price onto it.
    *
-   * Pane 0 stays open, the way it stays in place. Collapsing the maximized pane
-   * ends the maximize, since a strip cannot fill the chart; maximizing a
-   * collapsed pane shows it whole until the maximize ends. Returns false for
-   * pane 0, an unknown index, a value that is not a boolean, or no change.
+   * The primary price pane stays open in whatever slot it sits, top, middle or
+   * bottom: it carries the price the chart exists to show, and a chart always
+   * keeps one open pane for its furniture and the time navigator. Collapse is
+   * a property of a pane rather than a slot, so a fold travels with its pane
+   * through a move, and a study pane moved above the price pane, to slot 0,
+   * folds like any other. Collapsing the maximized pane ends the maximize,
+   * since a strip cannot fill the chart; maximizing a collapsed pane shows it
+   * whole until the maximize ends. Returns false for the primary pane, an
+   * unknown index, a value that is not a boolean, or no change.
    */
   public setPaneCollapsed(index: number, collapsed: boolean): boolean {
     const pane = this._panes[index];
-    if (!(index > 0) || pane === undefined || typeof collapsed !== 'boolean' || this._collapsed.has(pane) === collapsed) return false;
+    if (!Number.isInteger(index) || pane === undefined || pane === this._primaryPane
+      || typeof collapsed !== 'boolean' || this._collapsed.has(pane) === collapsed) return false;
     if (collapsed) this._collapsed.add(pane);
     else this._collapsed.delete(pane);
     const ended = collapsed && this._maximizedPane === index;
@@ -4316,7 +4464,7 @@ export class Chart {
     return true;
   }
 
-  /** Whether a pane is collapsed to its header strip. Pane 0 never is. */
+  /** Whether a pane is collapsed to its header strip. The primary price pane never is. */
   public paneCollapsed(index: number): boolean {
     return this._collapsed.has(this._panes[index]);
   }
@@ -4546,7 +4694,7 @@ export class Chart {
     // paint time so toggling the option or changing the viewport takes effect
     // without waiting for another pointer event, across every pane at once.
     let crosshairX = this._cursor?.x ?? 0;
-    const snapSeries = this._firstDataId.value ?? this._panes[0]?.series()[0]?.dataId;
+    const snapSeries = this._firstDataId.value ?? this._primaryPane.series()[0]?.dataId;
     if (this._cursor !== null && this._crosshairSnapToBar && snapSeries !== undefined) {
       const index = Math.round(this._timeScale.xToIndex(crosshairX));
       if (this._dataLayer.visibleBars(snapSeries, index, index).length > 0) {
@@ -5620,8 +5768,8 @@ export class Chart {
       case 'panRight': return pan(2);
       case 'panLeftFast': return pan(-10);
       case 'panRightFast': return pan(10);
-      case 'panUp': this._panes[0]?.priceScale.panByPixels(20); return true;
-      case 'panDown': this._panes[0]?.priceScale.panByPixels(-20); return true;
+      case 'panUp': this._primaryPane.priceScale.panByPixels(20); return true;
+      case 'panDown': this._primaryPane.priceScale.panByPixels(-20); return true;
       case 'zoomIn': return zoom(1.1);
       case 'zoomOut': return zoom(1 / 1.1);
       case 'resetScale': this.resetScale(); return true;
@@ -5655,9 +5803,9 @@ export class Chart {
     if (this._liveRegion === null) return;
     const n = this._dataLayer.length;
     let txt = `${n} bar${n === 1 ? '' : 's'}`;
-    if (this._firstDataId.value !== null && this._panes[0] !== undefined) {
+    if (this._firstDataId.value !== null && this._panes.includes(this._primaryPane)) {
       const last = this._dataLayer.lastIndexedBar(this._firstDataId.value);
-      if (last !== null) txt += `, latest price ${this._panes[0].priceScale.format(last.bar.close)}`;
+      if (last !== null) txt += `, latest price ${this._primaryPane.priceScale.format(last.bar.close)}`;
     }
     this._liveRegion.textContent = `Financial chart, ${txt}`;
   }
@@ -5720,7 +5868,7 @@ export class Chart {
         hoveredBar = bars[0].bar;
         // Magnet only snaps within the pane that holds the price series — never
         // in the volume/indicator panes (their scale isn't a price scale).
-        if (this._crosshairMode === 'magnet' && paneIndex === this._firstPaneIndex) {
+        if (this._crosshairMode === 'magnet' && paneIndex === this._firstPaneSlot()) {
           const snapped = magnetSnapPrice(pane.yToPrice(localY), hoveredBar);
           y = pane.priceToY(snapped);
         }

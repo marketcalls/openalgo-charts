@@ -33,6 +33,7 @@ export interface ChartObjectSnapshot {
 export interface ChartObjectDefinition {
   kind: ChartObjectKind;
   name: string;
+  /** Slot of the pane it belongs to; omitted means the price pane, wherever it sits. */
   paneIndex?: number;
   visible?: boolean;
   locked?: boolean;
@@ -318,7 +319,7 @@ export class ChartObjects {
         reorder: typeof actions.reorder === 'function', move: typeof actions.move === 'function',
       });
       const row: ChartObjectSnapshot = Object.freeze({
-        id, sourceId, kind: state.kind, name: state.name, paneIndex: state.paneIndex ?? 0,
+        id, sourceId, kind: state.kind, name: state.name, paneIndex: state.paneIndex ?? this._chart.primaryPaneIndex(),
         visible: state.visible !== false, locked: state.locked, groupId: state.groupId, selected: state.selected === true || this._selected === id,
         dataStatus: state.dataStatus ? Object.freeze({ ...state.dataStatus }) : undefined, capabilities,
       });

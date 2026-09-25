@@ -310,8 +310,14 @@ describe('pane removal, ordering, and maximize', () => {
     expect(chart.movePane(2, -1)).toBe(true);
     expect(macd.paneIndex).toBe(1);
     expect(rsi.paneIndex).toBe(2);
-    expect(chart.movePane(0, 1)).toBe(false);  // the price pane is pinned
-    expect(chart.movePane(1, -1)).toBe(false); // ...and cannot be displaced
+    // Off either end is refused; the price pane itself moves like any other
+    // pane now (primary-pane-reorder.test.ts covers what follows it).
+    expect(chart.movePane(0, -1)).toBe(false);
+    expect(chart.movePane(2, 1)).toBe(false);
+    expect(chart.movePane(1, 2 as unknown as 1)).toBe(false);
+    expect(chart.movePane(0, 1)).toBe(true);
+    expect(chart.primaryPaneIndex()).toBe(1);
+    expect(macd.paneIndex).toBe(0);
   });
 
   it('maximizePane gives one pane the whole chart and hides the rest', () => {

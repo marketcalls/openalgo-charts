@@ -7,7 +7,7 @@ export interface DrawingLinkContext { symbol?: string; exchange?: string }
 /** Resolve a host-owned identity without modifying the chart's data context. */
 export type DrawingLinkContextSource = DrawingLinkContext | (() => DrawingLinkContext | null | undefined);
 export interface DrawingLinkOptions { enabled?: boolean }
-export interface DrawingLinkChart extends Pick<DrawingChartHost, 'on'> {
+export interface DrawingLinkChart extends Pick<DrawingChartHost, 'on' | 'primaryPaneIndex'> {
   readonly isDestroyed?: boolean;
   getDataContext?(): Readonly<DrawingLinkContext> | undefined;
 }
@@ -61,6 +61,11 @@ function lineageOf(drawing: Drawing, context: string): string | undefined {
  * Existing local drawings stay local until `share` is called. Persisted shared
  * lineage reconnects across restores. Only price-pane drawings participate; time anchors
  * cross the boundary unchanged so each interval uses its own coordinate map.
+ *
+ * The price pane is each chart's own, in whatever slot that chart keeps it: one
+ * chart can hold it at the top and another below its studies. A shared drawing
+ * is therefore kept on slot 0 and put on each member's price pane as it is
+ * applied there, never copied across by slot.
  */
 export class DrawingLinkGroup {
   private readonly _members = new Map<DrawingLinkChart, Member>();
@@ -143,7 +148,7 @@ export class DrawingLinkGroup {
     let count = 0;
     for (const id of new Set(ids ?? member.controller.drawings().map(d => d.id))) {
       const drawing = member.controller.get(id);
-      if (drawing === undefined || drawing.paneIndex !== 0) continue;
+      if (drawing === undefined || drawing.paneIndex !== this._pricePane(member)) continue;
       const shared = member.drawings.get(id) ?? this._create(member, drawing);
       this._commit(shared, member, drawing, true);
       count++;
@@ -168,6 +173,16 @@ export class DrawingLinkGroup {
     for (const chart of [...this._members.keys()]) this.remove(chart);
   }
 
+  /** The slot this member keeps its price pane in, read at each use because it moves. */
+  private _pricePane(member: Member): number {
+    return member.chart.primaryPaneIndex?.() ?? 0;
+  }
+
+  /** A shared drawing as it lands on one member: on that member's own price pane. */
+  private _onPricePane<T extends Drawing | null>(member: Member, drawing: T): T {
+    return (drawing === null ? null : { ...drawing, paneIndex: this._pricePane(member) }) as T;
+  }
+
   private _eligible(member: Member): boolean {
     return !this._destroyed && this._enabled && member.context !== null
       && this._members.get(member.chart) === member && member.chart.isDestroyed !== true && !member.controller.isDestroyed;
@@ -185,7 +200,7 @@ export class DrawingLinkGroup {
       }
     }
     const shared: SharedDrawing = {
-      id: drawing.id, context, lineage, drawing: cloneDrawing(drawing),
+      id: drawing.id, context, lineage, drawing: cloneDrawing({ ...drawing, paneIndex: 0 }),
       bindings: new Map([[member, { id: drawing.id, local: true }]]), previewFrom: null,
     };
     member.drawings.set(drawing.id, shared);
@@ -199,14 +214,14 @@ export class DrawingLinkGroup {
     this._broadcasting = true;
     try {
       for (const drawing of [...member.controller.drawings()]) {
-        if (drawing.paneIndex !== 0 || member.drawings.has(drawing.id)) continue;
+        if (drawing.paneIndex !== this._pricePane(member) || member.drawings.has(drawing.id)) continue;
         const lineage = lineageOf(drawing, context);
         if (lineage === undefined) continue;
         for (const peer of this._members.values()) {
           if (peer === member || !this._eligible(peer) || peer.context !== context) continue;
           let shared = [...peer.drawings.values()].find(value => value.context === context && value.lineage === lineage);
           if (shared === undefined) {
-            const copy = peer.controller.drawings().find(value => value.paneIndex === 0 && lineageOf(value, context) === lineage);
+            const copy = peer.controller.drawings().find(value => value.paneIndex === this._pricePane(peer) && lineageOf(value, context) === lineage);
             if (copy !== undefined) shared = this._create(peer, copy);
           }
           if (shared === undefined) continue;
@@ -214,7 +229,7 @@ export class DrawingLinkGroup {
           // a deletion retained for undo. Unmarked local drawings never match.
           shared.bindings.set(member, { id: drawing.id, local: false });
           member.drawings.set(drawing.id, shared);
-          member.controller.applyLinkedDrawing(drawing.id, shared.drawing);
+          member.controller.applyLinkedDrawing(drawing.id, this._onPricePane(member, shared.drawing));
           authorities.add(peer);
           break;
         }
@@ -224,7 +239,7 @@ export class DrawingLinkGroup {
   }
 
   private _change(member: Member, drawing: Drawing, removed: boolean, added: boolean): void {
-    if (this._broadcasting || !this._eligible(member) || drawing.paneIndex !== 0) return;
+    if (this._broadcasting || !this._eligible(member) || drawing.paneIndex !== this._pricePane(member)) return;
     let shared = member.drawings.get(drawing.id);
     const first = shared === undefined && added;
     if (shared === undefined && added) shared = this._create(member, drawing);
@@ -241,13 +256,13 @@ export class DrawingLinkGroup {
       if (stamped !== null && lineageOf(drawing as Drawing, shared.context) !== shared.lineage) {
         from.controller.applyLinkedDrawing(drawing!.id, stamped);
       }
-      shared.drawing = stamped === null ? null : cloneDrawing({ ...stamped, id: shared.id });
+      shared.drawing = stamped === null ? null : cloneDrawing({ ...stamped, id: shared.id, paneIndex: 0 });
       for (const target of [...this._members.values()]) {
         if (target === from || !this._eligible(target) || target.context !== shared.context) continue;
         let binding = shared.bindings.get(target);
         if (binding === undefined) {
           if (drawing === null || !includeNew) continue;
-          const restored = target.controller.drawings().find(d => d.paneIndex === 0
+          const restored = target.controller.drawings().find(d => d.paneIndex === this._pricePane(target)
             && !target.drawings.has(d.id) && lineageOf(d, shared.context) === shared.lineage);
           let id = restored?.id ?? shared.id;
           if (restored === undefined) {
@@ -257,7 +272,7 @@ export class DrawingLinkGroup {
           shared.bindings.set(target, binding);
           target.drawings.set(id, shared);
         }
-        target.controller.applyLinkedDrawing(binding.id, shared.drawing);
+        target.controller.applyLinkedDrawing(binding.id, this._onPricePane(target, shared.drawing));
       }
     } finally { this._broadcasting = false; }
   }
@@ -270,7 +285,7 @@ export class DrawingLinkGroup {
       shared.previewFrom = from;
       for (const [target, binding] of shared.bindings) {
         if (target !== from && this._eligible(target) && target.context === shared.context) {
-          target.controller.setLinkedPreview(binding.id, drawing);
+          target.controller.setLinkedPreview(binding.id, this._onPricePane(target, drawing));
         }
       }
     }

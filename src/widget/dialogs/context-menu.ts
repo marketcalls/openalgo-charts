@@ -15,6 +15,11 @@ import { widgetText } from '../localization';
  * `priceAxis*` calls, so the menu can never claim a state the axis is not in,
  * and the same rows serve the price ladder, a left-hand scale and an indicator
  * pane's.
+ *
+ * The pane rows move the pane under the pointer up or down a slot, the price
+ * pane included, which is how a trader puts the price below the studies; a
+ * study pane also folds to its header strip. The price pane is found by
+ * `primaryPaneIndex`, never assumed to be the top one.
  */
 import { checkTradingCapability, getIndicator, isReplaying, PRICE_SCALE_MODES } from 'openalgo-charts';
 import type { Chart, ContextMenuEvent, ContextMenuTarget, PriceScaleId, PriceScaleMode, TradingCapabilityRequest, TradingCapabilitySource } from 'openalgo-charts';
@@ -244,6 +249,8 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
     out.push(...axisEntries(ctx, e.paneIndex, target.scaleId ?? target.side ?? 'right'));
     return out;
   }
+  // The price pane can sit below the studies, so it is found, never assumed.
+  const pricePane = chart.primaryPaneIndex();
 
   // Order entry: only through a host hook, and only at a price when there is
   // one. Off the plot the order rows would be offering to trade at nothing.
@@ -309,14 +316,14 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
     } else if (target.kind === 'indicator' && target.instanceId) {
       const instance = chart.indicators().find(item => item.id === target.instanceId);
       const plot = instance && getIndicator(instance.indicatorId).plots.find(item =>
-        (item.overlay ? 0 : instance.paneIndex) === e.paneIndex && (target.plotKey === undefined || item.key === target.plotKey));
+        (item.overlay ? pricePane : instance.paneIndex) === e.paneIndex && (target.plotKey === undefined || item.key === target.plotKey));
       if (instance && plot) out.push({ id: 'alert-indicator', label: widgetText(ctx, 'Create study alert...'), run: () => {
         const values = instance.values()[plot.key];
         const value = values?.[e.index ?? chart.primaryBars().length - 1];
         mountAlertEditor(ctx, undefined, { source: { kind: 'indicator', instanceId: instance.id, plotKey: plot.key, value: value ?? NaN } });
       } });
-    } else if (e.paneIndex === 0 && e.price !== null && Number.isFinite(e.price)) {
-      out.push({ id: 'alert-create', label: widgetText(ctx, 'Create alert at {price}...', { price: priceText(chart, 0, e.price) }),
+    } else if (e.paneIndex === pricePane && e.price !== null && Number.isFinite(e.price)) {
+      out.push({ id: 'alert-create', label: widgetText(ctx, 'Create alert at {price}...', { price: priceText(chart, pricePane, e.price) }),
         run: () => { mountAlertEditor(ctx, undefined, { source: { kind: 'price', price: e.price! } }); } });
     }
     out.push({ id: 'chart-alerts', label: widgetText(ctx, 'Alerts...'), run: () => { mountAlertsPanel(ctx); } });
@@ -343,12 +350,27 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
     }
   }
 
-  // A lower pane folds to its header strip and opens again; pane 0 stays open.
-  if (e.paneIndex > 0 && target.kind !== 'time-scale') {
-    const folded = chart.paneCollapsed(e.paneIndex);
-    sep();
-    out.push({ id: 'pane-collapse', label: widgetText(ctx, folded ? 'Expand pane' : 'Collapse pane'),
-      run: () => { chart.setPaneCollapsed(e.paneIndex, !folded); } });
+  // The pane under the pointer: it moves up or down a slot, the price pane
+  // included, and a study pane folds to its header strip and opens again. The
+  // price pane stays open in any slot. A menu raised from a button names no
+  // pane, and the time axis belongs to the whole chart, so neither gets these.
+  if (target.kind !== 'time-scale' && !SYNTHETIC.has(e)) {
+    const count = chart.panes().length, at = e.paneIndex;
+    if (count > 1 && at >= 0 && at < count) {
+      sep();
+      out.push({ id: 'pane-up', label: widgetText(ctx, 'Move pane up'),
+        disabled: at === 0, note: at === 0 ? widgetText(ctx, 'at the top') : undefined,
+        run: () => { chart.movePane(at, -1); } });
+      out.push({ id: 'pane-down', label: widgetText(ctx, 'Move pane down'),
+        disabled: at === count - 1, note: at === count - 1 ? widgetText(ctx, 'at the bottom') : undefined,
+        run: () => { chart.movePane(at, 1); } });
+    }
+    if (at !== pricePane && at >= 0 && at < count) {
+      const folded = chart.paneCollapsed(at);
+      sep();
+      out.push({ id: 'pane-collapse', label: widgetText(ctx, folded ? 'Expand pane' : 'Collapse pane'),
+        run: () => { chart.setPaneCollapsed(at, !folded); } });
+    }
   }
 
   if (target.kind !== 'time-scale') {
@@ -376,12 +398,17 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
   return out;
 }
 
+/** Events made for a menu raised from a button: they name no pane under a pointer. */
+const SYNTHETIC = new WeakSet<ContextMenuEvent>();
+
 /** A chart-level event for a menu raised from a button rather than the canvas. */
-function syntheticEvent(): ContextMenuEvent {
-  return {
-    paneIndex: 0, point: { x: 0, y: 0 }, price: null, time: null, index: null,
+function syntheticEvent(chart: Chart): ContextMenuEvent {
+  const event: ContextMenuEvent = {
+    paneIndex: chart.primaryPaneIndex(), point: { x: 0, y: 0 }, price: null, time: null, index: null,
     target: { kind: 'empty', id: null }, preventDefault: () => {},
   };
+  SYNTHETIC.add(event);
+  return event;
 }
 
 /** One menu per widget; a second right-click replaces the first. */
@@ -394,7 +421,7 @@ const OPEN = new WeakMap<HTMLElement, PanelHandle>();
 export function mountContextMenu(ctx: WidgetContext, anchor?: HTMLElement, opts: ContextMenuOptions = {}): PanelHandle {
   const doc = ctx.document;
   OPEN.get(ctx.root)?.close();
-  const e = opts.event ?? syntheticEvent();
+  const e = opts.event ?? syntheticEvent(ctx.chart);
   const hooks = opts.hooks ?? {};
 
   const menu = el(doc, 'div', 'oac-panel oac-ctx');
