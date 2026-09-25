@@ -345,13 +345,31 @@ describe('Trend Strength Index forms both means before any deviation', () => {
     expect(correlation(closes, [0, 1, 2, 3], 4)).toEqual([NaN, NaN, NaN, 0.7999999999999998]);
   });
 
-  it('leaves a window with no spread or with a missing value absent', () => {
+  it('leaves a window whose deviations are all exactly zero, or with a missing value, absent', () => {
     expect(correlation([5, 5, 5], [0, 1, 2], 3)).toEqual([NaN, NaN, NaN]);
     // Only the window 3, 4, 6 against 2, 3, 4 is complete: deviations
     // (-4/3, -1/3, 5/3) and (-1, 0, 1) give 1 / sqrt(14/9 * 2/3) = sqrt(27/28).
     const partial = correlation([1, NaN, 3, 4, 6], [0, 1, 2, 3, 4], 3);
     expect(partial.slice(0, 4)).toEqual([NaN, NaN, NaN, NaN]);
     expect(partial[4]).toBeCloseTo(Math.sqrt(27 / 28), 14);
+  });
+
+  it('reads what the arithmetic gives on a flat window whose mean is inexact', () => {
+    // A flat window is absent only when its mean comes out exact. Three bars of
+    // 0.1 sum and divide to 0.10000000000000002, fourteen of 2.01 to
+    // 2.009999999999999, so every deviation is the same few units in the last
+    // place. Against the bar index those cancel exactly and the reading is 0.
+    // Recorded from the language engine: correlation(close, bar.index, len).
+    const flat = (c: number, n: number): Bar[] => barsOf(Array.from({ length: n }, (): Row => [c, c, c, c, 1]));
+    expect((0.1 + 0.1 + 0.1) / 3).not.toBe(0.1);
+    expect(run(TREND_STRENGTH_INDEX, flat(0.1, 3), { length: 3 }).tsi).toEqual([null, null, 0]);
+    expect(run(TREND_STRENGTH_INDEX, flat(2.01, 14), { length: 14 }).tsi.slice(12)).toEqual([null, 0]);
+    expect(correlation([0.1, 0.1, 0.1], [0, 1, 2], 3)).toEqual([NaN, NaN, 0]);
+    // Fourteen bars of 0.1 average back to 0.1 exactly: no deviation, no reading.
+    expect(run(TREND_STRENGTH_INDEX, flat(0.1, 14), { length: 14 }).tsi[13]).toBeNull();
+    // Against a series other than the bar index the residue survives, as it
+    // does in the language: within rounding of 0, not 0 and not absent.
+    expect(correlation([0.1, 0.1, 0.1], [0.1, 0.2, 0.3], 3)[2]).toBe(4.532466518368395e-16);
   });
 
   it('still gives NaN throughout for a period that is not a whole number above 1', () => {
