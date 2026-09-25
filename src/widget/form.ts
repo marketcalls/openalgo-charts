@@ -18,7 +18,7 @@
  */
 import { INDICATOR_SOURCES, registeredIntervals, parseSessionSpec } from 'openalgo-charts';
 import type { ChartSettingsInput } from 'openalgo-charts';
-import { chromeIconSvg } from 'openalgo-charts/draw';
+import { chromeIconSvg, CHROME_ICON_STROKE } from 'openalgo-charts/draw';
 import type { SettingsField } from 'openalgo-charts/draw';
 import type { OverlayOptions } from './context';
 import { widgetText, type WidgetTranslationOptions } from './localization';
@@ -302,7 +302,7 @@ const XMLNS = 'http://www.w3.org/2000/svg';
  */
 export function glyphSvg(path: string): string {
   return `<svg xmlns="${XMLNS}" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor"`
-    + ` stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+    + ` stroke-width="${CHROME_ICON_STROKE}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
 }
 
 /** A chrome glyph wrapped for the stylesheet's `.oac-glyph--chrome` sizing. */

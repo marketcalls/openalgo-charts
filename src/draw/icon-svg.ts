@@ -11,10 +11,14 @@
  * Unknown ids throw. The registry returns `undefined` so a host can probe, but
  * a string builder has no such value to hand back, and an empty button in a
  * rail is harder to trace than a stack that names the id.
+ *
+ * A glyph with an accent becomes two paths: the glyph, then the accent with
+ * `fill="currentColor"` and nothing else, so the frame's stroke, caps and
+ * colour reach both.
  */
 import {
-  CHROME_ICON_ATTRS, CHROME_ICON_FILLED, CHROME_ICONS,
-  DRAWING_TOOL_ICONS, ICON_ATTRS, ICON_STROKE,
+  CHROME_ICON_ACCENTS, CHROME_ICON_ATTRS, CHROME_ICON_FILLED, CHROME_ICONS,
+  DRAWING_TOOL_ACCENTS, DRAWING_TOOL_ICONS, ICON_ATTRS, ICON_STROKE,
   type IconAttrs,
 } from './icons';
 
@@ -68,6 +72,15 @@ function glyph(registry: Readonly<Record<string, string>>, id: string, tier: str
   return d;
 }
 
+/**
+ * The paths of one glyph: its line, then its accent filled. The accent names
+ * its own fill because the frame's is `none`, and inside a sprite symbol it
+ * would otherwise inherit that and paint a ring where a dot belongs.
+ */
+function body(d: string, accent: string | undefined): string {
+  return `<path d="${attr(d)}"/>` + (accent === undefined ? '' : `<path d="${attr(accent)}" fill="currentColor"/>`);
+}
+
 /** Grid size from a viewBox, so the cursor's pixel maths follows the registry. */
 function gridOf(attrs: IconAttrs): number {
   return Number(attrs.viewBox.split(' ')[2]);
@@ -102,7 +115,7 @@ function frame(inner: string, attrs: IconAttrs, fill: string, opts: IconSvgOptio
  */
 export function iconSvg(id: string, opts: IconSvgOptions = {}): string {
   const d = glyph(DRAWING_TOOL_ICONS, id, 'tool');
-  return frame(`<path d="${attr(d)}"/>`, ICON_ATTRS, ICON_ATTRS.fill, opts);
+  return frame(body(d, DRAWING_TOOL_ACCENTS[id]), ICON_ATTRS, ICON_ATTRS.fill, opts);
 }
 
 /**
@@ -112,14 +125,15 @@ export function iconSvg(id: string, opts: IconSvgOptions = {}): string {
 export function chromeIconSvg(id: string, opts: IconSvgOptions = {}): string {
   const d = glyph(CHROME_ICONS, id, 'chrome');
   const fill = CHROME_ICON_FILLED.has(id) ? 'currentColor' : CHROME_ICON_ATTRS.fill;
-  return frame(`<path d="${attr(d)}"/>`, CHROME_ICON_ATTRS, fill, opts);
+  return frame(body(d, CHROME_ICON_ACCENTS[id]), CHROME_ICON_ATTRS, fill, opts);
 }
 
 /**
  * One hidden `<svg>` of `<symbol>`s, for a host that shows many glyphs and
  * wants each path in the document once. Inject it once, then place glyphs with
- * `iconUse`. Symbols carry the path and viewBox only; stroke and fill inherit
- * from the `<svg>` around each `<use>`, so one sprite serves every weight.
+ * `iconUse`. Symbols carry the paths and viewBox, and no stroke: the weight
+ * inherits from the `<svg>` around each `<use>`, so one sprite serves every
+ * weight. An accent carries its fill, the one attribute it cannot inherit.
  *
  * Default: every tool glyph. Repeated ids collapse to one symbol, since a
  * duplicate element id is an invalid document.
@@ -129,7 +143,7 @@ export function iconSprite(ids: readonly string[] = Object.keys(DRAWING_TOOL_ICO
   for (const id of new Set(ids)) {
     const d = glyph(DRAWING_TOOL_ICONS, id, 'tool');
     symbols += `<symbol id="${attr(ICON_SYMBOL_PREFIX + id)}" viewBox="${attr(ICON_ATTRS.viewBox)}">`
-      + `<path d="${attr(d)}"/></symbol>`;
+      + `${body(d, DRAWING_TOOL_ACCENTS[id])}</symbol>`;
   }
   return `<svg xmlns="${XMLNS}" style="display:none" aria-hidden="true">${symbols}</svg>`;
 }
@@ -176,10 +190,18 @@ export function toolCursor(id: string, opts: ToolCursorOptions = {}): string {
   // clears the glyph by a pixel on each side.
   const unit = gridOf(ICON_ATTRS) / size;
   const haloWidth = Math.round((ICON_STROKE + 2 * unit) * 100) / 100;
+  // Each layer is the glyph and then its accent, the accent filled in that
+  // layer's colour: haloed together, so a dot keeps its outline on a chart of
+  // its own colour, and painted together, so the cursor draws the same tool
+  // as the rail button that picked it.
+  const accent = DRAWING_TOOL_ACCENTS[id];
+  const layer = (paint: string, width: number): string =>
+    `<path d="${d}" stroke="${paint}" stroke-width="${width}"/>`
+    + (accent === undefined ? '' : `<path d="${accent}" fill="${paint}" stroke="${paint}" stroke-width="${width}"/>`);
   const svg = `<svg xmlns="${XMLNS}" viewBox="${ICON_ATTRS.viewBox}" width="${size}" height="${size}"`
     + ` fill="none" stroke-linecap="${ICON_ATTRS.strokeLinecap}" stroke-linejoin="${ICON_ATTRS.strokeLinejoin}">`
-    + `<path d="${d}" stroke="${attr(halo)}" stroke-width="${haloWidth}"/>`
-    + `<path d="${d}" stroke="${attr(color)}" stroke-width="${ICON_STROKE}"/>`
+    + layer(attr(halo), haloWidth)
+    + layer(attr(color), ICON_STROKE)
     + '</svg>';
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${Math.round(hx)} ${Math.round(hy)}, ${fallback}`;
 }

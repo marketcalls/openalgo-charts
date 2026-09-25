@@ -738,6 +738,39 @@ window.addEventListener('keydown', (e) => {
 });
 ```
 
+### Icons for the toolbar
+
+The tier ships a glyph for every tool on a 24 grid, and a chrome set (undo, lock, eye,
+trash, settings and the rest) on a 16 grid, as path data with string builders over it.
+Both tiers draw a 2-unit stroke on whole units, so at their native sizes (24px and 16px)
+every straight edge lands on a pixel boundary and both rails share one 2px line.
+
+```ts
+import { iconSvg, chromeIconSvg, iconSprite, iconUse, toolCursor } from 'openalgo-charts/draw';
+
+button.innerHTML = iconSvg('trend-line');       // 24px, currentColor
+lockButton.innerHTML = chromeIconSvg('lock');   // 16px
+canvas.style.cursor = toolCursor('trend-line'); // the glyph over a contrasting halo
+```
+
+Some glyphs carry one filled **accent**: the anchor dots of a trend line, the origin dot
+of a ray, an arrowhead, a magnet's pole caps. That is what tells siblings apart, so the
+builders always draw it: a second `<path>` with `fill="currentColor"` after the glyph,
+under the same stroke. A host that wraps the raw path data itself reads the accent too:
+
+```ts
+import { drawingToolIcon, drawingToolAccent, ICON_ATTRS } from 'openalgo-charts/draw';
+
+const accent = drawingToolAccent('ray');         // undefined when the glyph has none
+svg.innerHTML = `<path d="${drawingToolIcon('ray')}"/>`
+  + (accent ? `<path d="${accent}" fill="currentColor"/>` : '');
+```
+
+`CHROME_ICON_ACCENTS` and `chromeIconAccent(id)` are the same for the chrome set. The
+grid, margins, stroke and accents are checked by unit tests, and a browser check
+rasterises every glyph in Chromium, Firefox and WebKit and fails when two glyphs in a set
+overlap enough to be mistaken for each other.
+
 ## Plot clipping and moved axes (2.1.6)
 
 Drawing bodies, previews, selection handles and snap rings are clipped to their

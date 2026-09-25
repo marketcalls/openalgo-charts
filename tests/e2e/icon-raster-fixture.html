@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><style>
+html, body { margin: 0; height: 100%; background: #131722; }
+#host { position: absolute; inset: 0; }
+</style></head>
+<body><div id="host"></div><script type="module">
+// Both glyph tiers as the built draw tier hands them to a host: the markup
+// builders, accents included, at each tier's native size. A widget beside
+// them shows the same glyphs in place, in the rail, a flyout and a menu.
+import {
+  iconSvg, chromeIconSvg, drawingToolIconIds, chromeIconIds,
+} from '/dist/openalgo-charts.draw.mjs';
+import { createWidget } from '/dist/openalgo-charts.widget.mjs';
+
+const icons = {
+  tools: drawingToolIconIds().map((id) => ({ id, svg: iconSvg(id), px: 24 })),
+  chrome: chromeIconIds().map((id) => ({ id, svg: chromeIconSvg(id), px: 16 })),
+};
+
+const bars = [];
+let p = 100;
+for (let i = 0; i < 240; i++) {
+  const o = p;
+  p += Math.sin(i / 9) * 1.5 + ((i % 7) - 3) * 0.3;
+  bars.push({ time: 1_700_000_000 + i * 300, open: o, high: Math.max(o, p) + 1, low: Math.min(o, p) - 1, close: p, volume: 100 + i });
+}
+const theme = new URLSearchParams(location.search).get('theme') === 'light' ? 'light' : 'dark';
+if (theme === 'light') document.body.style.background = '#ffffff';
+const widget = createWidget(document.getElementById('host'), {
+  feed: { getBars: async () => bars, subscribeBars: () => () => {} },
+  symbol: 'ICONS', exchange: 'NSE', interval: '5m', theme,
+  rail: { favorites: ['trend-line', 'ray', 'long-position'] },
+});
+let lineId = '';
+widget.on('data', () => {
+  if (lineId !== '') return;
+  lineId = widget.draw.add({ tool: 'trend-line', paneIndex: 0,
+    points: [{ time: bars[150].time, price: bars[150].close }, { time: bars[200].time, price: bars[200].close + 4 }],
+    style: { color: '#ff00ff', lineWidth: 3 },
+  }).id;
+  window.__iconFixture.lineId = lineId;
+});
+window.__iconFixture = { icons, widget, lineId };
+</script></body></html>

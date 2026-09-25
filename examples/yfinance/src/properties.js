@@ -10,7 +10,7 @@
 // the fields their schemas share, and writes through `updateMany` so one
 // edit is one undo entry.
 import {
-  drawingSettingsSchema, readDrawingSettings, applyDrawingSettings, getDrawingTool, chromeIconSvg,
+  drawingSettingsSchema, readDrawingSettings, applyDrawingSettings, getDrawingTool, chromeIconSvg, CHROME_ICON_STROKE,
   formatRatio, gannLabel, cloneLevels, DEFAULT_FIB,
 } from '/dist/openalgo-charts.draw.mjs';
 import { el, inTextField, toast } from './ui.js';
@@ -119,7 +119,7 @@ const GLYPH = {
   pin: 'M6 2h4M7 2v4L5 9h6L9 6V2M8 9v5',
 };
 const XMLNS = 'http://www.w3.org/2000/svg';
-const glyph = (id, stroke = 1.5) =>
+const glyph = (id, stroke = CHROME_ICON_STROKE) =>
   `<svg xmlns="${XMLNS}" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor"`
   + ` stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${GLYPH[id]}"/></svg>`;
 const chrome = (id) => chromeIconSvg(id, { size: 16 });

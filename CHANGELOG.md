@@ -2,6 +2,52 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- Glyphs can carry one filled accent: an anchor dot, a pole cap or an
+  arrowhead, on the same integer grid and stroked with the same line as the
+  glyph. `DRAWING_TOOL_ACCENTS` / `drawingToolAccent(id)` and
+  `CHROME_ICON_ACCENTS` / `chromeIconAccent(id)` hold them, optional per glyph.
+  `iconSvg`, `chromeIconSvg`, `iconSprite` and `toolCursor` draw them
+  (a second `<path>` with `fill="currentColor"`, haloed with the glyph in a
+  cursor). A host that wraps the path data itself adds that second path, or
+  it shows a different glyph from the rest of the set.
+- A browser check for look-alike icons, `tests/e2e/icon-raster.spec.ts`: every
+  glyph is rasterised at its native size in Chromium, Firefox and WebKit, and
+  the check fails when two glyphs in a tier overlap at an intersection over
+  union of 0.85 or more (star, eye and link state pairs excepted), when a named
+  sibling pair reaches 0.75, or when a tier's share of solid pixels falls below
+  its floor.
+
+### Changed
+
+- The chrome icon stroke is 2 (`CHROME_ICON_STROKE`), the same 2px line as the
+  24px tool glyphs, and the chrome live area is 2 to 14. The old 1.5 stroke on
+  whole units put every edge three quarters of the way across a pixel, so no
+  edge was solid: 0.18 of the tier's inked pixels were solid at 16px, 0.63 now.
+  The dense chrome glyphs are redrawn for the heavier line (settings, camera,
+  link, unlink, duplicate, eye), and the widget stylesheet and the reference
+  host follow the tier's value. A host that sets its own chrome stroke keeps
+  it.
+- Look-alike glyphs are drawn apart. Long and short positions are a target box
+  with the direction and a stop bar, one the other turned over. The
+  risk-reward pair is a price ladder. The line family differs by its ends: a
+  trend line ends in two anchor dots, a ray starts at an origin dot (its
+  tick read as a check mark), an extended line carries its dots inside, an
+  arrow and a path end in a solid head, and a polyline marks its vertices.
+  Unlock swings the shackle open, and the cursor is a pointer rather than a
+  cross beside the cross-line tool and plus. The magnet has pole caps.
+
+### Fixed
+
+- `long-position` and `short-position` were one picture (the same subpaths in
+  another order), and the duplicate check compared path strings, so it passed.
+  It now compares drawings: subpaths walked to absolute coordinates, sorted,
+  and read from a fixed end. `lock` and `unlock` overlapped by more than 99
+  percent at 16px, and the chrome `cursor` and `plus` by 92 percent.
+
 ## 2.5.5
 
 2026-09-26

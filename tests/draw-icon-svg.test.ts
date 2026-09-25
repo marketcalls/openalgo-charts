@@ -13,10 +13,24 @@ import {
 import {
   DRAWING_TOOL_ICONS, drawingToolIconIds, ICON_VIEWBOX, ICON_STROKE,
   CHROME_ICONS, CHROME_ICON_FILLED, chromeIconIds, CHROME_ICON_VIEWBOX, CHROME_ICON_STROKE,
+  DRAWING_TOOL_ACCENTS, CHROME_ICON_ACCENTS,
 } from '../src/draw/icons';
 
 const TOOL_IDS = drawingToolIconIds();
 const CHROME_IDS = chromeIconIds();
+
+/**
+ * The `<path>` elements a glyph should render as: its registry path, then its
+ * accent, if it has one, filled and nothing else. Stroke, width, caps and
+ * joins still come from the frame for both.
+ */
+function expected(
+  registry: Readonly<Record<string, string>>, accents: Readonly<Record<string, string>>, id: string,
+): Record<string, string>[] {
+  const out: Record<string, string>[] = [{ d: registry[id] }];
+  if (accents[id] !== undefined) out.push({ d: accents[id], fill: 'currentColor' });
+  return out;
+}
 
 /** The `<path .../>` elements of a markup string, in document order, attributes as a map. */
 function paths(svg: string): Record<string, string>[] {
@@ -51,13 +65,27 @@ describe('iconSvg', () => {
     expect(r['stroke-linejoin']).toBe('round');
     expect(r['aria-hidden']).toBe('true');
     expect(r.class).toBeUndefined();
-    expect(paths(svg)).toEqual([{ d: DRAWING_TOOL_ICONS['trend-line'] }]);
+    expect(paths(svg)).toEqual([
+      { d: DRAWING_TOOL_ICONS['trend-line'] },
+      { d: DRAWING_TOOL_ACCENTS['trend-line'], fill: 'currentColor' },
+    ]);
     expect(svg.endsWith('</svg>')).toBe(true);
     expect(svg).not.toMatch(/\n/);
   });
 
-  it.each(TOOL_IDS)('%s renders its own registry path', (id) => {
-    expect(paths(iconSvg(id))).toEqual([{ d: DRAWING_TOOL_ICONS[id] }]);
+  it.each(TOOL_IDS)('%s renders its own registry path, and its accent', (id) => {
+    expect(paths(iconSvg(id))).toEqual(expected(DRAWING_TOOL_ICONS, DRAWING_TOOL_ACCENTS, id));
+  });
+
+  it('paints an accent solid in the frame colour, under the frame stroke', () => {
+    // The ray's origin dot: a closed mark whose only attribute is its fill,
+    // so a host restyling the frame restyles the dot with it.
+    const svg = iconSvg('ray', { stroke: 1.5 });
+    const [line, dot] = paths(svg);
+    expect(line).toEqual({ d: DRAWING_TOOL_ICONS.ray });
+    expect(dot).toEqual({ d: DRAWING_TOOL_ACCENTS.ray, fill: 'currentColor' });
+    expect(root(svg)['stroke-width']).toBe('1.5');
+    expect(root(svg).fill).toBe('none');
   });
 
   it('takes a pixel size, or a unit string for text-relative sizing', () => {
@@ -99,8 +127,8 @@ describe('chromeIconSvg', () => {
     expect(paths(chromeIconSvg('undo'))).toEqual([{ d: CHROME_ICONS.undo }]);
   });
 
-  it.each(CHROME_IDS)('%s renders its own registry path', (id) => {
-    expect(paths(chromeIconSvg(id))).toEqual([{ d: CHROME_ICONS[id] }]);
+  it.each(CHROME_IDS)('%s renders its own registry path, and its accent', (id) => {
+    expect(paths(chromeIconSvg(id))).toEqual(expected(CHROME_ICONS, CHROME_ICON_ACCENTS, id));
   });
 
   it('paints the filled glyphs solid, and only those', () => {
@@ -141,11 +169,15 @@ describe('iconSprite', () => {
     for (const s of syms) expect(s.viewBox).toBe(ICON_VIEWBOX);
   });
 
-  it('keeps each symbol presentation-free, so stroke and fill inherit from the use site', () => {
-    // One sprite serves every weight only if nothing inside it fixes one.
+  it('keeps each symbol stroke-free, so the weight inherits from the use site', () => {
+    // One sprite serves every weight only if nothing inside it fixes one. An
+    // accent carries its fill, and only that: the frame around a <use> is
+    // fill none, so a dot left to inherit would paint as a ring.
     for (const s of symbols(iconSprite())) {
-      expect(s.body).toMatch(/^<path d="[^"]+"\/>$/);
-      expect(s.body).not.toMatch(/stroke|fill/);
+      const id = s.id.slice(ICON_SYMBOL_PREFIX.length);
+      expect(paths(s.body)).toEqual(expected(DRAWING_TOOL_ICONS, DRAWING_TOOL_ACCENTS, id));
+      expect(s.body).toMatch(/^(<path d="[^"]+"( fill="currentColor")?\/>)+$/);
+      expect(s.body).not.toMatch(/stroke/);
     }
   });
 
@@ -154,7 +186,8 @@ describe('iconSprite', () => {
     // <use> to the first match anyway.
     const syms = symbols(iconSprite(['ray', 'arrow', 'ray']));
     expect(syms.map((s) => s.id)).toEqual([`${ICON_SYMBOL_PREFIX}ray`, `${ICON_SYMBOL_PREFIX}arrow`]);
-    expect(syms[0].body).toBe(`<path d="${DRAWING_TOOL_ICONS.ray}"/>`);
+    expect(syms[0].body).toBe(`<path d="${DRAWING_TOOL_ICONS.ray}"/><path d="${DRAWING_TOOL_ACCENTS.ray}" fill="currentColor"/>`);
+    expect(syms[1].body).toBe(`<path d="${DRAWING_TOOL_ICONS.arrow}"/><path d="${DRAWING_TOOL_ACCENTS.arrow}" fill="currentColor"/>`);
   });
 
   it('throws for an unknown id rather than emitting an empty symbol', () => {
@@ -206,15 +239,17 @@ describe('toolCursor', () => {
   });
 
   it('decodes to a sized svg carrying the glyph twice: a halo under the stroke', () => {
-    const c = parse(toolCursor('trend-line'));
+    const c = parse(toolCursor('horizontal-line'));
     const r = root(c.svg);
     expect(r.width).toBe('20');
     expect(r.height).toBe('20');
     expect(r.viewBox).toBe(ICON_VIEWBOX);
     expect(r.fill).toBe('none');
-    const [halo, glyph] = paths(c.svg);
-    expect(halo.d).toBe(DRAWING_TOOL_ICONS['trend-line']);
-    expect(glyph.d).toBe(DRAWING_TOOL_ICONS['trend-line']);
+    expect(DRAWING_TOOL_ACCENTS['horizontal-line']).toBeUndefined();
+    const [halo, glyph, ...rest] = paths(c.svg);
+    expect(rest).toEqual([]);
+    expect(halo.d).toBe(DRAWING_TOOL_ICONS['horizontal-line']);
+    expect(glyph.d).toBe(DRAWING_TOOL_ICONS['horizontal-line']);
     expect(glyph.stroke).toBe('#fff');
     expect(glyph['stroke-width']).toBe(String(ICON_STROKE));
     expect(halo.stroke).toBe('#000');
@@ -222,6 +257,24 @@ describe('toolCursor', () => {
     // the requested size, whatever that size is.
     const px = (Number(halo['stroke-width']) - ICON_STROKE) * 20 / 24;
     expect(px).toBeCloseTo(2, 5);
+  });
+
+  it('haloes an accent with its glyph, and paints both layers solid', () => {
+    // The dots on a trend line are part of the picture: a cursor that drops
+    // them draws a different tool, and one that haloes the line but not the
+    // dots loses them on a chart of the same colour.
+    const [halo, haloMarks, glyph, marks] = paths(parse(toolCursor('trend-line')).svg);
+    expect(halo.d).toBe(DRAWING_TOOL_ICONS['trend-line']);
+    expect(haloMarks.d).toBe(DRAWING_TOOL_ACCENTS['trend-line']);
+    expect(haloMarks.fill).toBe('#000');
+    expect(haloMarks.stroke).toBe('#000');
+    expect(haloMarks['stroke-width']).toBe(halo['stroke-width']);
+    expect(glyph.d).toBe(DRAWING_TOOL_ICONS['trend-line']);
+    expect(glyph.fill).toBeUndefined();
+    expect(marks.d).toBe(DRAWING_TOOL_ACCENTS['trend-line']);
+    expect(marks.fill).toBe('#fff');
+    expect(marks.stroke).toBe('#fff');
+    expect(marks['stroke-width']).toBe(String(ICON_STROKE));
   });
 
   it('scales the halo with the image so it stays one pixel at any size', () => {
@@ -239,8 +292,10 @@ describe('toolCursor', () => {
 
   it('lets an explicit halo win, and falls back to black for a colour it cannot read', () => {
     expect(paths(parse(toolCursor('ray', { color: '#000', halo: '#f00' })).svg)[0].stroke).toBe('#f00');
-    expect(paths(parse(toolCursor('ray', { color: 'rgb(0,0,0)' })).svg)[0].stroke).toBe('#000');
-    expect(paths(parse(toolCursor('ray', { color: 'rgb(0,0,0)' })).svg)[1].stroke).toBe('rgb(0,0,0)');
+    // Halo line, halo dot, then the glyph line and dot in the colour itself.
+    const layers = paths(parse(toolCursor('ray', { color: 'rgb(0,0,0)' })).svg);
+    expect(layers.map((p) => p.stroke)).toEqual(['#000', '#000', 'rgb(0,0,0)', 'rgb(0,0,0)']);
+    expect(layers[3].fill).toBe('rgb(0,0,0)');
   });
 
   it('takes a hotspot, a size and a fallback keyword', () => {
@@ -271,6 +326,7 @@ describe('toolCursor', () => {
     expect(value.length).toBeLessThan(4096);
     const c = parse(value);
     expect(c.svg).toContain(`d="${DRAWING_TOOL_ICONS[id]}"`);
+    if (DRAWING_TOOL_ACCENTS[id] !== undefined) expect(c.svg).toContain(`d="${DRAWING_TOOL_ACCENTS[id]}"`);
     expect(c.svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
   });
 
@@ -294,9 +350,10 @@ describe('icon markup escapes every interpolated attribute', () => {
     const svg = iconSvg('trend-line', { stroke: BREAKOUT as unknown as number });
     expect(svg).not.toContain('<script>');
     expect(svg).toContain('&quot;&gt;&lt;script&gt;');
-    // Three real tag delimiters and no more: `<svg`, `<path`, `</svg>`. An
-    // injected element would raise this count.
-    expect(svg.match(/</g)!.length).toBe(3);
+    // The real tag delimiters and no more: `<svg`, one `<path` per path
+    // (the line and its accent), `</svg>`. An injected element would raise
+    // this count.
+    expect(svg.match(/</g)!.length).toBe(2 + expected(DRAWING_TOOL_ICONS, DRAWING_TOOL_ACCENTS, 'trend-line').length);
   });
 
   it('cannot be broken out of through className', () => {

@@ -94,8 +94,10 @@ export {
 // shows a tool reads from one source.
 export {
   DRAWING_TOOL_ICONS, drawingToolIcon, drawingToolIconIds,
+  DRAWING_TOOL_ACCENTS, drawingToolAccent,
   ICON_VIEWBOX, ICON_STROKE, ICON_ATTRS,
   CHROME_ICONS, CHROME_ICON_FILLED, chromeIcon, chromeIconIds,
+  CHROME_ICON_ACCENTS, chromeIconAccent,
   CHROME_ICON_VIEWBOX, CHROME_ICON_STROKE, CHROME_ICON_ATTRS,
   type IconAttrs,
 } from './icons';
