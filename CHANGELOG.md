@@ -9,7 +9,9 @@ All notable changes to OpenAlgo Charts.
 - Account state in the trade tier. `AccountManager` lists a provider's accounts
   for one mode, loads the selected account's balance, equity, margin used and
   available, P&L and leverage, follows its stream, and reads its positions,
-  executions and order history. Switching accounts aborts the old account's
+  executions and order history, dropping and counting rows that name another
+  account (a position names one through the new optional `Position.accountId`
+  when the provider stamps it). Switching accounts aborts the old account's
   requests and stream, so a late answer is never shown under the new name; a
   pushed reading older than the one on screen, a snapshot from the other
   ledger, and a non-finite figure are all refused. A dropped connection keeps
@@ -33,17 +35,19 @@ All notable changes to OpenAlgo Charts.
   `placeBracket`, each with its own idempotency token, its own feature and
   `confirmCommand` approval when not armed. An opposite order is never sent in
   place of a close. A close or reverse without a known outcome holds the
-  position against another; `onBrokerOrder` settles a write whose answer was
-  lost through the client token the broker echoes, `releaseAmbiguous` frees one
-  the host has shown never arrived, and a feed error marked `rejected: true`
-  (`isBrokerRejection`) settles as the broker's refusal. A bracket gives each
+  position against another, whether or not either names the exchange;
+  `onBrokerOrder` settles a write whose answer was lost through the client
+  token the broker echoes, `releaseAmbiguous` frees one the host has shown
+  never arrived, and a feed error marked `rejected: true` (`isBrokerRejection`)
+  settles as the broker's refusal. A bracket gives each
   leg its own client token (`legClientTokens`), and `onBrokerOrder` adopts a
   leg by that token or by its entry and role (`parentId`, `role`), so a bracket
   whose answer was lost still has legs that can be cancelled and filled.
 - `FakeBroker({ accounts })` simulates all of it: per-account ledgers filled at
   a mark price, preview, `IOC`/`FOK` cancellation, `GTD` expiry, leverage
-  limits, native close, reverse and linked bracket legs, server-side refusals,
-  and hooks to hold, fail or lose any answer and drop the connection. A call
+  limits, native close, reverse and linked bracket legs, server-side refusals
+  (including a cancel or modify of an order that has already filled), and
+  hooks to hold, fail or lose any answer and drop the connection. A call
   made while the connection is down fails as never sent (a pre-flight
   failure), so the engine blocks it rather than holding it ambiguous; one
   already out when it drops fails like a lost answer. Without `accounts` it
