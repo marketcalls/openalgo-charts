@@ -1,4 +1,5 @@
 import type { Bar, UTCSeconds } from '../model/bar';
+import type { DataVariant, DataVariantCapabilities, DataVariantQuery } from './data-variant';
 
 /** Cancels a subscription. */
 export type UnsubscribeFn = () => void;
@@ -18,6 +19,12 @@ export interface BarsRequest {
   timeoutMs?: number;
   /** Preferred number of bars; a date-range feed may return a different count. */
   countBack?: number;
+  /**
+   * Which of the provider's series: a session, an adjustment, a currency or a
+   * unit. Absent is the provider's default. A feed serves only what it
+   * declares through `dataVariants`, and never derives one series from another.
+   */
+  variant?: DataVariant;
 }
 
 /** An optional provider page before an exclusive UTC-second anchor. */
@@ -68,6 +75,12 @@ export interface LiveBarMeta {
 export interface DataFeed {
   getBars(req: BarsRequest): Promise<Bar[]>;
   getBarsPage?(req: BarsPageRequest): Promise<BarsPage>;
+  /**
+   * The variants this provider serves for an instrument and interval. Without
+   * it the feed serves only its default series, and a request for any other
+   * variant is reported unsupported rather than sent.
+   */
+  dataVariants?(query: DataVariantQuery): DataVariantCapabilities | Promise<DataVariantCapabilities>;
   /** Read a closed-bar snapshot without initiating a network request. */
   getCachedBars?(req: BarsRequest): Promise<Bar[] | undefined>;
   subscribeBars?(req: BarsRequest, onBar: (bar: Bar, meta?: LiveBarMeta) => void, opts?: BarSubscriptionOptions): UnsubscribeFn;

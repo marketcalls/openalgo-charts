@@ -73,7 +73,11 @@ creation/update timestamps. Document timestamps are milliseconds; chart bar
 and drawing times remain UTC seconds.
 
 Configuration includes chart snapshots, studies, drawings, alerts, viewport,
-host preferences and comparison definitions. Primary and comparison history
+host preferences and comparison definitions. A chart's optional `variant` names the
+provider series it showed (extended hours, raw prices, a currency or a unit; see
+[Data Variants](/docs/data-variants)). The parser stores the default as no field at
+all and refuses a variant it cannot name, since it would reopen as another series, and
+`createChartGrid` saves and reopens each cell's variant. Primary and comparison history
 are loaded separately. Credentials, account balances, orders, positions and
 armed execution state do not belong in portable workspaces.
 

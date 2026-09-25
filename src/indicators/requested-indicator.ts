@@ -1,10 +1,11 @@
 import {
-  IndicatorInputError,
+  IndicatorInputError, dataVariantKey, normalizeDataVariant,
   type Bar, type ChartDataContext, type IndicatorCalcContext, type IndicatorDataStatus,
   type IndicatorDescriptor, type IndicatorRequestState, type IndicatorSettings,
   type IndicatorSnapshotRequest, type IndicatorStore, type IndicatorValues, type RequestedBarsSnapshot,
 } from 'openalgo-charts';
 import { alignRequestedExpression, type RequestedAlignmentOptions } from './requested-context';
+import { inheritedDataVariant } from './inherited-variant';
 
 /** Source and settings visible to request selection and requested calculation. */
 export interface RequestedIndicatorContext {
@@ -21,7 +22,10 @@ export interface RequestedIndicatorDescriptor extends Pick<IndicatorDescriptor,
   /**
    * Select a complete history window, including expression warmup. null means
    * unsupported. The helper owns cancellation; signal is not a selector input.
-   * Symbol, exchange, interval and explicit asOf changes start a new generation.
+   * Symbol, exchange, interval, variant and explicit asOf changes start a new
+   * generation, and so does a change of the chart's own variant. A request that
+   * names no `variant` asks in the chart's session and adjustment (see
+   * `inheritedDataVariant`); naming one, `{}` included, overrides that.
    * Window changes refresh the complete selection without merging partial pages.
    */
   request(ctx: RequestedIndicatorContext): Omit<IndicatorSnapshotRequest, 'signal'> | null;
@@ -78,14 +82,18 @@ const EMPTY: RequestedBarsSnapshot = { bars: [], availableAt: [], confirmed: [] 
 const stateOf = (store: IndicatorStore): State | undefined => store[STATE] as State | undefined;
 const invalid = (message: string): never => { throw new IndicatorInputError(`Requested indicator: ${message}`); };
 
-function checkedRequest(value: Omit<IndicatorSnapshotRequest, 'signal'>): Omit<IndicatorSnapshotRequest, 'signal'> {
+function checkedRequest(value: Omit<IndicatorSnapshotRequest, 'signal'>, market?: Readonly<ChartDataContext>): Omit<IndicatorSnapshotRequest, 'signal'> {
   if (value === null || typeof value !== 'object'
     || typeof value.symbol !== 'string' || value.symbol.trim() === ''
     || typeof value.interval !== 'string' || value.interval.trim() === ''
     || (value.exchange !== undefined && typeof value.exchange !== 'string')
     || !Number.isFinite(value.from) || !Number.isFinite(value.to) || value.from > value.to
     || (value.asOf !== undefined && !Number.isFinite(value.asOf))) invalid('request requires an instrument and a finite ordered time window');
-  return { symbol: value.symbol, exchange: value.exchange, interval: value.interval, from: value.from, to: value.to, asOf: value.asOf };
+  let variant;
+  try { variant = value.variant === undefined ? inheritedDataVariant(market?.variant) : normalizeDataVariant(value.variant); }
+  catch { invalid('request variant must be a data variant'); }
+  return { symbol: value.symbol, exchange: value.exchange, interval: value.interval, from: value.from, to: value.to, asOf: value.asOf,
+    ...(variant ? { variant } : {}) };
 }
 
 /** Validate every row before truncation, including rows beyond an availability barrier. */
@@ -247,7 +255,14 @@ export function createRequestedIndicator(d: RequestedIndicatorDescriptor): Indic
         };
         state.context = context;
         let selected: Omit<IndicatorSnapshotRequest, 'signal'> | null;
-        try { const value = d.request(context); selected = value === null ? null : checkedRequest(value); }
+        let variant = '';
+        try {
+          const value = d.request(context);
+          selected = value === null ? null : checkedRequest(value, context.dataContext);
+          // The chart's variant is part of its source even when the request
+          // does not inherit it: the source bars themselves are another series.
+          variant = dataVariantKey(context.dataContext?.variant);
+        }
         catch (error) { if (fresh()) { clear(); if (fresh()) publish({ state: 'error', error }); } return; }
         if (!fresh()) return;
         if (selected === null || ctx.requestSnapshot === undefined || requestState?.supportsSnapshots === false
@@ -259,7 +274,7 @@ export function createRequestedIndicator(d: RequestedIndicatorDescriptor): Indic
         const market = context.dataContext;
         const key = JSON.stringify([
           selected.symbol, selected.exchange, selected.interval, selected.asOf,
-          market?.symbol, market?.exchange, market?.interval,
+          market?.symbol, market?.exchange, market?.interval, variant, selected.variant ?? null,
           requestState?.providerRevision, source?.sourceId,
           replay === undefined ? source?.historyRevision : null, replay !== undefined,
         ]);

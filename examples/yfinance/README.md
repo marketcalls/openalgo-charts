@@ -123,6 +123,7 @@ without it.
 ```
 GET /api/history?symbol=AAPL&interval=1d&period=1y
 GET /api/history?symbol=AAPL&interval=5m&from=<utc seconds>&to=<utc seconds>
+GET /api/history?symbol=AAPL&interval=5m&period=1mo&session=extended
 ```
 
 | Parameter | Rule |
@@ -131,6 +132,7 @@ GET /api/history?symbol=AAPL&interval=5m&from=<utc seconds>&to=<utc seconds>
 | `interval` | One of `1m 2m 5m 15m 30m 60m 90m 1h 1d 5d 1wk 1mo 3mo` (default `1d`). |
 | `period` | One of `1d 5d 1mo 3mo 6mo 1y 2y 5y 10y ytd max` (default `1y`). |
 | `from`, `to` | Optional UTC seconds that pin the window. `to` alone ends the period there; `from` overrides the period's length. Both must be positive, before the year 2100, and `from` before `to`. |
+| `session` | `regular` (the default) or `extended`, which adds the source's own pre and post market bars (`prepost` upstream). Extended hours exist only for intraday bars of a US listed stock: a plain ticker of one to five letters with an optional share class, such as `AAPL` or `BRK-B`. |
 
 A success is the `Bar[]` the chart consumes directly, `{ time: <UTC seconds>,
 open, high, low, close, volume }`, with any row the source left without a
@@ -140,7 +142,8 @@ with the status that matches, and never a traceback: that goes to the terminal.
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `bad_symbol`, `bad_interval`, `bad_period`, `bad_range` | A parameter failed the rule above. The message names the rule. |
+| 400 | `bad_symbol`, `bad_interval`, `bad_period`, `bad_range`, `bad_session` | A parameter failed the rule above. The message names the rule. |
+| 400 | `unsupported_session` | Extended hours asked of an instrument or interval the source has none for. Refused rather than answered with regular hours under the extended label. |
 | 404 | `no_data` | The source has no bars for that ask: an unknown symbol, or a range it does not serve. |
 | 404 | `not_found` | No such endpoint under `/api/`. |
 | 429 | `rate_limited` | The source is throttling this address. `Retry-After` says when to try again. |
@@ -195,6 +198,9 @@ daemon threads, so a yfinance call that hangs cannot hold the process open.
 day, as long as the window is pinned with `to`. It is what the end-to-end
 suite runs against, and what a fresh clone can run before installing anything.
 
+- `session=extended` adds two hours either side of the synthetic session on the
+  same grid, so the regular bars are the same observations in both series and
+  only the pre and post market bars differ.
 - Each symbol has its own base price, drift and three waves whose periods the
   symbol's hash picks, so two symbols never move together and a comparison
   overlay has something to show. Every bar's open is the previous bar's close.
@@ -294,6 +300,7 @@ examples/yfinance/
     clipboard.js      the drawing clipboard and its chords
     menus.js          the right-click menu (including Move pane up/down and Collapse pane), the price-axis menu, the popup menu
     session-marks.js  host-owned price marks: read-only, never saved, not listed
+    session.js        regular or extended trading hours as the engine's data variant
     toolbar.js        the shell bar, chart types, chart-only full screen
     rail.js           the drawing rail: groups, pins, magnet, stay mode, selection controls, keyboard
     rail-flyout.js    the rail's flyout, context menu and dwell tooltip
@@ -476,7 +483,7 @@ exists to show one engine surface carrying real use, not just being present.
 | Module | Proves |
 |---|---|
 | `expression.js` | A symbol box holding arithmetic (`AAPL/MSFT`, `NSEIX:NIFTY1!/NSE:RELIANCE+NASDAQ:META`) charts the result. `parseExpression` names the legs before anything is fetched, so exactly those are loaded, in parallel, with the first failure winning: a ratio missing a leg is not a chart with a gap. `evaluateExpression` folds them onto the first leg's time grid, gapping any bar the others did not trade rather than carrying a stale price forward. Closes are exact; a high and low can be bounded by interval arithmetic, which is offered rather than assumed because the bound assumes each leg hit its extreme at the worst possible moment. |
-| `feed.js` | A `DataFeed` is one method. The bar cache wrapper (`withBarCache`) keys on symbol, exchange and interval, snaps `from` to the bar grid so a reload inside the same bar hits, stops `to` at the last seen bar while the venue is shut, and refetches only the forming bar. A 404, 429 or 5xx becomes a typed error (`NotFoundError`, `RateLimitedError`, `NetworkError`) with a deadline and one retry, so the readout can say "check the symbol" or "try again in a minute" rather than printing whatever the server wrote. A staleness badge says when the newest bar is older than the venue's clock allows. |
+| `feed.js` | A `DataFeed` is one method. The bar cache wrapper (`withBarCache`) keys on symbol, exchange, interval and the data variant, snaps `from` to the bar grid so a reload inside the same bar hits, stops `to` at the last seen bar while the venue is shut, and refetches only the forming bar. A 404, 429 or 5xx becomes a typed error (`NotFoundError`, `RateLimitedError`, `NetworkError`) with a deadline and one retry, so the readout can say "check the symbol" or "try again in a minute" rather than printing whatever the server wrote. A staleness badge says when the newest bar is older than the venue's clock allows. |
 | `intervals.js` | The interval registry accepts codes the built-in grammar does not (`1wk`, a calendar month, a quarter). Monthly and quarterly bars are folded from daily ones through `bucketStartOf`, so a month runs first-to-first in the chart's zone and February is 29 days long in 2024. Ranges are clamped to what the interval can serve. |
 | `indicators.js` | The picker is built from `registeredIndicators()`, so built-ins and the host's opt-in example appear grouped by category. The gear opens a form generated from the descriptor's `inputs`; the same code renders MACD, Bollinger or your own indicator. |
 | `indicator-input-controls.js` | Validates typed drafts and connects shared symbol lookup and chart picking to the reference modal, preserving its Apply and Cancel behavior. |
@@ -494,6 +501,7 @@ exists to show one engine surface carrying real use, not just being present.
 | `drawing.js`, `rail.js`, `rail-flyout.js` | The 2.0 drawing model from the host's side: the controller, the tool picker built from `BUILTIN_DRAWING_TOOLS` with the tier's own icon sprite and cursors, keyboard chords from `drawingShortcuts()`, and a rail whose flyouts and tooltips are host chrome built from the shipped glyphs. The toolbar's Del, Clear, Undo and Redo are off whenever pressing them would do nothing: Del and Clear leave read-only drawings alone, and Undo and Redo follow the controller's `canUndo()` and `canRedo()`. |
 | `properties.js` | The floating properties bar is generated from `drawingSettingsSchema`, which declares only the fields a tool's `draw` reads: a field in the schema is a control with something behind it, a field absent from it is a control not shown. With several drawings selected it edits the fields their schemas share, as one undo entry. A read-only selection shows "Read-only" and a Duplicate button instead of controls the controller would refuse. For text, rectangle, ellipse and table the schema's `space` field becomes a pin toggle: pinned, the drawing keeps its place on screen through pan and zoom and scales with the chart, and unpinning puts it back on the bars under it. The bar and the inline text editor place themselves by `draw.screenPoints(id)`, since a pinned drawing has no time and price to map. |
 | `session-marks.js` | Drawing policies from the host's side. **Mark ... for This Session** in the right-click menu places a dashed price line with `policy: { editable: false, persistent: false, listed: false }`. Select it to read it, copy it, duplicate it into your own drawing or raise an alert from it; it cannot be dragged, nudged, restyled, cut or deleted, undo does not remove it, it is left out of saved layouts and it is absent from the Objects dock. The host keeps the marks per symbol for the life of the page and puts them back, with their ids, after every chart-type switch, reload and layout restore. **Clear Session Marks** removes them with `removeMany(ids, { force: true })`, the one call in the host that overrides the policy. |
+| `session.js` | Trading session as a data variant. The session menu beside the range offers regular hours and, for intraday bars of a US listed stock (the one place this source has them), extended hours: the source's own pre and post market bars, asked for with `session=extended` and never derived from the regular series. The feed declares what it serves through `dataVariants`, so a request for extended hours anywhere else is refused before it is sent and the chart says so, with a button back to regular hours, rather than showing regular bars under the extended label. The session is part of the bar cache key, the chart's data context, comparisons (asked for in their chart's session), replay's finer history, the saved layout and named workspaces. In fixture mode extended hours are two hours either side of the synthetic session, the same bars in between, byte for byte on every run. |
 | `clipboard.js` | One in-memory clipboard shared by both charts' controllers, so copy here and paste there works even when the browser refuses the OS clipboard; the OS read is bounded so a paste never hangs on a permission popup. |
 | `level-editor.js` | A ladder tool's levels (retracement, extension, channel, fan, time zones, the Gann pair) edited one row each: enable, ratio, colour, label, add, remove, reset. Every edit is one undo entry through the controller. |
 | `text-editor.js` | Inline text editing over the painted text, sized by the same rules the text tool paints with, with every pointer and key event stopped at the box so the chart under it does not pan. |

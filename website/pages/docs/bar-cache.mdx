@@ -56,8 +56,11 @@ completed history and re-fetch only the tail.
 
 ## The key deliberately excludes the range
 
-An entry is keyed `symbol | exchange | interval`. The requested `from` and `to` are **not**
-part of the key:
+An entry is keyed `symbol | exchange | interval`, then the request's
+[data variant](/docs/data-variants) when it names one: extended hours or raw prices are
+another series, so they are another entry. The default variant adds nothing, so the key
+of a request without one is the key it always was. The requested `from` and `to` are
+**not** part of the key:
 
 - one entry per series holds the set that was fetched, and a **narrower** request is served
   by slicing it;
@@ -183,7 +186,7 @@ trade flow. They are then passed straight through, uncached.
 
 ```ts
 await feed.getBars({ ...req, noCache: true });  // always fetch, and refresh the entry
-await feed.invalidate(req);                     // drop one series (symbol/exchange/interval)
+await feed.invalidate(req);                     // drop one series (symbol/exchange/interval/variant)
 await feed.invalidate();                        // same as clear()
 await feed.clear();                             // drop everything this cache knows of
 feed.stats();                                   // { entries, bars, hits, misses, evictions }

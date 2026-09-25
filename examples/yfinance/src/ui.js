@@ -323,7 +323,7 @@ export function initOverlays() {
 // no bars for this request, or a request that failed and can be retried. A
 // failed load therefore never leaves a blank stage.
 
-export const CHART_STATES = ['ready', 'loading', 'empty', 'error'];
+export const CHART_STATES = ['ready', 'loading', 'empty', 'error', 'unsupported'];
 /** A warm load lands in a few ms; the dots only show for a slow one. */
 export const LOADING_DELAY_MS = 120;
 let chartStateName = 'ready';
@@ -348,6 +348,12 @@ function showChartState(state, detail) {
     title.textContent = 'No data for ' + (sym || 'this symbol') + (iv ? ' on ' + iv : '');
     text.textContent = detail.message || 'Try a longer range, another interval, or check the symbol.';
     card.setAttribute('role', 'status');
+  } else if (state === 'unsupported') {
+    // The source has no such series. Retrying asks the same question, so the
+    // action is the choice that will load instead.
+    title.textContent = 'Extended hours are not available for ' + (sym || 'this symbol') + (iv ? ' ' + iv : '');
+    text.textContent = 'This source serves extended hours only for intraday bars of US listed stocks.';
+    card.setAttribute('role', 'status');
   } else {
     title.textContent = 'Could not load ' + (sym || 'the chart') + (iv ? ' ' + iv : '');
     text.textContent = detail.message || 'The request failed.';
@@ -355,8 +361,11 @@ function showChartState(state, detail) {
   }
   const retry = el('cs-retry');
   const dismiss = el('cs-dismiss');
-  if (retry) retry.hidden = state === 'loading';
-  if (dismiss) dismiss.hidden = state !== 'error';
+  if (retry) {
+    retry.hidden = state === 'loading';
+    retry.textContent = state === 'unsupported' ? 'Use regular hours' : 'Try again';
+  }
+  if (dismiss) dismiss.hidden = state !== 'error' && state !== 'unsupported';
   // The dots are the load, and the load only. An empty or failed request has
   // something to say, and says it in the card.
   const dots = el('cs-dots');

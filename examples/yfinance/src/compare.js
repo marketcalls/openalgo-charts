@@ -2,6 +2,7 @@ import * as engine from '/dist/openalgo-charts.mjs';
 import { PaneLegend } from '/dist/openalgo-charts.mjs';
 import { el, esc, fmt, UP, DOWN } from './ui.js';
 import { fetchBars } from './feed.js';
+import { requestVariant, sessionOf } from './session.js';
 import { renderToolbar } from './toolbar.js';
 import { autosave } from './persist.js';
 import { capturePaneTarget, selectedPane } from './pane-target.js';
@@ -26,7 +27,9 @@ function captureComparisonTarget(pane) {
   return { ...target, timezone, current: () => target.current() && target.chart.timezone() === timezone };
 }
 const actionTarget = () => dialogTarget || captureComparisonTarget();
-const sourceKey = target => JSON.stringify([target.request.interval, target.request.period, target.timezone]);
+// A comparison is asked for in its chart's session, so it lines up with the
+// chart's bars; a session change is a new source for it too.
+const sourceKey = target => JSON.stringify([target.request.interval, target.request.period, sessionOf(target.request), target.timezone]);
 const available = target => target?.current() && target.chart.primaryBars().length > 0
   && !app[target.pane === 2 ? 'loading2' : 'loading'] && !app[target.pane === 2 ? 'loadFailed2' : 'loadFailed'];
 
@@ -176,7 +179,7 @@ async function loadComparison(spec, target, stillWanted) {
   const current = () => !controller.signal.aborted && target.current() && stillWanted();
   try {
     const bars = await fetchBars(spec.symbol, target.request.interval, target.request.period,
-      { signal: controller.signal, timezone: target.timezone });
+      { signal: controller.signal, timezone: target.timezone, variant: requestVariant(target.request) });
     if (!current()) return false;
     spec.bars = bars;
     spec.dataKey = sourceKey(target);

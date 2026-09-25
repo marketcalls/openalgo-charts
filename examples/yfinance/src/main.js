@@ -17,6 +17,7 @@ import { initFeed, fetchBars, fetchNote, feedErrorState } from './feed.js';
 import { applyTransform } from './transforms.js';
 import { isExpression, fetchExpressionBars, mountOperatorKeypad, referenceDataContext } from './expression.js';
 import { initStatus, nameOf, symbolStatus } from './status.js';
+import { requestVariant, sessionOf, sessionLabel } from './session.js';
 import { DEFAULT_TZ, initTimezone } from './timezone.js';
 import { initAxisChrome, applyAxisChrome, applyStatusLineChoice, applyTradeChoice } from './axis-chrome.js';
 import { initVolume, attachVolume, refreshVolume, setVolumeShown, setLegend, applyVolumeSettings } from './volume.js';
@@ -63,6 +64,10 @@ const { PriceLevels } = engine;
 // against an older dist/ and say which features that dist cannot serve,
 // rather than failing at link time and showing a blank document.
 const { createLinkGroup, withBarCache, barCloseSec, registerInterval, bucketStartOf } = engine;
+// A session change alone is a change of source, which only this helper makes
+// the chart see; a dist/ from before sessions sets the context directly.
+const publishContext = (chart, context) => (engine.publishDataContext
+  ? engine.publishDataContext(chart, context) : chart.setDataContext(context));
 
 /**
  * A tick size for the demo, by market. yfinance does not report one, and a
@@ -386,7 +391,8 @@ function installWorkspace({ layout, bars }) {
   invalidateComparisons(1);
   removeBracket(); removeAllOrders(); clearPosition();
   app.req = { ...selection.request };
-  for (const [key, value] of Object.entries(app.req)) el(key).value = value;
+  for (const key of ['symbol', 'interval', 'period']) el(key).value = app.req[key];
+  el('session').value = sessionOf(app.req);
   el('ctype').value = selection.chartType || 'candlestick';
   el('pfmode').value = selection.pfmode || 'atr';
   app.chartTimezone = selection.timezone || DEFAULT_TZ;
@@ -432,20 +438,22 @@ async function load(opts) {
   const period = clampPeriod(interval, wanted);
   if (period !== wanted) el('period').value = period;
   const prev = app.req || {};
-  app.req = { symbol: el('symbol').value.trim(), interval, period };
+  app.req = { symbol: el('symbol').value.trim(), interval, period,
+    ...(el('session').value === 'extended' ? { session: 'extended' } : {}) };
   // A different instrument or timeframe means the bars on screen are about to
   // be replaced rather than refreshed, so the stage blanks under the loading
   // dots. A reload of the same request keeps them: they are still correct,
   // and blanking a chart to redraw the same chart is just a flicker.
+  // Extended hours are another series, so a session change blanks the stage too.
   const identityChanged =
-    prev.symbol !== app.req.symbol || prev.interval !== app.req.interval;
+    prev.symbol !== app.req.symbol || prev.interval !== app.req.interval || sessionOf(prev) !== sessionOf(app.req);
   if (app.chart) {
     // Context subscribers must never read the previous source's bars as the new one.
     if (identityChanged) {
       app.price?.setData([]);
       app.volume?.setData([]);
     }
-    app.chart.setDataContext(referenceDataContext(app.req, app.chart.getDataContext()));
+    publishContext(app.chart, referenceDataContext(app.req, app.chart.getDataContext()));
   }
   // Announced before the fetch, not after it: the follower starts loading
   // the same instrument in parallel instead of a second behind. Recorded
@@ -461,9 +469,10 @@ async function load(opts) {
     // quick symbol switch cannot land the older answer on the newer name.
     // A symbol box holding arithmetic (`AAPL/MSFT`) fetches every leg and folds
     // them into one series. Anything else takes the ordinary single-symbol path.
+    const variant = requestVariant(app.req);
     const bars = isExpression(app.req.symbol)
-      ? (await fetchExpressionBars(app.req.symbol, app.req.interval, app.req.period, { ...(opts || {}) })).bars
-      : await fetchBars(app.req.symbol, app.req.interval, app.req.period, { ...(opts || {}), slot: 'main' });
+      ? (await fetchExpressionBars(app.req.symbol, app.req.interval, app.req.period, { ...(opts || {}), variant })).bars
+      : await fetchBars(app.req.symbol, app.req.interval, app.req.period, { ...(opts || {}), slot: 'main', variant });
     // Read the cache verdict now: `syncComparisons()` below fetches too, and
     // `lastFetch` describes whichever load ran most recently, so composing
     // the line at the end would report the comparison's verdict as this
@@ -492,6 +501,7 @@ async function load(opts) {
     if (revision !== loadRevision) return;
     renderToolbar();
     status.textContent = `${app.req.symbol} · ${bars.length} bars · ${app.req.interval}/${app.req.period}`
+      + (sessionOf(app.req) === 'extended' ? ' · ' + sessionLabel('extended').toLowerCase() : '')
       + (period !== wanted ? `  (${wanted} unavailable at ${interval})` : '')
       + note
       + (MISSING.length ? `  ·  dist/ predates: ${MISSING.join(', ')}` : '');
@@ -501,6 +511,13 @@ async function load(opts) {
     if (fault.state === 'aborted') return;
     if (revision !== loadRevision) return;
     app.loadFailed = true;
+    if (fault.state === 'unsupported') {
+      // Not a failure to retry: the source has no such series. The card says
+      // so and offers the one choice that will load, and nothing is relabelled.
+      status.textContent = fault.message;
+      setChartState('unsupported', { ...app.req, message: fault.message, retry: () => { el('session').value = 'regular'; load(opts); } });
+      return;
+    }
     status.textContent = 'error: ' + fault.message;
     setChartState('error', { ...app.req, message: fault.message, retry: () => load(opts) });
     toast('error', `Could not load ${app.req.symbol}: ${fault.message}`);

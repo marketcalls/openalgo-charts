@@ -2,6 +2,63 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- Data variants: regular and extended hours, adjusted and raw prices, and a quote
+  currency or unit are each their own provider series, with their own identity.
+  `BarsRequest.variant` names one; a feed declares what it serves through the new
+  optional `DataFeed.dataVariants`, and a feed without it serves only its default series.
+  Nothing is converted or adjusted locally: a variant the provider does not declare is
+  reported, never made from another series. New base exports `normalizeDataVariant`,
+  `dataVariantKey`, `unsupportedDataVariant`, `dataVariantError` and `publishDataContext`,
+  and the types `DataVariant`, `DataSession`, `DataAdjustment`, `DataVariantDimension`,
+  `DataVariantCapabilities`, `DataVariantQuery` and `DataContextTarget`.
+- `DataLoadingController` asks the declaration before the cache or the network and
+  publishes the new status `'unsupported'` with `snapshot.unsupported` (the dimension)
+  and a `DataVariantUnsupportedError`, fetching, streaming, refreshing and paging
+  nothing. A load with another variant is a new source: the request in flight is
+  aborted, the stream released and the bars cleared. Hosts that switch exhaustively
+  on `DataLoadingStatus` gain one case.
+- `withBarCache` keys each variant as its own series (`invalidate` takes a `variant`) and
+  forwards `dataVariants`; `HistoryRequestPool` never shares a request between two
+  variants. The default variant adds nothing to a key, so keys and persisted entries
+  from before variants still match.
+- `ChartDataContext.variant` carries the variant to studies and hosts. Set it with
+  `publishDataContext(chart, context)`, which makes a change of variant alone a change
+  of source (requested bars aborted, source revisions restarted, studies told) while
+  the instrument, its event markers and linked drawings stay. `Instrument.applyTo`
+  keeps the context's variant.
+- Requested contexts: `IndicatorBarsRequest.variant`. `createRequestedIndicator` and a
+  Tier 2 study's `requestBars` ask for another instrument in the chart's session and
+  adjustment (`inheritedDataVariant`, indicators tier) unless the request names a
+  variant, and a variant-only change restarts both.
+- Widget: the `variant` option, `widget.variant()`, `widget.setDataVariant(variant)` and
+  a `variant` event. The variant rides on every load, the data context, `getState`,
+  the persisted layout and the saved-view check; the status line names a non-default
+  variant and the data status reads "Not available from this source" with no retry for
+  an undeclared one. `WorkspacePane.variant` saves it in portable workspaces, and
+  `createChartGrid` saves, reopens and copies it per cell.
+- The yfinance reference host has a session menu: regular hours, and extended hours for
+  intraday bars of US listed stocks, the source's own pre and post market bars
+  (`session=extended`, and `prepost` upstream). Elsewhere the choice is greyed with the
+  reason, and a chart already on extended hours that moves to daily bars shows an
+  unsupported card with a button back to regular hours. The session is part of the bar
+  cache key, the data context, comparisons, replay's finer history, saved layouts and
+  named workspaces; fixture mode serves a deterministic extended session.
+
+### Changed
+
+- The OpenAlgo adapters refuse a non-default variant (`OpenAlgoDataFeed.getBars`,
+  `OpenAlgoLiveDataFeed.subscribeBars`) with a `DataVariantUnsupportedError` rather than
+  answering with the one series they have under another name.
+
+### Fixed
+
+- The yfinance reference host's chart state card hid its Dismiss button in the markup
+  only: the button style overrode the hidden attribute, so an empty chart showed it too.
+
 ## 2.5.5
 
 2026-09-26

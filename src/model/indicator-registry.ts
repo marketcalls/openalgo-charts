@@ -20,6 +20,7 @@ import type { SeriesMarker } from '../primitives/markers';
 import type { TableCell, ChartTableOptions } from '../primitives/table';
 import type { FillGradient } from '../primitives/indicator-fill';
 import type { IPrimitive } from '../primitives/primitive';
+import type { DataVariant } from '../feed/data-variant';
 import { validateIndicatorInputs } from './indicator-inputs';
 import { IndicatorInputError } from './indicator-input-error';
 export { IndicatorInputError } from './indicator-input-error';
@@ -636,6 +637,8 @@ export interface IndicatorBarsRequest {
   interval: string;
   from: number;
   to: number;
+  /** The provider series to answer from; absent is its default. See `inheritedDataVariant`. */
+  variant?: DataVariant;
   signal?: AbortSignal;
 }
 
@@ -690,6 +693,8 @@ export interface ChartDataContext {
   interval?: string;
   /** Instrument capability, independent of readings: false unsupported, absent unknown. */
   hasOpenInterest?: boolean;
+  /** Which of the provider's series the chart shows; absent is its default. Set it with `publishDataContext`. */
+  variant?: Readonly<DataVariant>;
 }
 
 /** Source identity changed, or the available source-bar range changed. */

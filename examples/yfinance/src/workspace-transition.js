@@ -4,6 +4,7 @@ import { layoutFromWorkspace } from './workspace-document.js';
 import { fetchBars } from './feed.js';
 import { fetchExpressionBars, isExpression } from './expression.js';
 import { DEFAULT_TZ } from './timezone.js';
+import { requestVariant } from './session.js';
 
 function owned(promise, signal) {
   return new Promise((resolve, reject) => {
@@ -36,9 +37,11 @@ function validateStudiesAndDrawings(state) {
 }
 
 async function sourceBars(request, options) {
+  // Staged in the session the workspace names, so a saved extended chart reopens on extended bars.
+  const staged = { ...options, variant: requestVariant(request) };
   return isExpression(request.symbol)
-    ? (await fetchExpressionBars(request.symbol, request.interval, request.period, options)).bars
-    : fetchBars(request.symbol, request.interval, request.period, options);
+    ? (await fetchExpressionBars(request.symbol, request.interval, request.period, staged)).bars
+    : fetchBars(request.symbol, request.interval, request.period, staged);
 }
 
 /** Use the same availability checks for startup and prepared live switching. */

@@ -56,6 +56,18 @@ describe('reference replay transitions', () => {
     ]);
   });
 
+  it('keys finer history by session and asks for it in that session', async () => {
+    fetchBars.mockResolvedValue([flatBar(1, 10)]);
+    app.req.interval = '1h';
+    await loadReplaySubBars();
+    // Extended hours are another series: the regular finer bars cannot stand in for them.
+    app.req.session = 'extended';
+    await loadReplaySubBars();
+    expect(fetchBars.mock.calls.map(call => [call[0], call[1], call[3]?.variant])).toEqual([
+      ['FIRST', '15m', undefined], ['FIRST', '15m', { session: 'extended' }],
+    ]);
+  });
+
   it('captures the selected chart request while focus changes during loading', async () => {
     let resolve;
     fetchBars.mockReturnValue(new Promise(done => { resolve = done; }));

@@ -1,5 +1,5 @@
-import type { ChartState, ChartSettingsState, IndicatorState, PaneState, PriceScaleId, SeriesState } from 'openalgo-charts';
-import { parseAlertsDocument, parsePaneState } from 'openalgo-charts';
+import type { ChartState, ChartSettingsState, DataVariant, IndicatorState, PaneState, PriceScaleId, SeriesState } from 'openalgo-charts';
+import { normalizeDataVariant, parseAlertsDocument, parsePaneState } from 'openalgo-charts';
 import { boolean, choice, list, number, readJson, record, string, WorkspaceDocumentError, type Json } from './json';
 
 export { WorkspaceDocumentError } from './json';
@@ -15,6 +15,8 @@ export interface WorkspaceSlot {
 }
 export interface WorkspacePane {
   id: string; symbol: string; exchange: string; interval: string; chartType: string;
+  /** Which of the provider's series the chart showed. Absent is the provider's default. */
+  variant?: DataVariant;
   chart: WorkspaceChartState; settings: WorkspaceSettings;
   volume: boolean; magnet: 'off' | 'weak' | 'strong'; stay: boolean;
   comparisons: WorkspaceComparison[]; comparisonMode: 'price' | 'percent'; historyPeriod?: string;
@@ -299,6 +301,13 @@ function paneState(input: Json): WorkspacePane {
     comparisons, comparisonMode: choice(source.comparisonMode, 'comparisonMode', ['price', 'percent'], 'percent'),
   };
   if (source.historyPeriod !== undefined) out.historyPeriod = string(source.historyPeriod, 'historyPeriod', 100);
+  if (source.variant !== undefined) {
+    // A variant this build cannot name would reopen as some other series, so the document is refused.
+    let variant: DataVariant | undefined;
+    try { variant = normalizeDataVariant(source.variant); }
+    catch (error) { throw new WorkspaceDocumentError(error instanceof Error ? error.message : 'Invalid data variant'); }
+    if (variant) out.variant = { ...variant };
+  }
   return out;
 }
 
@@ -368,6 +377,7 @@ export function migrateWidgetWorkspace(input: unknown, meta: { id: string; name:
     kind: 'workspace', version: 1, id: meta.id, name: meta.name, createdAt: meta.now, updatedAt: meta.now,
     panes: [{ id: 'p0', symbol: source.symbol, exchange: source.exchange ?? '', interval: source.interval,
       chartType: source.chartType, chart: source.chart, magnet: rail.magnet ?? 'off', stay: rail.stay ?? false,
+      ...(source.variant === undefined ? {} : { variant: source.variant }),
       settings: { 'widget.theme': choice(source.theme, 'theme', ['light', 'dark'], 'dark') } }],
     layout: { rows: 1, columns: 1, slots: [{ paneId: 'p0', row: 0, column: 0, rowSpan: 1, columnSpan: 1 }] }, activePaneId: 'p0',
   });

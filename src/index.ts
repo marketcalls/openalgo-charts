@@ -253,6 +253,12 @@ export type { TradingOperation, TradingCapabilities, TradingCapabilityRequest, T
 export { HistoryRequestPool, sharedHistoryRequests } from './feed/request-pool';
 export type { HistoryRequestPoolOptions } from './feed/request-pool';
 export { DataLoadingController } from './feed/data-controller';
+export {
+  normalizeDataVariant, dataVariantKey, unsupportedDataVariant, dataVariantError, publishDataContext,
+} from './feed/data-variant';
+export type {
+  DataVariant, DataSession, DataAdjustment, DataVariantDimension, DataVariantCapabilities, DataVariantQuery, DataContextTarget,
+} from './feed/data-variant';
 export type { DataLoadingOptions, DataLoadingSnapshot, DataLoadingStatus, HistoryLoadingStatus, DataUpdateReason } from './feed/data-controller';
 export type { ChartDataContext, IndicatorDataChange, IndicatorDataStatus } from './model/indicator-registry';
 export { OpenAlgoDataFeed, mapHistoryResponse, rowTimeToUtcSeconds } from './feed/openalgo-rest';

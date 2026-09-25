@@ -1,6 +1,27 @@
-import { widgetText } from './localization';
-import type { DataLoadingController, DataLoadingSnapshot } from 'openalgo-charts';
+import { widgetText, type WidgetTranslationOptions } from './localization';
+import type { DataLoadingController, DataLoadingSnapshot, DataVariant, DataVariantDimension } from 'openalgo-charts';
 import { h, type WidgetContext } from './context';
+
+/**
+ * A variant in words: the session and the adjustment in the host's language,
+ * the currency and the unit as the provider names them. With `only`, just
+ * that field, for saying which part a provider does not serve. Empty for the
+ * default series.
+ */
+export function dataVariantLabel(ctx: WidgetTranslationOptions, variant: Readonly<DataVariant> | undefined, only?: DataVariantDimension): string {
+  if (variant === undefined) return '';
+  const words: Record<string, string> = {
+    regular: widgetText(ctx, 'Regular hours'), extended: widgetText(ctx, 'Extended hours'),
+    adjusted: widgetText(ctx, 'Adjusted prices'), raw: widgetText(ctx, 'Raw prices'),
+  };
+  const parts: string[] = [];
+  for (const key of ['session', 'adjustment', 'currency', 'unit'] as const) {
+    const value = variant[key];
+    if (value === undefined || (only !== undefined && only !== key)) continue;
+    parts.push(key === 'session' || key === 'adjustment' ? words[value] : value);
+  }
+  return parts.join(' ');
+}
 
 export interface DataStatusHandle {
   readonly el: HTMLElement;
@@ -35,6 +56,9 @@ export function mountDataStatus(
         case 'empty': rows.push({ text: widgetText(ctx, 'No bars for {symbol} {interval}', { symbol, interval }), label: widgetText(ctx, 'Retry chart data'), retry }); break;
         case 'stale': rows.push({ text: widgetText(ctx, 'History is stale for {symbol} {interval}', { symbol, interval }), label: widgetText(ctx, 'Retry chart data'), retry }); break;
         case 'error': rows.push({ text: widgetText(ctx, 'Could not load {symbol} {interval}', { symbol, interval }), label: widgetText(ctx, 'Retry chart data'), retry }); break;
+        // No retry: the same provider would give the same answer. The way out is another variant.
+        case 'unsupported': rows.push({ text: widgetText(ctx, 'Not available from this source: {variant}',
+          { variant: dataVariantLabel(ctx, state.request?.variant, state.unsupported) }) }); break;
       }
       if (state.historyStatus === 'limited') rows.push({ text: widgetText(ctx, 'History retention limit reached') });
       else if (state.historyStatus === 'loading') rows.push({ text: widgetText(ctx, 'Loading older history') });

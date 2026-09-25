@@ -2,8 +2,10 @@ import type { Bar } from '../model/bar';
 import type { BarsRequest, DataFeed, LiveBarMeta, UnsubscribeFn } from './types';
 import { type HistoryRequestPool, sharedHistoryRequests, withHistoryDeadline } from './request-pool';
 import { tryResolveInterval } from './intervals';
+import { dataVariantError, normalizeDataVariant, unsupportedDataVariant, type DataVariantDimension } from './data-variant';
 
-export type DataLoadingStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'refreshing' | 'stale' | 'error';
+/** `unsupported`: the provider does not declare the requested variant, so nothing was fetched. */
+export type DataLoadingStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'refreshing' | 'stale' | 'error' | 'unsupported';
 export type HistoryLoadingStatus = 'idle' | 'loading' | 'error' | 'exhausted' | 'limited';
 export type DataUpdateReason = 'load' | 'cache' | 'live' | 'refresh' | 'prepend' | 'resume' | 'state';
 
@@ -18,6 +20,8 @@ export interface DataLoadingSnapshot {
   readonly historyError?: Error;
   readonly reason: DataUpdateReason;
   readonly paused: boolean;
+  /** With status `unsupported`: the first field of the request's variant the provider does not serve. */
+  readonly unsupported?: DataVariantDimension;
 }
 
 export interface DataLoadingOptions {
@@ -171,7 +175,15 @@ export class DataLoadingController {
     this._provisionalTime = null;
     const found = tryResolveInterval(req.interval);
     this._seconds = found?.bucketing.mode === 'interval' ? found.bucketing.seconds : null;
-    const request = { ...req, signal: undefined, timeoutMs: req.timeoutMs ?? this._options.timeoutMs };
+    const request: BarsRequest = { ...req, signal: undefined, timeoutMs: req.timeoutMs ?? this._options.timeoutMs };
+    // The default variant is no variant at all, so a request naming `{}` keys,
+    // shares and fetches exactly like one that names nothing. A malformed one
+    // is left for `_load` to report.
+    try {
+      const variant = normalizeDataVariant(req.variant);
+      if (variant) request.variant = variant;
+      else delete request.variant;
+    } catch { /* reported by _load */ }
     this._state = { request, bars: [], status: 'loading', historyStatus: 'idle', hasMore: null, reason: 'load', paused: false };
     let complete!: (bars: readonly Bar[]) => void;
     const work = new Promise<readonly Bar[]>(resolve => { complete = resolve; });
@@ -189,6 +201,20 @@ export class DataLoadingController {
     callerSignal?.addEventListener('abort', abort, { once: true });
     if (callerSignal?.aborted) scope.abort();
     try {
+      if (req.variant !== undefined) {
+        // Ask before the cache or the network: a variant the provider never
+        // declared is not fetched and relabelled, it is reported. A malformed
+        // one throws below, which is reported as an error.
+        const declared = this._feed.dataVariants;
+        const capabilities = declared === undefined ? undefined : await withHistoryDeadline({ signal: scope.signal, timeoutMs: req.timeoutMs },
+          signal => Promise.resolve(declared.call(this._feed, { symbol: req.symbol, exchange: req.exchange, interval: req.interval, signal })));
+        if (!this._current(generation)) return this._bars;
+        const unsupported = unsupportedDataVariant(capabilities, req.variant);
+        if (unsupported !== null) {
+          this._publish('state', { status: 'unsupported', unsupported, error: dataVariantError(unsupported, req.variant) });
+          return this._bars;
+        }
+      }
       let cached: Bar[] | undefined;
       if (!req.noCache && this._feed.getCachedBars) {
         try {
@@ -227,7 +253,7 @@ export class DataLoadingController {
   }
 
   private async _refresh(repair?: Repair): Promise<readonly Bar[]> {
-    if (this._destroyed || !this._state.request) return this._bars;
+    if (this._destroyed || !this._state.request || this._state.status === 'unsupported') return this._bars;
     if (this._loadWork) return this._loadWork;
     const generation = this._generation;
     const id = ++this._refreshId;
@@ -335,7 +361,7 @@ export class DataLoadingController {
    * undone by the next tick.
    */
   public pushBar(value: Bar, meta?: LiveBarMeta): void {
-    if (this._destroyed || !this._state.request) return;
+    if (this._destroyed || !this._state.request || this._state.status === 'unsupported') return;
     let bar: Bar;
     try { bar = normalize([value])[0]; } catch (error) {
       this._publish('state', { status: this._bars.length ? 'stale' : 'error', error: asError(error) });
@@ -408,7 +434,8 @@ export class DataLoadingController {
    */
   public loadMore(until?: number): Promise<readonly Bar[]> {
     if (this._pageWork) return this._pageWork;
-    if (this._destroyed || !this._state.request || this._loadWork || this._state.paused || this._state.hasMore === false) return Promise.resolve(this._bars);
+    if (this._destroyed || !this._state.request || this._loadWork || this._state.paused || this._state.hasMore === false
+      || this._state.status === 'unsupported') return Promise.resolve(this._bars);
     if (this._bars.length >= this._options.maxBars!) {
       this._publish('state', { historyStatus: 'limited' });
       return Promise.resolve(this._bars);

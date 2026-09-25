@@ -271,21 +271,26 @@ widget.context;               // what every dialog was handed, for a panel of yo
 widget.symbol(); widget.exchange(); widget.interval(); widget.chartType(); widget.theme();
 widget.setSymbol('INFY', 'NSE');
 widget.setInterval('15m');    // throws UnknownIntervalError for a code the registry lacks
+widget.variant();             // the data variant in use, undefined for the feed's default series
+widget.setDataVariant({ session: 'extended' }); // another provider series: a new source, reloaded
 widget.setChartType('area');
 widget.setTheme('light');
 widget.openSettings();        // false when no settings dialog is registered
 widget.openIndicatorPicker();
 widget.openObjects();         // searchable inventory, false after destruction
 await widget.reload();        // fetch again for the current symbol and interval
-const saved = widget.getState();   // { version, symbol, exchange, interval, chartType, theme, chart, rail }
+const saved = widget.getState();   // { version, symbol, exchange, interval, chartType, theme, variant?, chart, rail }
 widget.restoreState(saved);        // { applied, reason?, chart? }
 widget.destroy();                  // saves if persisting, removes the chrome, destroys the chart
 widget.isDestroyed;
 ```
 
 `restoreState` applies a saved viewport only when the state was captured on the same
-symbol and interval; on any other dataset the indicators, drawings and panes still land
-and the view is dropped, because a range of bar indices means nothing on different bars.
+symbol, interval and [data variant](/docs/data-variants); on any other dataset the
+indicators, drawings and panes still land and the view is dropped, because a range of bar
+indices means nothing on different bars. A state without `variant` (one saved before
+variants existed) keeps the widget's current variant; one this build cannot read is
+refused before anything is applied.
 
 A `Widget` is a thin owner. Anything the chrome does not expose, do on `widget.chart` or
 `widget.draw` directly; the chrome observes the chart and stays in step.
@@ -353,6 +358,7 @@ passes through to `createChart` unchanged.
 | `exchange` | `string` | Passed to the feed with the symbol. Default `''`. |
 | `interval` | `string` | An interval code the interval registry knows (`'1m'`, `'5m'`, `'1d'`, or one you registered with `registerInterval`). An unknown code throws `UnknownIntervalError`; a persisted code this build does not know falls back to `'1d'`. Default `'1d'`. |
 | `intervals` | `string[]` | The interval pills. Default: `DEFAULT_INTERVALS` (`1m 5m 15m 1h 1d 1w`) plus every other registered code. |
+| `variant` | `DataVariant` | Which of the feed's series to show: `{ session: 'extended' }`, `{ adjustment: 'raw' }`, a currency or a unit. The feed must declare it through `dataVariants`, or the chart shows "Not available from this source" with no retry. A malformed one throws a `TypeError`. Default: the feed's default series, or the persisted one. See [Data Variants](/docs/data-variants). |
 | `chartType` | `string` | The primary series type, a registered chart type id. Default `'candlestick'`. |
 | `theme` | `'dark'` \| `'light'` \| `ChartTheme` | A named palette or a full theme object. Drives both the canvas and the chrome tokens (see below). Default `'dark'` (the engine's own default is light). |
 | `rail` | `boolean` \| `RailOptions` | The drawing rail. `false` hides it; `tools` restricts which registered tool ids appear (the order follows the rail's own groups); `favorites` seeds the pins when nothing is stored. |
@@ -423,13 +429,14 @@ viewport preservation is specific to automatic reconnect recovery.
 ```ts
 widget.on('symbol', (e) => console.log(e));    // { symbol, exchange }: picked in the top bar, or setSymbol
 widget.on('interval', (e) => console.log(e));  // { interval }
+widget.on('variant', (e) => console.log(e));   // { variant? }: setDataVariant or a restored state
 widget.on('theme', (e) => console.log(e));     // { theme, chartTheme }
 widget.on('layout', (e) => console.log(e));    // { reason, chartType? }: getState() would now return differently
 widget.on('data', (e) => console.log(e));      // { symbol, interval, bars, error? }: a load finished or failed
 widget.on('status', (e) => console.log(e));    // { text, kind }: the status line's message changed
 ```
 
-`on` returns the unsubscriber; `off(event, cb?)` is the same thing by name. The six
+`on` returns the unsubscriber; `off(event, cb?)` is the same thing by name. The seven
 events are what a host needs to keep its own state (a URL, a workspace, a watchlist) in
 step with the chrome. Everything the chart itself emits (`crosshair:move`, `contextmenu`,
 `trading:*`, the drawing controller's `drawing:*`) is still there on `widget.chart` and

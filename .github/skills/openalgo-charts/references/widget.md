@@ -268,6 +268,7 @@ Color swatches stay compact. Theme overrides should target these tokens.
 | `exchange` | `string` | `''` | Passed to the feed with the symbol. |
 | `interval` | `string` | `'1d'` (or the saved one) | Must be a code the interval registry knows; an unknown code throws the engine's `UnknownIntervalError` at the call site. A saved code this build does not know falls back to `'1d'`. |
 | `intervals` | `readonly string[]` | `DEFAULT_INTERVALS` plus every registered code | The pill list. Each is validated the same way. |
+| `variant` | `DataVariant` | the feed's default series (or the saved one) | Which of the feed's series to show: `{ session: 'extended' }`, `{ adjustment: 'raw' }`, a currency or a unit. A malformed one throws a `TypeError` at the call site. The feed must declare it through `dataVariants`, or the data status reads "Not available from this source: ..." with no retry. Unreleased. |
 | `chartType` | `string` | `'candlestick'` | The primary series type; must be a registered chart type. |
 | `theme` | `'dark' \| 'light' \| ChartTheme` | `'dark'` | Drives the canvas and the chrome tokens. Note the engine's own default is light; the widget's is dark. |
 | `rail` | `boolean \| RailOptions` | on | `false` hides it. `RailOptions.tools` restricts which ids appear (order still follows `RAIL_GROUPS`); `favorites` seeds the pins when nothing is stored. |
@@ -322,8 +323,10 @@ widget.objects;                      // the owned base-tier ChartObjects invento
 widget.alerts;                       // the owned AlertController, including drawing anchors
 widget.series;                       // the primary SeriesApi, retained by setChartType
 widget.symbol(); widget.exchange(); widget.interval(); widget.chartType(); widget.theme();
+widget.variant();                    // the DataVariant in use, undefined for the feed's default series
 widget.setSymbol(symbol, exchange?);
 widget.setInterval(code);            // throws UnknownIntervalError for a code the registry lacks
+widget.setDataVariant(variant);      // a new source: aborts, clears, reloads; undefined is the default
 widget.setChartType(id);             // registered renderer; retains handle, data, styles, scale and markers
 widget.setTheme('dark' | 'light' | theme);
 widget.openSettings();               // false when no dialog is registered under 'settings'
@@ -341,7 +344,7 @@ widget.destroy();                    // saves if persisting, removes the chrome,
 widget.isDestroyed;
 ```
 
-`getState()` returns `{ version: 1, symbol, exchange, interval, chartType, theme, chart: chart.getState(), rail: RailPrefs | null }`. `restoreState` validates field by field and returns `{ applied, reason?, chart?: RestoreReport }`; a saved viewport is applied only when the state was captured on the same symbol and interval, otherwise `stripView` drops it and the indicators, drawings and panes still land. With `persist`, the state is written under `oac-widget:<namespace>:state` (debounced by `SAVE_DEBOUNCE_MS`, flushed on `pagehide` and on `destroy`) and the rail's preferences under `oac-widget:<namespace>:rail`.
+`getState()` returns `{ version: 1, symbol, exchange, interval, chartType, theme, variant?, chart: chart.getState(), rail: RailPrefs | null }`; `variant` is present only for a non-default series, and a state without one (older records) keeps the widget's current variant on restore, while one this build cannot read is refused before anything is applied. The variant is part of the dataset, so a saved viewport lands only on the same variant too, and a `variant` bus event announces a change. The status line names a non-default variant (`.oac-statusline__variant`: localized "Regular hours", "Extended hours", "Adjusted prices", "Raw prices", then the provider's currency and unit names). `restoreState` validates field by field and returns `{ applied, reason?, chart?: RestoreReport }`; a saved viewport is applied only when the state was captured on the same symbol and interval, otherwise `stripView` drops it and the indicators, drawings and panes still land. With `persist`, the state is written under `oac-widget:<namespace>:state` (debounced by `SAVE_DEBOUNCE_MS`, flushed on `pagehide` and on `destroy`) and the rail's preferences under `oac-widget:<namespace>:rail`.
 
 ### Objects panel
 

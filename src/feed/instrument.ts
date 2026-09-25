@@ -185,7 +185,9 @@ export class Instrument {
     // The primary series can use a left or hidden scale instead of the chart default.
     series.priceScale().setOptions({ minMove: m.priceTick });
     series.priceScale().setPriceFormatter(value => this.formatPrice(value));
-    chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest });
+    // The variant is the host's choice of provider series, not instrument metadata, so it stays.
+    chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest,
+      ...(previous?.variant === undefined ? {} : { variant: previous.variant }) });
     // Drags snap by the same schedule the order constraints carry, and a
     // constant tick clears the one an earlier instrument left.
     applyInstrumentTicks(chart, this.tickSchedule);

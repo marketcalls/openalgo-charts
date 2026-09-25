@@ -1467,6 +1467,16 @@ an availability clock report unsupported and clear values. Removal and chart
 destruction cancel requests and prevent stale publication. This helper adds no
 transport, page merging or live subscription; the host announces external changes.
 
+**Data variants (unreleased).** A request that names no `variant` is sent in the
+chart's session and adjustment: `inheritedDataVariant(dataContext.variant)` from
+`openalgo-charts/indicators`, so a benchmark lines up with extended-hours bars bar for
+bar. The currency and unit stay behind, since they belong to the instrument asked
+for. Name a `variant` in the request to override (`{}` asks for the provider's
+default); a malformed one publishes `error`. A change of the chart's variant alone
+starts a new generation, as a change of symbol does. Tier 2's `ctx.requestBars`
+inherits the same way, `ctx.dataContext.variant` is visible to `fetch`, and a
+variant-only change refetches. See [feeds-and-live](feeds-and-live.md).
+
 ## Optional missing-value policies on established helpers
 
 `sma`, `wma`, `rma`, `smaSeededEma`, `stdev`, `dev`, `highest`, `lowest`,
