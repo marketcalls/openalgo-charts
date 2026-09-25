@@ -2,7 +2,7 @@
   {
     "name": "Base engine (chart types + indicator registry + watermark + shortcuts + trading API + alerts)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "117.42 kB",
+    "limit": "117.45 kB",
     "brotli": true
   },
   {
@@ -11,13 +11,13 @@
       "dist/openalgo-charts.mjs",
       "dist/openalgo-charts.trade.mjs"
     ],
-    "limit": "125.43 kB",
+    "limit": "125.45 kB",
     "brotli": true
   },
   {
     "name": "Indicator tier (105 built-ins + Tier-2 contract)",
     "path": "dist/openalgo-charts.indicators.mjs",
-    "limit": "36.32 kB",
+    "limit": "36.33 kB",
     "brotli": true
   },
   {
@@ -58,7 +58,7 @@
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "267.60 kB",
+    "limit": "267.64 kB",
     "brotli": true
   },
   {
@@ -80,7 +80,7 @@
       "dist/openalgo-charts.widget.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "310.13 kB",
+    "limit": "310.17 kB",
     "brotli": true
   }
 ]
