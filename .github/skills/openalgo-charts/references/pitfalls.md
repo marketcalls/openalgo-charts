@@ -88,7 +88,7 @@ See [bundling-and-tiers](./bundling-and-tiers.md).
 
 **A `SeriesApi` captures its pane index at creation, and `removePane`/`movePane` re-index panes.** Indicators are re-pointed automatically; host-added series are not. Call `series.remove()` before restructuring panes, or re-add the series afterwards.
 
-**Slot 0 is not the price pane once a user moves it**, which only a chart built with `movablePrimaryPane` allows (the widget turns it on). A host that passes `0` to mean "the price pane" (an order line, a volume overlay, a price alert check, a coordinate call for a DOM overlay) lands on a study pane after `setPrimaryPaneIndex` or `movePane`. Omit the pane, which defaults to the price pane, or ask `chart.primaryPaneIndex()`, before turning the option on.
+**Slot 0 is not the price pane once a user moves it**, which only a chart built with `movablePrimaryPane` allows (off by default in `createChart`, `createWidget` and `createChartGrid`). A host that passes `0` to mean "the price pane" (an order line, a volume overlay, a price alert check, a coordinate call for a DOM overlay) lands on a study pane after `setPrimaryPaneIndex` or `movePane`. Omit the pane, which defaults to the price pane, or ask `chart.primaryPaneIndex()`, before turning the option on.
 
 **With the default `minMove: 0`, price precision is inferred from the visible range, so label decimals change as you zoom, and `snapToTick` is a no-op.** Set `priceFormat: { type: 'price', minMove: 0.05 }` (or `precision`) per series for a stable instrument tick.
 

@@ -522,7 +522,7 @@ Each call emits an event: `paneRemoved`, `paneMoved`, `paneMaximized`, `paneColl
 
 ### Moving the price pane (opt-in)
 
-`createChart(el, { movablePrimaryPane: true })` lets the price pane (primary pane) leave slot 0. It is the pane the chart is built with, and it holds the price series a host adds without naming a pane and the on-chart studies. With the option it can sit in any slot: `movePane(0, 1)`, `movePane(1, -1)` on the study below it (the study row's up control does exactly that), or `setPrimaryPaneIndex(panes().length - 1)` put it below its studies. `primaryPaneIndex()` says where it is now. The option is decided at construction; the widget and the reference host turn it on.
+`createChart(el, { movablePrimaryPane: true })` lets the price pane (primary pane) leave slot 0. It is the pane the chart is built with, and it holds the price series a host adds without naming a pane and the on-chart studies. With the option it can sit in any slot: `movePane(0, 1)`, `movePane(1, -1)` on the study below it (the study row's up control does exactly that), or `setPrimaryPaneIndex(panes().length - 1)` put it below its studies. `primaryPaneIndex()` says where it is now. The option is decided at construction. `createWidget` and `createChartGrid` take it too and hand it to their charts as given, off by default like the chart; the reference host opts in on every chart it builds.
 
 It is opt-in because the move changes what slot 0 means. A host that passes `0` for the price pane would, once a user put a study above the candles, place order and price lines on the study, price a right-click order in the study's units through `coordinateToPrice(y, 0)` and test price alerts against the wrong pane. Before turning it on:
 
@@ -531,6 +531,20 @@ It is opt-in because the move changes what slot 0 means. A host that passes `0` 
 - **Persist `primaryPane`.** A host that saves `getState()` through a field allowlist must keep `primaryPane` (and the version 2 it comes with), or a reload puts the price pane back on top.
 - **Forward `plan.primaryPane` when applying a template.** `planIndicatorTemplateState` returns the destination's price-pane slot beside `plan.panes`; restore them together in a version 2 state, and roll back with `getState().primaryPane`, or the restore returns the price pane to the top. `planIndicatorTemplate` takes the slot as its sixth argument.
 - **Structural hosts** (`IndicatorHost`, `DrawingChartHost`, `AlertChartHost`, `ComparisonChartHost`) have an optional `primaryPaneIndex()`; a custom host that omits it keeps slot-0 semantics.
+
+**Opting in.** A host that passes an explicit `0` for the price pane changes those calls first, then turns the option on. Omit the pane argument, which defaults to the price pane wherever it sits, or pass `chart.primaryPaneIndex()` read at the moment of use:
+
+```ts
+// Before: 0 means the price pane only while it is pinned on top.
+chart.addPriceLine({ price: 101.5, id: 'stop' }, 0);
+const price = chart.coordinateToPrice(y, 0);
+
+// After: name no pane, or ask where the price pane is now.
+chart.addPriceLine({ price: 101.5, id: 'stop' });
+const price = chart.coordinateToPrice(y, chart.primaryPaneIndex());
+```
+
+Then build with `createChart(el, { movablePrimaryPane: true })`, or pass the same option to `createWidget` or `createChartGrid`. A host that keeps even one such `0` (a volume histogram added with `paneIndex: 0` on `widget.chart`, say) leaves the option off, and nothing about its price pane changes.
 
 Everything that means "the price pane" follows it rather than slot 0: `addSeries`, `addPriceLine`, `addEventMarkers`, `setEvents`, `addPrimitive` and `tradeHost` with no pane, `priceToCoordinate` / `coordinateToPrice` / `priceAxisState` / `priceAxisLayout` with no pane, `priceScaleOptions()`, the `panUp` / `panDown` shortcuts, an `onchart` study and every `overlay` plot, band, table and price-anchored mark, comparisons, price alerts, the drawing magnet, drawing copy and paste (the clipboard counts panes price pane first, so a drawing copied beside the candles pastes beside the candles on any chart) and a drawing link. The legend offset, the `Indicators N` count and the chart's background text sit on it (anchor `'primary-pane'`); the time navigator and the brand mark stay on the bottom open pane, which is the price pane when it is at the bottom.
 

@@ -301,9 +301,31 @@ units, and a price alert is checked against the wrong pane. Before turning it on
 - Forward `plan.primaryPane` beside `plan.panes` when you apply a template plan, and roll back
   with `getState().primaryPane`.
 
-The [widget](/docs/widget) turns the option on for its own chart, because all of its chrome
-follows the price pane.
+The [widget](/docs/widget) and `createChartGrid` leave the option off as well; see
+[Opting in](#opting-in).
 </Callout>
+
+#### Opting in
+
+A host that passes an explicit `0` for the price pane changes those calls first, then turns
+the option on. Omit the pane argument, which defaults to the price pane wherever it sits, or
+pass `chart.primaryPaneIndex()` read at the moment of use:
+
+```ts
+// Before: 0 means the price pane only while it is pinned on top.
+chart.addPriceLine({ price: 101.5, id: 'stop' }, 0);
+const price = chart.coordinateToPrice(y, 0);
+
+// After: name no pane, or ask where the price pane is now.
+chart.addPriceLine({ price: 101.5, id: 'stop' });
+const price = chart.coordinateToPrice(y, chart.primaryPaneIndex());
+```
+
+Then build the chart with `createChart(el, { movablePrimaryPane: true })`. `createWidget` and
+`createChartGrid` take the same option and hand it to their charts as given, off unless you
+pass it, so a widget host whose own code on `widget.chart` still passes `0` (a volume histogram
+added with `paneIndex: 0`, say) keeps working unchanged. Pass `movablePrimaryPane: true` once
+that code names no pane; the widget's own chrome already follows the price pane.
 
 Everything that means "the price pane" follows it rather than slot 0:
 

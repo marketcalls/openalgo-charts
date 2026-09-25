@@ -7,17 +7,19 @@ All notable changes to OpenAlgo Charts.
 ### Added
 
 - The price pane can move below its studies, on a chart that opts in with the
-  new `movablePrimaryPane` chart option. It is off by default, and a chart
-  without it behaves exactly as 2.5.4 did: the price pane stays at slot 0,
-  `movePane` refuses to move or displace it (so the up control on the first
-  study pane still does nothing), `setPrimaryPaneIndex` returns false and
-  `restoreState` refuses a layout that moved it. It is opt-in because a host
-  that passes an explicit 0 to mean the price pane (a price or order line,
-  `coordinateToPrice(y, 0)` pricing a right-click order, a price alert check,
-  `panes()[0]`) would otherwise read a study's units, order prices included,
-  the moment a user moved a study above the candles. Before turning it on,
-  drop those zeros or ask `chart.primaryPaneIndex()`, and follow `paneMoved`;
-  read the option back with `chart.movablePrimaryPane()`.
+  new `movablePrimaryPane` option. Moving it is opt-in in both the chart and
+  the widget: `createChart`, `createWidget` and `createChartGrid` all leave the
+  option off, and for a host that does not opt in nothing about the price pane
+  changes. It stays at slot 0 exactly as in 2.5.4: `movePane` refuses to move
+  or displace it (so the up control on the first study pane still does
+  nothing), `setPrimaryPaneIndex` returns false, `restoreState` refuses a
+  layout that moved it, and an explicit pane 0 still means the price. It is
+  opt-in because a host that passes an explicit 0 to mean the price pane (a
+  price or order line, `coordinateToPrice(y, 0)` pricing a right-click order,
+  a price alert check, `panes()[0]`) would otherwise read a study's units,
+  order prices included, the moment a user moved a study above the candles.
+  Before turning it on, drop those zeros or ask `chart.primaryPaneIndex()`, and
+  follow `paneMoved`; read the option back with `chart.movablePrimaryPane()`.
 - With the option on, the price pane is an identity rather than slot 0:
   `chart.primaryPaneIndex()` reads the slot it holds, and
   `chart.setPrimaryPaneIndex(index)` moves it there one `movePane` step at a
@@ -51,15 +53,21 @@ All notable changes to OpenAlgo Charts.
   `planIndicatorTemplateState` keeps the destination's price pane in place and
   returns `primaryPane` for the restore, and `planIndicatorTemplate` takes the
   destination's price-pane slot as an optional sixth argument.
-- The widget turns the option on for its chart (pass `movablePrimaryPane: false`
-  to keep it pinned), and its right-click menu moves the pane under the pointer
-  up or down (`pane-up`, `pane-down`), the price pane included, greying a row
-  that has nowhere to go or that a pinned price pane refuses. The Objects panel
-  names the price pane in its pane headings and its move targets wherever it
-  sits (`ChartObjects.primaryPaneIndex()`). The reference host builds both of its
-  charts with the option and offers the same rows on both right-click menus.
-  Both keep the collapse row off the price pane in every slot and forward the
-  price-pane slot when applying a template.
+- `createWidget` and `createChartGrid` take the option and hand it to their
+  charts as given, off unless the host passes `movablePrimaryPane: true`. Only
+  the host knows whether its own code on `widget.chart` still passes 0 for the
+  price, such as a volume histogram added with `paneIndex: 0`, so the widget
+  does not decide for it. The widget's right-click menu moves the pane under
+  the pointer up or down (`pane-up`, `pane-down`): study panes on every widget,
+  and the price pane as well on a widget that opted in. A row that has nowhere
+  to go is greyed, and so is a row that a pinned price pane refuses, with the
+  note "price pane stays on top". The Objects panel names the price pane in its
+  pane headings and its move targets wherever it sits
+  (`ChartObjects.primaryPaneIndex()`). The reference host opts in on both charts
+  of its main page and in its grid view, so a layout either one saves opens in
+  the other, and it offers the same rows on both right-click menus. The widget
+  and the reference host keep the collapse row off the price pane in every slot
+  and forward the price-pane slot when applying a template.
 
 ### Changed
 
@@ -77,7 +85,10 @@ All notable changes to OpenAlgo Charts.
   panes it emptied, so a drawing kept through a template swap shifts with the
   panes instead of recreating a pane at its old slot. The saved drawings a
   draw tier reads when it loads later are shifted the same way, by every pane
-  removal or move before it arrives.
+  removal or move before it arrives. A drawing on a study pane that the restore
+  prunes (the pane of a study not registered where the layout opens, say) is
+  dropped with that pane, where 2.5.4 recreated an empty pane at its old slot
+  to hold it. This applies whether or not the host opted in.
 - The widget's right-click menu offered Buy and Sell limit and stop rows over a
   study pane, priced from that pane's scale: an RSI reading of 58.75 became a
   limit price. A study pane now offers the market rows only.
