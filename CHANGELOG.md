@@ -53,7 +53,9 @@ All notable changes to OpenAlgo Charts.
   are exported for custom hosts.
 - The reference host's Account button opens a sandbox broker panel: account
   switching, preview-gated placement with durations and leverage, native close,
-  partial close, reverse and brackets, executions, and a dropped connection.
+  partial close, reverse and brackets, executions, and a dropped connection
+  whose Reconnect settles every write the panel sent from the provider's order
+  history, as the sandbox example on the examples page does.
 
 ### Fixed
 

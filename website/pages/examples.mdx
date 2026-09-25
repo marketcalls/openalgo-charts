@@ -6,6 +6,7 @@ description: Live, in-page chart demos powered by the real OpenAlgo Charts libra
 import RunnableExample from '../components/RunnableExample'
 import TypedInputsDemo from '../components/TypedInputsDemo'
 import { STOCK_BARS_SOURCE } from '../components/synthetic-market'
+import { SANDBOX_BROKER_EXAMPLE } from '../components/account-examples'
 import { ProfileDemo, ProfileThemeGallery } from '../components/ProfileShowcase'
 import DepthLadderDemo from '../components/DepthLadderDemo'
 import DrawingToolsDemo from '../components/DrawingToolsDemo'
@@ -407,58 +408,7 @@ accounts. Buy, then close part of the position, reverse it or close it: each is 
 provider's own command, never an opposite order. Drop the connection to see the
 figures kept and marked stale. See [Accounts and advanced orders](/docs/trading-accounts).
 
-<RunnableExample height={520} tiers={['widget', 'trade']} caption="Simulated sandbox broker in analyzer mode. Use the account menu in the status line to switch accounts." code={`${STOCK_BARS_SOURCE}
-el.style.display = 'flex';
-el.style.flexDirection = 'column';
-const controls = document.createElement('div');
-controls.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;font:12px sans-serif';
-controls.addEventListener('pointerdown', event => event.stopPropagation());
-const host = document.createElement('div');
-host.style.cssText = 'flex:1;min-height:0';
-el.append(controls, host);
-
-const broker = new lib.FakeBroker({ accounts: [
-  { id: 'SBX-CASH', name: 'Sandbox cash', mode: 'analyzer', currency: 'INR', balance: 500000 },
-  { id: 'SBX-MARGIN', name: 'Sandbox margin', mode: 'analyzer', currency: 'INR', balance: 1500000, leverage: 5, maxLeverage: 5 },
-  { id: 'LIVE', name: 'Live', mode: 'live', currency: 'INR', balance: 9000000 },
-] });
-const accounts = new lib.AccountManager({ feed: broker, mode: 'analyzer' });
-const engine = new lib.OrderEngine({
-  feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05 },
-  selectedAccount: () => accounts.selectedAccount(),
-});
-// The broker's order stream settles every order and command.
-broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
-
-const bars = stockBars(1700000000, 160, 300, 100, 41);
-const widget = lib.createWidget(host, {
-  symbol: 'NOVA', exchange: 'DEMO', interval: '5m', intervals: ['5m'], persist: false, locale: 'en-IN', account: accounts,
-});
-widget.series.setData(bars);
-broker.setMark('NOVA', bars[bars.length - 1].close);
-accounts.refresh();
-
-const log = document.createElement('span');
-log.style.opacity = '0.8';
-const action = (label, run) => {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.textContent = label;
-  button.style.cssText = 'padding:4px 9px;border:1px solid #667085;border-radius:4px;background:transparent;color:inherit;font:12px sans-serif;cursor:pointer';
-  button.onclick = async () => {
-    const result = await run();
-    log.textContent = result.ok ? label + ': ' + (engine.brokerStatus(result.clientId) || result.intent) : label + ' refused: ' + result.reason;
-  };
-  controls.appendChild(button);
-};
-action('Buy 50', () => engine.placeOrder({ symbol: 'NOVA', side: 'BUY', type: 'MARKET', qty: 50, duration: 'DAY' }));
-action('Close 20', () => engine.closePosition({ symbol: 'NOVA', qty: 20 }));
-action('Reverse', () => engine.reversePosition({ symbol: 'NOVA' }));
-action('Close all', () => engine.closePosition({ symbol: 'NOVA' }));
-action('Drop connection', async () => { broker.disconnect(); return { ok: false, reason: 'figures are stale' }; });
-action('Reconnect', async () => { broker.reconnect(); const result = await accounts.reconnect(); return { ...result, intent: 'reconnected' }; });
-controls.appendChild(log);
-return widget;`} />
+<RunnableExample height={520} tiers={['widget', 'trade']} caption="Simulated sandbox broker in analyzer mode. Use the account menu in the status line to switch accounts." code={SANDBOX_BROKER_EXAMPLE} />
 
 ## Open interest and instrument rules
 

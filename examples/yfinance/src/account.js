@@ -40,10 +40,40 @@ export function createDesk(options = {}) {
     clock: options.now,
   });
   broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
+
+  // Every write the panel sent whose outcome may still need the broker's word.
+  let sent = [];
+  /**
+   * Restore the connection, then settle every write from the broker's own
+   * history before reading the account again. A write whose answer was lost
+   * finds its outcome there by the token the broker echoes; one the complete
+   * history never mentions did not arrive, so its token is released. Without
+   * this, a close left unresolved by the drop would refuse every later close.
+   */
+  async function reconnect() {
+    broker.reconnect();
+    engine.beginReconcile();
+    const tokens = new Set();
+    const ids = new Set();
+    for (const accountId of new Set(sent.map((id) => engine.orderAccount(id)).filter(Boolean))) {
+      for (const row of await broker.getOrderHistory({ accountId })) {
+        tokens.add(row.clientToken);
+        ids.add(row.order.id);
+        engine.onBrokerOrder({ ...row.order, clientToken: row.clientToken });
+      }
+    }
+    engine.onReconnect(ids);
+    for (const id of sent) if (!tokens.has(id)) engine.releaseAmbiguous(id);
+    // A settled write needs nothing more from a later reconnect.
+    sent = sent.filter((id) => !['SETTLED', 'BLOCKED', undefined].includes(engine.intentState(id)));
+    return accounts.reconnect();
+  }
   return {
-    broker, accounts, engine,
+    broker, accounts, engine, reconnect,
     approveOrder: (req) => { approvedOrder = fingerprint(req); },
     approveCommand: (kind) => { approvedCommand = kind; },
+    /** Remember a write the panel sent, so a reconnect can account for it. */
+    track: (result) => { if (result.clientId) sent.push(result.clientId); return result; },
   };
 }
 
@@ -118,7 +148,7 @@ export function openAccountPanel(anchor) {
   const context = app.inspection1?.context;
   if (!context) return false;
   if (panel) { panel.close(); return true; }
-  const { broker, accounts, engine, approveOrder, approveCommand } = accountDesk();
+  const { broker, accounts, engine, approveOrder, approveCommand, track, reconnect } = accountDesk();
   const price = lastClose();
   const symbol = symbolNow();
   const ticket = {
@@ -200,7 +230,7 @@ export function openAccountPanel(anchor) {
     invalidate();
     mark();
     approveOrder(req);
-    const result = await engine.placeOrder(req);
+    const result = track(await engine.placeOrder(req));
     if (!alive) return;
     say(result.ok ? `${req.side} ${req.qty} ${symbol} ${req.type} ${req.duration}: ${engine.brokerStatus(result.clientId) ?? 'sent'}`
       : `Not placed: ${result.reason}`, result.ok ? 'info' : 'error');
@@ -215,7 +245,7 @@ export function openAccountPanel(anchor) {
     const b = button(label, async () => {
       mark();
       approveCommand(kind);
-      const result = await run();
+      const result = track(await run());
       if (!alive) return;
       say(result.ok ? `${label}: ${engine.brokerStatus(result.clientId) ?? result.intent}` : `${label} refused: ${result.reason}`, result.ok ? 'info' : 'error');
       await refresh();
@@ -237,7 +267,7 @@ export function openAccountPanel(anchor) {
     mark();
     approveCommand('bracket');
     const req = { symbol, side: ticket.side, type: 'MARKET', qty: Number(qty.value), stopLoss: Number(stop.value), takeProfit: Number(target.value) };
-    const result = await engine.placeBracket(req);
+    const result = track(await engine.placeBracket(req));
     if (!alive) return;
     say(result.ok ? `Bracket placed: stop and target are linked by the provider` : `Bracket refused: ${result.reason}`, result.ok ? 'info' : 'error');
     await refresh();
@@ -247,8 +277,7 @@ export function openAccountPanel(anchor) {
   const fills = node('ol', 'acct-fills');
   const connection = button('Drop connection', () => {
     if (connection.dataset.state === 'down') {
-      broker.reconnect();
-      void accounts.reconnect().then((result) => {
+      void reconnect().then((result) => {
         if (!alive) return;
         say(result.ok ? 'Reconnected to the simulated provider' : `Reconnect failed: ${result.reason}`, result.ok ? 'info' : 'error');
         return refresh();

@@ -61,6 +61,36 @@ describe('sandbox broker desk', () => {
     expect(executions.ok && executions.rows.map((row) => `${row.side} ${row.qty}`)).toEqual(['BUY 6', 'SELL 12', 'SELL 4', 'BUY 10']);
   });
 
+  it('settles every write a dropped connection left open when it reconnects', async () => {
+    const desk = await ready();
+    const req = ticketRequest(ticket({ qty: 50 }), 'AAPL');
+    desk.approveOrder(req);
+    desk.track(await desk.engine.placeOrder(req));
+    // The broker applies this close; its answer is lost with the connection.
+    desk.broker.muteOrderUpdates(true);
+    desk.broker.failNext('close', 'lost-response');
+    desk.approveCommand('close');
+    const lost = desk.track(await desk.engine.closePosition({ symbol: 'AAPL', qty: 20 }));
+    expect(lost).toMatchObject({ ok: false, intent: 'AMBIGUOUS' });
+    // This order is lost before the broker applies it.
+    desk.broker.failNext('place', 'timeout');
+    const other = ticketRequest(ticket({ qty: 5 }), 'MSFT');
+    desk.approveOrder(other);
+    const never = desk.track(await desk.engine.placeOrder(other));
+    expect(never).toMatchObject({ ok: false, intent: 'AMBIGUOUS' });
+    desk.broker.muteOrderUpdates(false);
+    desk.broker.disconnect();
+    desk.approveCommand('close');
+    expect(await desk.engine.closePosition({ symbol: 'AAPL', qty: 20 })).toMatchObject({ ok: false, intent: 'BLOCKED' });
+
+    expect(await desk.reconnect()).toMatchObject({ ok: true });
+    expect([desk.engine.intentState(lost.clientId), desk.engine.brokerStatus(lost.clientId)]).toEqual(['SETTLED', 'filled']);
+    expect(desk.engine.intentState(never.clientId)).toBeUndefined();
+    desk.approveCommand('close');
+    expect(await desk.engine.closePosition({ symbol: 'AAPL', qty: 20 })).toMatchObject({ ok: true });
+    expect(desk.broker.accountPositions('SBX-CASH')).toEqual([{ symbol: 'AAPL', netQty: 10, avgPrice: 100 }]);
+  });
+
   it('previews without placing and reports what the provider would refuse', async () => {
     const desk = await ready();
     const preview = await desk.engine.previewOrder(ticketRequest(ticket({ qty: 5000 }), 'AAPL'));

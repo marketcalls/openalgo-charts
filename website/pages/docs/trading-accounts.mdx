@@ -5,6 +5,7 @@ description: Account selection and figures, order preview, durations and leverag
 
 import RunnableExample from '../../components/RunnableExample'
 import { Callout } from 'nextra/components'
+import { ACCOUNT_SUMMARY_EXAMPLE } from '../../components/account-examples'
 
 # Accounts and advanced orders
 
@@ -158,7 +159,12 @@ still apply, so a host lock during replay stops them too.
   cancel, modify and see filled. An `Order` row passes as it is:
   `onBrokerOrder({ ...order, clientToken })`.
 - **Reconnect.** `beginReconcile()` and `onReconnect(presentIds)` treat commands like orders:
-  an absent one becomes `AMBIGUOUS`, not cancelled.
+  an absent one becomes `AMBIGUOUS`, not cancelled. After a dropped connection, read the
+  broker's order history for each account written to, pass every row to `onBrokerOrder`,
+  call `onReconnect` with the ids it lists, and `releaseAmbiguous` each write that complete
+  history never mentions. The sandbox example on the examples page and the reference
+  host's Account panel reconnect this way; without it, a close left unresolved by the drop
+  refuses every later close.
 
 ## Account summary in the widget
 
@@ -178,23 +184,7 @@ createWidget('#chart', { feed, symbol: 'SBIN', exchange: 'NSE', account: account
 `mountAccountSummary(context, host, { source })` mounts the same summary in a host's own
 chrome.
 
-<RunnableExample height={480} tiers={['widget', 'trade']} caption="Simulated sandbox broker. Switch accounts from the status line menu." code={`const broker = new lib.FakeBroker({ accounts: [
-  { id: 'SBX-CASH', name: 'Sandbox cash', mode: 'analyzer', currency: 'INR', balance: 500000 },
-  { id: 'SBX-MARGIN', name: 'Sandbox margin', mode: 'analyzer', currency: 'INR', balance: 1500000, leverage: 5, maxLeverage: 5 },
-  { id: 'LIVE', name: 'Live', mode: 'live', currency: 'INR', balance: 9000000 },
-] });
-const accounts = new lib.AccountManager({ feed: broker, mode: 'analyzer' });
-const engine = new lib.OrderEngine({ feed: broker, mode: 'analyzer', armed: true,
-  constraints: { tickSize: 0.05 }, selectedAccount: () => accounts.selectedAccount() });
-broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
-
-const bars = lib.generateBars(1700000000, 160, 300);
-const widget = lib.createWidget(el, { symbol: 'NOVA', exchange: 'DEMO', interval: '5m', intervals: ['5m'],
-  persist: false, locale: 'en-IN', account: accounts });
-widget.series.setData(bars);
-broker.setMark('NOVA', bars[bars.length - 1].close);
-accounts.refresh().then(() => engine.placeOrder({ symbol: 'NOVA', side: 'BUY', type: 'MARKET', qty: 40 }));
-return widget;`} />
+<RunnableExample height={480} tiers={['widget', 'trade']} caption="Simulated sandbox broker. Switch accounts from the status line menu." code={ACCOUNT_SUMMARY_EXAMPLE} />
 
 ## FakeBroker
 
