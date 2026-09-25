@@ -65,15 +65,25 @@ The broker interface you implement:
 
 ```ts
 interface OrderFeed {
+  capabilities?: TradingCapabilitySource;   // place/modify/cancel restrictions
+  features?: TradingFeatureSource;          // the newer operations below; omitted declares none
   place(req: PlaceRequest & { mode: TradeMode }): Promise<{ orderId: string }>;
   modify(orderId: string, patch: { price?: number; triggerPrice?: number; qty?: number }): Promise<void>;
   cancel(orderId: string): Promise<void>;
+  previewOrder?(req): Promise<OrderPreview>;              // read-only
+  closePosition?(req: ClosePositionRequest & { mode }): Promise<CommandReceipt>;
+  reversePosition?(req: ReversePositionRequest & { mode }): Promise<CommandReceipt>;
+  placeBracket?(req: BracketOrderRequest & { mode }): Promise<BracketReceipt>;
 }
 interface PlaceRequest {
   symbol: string; exchange?: string; side: OrderSide; type: OrderType; qty: number;
   price?: number; triggerPrice?: number;
   product?: 'CNC' | 'NRML' | 'MIS';
   clientToken?: string;            // idempotency token
+  account?: string;                // needs features.accounts
+  duration?: OrderDuration;        // 'DAY' | 'IOC' | 'FOK' | 'GTC' | 'GTD', must be in features.durations
+  expiresAt?: number;              // GTD only, UTC seconds, in the future
+  leverage?: number;               // needs features.leverage
 }
 interface PlaceResult { ok: boolean; clientId?: string; state?: ClientOrderState; reason?: string }
 ```
@@ -215,7 +225,60 @@ feed.subscribeDepth({ symbol, exchange, interval }, (d) => ladder.setDepth(d));
 
 Deterministic in-memory `OrderFeed` for tests and offline demos. Members: `onBook(cb)` / `setBook(orders, positions)` (copies its inputs), `onLtp(cb)` / `emitLtp(symbol, ltp)`, `onDepth(cb)` / `emitDepth(symbol, depth)`, `place`/`modify`/`cancel` (broker ids `B1`, `B2`, …), `fill(orderId)`, `orders()` / `positions()`, the test hook `rejectNextPlace = 'reason'` (next `place()` throws once), and `static makeDepth(ltp, levels, tickSize = 0.05)`.
 
-`place()` marks `MARKET` orders `'filled'` and everything else `'working'`. It appends to the order book but never updates `positions`, seed those with `setBook`.
+`new FakeBroker()` (no options) is the original book simulator and declares no `features`: `place()` marks `MARKET` orders `'filled'` and everything else `'working'`, appends to the order book and never updates `positions` (seed those with `setBook`). A request carrying `account`, `duration`, `expiresAt` or `leverage` is refused, and the engine refuses every newer operation against it.
+
+`new FakeBroker({ accounts, features?, now?, latency? })` (`FakeBrokerOptions`, `FakeAccountSeed` = `{ id, name?, mode, currency?, balance, leverage?, maxLeverage? }`) also simulates a provider with account ledgers. It implements `AccountFeed` and every optional `OrderFeed` method, declares every feature and duration unless `features` narrows it, and:
+
+- fills `MARKET` orders at the mark (`setMark(symbol, price)`, which `emitLtp` also sets), averages, realizes and flips positions per account (`accountPositions(id)`), records executions and order history with the echoed client token, duration and expiry;
+- reports balance, equity, margin used and available (margin is `|netQty| x avgPrice / leverage`), pushing snapshots to `subscribeAccount` on every change and mark;
+- cancels an unmarketable `IOC`/`FOK` limit at once, lapses a `GTD` order at its expiry, and links bracket legs itself (an entry fill starts them, a leg fill cancels its sibling);
+- refuses like a server, with an error marked `rejected: true` (`isBrokerRejection`): unknown account, the other ledger's account (`mode` mismatch), an undeclared feature, no mark, missing margin, leverage above `maxLeverage`, a close larger than the position;
+- test hooks: `latency(operation, accountId)` holds any answer, `failNext(operation, 'reject' | 'timeout' | 'lost-response', reason?)` (`FakeBrokerOperation`, `FakeBrokerFailure`), `disconnect()` / `reconnect()` (streams get `onError`), `onOrderUpdate(cb)` the order stream with `FakeOrderInfo` (`accountId`, `clientToken`, `command`), and `muteOrderUpdates(true)` for a silent stream.
+
+## Accounts, preview, durations and position commands
+
+Declared with `TradingFeatures` on `OrderFeed.features` / `AccountFeed.features` (a `TradingFeatureSource`: an object or a synchronous provider of one). **Unlike `TradingCapabilities`, an omitted feature is unsupported.** Flags: `accounts`, `executions`, `orderHistory`, `preview`, `leverage`, `close`, `partialClose`, `reverse`, `brackets` (each `boolean | 'unknown'`), and `durations: OrderDuration[]` (`ORDER_DURATIONS` lists all five). `checkTradingFeature(source, { feature, ... })` answers `{ supported } | { supported: false, reason }`; `tradingFeatureLabel(feature)` is the wording its reasons use. `OrderEngineOptions.features` and `AccountManagerOptions.features` add host restrictions (either side can refuse).
+
+`AccountManager` (`new AccountManager({ feed, mode?, features?, initialAccount? })`) is read-only and implements `AccountStateSource` (`getState()`, `subscribe(listener)`, `select(id)`), which the widget's `account` option takes:
+
+| Member | Behaviour |
+|---|---|
+| `getState()` | `AccountState`: `status` (`unsupported` with `reason`, `idle`, `loading`, `ready`, `stale`, `error`), `mode`, `accounts` (only this mode's), `selectedId`, `snapshot` (`AccountSnapshot`: `accountId`, `mode`, `asOf` UTC seconds, `currency?`, `balance?`, `equity?`, `marginUsed?`, `marginAvailable?`, `unrealizedPnl?`, `realizedPnl?`, `leverage?`), `generation` |
+| `refresh()` / `reconnect()` | List accounts (other-mode accounts dropped), keep or choose the selection, load its snapshot, subscribe. Figures on screen stay until the answer |
+| `select(id)` | Aborts the previous snapshot and history reads, unsubscribes the old stream, clears the old figures, loads the new. A late answer for the old account resolves `{ ok: false, cancelled: true }` and is never shown |
+| `disconnected(reason?)` | Keeps the last figures as `stale` (or `error` when there were none) and abandons what is in flight. A stream's `onError` calls it |
+| `positions()`, `executions(query?)`, `orderHistory(query?)` | `AccountReadResult`: `{ ok: true, accountId, rows, dropped }` or `{ ok: false, reason, cancelled?, unsupported? }`. Rows for another account and unreadable rows are dropped and counted. `AccountHistoryQuery` filters `symbol`, `from`, `to` (UTC seconds), `limit` |
+| `selectedAccount()`, `destroy()` | |
+
+Snapshots are validated: a non-finite figure is an unreadable snapshot (`error`), a snapshot naming another account or the other ledger is refused, and a pushed reading older than the one shown is ignored. `TradingAccount`, `Execution` and `OrderHistoryEntry` (`accountId`, `order`, `time`, `clientToken?`, `duration?`, `expiresAt?`, `command?`) are the row types.
+
+`OrderEngine` additions:
+
+- `selectedAccount: () => accounts.selectedAccount()` stamps the selected account on every order and command, refuses one naming a different account, refuses `No account is selected`, and after confirmation refuses `The account changed before the order was sent; nothing was sent` (token released). An order already sent stays with its account; `orderAccount(clientId)` reads it.
+- `account`, `duration`, `expiresAt`, `leverage` are checked before confirmation and again after: an undeclared one is refused (`... is not declared by this provider`), never dropped. `GTD` needs a future `expiresAt` (`clock`, UTC seconds, default `Date.now() / 1000`); an expiry needs `GTD`.
+- `previewOrder(req)`: `PreviewResult` = `{ ok: true, preview: OrderPreview, request }` or `{ ok: false, reason, unsupported?, stale? }`. Claims no token, never calls `place`, is `stale` when the account changed while it was out. `OrderPreview` carries `estimatedPrice`, `estimatedValue`, `marginRequired`, `marginAvailableAfter`, `fees`, `currency`, `warnings`, `rejectReason`, `asOf`.
+- `closePosition({ symbol, qty? })` (`partialClose` feature when `qty` is set, validated against lot and freeze limits), `reversePosition({ symbol })` and `placeBracket({ ...PlaceRequest, stopLoss, takeProfit })` return `CommandResult` (`PlaceResult` plus `kind` and, for a bracket, `legs` client ids `<token>:stop` / `<token>:target`). Each has its own `clientToken`. They need the feature **and** the feed method; otherwise they are `BLOCKED` with a reason. **An opposite order is never sent instead.** `TradingCommand` is what `confirmCommand` approves when not `armed` (omitted declines, like the gate). The place flag and `modes` still apply (a host lock stops them); `orderTypes` does not apply to close or reverse.
+- A close or reverse whose outcome is unknown (`SUBMITTING`, `SUBMITTED`, `AMBIGUOUS`, `RECONCILING`) blocks another on the same account and symbol: `A previous close or reverse for X is unresolved; reconcile it with the broker first`.
+- A feed error marked `rejected: true` (`BrokerRejection`, `isBrokerRejection`) is the broker's explicit refusal: the row settles `SETTLED` with `brokerStatus` `rejected`; the token stays claimed. Any other non-preflight error is `AMBIGUOUS`, as for orders.
+- `onBrokerOrder({ id, clientToken?, status })` (`BrokerOrderUpdate`) applies an order-stream or book row by broker id, or binds an unknown id through the echoed client token: how an `AMBIGUOUS` write whose answer was lost gets its id and outcome. A stream status that arrives before the transport answers outranks it. `releaseAmbiguous(clientId)` drops an `AMBIGUOUS` row after the host has established from the complete book that it never arrived. `orderKind(clientId)` (`OrderKind`), `bracketLegs(clientId)`. Close and reverse rows cannot be modified or cancelled (`onValidationError`).
+
+`OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and `leverage` pre-flight: OpenAlgo's placeorder has no such fields and one key is one account.
+
+```ts
+import { AccountManager, FakeBroker, OrderEngine } from 'openalgo-charts/trade';
+const broker = new FakeBroker({ accounts: [{ id: 'SBX-1', mode: 'analyzer', balance: 100000 }] });
+const accounts = new AccountManager({ feed: broker, mode: 'analyzer' });
+const engine = new OrderEngine({ feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05 },
+  selectedAccount: () => accounts.selectedAccount() });
+broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ id: order.id, clientToken: info.clientToken, status: order.status }));
+await accounts.refresh();
+broker.setMark('SYN', 100);
+await engine.placeOrder({ symbol: 'SYN', side: 'BUY', type: 'MARKET', qty: 10, duration: 'DAY' });
+await engine.closePosition({ symbol: 'SYN', qty: 4 });     // native partial close
+await engine.reversePosition({ symbol: 'SYN' });            // native reverse
+```
+
+Full guide: website `docs/trading-accounts`.
 
 ## Worked example: engine + OpenAlgo + chart gesture
 

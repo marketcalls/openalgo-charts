@@ -2,6 +2,59 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- Account state in the trade tier. `AccountManager` lists a provider's accounts
+  for one mode, loads the selected account's balance, equity, margin used and
+  available, P&L and leverage, follows its stream, and reads its positions,
+  executions and order history. Switching accounts aborts the old account's
+  requests and stream, so a late answer is never shown under the new name; a
+  pushed reading older than the one on screen, a snapshot from the other
+  ledger, and a non-finite figure are all refused. A dropped connection keeps
+  the last figures marked stale until `reconnect()`. It never writes.
+- Declared newer operations. `TradingFeatures` (`accounts`, `executions`,
+  `orderHistory`, `preview`, `durations`, `leverage`, `close`, `partialClose`,
+  `reverse`, `brackets`) on `OrderFeed.features`, checked with
+  `checkTradingFeature`. Unlike the place, modify and cancel flags, an omitted
+  feature is unsupported, and every refusal names the feature.
+- `PlaceRequest.account`, `duration` (`DAY`, `IOC`, `FOK`, `GTC`, `GTD`),
+  `expiresAt` and `leverage`, checked before and after confirmation and never
+  dropped on the way to the wire. With `selectedAccount`, the engine stamps the
+  selected account on each order, refuses one naming another account, and
+  sends nothing when the account changes while the user is confirming; an order
+  already in flight keeps its account.
+- `OrderEngine.previewOrder`: the provider's estimated value, margin and
+  refusal reason for an order, without claiming its token or placing it.
+- Provider-native `closePosition` (whole or partial), `reversePosition` and
+  `placeBracket`, each with its own idempotency token, its own feature and
+  `confirmCommand` approval when not armed. An opposite order is never sent in
+  place of a close. A close or reverse without a known outcome holds the
+  position against another; `onBrokerOrder` settles a write whose answer was
+  lost through the client token the broker echoes, `releaseAmbiguous` frees one
+  the host has shown never arrived, and a feed error marked `rejected: true`
+  (`isBrokerRejection`) settles as the broker's refusal.
+- `FakeBroker({ accounts })` simulates all of it: per-account ledgers filled at
+  a mark price, preview, `IOC`/`FOK` cancellation, `GTD` expiry, leverage
+  limits, native close, reverse and linked bracket legs, server-side refusals,
+  and hooks to hold, fail or lose any answer and drop the connection. Without
+  `accounts` it is unchanged and declares none of it.
+- Widget account summary. The `account` option shows the selected account,
+  an Analyzer tag for the sandbox ledger, equity and margin in the status line,
+  with a menu to switch; a source whose provider declares no accounts renders
+  disabled with the reason. `mountAccountSummary` and `ACCOUNT_SUMMARY_CSS`
+  are exported for custom hosts.
+- The reference host's Account button opens a sandbox broker panel: account
+  switching, preview-gated placement with durations and leverage, native close,
+  partial close, reverse and brackets, executions, and a dropped connection.
+
+### Changed
+
+- `OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and
+  `leverage` before any network call: OpenAlgo's placeorder has no such fields
+  and one key is one account.
+
 ## 2.5.4
 
 2026-09-25

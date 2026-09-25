@@ -125,7 +125,10 @@ A refused modify or cancel leaves the previous client state and intent in
 place, including partial fills and an unacknowledged `SUBMITTED` intent. A
 broker event received while a preflight refusal is pending remains
 authoritative. Transport success alone still does not write `brokerStatus`;
-only the existing broker update path does that.
+only the broker update path (`onBrokerUpdate`, or `onBrokerOrder` with the
+client token the broker echoes) does that, plus a feed error marked
+`rejected: true`, which is the broker's own explicit refusal and settles the
+intent as rejected.
 
 New broker updates, reconciliation and later modify/cancel attempts supersede
 older write completions. A late transport success or failure cannot overwrite
@@ -135,6 +138,19 @@ network request; subsequent broker events still establish the actual outcome.
 
 Capabilities and replay locks are runtime inputs. They are not workspace
 layout data and do not serialize broker orders, account state or armed flags.
+
+## Newer operations are declared, not assumed
+
+Accounts, execution and order history, preview, durations, leverage, close,
+partial close, reverse and provider brackets are declared separately, with the
+trade tier's `TradingFeatures` on `OrderFeed.features` and checked with
+`checkTradingFeature`. The rule is the reverse of the flags above: an omitted
+feature is unsupported, so a provider written before these operations existed
+refuses them instead of dropping an account or a duration on the wire, or
+standing in an opposite order for a close. The place flag and accepted modes
+still govern the position commands, so a host replay lock stops them as well.
+See the website guide, Accounts and advanced orders, and
+`tests/order-engine-accounts.test.ts`, `tests/account-manager.test.ts`.
 
 ## Verification
 

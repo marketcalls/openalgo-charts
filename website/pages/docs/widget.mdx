@@ -362,6 +362,7 @@ passes through to `createChart` unchanged.
 | `lookbackBars` | `number` | Bars per load. Default 500. |
 | `now` | `() => number` | The clock for the load window and the capture filename. Default `Date.now`. |
 | `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). Without it the menu draws no trade rows. |
+| `account` | `AccountStateSource` | The selected account's equity and margin in the status line, with a menu to switch account, usually a trade-tier `AccountManager`. A source whose provider declares no accounts shows disabled with the reason; omitted shows nothing. It reads and switches accounts only. See [Accounts and advanced orders](/docs/trading-accounts). |
 | `styleNonce` | `string` | The host's CSP nonce for the shared widget and dialog stylesheet. See [Content Security Policy](#content-security-policy). |
 
 The chrome switches (`rail`, `topbar`, `statusline`, `indicators`) default to on, so a
