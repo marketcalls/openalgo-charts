@@ -13,7 +13,7 @@ type ColumnContext = PrimitiveRenderContext & { priceAxisOffset?: number };
 
 class FontContext extends RecordingContext {
   public override measureText(text: string) {
-    return { width: text.length * Number(/([\d.]+)px/.exec(this.font)?.[1] ?? 10) * 0.6 };
+    return { width: text.length * Number(this.font.split(' ').find(part => part.endsWith('px'))?.slice(0, -2) ?? 10) * 0.6 };
   }
 }
 
