@@ -41,6 +41,17 @@ describe('panel dock sources', () => {
     plain.dock.destroy(); restored.dock.destroy();
   });
 
+  it('restoring a panel this dock lacks closes the one that was open, so the state and the dock agree', () => {
+    const plain = rig();
+    plain.dock.open('data');
+    expect(plain.dock.state().panel).toBe('data');
+    plain.dock.restore({ panel: 'watchlist', width: 320 });
+    expect(plain.dock.state()).toEqual({ panel: null, width: 320 });
+    expect(plain.destroyed).toEqual(['data']);
+    expect(plain.dock.el.hidden).toBe(true);
+    plain.dock.destroy();
+  });
+
   it('mounts one source at a time and releases it on switch, close and destroy', () => {
     const r = rig({ watchlist: undefined, news: undefined });
     r.dock.open('watchlist');

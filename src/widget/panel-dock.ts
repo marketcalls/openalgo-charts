@@ -168,7 +168,8 @@ export function mountPanelDock(ctx: WidgetContext, stage: HTMLElement, opts: Pan
   return {
     el: panel, open, close, toggle: id => { if (state.panel === id) close(); else open(id); },
     state: () => ({ ...state }),
-    restore: raw => { const next = sanitizePanelDockState(raw); resize(next.width); if (next.panel === null) close(); else open(next.panel, false); },
+    // A saved panel whose source this dock lacks restores as closed, never as whatever was open.
+    restore: raw => { const next = sanitizePanelDockState(raw); resize(next.width); if (next.panel === null || !available.includes(next.panel)) close(); else open(next.panel, false); },
     destroy: () => {
       if (destroyed) return; close(); destroyed = true; observer?.disconnect(); win?.removeEventListener?.('resize', onResize);
       panel.removeEventListener('keydown', onKey); grip.removeEventListener('pointerdown', onDown);
