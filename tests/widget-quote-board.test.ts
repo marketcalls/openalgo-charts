@@ -215,6 +215,45 @@ describe('quote board', () => {
     board.destroy();
   });
 
+  it('waits out a stale window longer than one timer delay can hold, instead of re-arming at once', async () => {
+    vi.useFakeTimers();
+    const feed: QuoteFeed = { getQuotes: async ({ instruments }) => instruments.map(i => q(i.symbol, 200)) };
+    const onChange = vi.fn();
+    // Thirty days: past the 2^31 - 1 ms a timer delay holds before it wraps and fires at once.
+    const window = 30 * 24 * 3600 * 1000;
+    const board = new QuoteBoard({ feed, pollMs: 0, staleAfterMs: window, onChange });
+    board.setVisible([k('A')]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(board.row(k('A')).status).toBe('snapshot');
+    onChange.mockClear();
+    const armed = vi.spyOn(globalThis, 'setTimeout');
+    await vi.advanceTimersByTimeAsync(1000);
+    const rearmed = armed.mock.calls.length;
+    armed.mockRestore();
+    expect(rearmed).toBe(0);
+    await vi.advanceTimersByTimeAsync(window - 1000);
+    expect(board.row(k('A')).status).toBe('snapshot');
+    expect(onChange).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(board.row(k('A')).status).toBe('stale');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    board.destroy();
+  });
+
+  it('polls no faster than asked when the interval is longer than one timer delay can hold', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const feed: QuoteFeed = { getQuotes: async ({ instruments }) => { calls++; return instruments.map(i => q(i.symbol, 200)); } };
+    const board = new QuoteBoard({ feed, pollMs: 2 ** 31 });
+    board.setVisible([k('A')]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toBe(1);
+    board.destroy();
+  });
+
   it('ignores quotes for another instrument, non-finite prices and instruments nobody asked for', async () => {
     const { feed, streams, pending } = streamingFeed();
     const board = new QuoteBoard({ feed });

@@ -51,6 +51,8 @@ interface Entry {
 interface Request { controller: AbortController; ids: Set<string>; seq: number }
 
 const RETAINED = 1000;
+// A timer keeps its delay in a signed 32-bit integer; a longer one wraps and fires at once.
+const MAX_DELAY = 2 ** 31 - 1;
 const idOf = (key: InstrumentKey): string => JSON.stringify([key.symbol, key.exchange]);
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -292,7 +294,7 @@ export class QuoteBoard {
       this._poll = null;
       this._snapshot([...this._visible].map(id => this._entries.get(id)!.key));
       this._schedulePoll();
-    }, this._pollMs);
+    }, Math.min(this._pollMs, MAX_DELAY));
   }
 
   /** When a visible row turns stale by age alone, or null when age cannot change what it shows. */
@@ -321,9 +323,10 @@ export class QuoteBoard {
     if (next === Infinity) return;
     this._stale = setTimeout(() => {
       this._stale = null;
-      // row() calls a quote stale once its age exceeds the window; a timer that fires early changes nothing.
+      // row() calls a quote stale once its age exceeds the window; a timer that fires early changes nothing,
+      // which is also how a deadline beyond the longest delay is waited out in steps.
       if (this._now() > next) this._onChange();
       this._scheduleStale();
-    }, next - now + 1);
+    }, Math.min(next - now + 1, MAX_DELAY));
   }
 }
