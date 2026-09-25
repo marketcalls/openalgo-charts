@@ -477,3 +477,53 @@ test('Parabolic SAR and OBV keep drawing after an incomplete bar', async ({ page
   expect(errors).toEqual([]);
   await page.screenshot({ path: info.outputPath('psar-obv-incomplete-bar.png') });
 });
+
+test('Supertrend holds its side and A/D keeps drawing across a missing close', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const result = await page.evaluate(async () => {
+    const { chart, source, paint, ink } = window.__numeric;
+    // A steady fall. Every true range is 2, so the ATR is 2 and the upper band sits
+    // at close + 2.5. Bar 6 has no close: bar 7's true range reads it and has no
+    // ATR, and every close sits a quarter of the range from the low, so each
+    // complete bar moves A/D by -50.
+    source.setData(Array.from({ length: 10 }, (_, i) => {
+      const c = 20 - 0.5 * i;
+      return { time: 1700000000 + i * 60, open: c, high: c + 1.5, low: c - 0.5, close: i === 6 ? NaN : c, volume: 100 };
+    }));
+    const trend = chart.addIndicator('supertrend', { period: 3, multiplier: 1, upColor: '#ff9900', downColor: '#00c8ff' });
+    const flow = chart.addIndicator('adl', { color: '#ff9900' });
+    trend.series('down')!.applyOptions({ lineWidth: 3 });
+    const line = flow.series('adl')!;
+    line.applyOptions({ lineWidth: 3 });
+    line.priceScale().setAutoScale(false);
+    line.priceScale().setPriceRange({ min: -500, max: 0 });
+    source.priceScale().setAutoScale(false);
+    source.priceScale().setPriceRange({ min: 12, max: 23 });
+    chart.setPaneWeight(flow.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 10 });
+    await paint();
+    const down = trend.series('down')!;
+    const up = trend.series('up')!;
+    return {
+      values: trend.values(), adl: flow.values().adl,
+      resumed: ink(down, 0, 8.5, 18.25, [0, 200, 255]),
+      bridged: ink(down, 0, 6.5, 19.25, [0, 200, 255]),
+      // Where the flipped support line of the NaN comparison used to run.
+      flipped: ink(up, 0, 8.5, 14.5, [255, 153, 0]),
+      flowResumed: ink(line, flow.paneIndex, 7.5, -375),
+      flowBridged: ink(line, flow.paneIndex, 6, -325),
+    };
+  });
+  expect(result.values.down).toEqual([null, null, 21.5, 21, 20.5, 20, null, null, 18.5, 18]);
+  expect(result.values.up).toEqual(Array(10).fill(null));
+  expect(result.adl).toEqual([-50, -100, -150, -200, -250, -300, null, -350, -400, -450]);
+  expect(result.resumed).toBeGreaterThan(1);
+  expect(result.bridged).toBe(0);
+  expect(result.flipped).toBe(0);
+  expect(result.flowResumed).toBeGreaterThan(1);
+  expect(result.flowBridged).toBe(0);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('supertrend-adl-missing-close.png') });
+});
