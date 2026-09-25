@@ -136,6 +136,7 @@ Access via `chart.trading`.
 | `getPositions()` / `getOrders()` / `getTrades()` | current state |
 | `clear()` | remove everything |
 | `setSettings(colors)` / `getSettings()` | global trading colors |
+| `setTickSchedule(schedule)` | snap dragged order and bracket lines to a `TickSchedule`; `null` (the default) keeps raw pointer prices |
 | `on(event, cb)` / `off(event, cb)` | subscribe / unsubscribe (`on` returns an unsubscribe fn) |
 
 ## Events
@@ -144,12 +145,32 @@ Subscribe with `chart.trading.on(event, cb)`.
 
 | Event | Payload | Fires when |
 |---|---|---|
-| `trading:order_modify` | `{ orderId, newPrice, previousPrice }` | an order line is dragged and released |
-| `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` | a TP/SL bracket line is dragged |
+| `trading:order_modify` | `{ orderId, newPrice, previousPrice }` | an order line is dragged and released; `newPrice` is on the tick schedule when one is set |
+| `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` | a TP/SL bracket line is dragged; `newPrice` is on the tick schedule when one is set |
 | `trading:order_cancel` | `{ orderId }` | the ✕ on an order pill is clicked |
 | `trading:position_close` | `{ positionId }` | the ✕ on a position pill is clicked |
 | `trading:order_click` | `{ order }` | an order pill body is clicked |
 | `trading:position_click` | `{ position }` | a position pill body is clicked |
+
+## Price ticks while dragging
+
+Without a schedule, a drag reports the price under the pointer, unrounded. Hand the
+controller the instrument's ticks and the dragged line previews, and both modify events
+carry, the nearest price the instrument can trade at, on the band the price is in:
+
+```ts
+import { TickSchedule } from 'openalgo-charts';
+
+// Host-supplied rules for this instrument (synthetic here): 0.01 below 100, 0.05 from 100.
+chart.trading.setTickSchedule(new TickSchedule([{ tick: 0.01 }, { from: 100, tick: 0.05 }]));
+// or, from validated metadata: chart.trading.setTickSchedule(instrument.tickSchedule);
+```
+
+A release at 100.33 then emits `newPrice: 100.35`, and one at 99.874 emits `99.87`. A
+one-band schedule, `[{ tick: 0.05 }]`, snaps a constant tick. Price limits are not
+checked here: run [`validatePrice`](/docs/trading#price-dependent-ticks) before sending
+the amend. See [Instrument metadata](/docs/instruments#price-dependent-ticks) for the
+band rules.
 
 ## Settings
 

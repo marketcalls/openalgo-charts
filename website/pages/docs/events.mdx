@@ -513,6 +513,10 @@ Every trading event is mirrored onto the main bus, so
 | `trading:position_click` | `{ position }` |
 | `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` |
 
+`newPrice` is the pointer's price unless the host called
+[`chart.trading.setTickSchedule`](/docs/trading-api#price-ticks-while-dragging), in which
+case it is the nearest price on the instrument's ticks.
+
 ```ts
 chart.on('trading:order_modify', async ({ orderId, newPrice }) => {
   await broker.modifyOrder(orderId, { price: newPrice });

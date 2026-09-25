@@ -2,7 +2,9 @@
 
 `orderConstraintsForInstrument(instrument)` maps a validated base `Instrument` to
 the existing `OrderConstraints`: price tick, quantity grid and fractional quantity
-support. Steps remain in the adapter's order units, without multiplying lots.
+support, plus `tickSchedule` when the metadata carries `tickBands` (a constant
+tick returns the same three fields as before). Steps remain in the adapter's order
+units, without multiplying lots.
 Use `validateQuantity`/`validatePrice` for advisory checks and add host price-band
 or freeze limits when available. See [instrument metadata](../../../../docs/instruments.md).
 
@@ -131,14 +133,27 @@ Note the asymmetry: in `modify_pending`, `reject` means "the amend failed, the o
 
 ```ts
 interface PriceBand { lower: number; upper: number }
-interface OrderConstraints { tickSize: number; priceBand?: PriceBand; freezeQty?: number }
-interface ValidationResult { ok: boolean; reason?: string; price?: number }
+interface OrderConstraints { tickSize: number; tickSchedule?: TickSchedule; priceBand?: PriceBand; freezeQty?: number; lotSize?: number; allowFractionalQty?: boolean }
+interface ValidationResult { ok: boolean; reason?: string; code?: ValidationCode; price?: number }
 
 withinPriceBand(price, band): boolean            // inclusive on both bounds
 validateOrder(price, qty, c): ValidationResult
 ```
 
 Check order: `qty <= 0` -> reject; `qty > freezeQty` -> reject; snap with `roundToTick(price, tickSize)`; band check runs on the **snapped** price. On success `price` holds the snapped value, always use `result.price`, not your input. `roundToTick` is `Math.round(value / step) * step` and returns raw floats (`100.05000000000001`), so format for display and never compare with `===`.
+
+### Price-dependent ticks
+
+`tickSchedule` replaces the constant snap: `validatePrice` rounds with `tickSchedule.round(price)`, which returns exact decimals (`===` is safe) and rounds a written halfway price up. `tickSize` is then read only by older code; give it `tickSchedule.minMove`. The price band still runs on the snapped price, so a price inside the limits as typed can snap outside them and be refused. `OrderEngine.placeOrder` (typed prices, triggers included) and `requestModify` (drags, a stop-limit's carried trigger included) both go through it. A plain band list in place of a `TickSchedule` throws a `TypeError` naming `new TickSchedule(bands)`.
+
+```ts
+import { TickSchedule } from 'openalgo-charts';
+const ticks = new TickSchedule([{ tick: 0.01 }, { from: 10, tick: 0.05 }, { from: 100, tick: 0.1 }]);
+validatePrice(10.03, { tickSize: ticks.minMove, tickSchedule: ticks }); // { ok: true, price: 10.05 }
+validatePrice(9.996, { tickSize: ticks.minMove, tickSchedule: ticks }); // { ok: true, price: 10 }
+```
+
+Band rules (`src/feed/tick-schedule.ts`): the first band has no `from` and covers every lower price, zero and negatives included; each later `from` is inclusive and strictly ascending; every `from` must be a multiple of the ticks on both sides of it; ticks are positive with at most 12 decimals; 1 to 64 bands. Anything else throws `Invalid tick schedule: ...` naming the band. An exact boundary takes the upper band's tick (`tickAt(10) === 0.05`); `step(price, n)` moves whole ticks across bands, down from a boundary on the band below. A floor such as "no negative prices" is a price band, not a tick rule. Real venue schedules come from the host; the library ships none.
 
 `OrderEngine.placeOrder` skips the price path entirely when `req.price` is undefined and only checks `qty > 0`. **A `MARKET` order bypasses the freeze-quantity check.**
 

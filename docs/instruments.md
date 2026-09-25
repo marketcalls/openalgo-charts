@@ -76,3 +76,29 @@ helper returns existing `OrderConstraints` with that grid and the price tick.
 It does not multiply units by a lot size. Hosts can add current price-band/freeze
 constraints. Client checks remain advisory; the broker retains execution authority.
 `hasOpenInterest` stays true, false or unknown independently of zero/missing bars.
+
+## Price-dependent ticks
+
+`tickBands` declares a tick that changes with price, supplied by the host from its
+venue's rules; the library ships none. The first band has no `from` and covers every
+lower price, zero and negative prices included. Each later band starts at its `from`
+(inclusive, strictly ascending), and every `from` must be a multiple of the ticks on
+both sides of it, so a boundary is itself a valid price. Ticks are positive with at
+most 12 decimals, and a schedule has 1 to 64 bands. Invalid bands throw
+`Invalid tick schedule: ...` naming the band.
+
+```ts
+const banded = new Instrument({ ...metadata, priceTick: 0.01,
+  tickBands: [{ tick: 0.02 }, { from: 20, tick: 0.05 }] }); // synthetic rules
+banded.tickSchedule.round(20.03); // 20.05, an exact decimal
+```
+
+`instrument.tickSchedule` is the validated `TickSchedule` (one band for a constant
+tick): `round` gives the nearest valid price, a written halfway price rounding up;
+`tickAt` gives the tick in force, the upper band's at an exact boundary; `step` moves
+whole ticks across boundaries. With bands, `priceTick` must equal the schedule's
+`minMove`, the common grid of every band, and `applyTo` sets that as the price scale's
+`minMove`. `orderConstraintsForInstrument` adds `tickSchedule` to the constraints, so
+`validatePrice`, `OrderEngine.placeOrder` and `OrderEngine.requestModify` snap on the
+band each price lands in and check price limits after snapping. For chart drags, pass
+the same schedule to `chart.trading.setTickSchedule`.

@@ -737,7 +737,7 @@ import { DEFAULT_PRICE_SCALE_OPTIONS } from 'openalgo-charts';
 |---|---|---|---|
 | `marginTop` | `number` | `0.1` | Fraction of the pane height kept empty above the highest visible value. `0.1` keeps a 10 % gap at the top. |
 | `marginBottom` | `number` | `0.1` | Fraction of the pane height kept empty below the lowest visible value. |
-| `minMove` | `number` | `0` | Instrument tick size, for example `0.05` for a 5-paise step. `0` means precision is inferred from the visible range automatically. |
+| `minMove` | `number` | `0` | Instrument tick size, for example `0.05` for a 5-paise step. `0` means precision is inferred from the visible range automatically. For a [price-dependent tick](/docs/instruments#price-dependent-ticks), use the schedule's `minMove`. |
 | `mode` | `PriceScaleMode` | `'linear'` | Price-to-pixel coordinate transform: `'linear'`, `'logarithmic'`, `'percentage'`, or `'indexed-to-100'`. See below. |
 | `inverted` | `boolean` | `false` | Flips the Y axis so prices increase downward, useful for spread or inverted-chart views. |
 

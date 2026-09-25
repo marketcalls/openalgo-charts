@@ -2,6 +2,32 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- Price-dependent tick schedules. `TickSchedule` validates an ordered list of
+  `TickBand`s: the first band covers every lower price, zero and negative prices
+  included, each later band starts at its inclusive `from`, and every boundary must
+  be a multiple of the ticks on both sides, so a boundary is itself a valid price.
+  Invalid bands throw `Invalid tick schedule: ...` naming the band. `round` returns
+  the nearest valid price as an exact decimal (a written halfway price rounds up),
+  `tickAt` gives the upper band's tick at an exact boundary, `step` moves whole ticks
+  across boundaries, and `minMove` is the common grid of every band.
+  `InstrumentMetadata.tickBands` carries a host-supplied schedule; `priceTick` must
+  then equal its `minMove`, which `applyTo` gives the price scale, and
+  `instrument.tickSchedule` is always available (one band for a constant tick).
+  `OrderConstraints.tickSchedule` makes `validatePrice`, `OrderEngine.placeOrder` and
+  `OrderEngine.requestModify` snap each price in its own band before checking price
+  limits, and `orderConstraintsForInstrument` fills it from `tickBands`.
+  `chart.trading.setTickSchedule` snaps dragged order and bracket lines and the
+  `newPrice` their modify events carry. Without a schedule every path is unchanged:
+  constant `tickSize` snapping, the same constraints object for a constant-tick
+  instrument, and raw pointer prices from `chart.trading`. No venue's schedule ships
+  as a default. The reference host's fixture server adds a synthetic `BANDED`
+  instrument (0.01 below 100, 0.05 from 100) whose right-click orders, dragged order
+  lines, market fills and bracket legs snap in the band they land in.
+
 ## 2.5.4
 
 2026-09-25

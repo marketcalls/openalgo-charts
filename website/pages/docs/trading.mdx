@@ -215,7 +215,9 @@ chart.subscribeDrag(
 );
 ```
 
-`orderLines`, `clientId` and `restoreOrderPreview` belong to the host. The last
+`orderLines`, `clientId` and `restoreOrderPreview` belong to the host. The preview
+above shows the raw pointer price; with a tick schedule, preview
+`ticks.round(price)` instead, which is the price `requestModify` will send. The last
 restores the broker-confirmed level after cancellation. `requestModify` can
 send immediately and rate-limits subsequent requests; it is not a visual-preview
 API. `commitModify` flushes any queued patch. Call them only when the host has
@@ -443,6 +445,37 @@ validateOrder(2950, 2000, c)
 
 `ValidationResult` always has `.ok`. When `false` it also has `.reason`;
 when `true` it also has `.price` (the tick-snapped value).
+
+### Price-dependent ticks
+
+Some instruments change tick with price. Pass the schedule as `tickSchedule` and it
+decides every snap; `tickSize` is then read only by older code, so give it the
+schedule's `minMove`. Without `tickSchedule`, snapping is exactly the constant
+`tickSize` path above.
+
+```ts
+import { TickSchedule } from 'openalgo-charts';
+import { validatePrice, type OrderConstraints } from 'openalgo-charts/trade';
+
+// Synthetic rules for illustration. Real schedules come from your venue's metadata.
+const ticks = new TickSchedule([{ tick: 0.01 }, { from: 10, tick: 0.05 }, { from: 100, tick: 0.1 }]);
+const c: OrderConstraints = { tickSize: ticks.minMove, tickSchedule: ticks, priceBand: { lower: 9.97, upper: 10.04 } };
+
+validatePrice(9.994, c)  // { ok: true, price: 9.99 }   the 0.01 band
+validatePrice(9.996, c)  // { ok: true, price: 10 }     rounds onto the boundary
+validatePrice(10.02, c)  // { ok: true, price: 10 }
+validatePrice(10.03, c)  // { ok: false, code: 'PRICE_OUT_OF_BAND', reason: 'price 10.05 outside band 9.97 to 10.04' }
+```
+
+The snapped price is an exact decimal, and a price written exactly halfway between two
+valid prices rounds up. Price limits are checked after snapping, as with a constant tick,
+so a price inside the limits as typed can still be refused. Zero and negative prices use
+the first band; a floor belongs in `priceBand`. `OrderEngine` applies the schedule to
+typed prices and triggers in `placeOrder` and to dragged levels in `requestModify`,
+including the trigger a stop-limit carries across a boundary. A band list passed in
+place of a `TickSchedule` throws, because an unvalidated list would round nothing.
+[Instrument metadata](/docs/instruments#price-dependent-ticks) has the band rules, and
+`orderConstraintsForInstrument` fills `tickSchedule` from an instrument's `tickBands`.
 
 ## TradeController and TradeHost
 
