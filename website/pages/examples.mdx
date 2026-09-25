@@ -298,6 +298,53 @@ of all 87 tools, including volume studies, pitchforks, harmonic patterns and adv
 
 <DrawingToolsDemo />
 
+## Notes pinned to the screen
+
+A note, a box or a table can stay put while the chart moves under it. Drag the chart: the
+yellow note and the orange box hold their place, and the blue box follows the bars. Select
+the blue box and press **Pin selected** to fix it where it is, or **Unpin selected** to let a
+pinned drawing follow the bars again. See [Pinned to the screen](/docs/drawing-tools#pinned-to-the-screen).
+
+<RunnableExample height={380} tiers={['draw']} caption="Drag to pan and scroll to zoom. Pinned drawings keep their place on screen; drag them, or their handles, to edit them." code={`const bar = document.createElement('div');
+bar.style.cssText = 'display:flex;gap:6px;margin-bottom:8px';
+el.appendChild(bar);
+const host = document.createElement('div');
+host.style.cssText = 'height:320px';
+el.appendChild(host);
+
+const chart = lib.createChart(host);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.setVisibleLogicalRange({ from: 80, to: 200 });
+
+const draw = new lib.DrawingController(chart);
+// Pinned: fractions of the pane's plot, not a time and a price.
+draw.add({ tool: 'text', paneIndex: 0, style: {}, points: [], space: 'viewport',
+  viewportPoints: [{ x: 0.02, y: 0.04 }],
+  text: { value: 'Plan: fade the open\\nStop above the high', color: '#f5c542', fontSize: 13,
+    background: true, backgroundColor: '#1c2030', backgroundOpacity: 0.9 } });
+draw.add({ tool: 'rectangle', paneIndex: 0, points: [], space: 'viewport',
+  viewportPoints: [{ x: 0.62, y: 0.1 }, { x: 0.9, y: 0.32 }],
+  style: { color: '#f5a623', lineWidth: 2 }, text: { value: 'Watch zone', color: '#f5a623' } });
+// On time and price, for comparison: a box around the bars it covers.
+const span = bars.slice(130, 161);
+draw.add({ tool: 'rectangle', paneIndex: 0, style: { color: '#4f8cff', lineWidth: 2 }, points: [
+  { time: bars[130].time, price: Math.max(...span.map(b => b.high)) },
+  { time: bars[160].time, price: Math.min(...span.map(b => b.low)) },
+] });
+
+const button = (label, space) => {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+  // One conversion for the whole selection; it keeps each drawing where it is on screen.
+  b.onclick = () => draw.updateMany(draw.selection().map(id => ({ id, patch: { space } })));
+  bar.appendChild(b);
+};
+button('Pin selected', 'viewport');
+button('Unpin selected', 'data');
+return chart;`} />
+
 ## The terminal in one call
 
 Add a toolbar, drawing tools, settings, and the Data and Objects panels with

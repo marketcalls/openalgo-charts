@@ -243,6 +243,9 @@ changed. Anchors map through `DataLayer.timeToIndexFloat`, which also resolves p
 *between* bars (inside a collapsed gap) and *past the last bar*, where trend projections and
 forecasts live.
 
+A note, a box or a table can instead be pinned to the screen. Its anchors are then fractions
+of its pane's plot, kept in a field of their own; see [Pinned to the screen](#pinned-to-the-screen).
+
 ## Using it from TypeScript
 
 `DrawingController` takes a `DrawingChartHost`, a structural interface covering
@@ -311,11 +314,12 @@ chart has a different interval loaded.
 
 | Member | Description |
 |---|---|
-| `setTool(id \| null)` | Arm a tool for placement, or return to the cursor. |
-| `activeTool()` | The armed tool id, or null. |
+| `setTool(id \| null, options?)` | Arm a tool for placement, or return to the cursor. `{ space: 'viewport' }` pins what it places to the screen. |
+| `activeTool()` / `activeToolSpace()` | The armed tool id, or null; the space it places in. |
+| `screenPoints(id)` | A drawing's anchors in container px, whichever space it is anchored in, for placing an overlay beside it. |
 | `drawings()` / `get(id)` | The model, in paint order. |
 | `add(drawing)` | Add one directly (import, or host-authored). `zIndex`, `createdAt` and `id` are filled in. A `policy` restricts what the user can do with it; see [Drawing policies](#drawing-policies). |
-| `update(id, patch, options?)` / `updateMany(patches, options?)` | Patch `points`, `style`, `text`, `props`, `locked`, `visible`, `zIndex` or `policy`. `updateMany` is one undo step. A read-only drawing is left alone unless `options` is `{ force: true }`, and a forced patch is not an undo step. |
+| `update(id, patch, options?)` / `updateMany(patches, options?)` | Patch `points`, `style`, `text`, `props`, `locked`, `visible`, `zIndex`, `policy`, `space` or `viewportPoints`. `space` alone converts the anchors where the drawing is on screen. `updateMany` is one undo step. A read-only drawing is left alone unless `options` is `{ force: true }`, and a forced patch is not an undo step. |
 | `remove(id, options?)` / `removeMany(ids, options?)` / `clear(options?)` | Delete one, several (one undo step), or all. Read-only drawings stay unless `{ force: true }`. |
 | `finish()` | End a variable-anchor shape (`path`, `polyline`) at the anchors placed so far. Returns whether it committed. Double-click already calls it. |
 | `select(id \| ids \| null, additive?)` / `selected()` / `selection()` | Selection. `additive` toggles each id; `selected()` is the primary id, `selection()` the list in pick order. |
@@ -435,6 +439,57 @@ The [Objects](/docs/objects) panel leaves unlisted drawings out and offers a rea
 no hide, lock or remove. The yfinance reference host's **Mark ... for This Session** menu
 row places a read-only, transient, unlisted line, puts it back after every rebuild or
 restore, and clears the marks with `force`.
+
+## Pinned to the screen
+
+Most drawings mark something on the bars and move with them. A session plan, a checklist or
+a box framing part of the screen belongs to the screen instead. A drawing whose `space` is
+`'viewport'` stays where it is when the chart pans or zooms, keeps its proportions when the
+chart is resized, and is edited like any other drawing: drag it, drag a handle, nudge it,
+copy it, undo it.
+
+```ts
+// Placed by the host, at fractions of the pane's plot.
+draw.add({
+  tool: 'text', paneIndex: 0, style: {}, points: [], space: 'viewport',
+  viewportPoints: [{ x: 0.02, y: 0.04 }], text: { value: 'Session plan' },
+});
+
+// Placed by the user: the next rectangle is pinned where it is drawn.
+draw.setTool('rectangle', { space: 'viewport' });
+
+// Pin or unpin an existing drawing, keeping it where it is on screen.
+draw.update(id, { space: 'viewport' });
+draw.update(id, { space: 'data' });
+```
+
+**The coordinates are pane-relative.** `x` runs from 0 at the plot's left edge to 1 at its
+right edge, with the price axes outside that span. `y` runs from 0 at the top of the pane to
+1 at the bottom of its plot, which on the lowest pane is the top of the time axis. A pinned
+drawing belongs to its pane, so it moves with the pane, keeps its fraction of the pane when
+the separator is dragged, and comes back where it was when a collapsed pane is opened again.
+There is no whole-chart coordinate. Pixel sizes stay pixel sizes: a note's font does not
+scale with the chart, while both corners of a box do.
+
+**Which tools.** Text, rectangle, ellipse and table. Their shape and text come from their
+own anchors, and nothing they print is a price or a time. Tools that print prices (the
+fib family, measures, the position tools), that point at a bar (notes, balloons, signposts,
+callouts) or that compute from bars (anchored VWAP, volume profile) stay on time and price,
+because a fixed place on screen would contradict what they show. A custom tool can opt in
+with `viewport: true` when its `draw` and `distance` read only the screen anchors.
+
+Converting keeps the drawing where it is on screen and is one undo step. A conversion that
+cannot be made (a tool without support, a pane folded to its strip) leaves the drawing as it
+was. A pinned drawing has no price, so it offers no alert levels.
+
+| Where | How it behaves |
+|---|---|
+| Save and restore | `toJSON()` writes `space: 'viewport'` and `viewportPoints`. A layout with no pinned drawing is saved exactly as before, still version 2, and older layouts load unchanged. |
+| Copy and paste | A paste lands at the same fraction of the target pane on a chart of any size, offset by `pasteOffsetPixels` on both axes. |
+| Linked charts | A pinned drawing is never shared: the same fraction of another chart's pane sits over different bars. Pinning a shared drawing takes it out of the link on that chart only; the other charts keep their copy. |
+| Device pixel ratio | Painted at the same fraction of the plot at any ratio. |
+| Widget | The drawing properties dialog shows an **Anchor** row (Time and price, Screen) for the four tools. |
+| Reference host | The properties bar in `examples/yfinance` shows a pin toggle for the same tools. |
 
 ## Keyboard shortcuts
 

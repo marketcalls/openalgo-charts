@@ -29,7 +29,9 @@ Importing `openalgo-charts/draw` calls `registerBuiltinDrawingTools()` as a side
 interface Drawing {
   id: string;
   tool: string;              // a registered tool id
-  points: DrawingPoint[];    // { time: UTC seconds, price: number, pressure? }
+  points: DrawingPoint[];    // { time: UTC seconds, price: number, pressure? }; [] on a viewport drawing
+  space?: DrawingSpace;      // 'data' (absent, the default) or 'viewport' (see Viewport-anchored drawings)
+  viewportPoints?: ViewportPoint[];  // { x, y } fractions of the pane's plot; only when space is 'viewport'
   style: DrawingStyle;
   text?: DrawingText;        // the label, or for the text tool the whole content
   props?: Record<string, unknown>;   // per-tool extras, JSON-safe, persisted verbatim
@@ -78,6 +80,8 @@ The time axis is gapless (weekends, holidays, and session breaks collapse) so a 
 - An anchor can sit **past the last bar**, which is where trend projections, `forecast`, and the position tools' targets live.
 
 Drag deltas are computed in data space too (`p.time - start.from.time`), so translating a shape keeps it on the same bars.
+
+The one exception is a drawing pinned to the screen (`space: 'viewport'`), whose anchors are fractions of its pane's plot in a field of their own, `viewportPoints`. Its time and price are never overloaded with pixels. See [Viewport-anchored drawings](#viewport-anchored-drawings-unreleased).
 
 ## Anchored analysis drawings
 
@@ -355,12 +359,13 @@ new DrawingController(chart, {
 
 | Member | Behaviour |
 |---|---|
-| `setTool(id \| null)` | Arms a tool; throws on an unregistered id. Also calls `chart.setPlacementMode(true/false)`. |
-| `activeTool()` | Armed id, or `null`. |
+| `setTool(id \| null, options?)` | Arms a tool; throws on an unregistered id. Also calls `chart.setPlacementMode(true/false)`. `options` is a `DrawingPlacementOptions`: `{ space: 'viewport' }` places the next drawing pinned to the screen, and throws for a tool without `viewport` support. |
+| `activeTool()` / `activeToolSpace()` | Armed id, or `null`; the space it places in (`'data'` unless armed for the viewport). |
+| `screenPoints(id)` | A drawing's anchors in container media px (the space `timeToCoordinate` and `priceToCoordinate` answer in), for either space. What a host places an overlay by. `null` for an unknown id or a pane with no place on screen (collapsed, or hidden by a maximize). |
 | `setOptions(patch)` | Live-patch the options above. |
 | `drawings()` / `get(id)` | Read the model. `drawings()` is the live array, in **paint order** (creation order until a reorder; `createdAt` keeps the creation time). |
 | `add(drawing)` | `add({ tool, points, style, paneIndex, text?, props?, id?, locked?, visible?, zIndex?, policy? })` (a `DrawingInput`) returns the created `Drawing`, with `zIndex` 0, `createdAt` and a minted id (a supplied id that collides with a restored one is replaced). The tool's `defaultText` merges under `text` the way `defaultStyle` merges under `style`. Adding a drawing whose `policy` sets any flag to false records no undo step: it is the host's. The `policy` object is copied. |
-| `update(id, patch, options?)` / `updateMany(patches, options?)` | Patch `points` \| `style` \| `text` \| `props` \| `locked` \| `visible` \| `zIndex` \| `policy` (a `DrawingPatch`). `style`, `text`, `props` and `policy` merge; `points` replaces. `updateMany([{ id, patch }])` is one undo step and one `drawing:change`. A read-only drawing is refused (`update` returns false, `updateMany` skips it) unless `options` is `{ force: true }` (`DrawingEditOptions`). A patch that carries `policy`, and any forced call, records no undo step, and every recorded step takes it as well, so no later undo or redo reverses it. |
+| `update(id, patch, options?)` / `updateMany(patches, options?)` | Patch `points` \| `style` \| `text` \| `props` \| `locked` \| `visible` \| `zIndex` \| `policy` \| `space` \| `viewportPoints` (a `DrawingPatch`). `space` alone converts the anchors at the view on screen (see Viewport-anchored drawings). `style`, `text`, `props` and `policy` merge; `points` replaces. `updateMany([{ id, patch }])` is one undo step and one `drawing:change`. A read-only drawing is refused (`update` returns false, `updateMany` skips it) unless `options` is `{ force: true }` (`DrawingEditOptions`). A patch that carries `policy`, and any forced call, records no undo step, and every recorded step takes it as well, so no later undo or redo reverses it. |
 | `remove(id, options?)` / `removeMany(ids, options?)` / `clear(options?)` | Delete one / several (one undo step) / all. Read-only drawings stay unless `{ force: true }`. A forced delete records no undo step and takes the drawing out of every recorded step, so no redo brings it back. |
 | `finish()` | Commit a `points: 0` tool at the anchors placed so far. Returns whether it committed. |
 | `cancel()` | Drop the anchors placed so far; disarms the tool unless `stayInDrawingMode` keeps it (a second call then disarms). Returns whether anything changed. |
@@ -795,3 +800,78 @@ at most one group. Invalid/missing members are discarded on restore. Optional
 `DrawingsDocument.groups` preserves old drawing documents and round-trips named
 groups. Group changes participate in undo/redo. `ChartObjectDrawingGroup` is the
 base tier's structural view, avoiding an import from the draw tier.
+
+
+## Viewport-anchored drawings (unreleased)
+
+A drawing's `space` says which coordinates its anchors are in. `'data'`, the
+default and never written out, is time and price: the drawing follows the bars.
+`'viewport'` pins it to the screen: the anchors are `viewportPoints`, `{ x, y }`
+fractions of the plot area of the pane that holds it, and `points` is empty.
+Pan and zoom leave it where it is, a chart resize keeps it in proportion, and it
+paints at any device pixel ratio the way every drawing does.
+
+**Pane-relative, not whole-chart-relative.** `x` is 0 at the plot's left edge
+and 1 at its right edge (the price axes are outside that span); `y` is 0 at the
+top of the pane and 1 at the bottom of its plot (above the time axis on the
+lowest pane). The pane's own layer paints, clips and hit-tests the drawing, so
+these are the coordinates that follow the pane when it moves (`movePane`), is
+resized by its separator, or is collapsed and opened again. Whole-chart
+coordinates are not offered. Sizes a tool sets in pixels (a font size, a wrap
+width) stay in pixels: a resize moves a note in proportion without scaling its
+type, while both corners of a box scale with the pane.
+
+**Which tools.** `text`, `rectangle`, `ellipse` and `table` declare
+`DrawingTool.viewport`, and only those accept the space. Their geometry and
+text come from the screen anchors alone and nothing they print is a price or a
+time. The note family points at a bar, the fib, measure and position tools
+print prices, and the analysis tools compute from bars, so a fixed place on
+screen would contradict what each of them says. A custom tool opts in with
+`viewport: true` when its `draw` and `distance` read only `pts`; `expand`,
+`constrain` and `alertValue` apply to data space only. A saved viewport entry
+whose tool lacks the flag is kept in the model and neither painted nor hit.
+
+```ts
+// Programmatic: the fractions are the anchors.
+draw.add({ tool: 'text', paneIndex: 0, style: {}, points: [], space: 'viewport',
+  viewportPoints: [{ x: 0.02, y: 0.04 }], text: { value: 'Session plan' } });
+
+// Placement: clicked where the user clicks, pinned from then on.
+draw.setTool('rectangle', { space: 'viewport' });
+
+// Conversion at the view on screen, one undo step each way.
+draw.update(id, { space: 'viewport' });
+draw.update(id, { space: 'data' });
+```
+
+`add` throws for a tool without viewport support or anchors that are not finite
+numbers. A conversion the controller cannot make (a tool without support, a
+pane folded to its strip or hidden) is left out of the patch and the rest
+applies; with the new space's anchors in the patch they are taken as given.
+Editing is native: the body drags by the pointer's travel as a fraction of the
+pane, a handle lands under the pointer, `nudge` moves by screen pixels, and no
+gesture carries an anchor out of the pane (one a host parked outside may only
+move back in). `alertInfo` reports a pinned drawing unavailable: it has no
+price to watch.
+
+The settings schema carries the choice as `SPACE_FIELD` (path `space`, a select
+over `SPACE_OPTIONS`: Time and price, Screen), declared by exactly the four
+tools, so a generated properties panel offers it where it works and nowhere
+else. The widget's drawing properties show it as the Anchor row, and the
+reference host's properties bar as a pin toggle.
+
+Persistence and transfer: `migrateDrawings` keeps a viewport entry and drops
+one without usable `viewportPoints`; a document with no viewport drawing loads
+byte for byte as before, still version 2. The clipboard payload carries the
+space and the fractions, so a paste lands at the same place on a chart of any
+size, offset by `pasteOffsetPixels` on both axes; `duplicate` does the same.
+Drawing links never share a viewport drawing (the same fraction of another
+chart's pane sits over different bars at a different size), and pinning a
+shared drawing takes it out of the link on that chart alone, dropping its
+lineage mark, while the other charts keep their copy.
+
+The controller converts through `DrawingChartHost.timeScale` (its `width` is the
+plot width) and each pane's `priceToY` / `yToPrice` / `priceScale.height`, which
+the built-in `Chart` provides. A host without them still paints viewport
+drawings but cannot place, move or convert them. Types: `DrawingSpace`,
+`ViewportPoint`, `DrawingPlacementOptions`.
