@@ -281,7 +281,7 @@ export function mountDrawingProperties(ctx: WidgetContext, anchor?: HTMLElement,
     { ...(anchor === undefined ? { placement: 'below' as const, dismissOnOutside: true } : { anchor, placement: 'below' as const }), onClose: cleanup },
     cleanup,
   );
-  if (anchor === undefined) placePanel(ctx.root, frame.el, { point: selectionPoint(ctx.root, chart, live) });
+  if (anchor === undefined) placePanel(ctx.root, frame.el, { point: selectionPoint(ctx.root, chart, live, (id) => draw.screenPoints(id)) });
   const handle: PanelHandle = {
     el: frame.el,
     isOpen: session.isOpen,
