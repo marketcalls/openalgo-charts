@@ -342,3 +342,138 @@ test('Seasonality paints finite completed-month cells and omits unavailable chan
   expect(errors).toEqual([]);
   await page.screenshot({ path: info.outputPath('seasonality-finite-table.png') });
 });
+
+// Open, high, low, close and volume rows; NaN marks what the feed did not send.
+// Bar 2 of GAP_ROWS has no high, the numerical audit's ATR hole.
+const GAP_ROWS = [
+  [9, 10, 8, 9, 1], [9, 12, 9, 11, 1], [11, NaN, 10, 11, 1],
+  [11, 14, 11, 13, 1], [13, 13, 10, 11, 1], [11, 12, 10, 12, 1],
+];
+
+test('ATR and Supertrend resume after a missing high and never bridge it', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const result = await page.evaluate(async (rows) => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData(rows.map(([open, high, low, close, volume], i) => ({
+      time: 1700000000 + i * 60, open, high, low, close, volume,
+    })));
+    const study = chart.addIndicator('atr', { period: 2, color: '#ff9900' });
+    const trend = chart.addIndicator('supertrend', { period: 2, multiplier: 1, downColor: '#00c8ff' });
+    window.__numeric.study = study;
+    const plot = study.series('atr')!;
+    plot.applyOptions({ lineWidth: 3 });
+    plot.priceScale().setAutoScale(false);
+    plot.priceScale().setPriceRange({ min: 2, max: 3.25 });
+    source.priceScale().setAutoScale(false);
+    source.priceScale().setPriceRange({ min: 8, max: 15 });
+    chart.setPaneWeight(study.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 6 });
+    await paint();
+    const band = trend.series('down')!;
+    return {
+      atr: study.values().atr, down: trend.values().down,
+      resumed: ink(plot, study.paneIndex, 3.5, (2.75 + 2.875) / 2),
+      bridged: ink(plot, study.paneIndex, 2, (2.5 + 2.75) / 2),
+      band: ink(band, 0, 4.5, 13, [0, 200, 255]),
+    };
+  }, GAP_ROWS);
+  expect(result.atr).toEqual([null, 2.5, null, 2.75, 2.875, 2.4375]);
+  expect(result.down).toEqual([null, 13, null, 13, 13, 13]);
+  expect(result.resumed).toBeGreaterThan(1);
+  expect(result.bridged).toBe(0);
+  expect(result.band).toBeGreaterThan(1);
+  await page.screenshot({ path: info.outputPath('atr-gap-recovery.png') });
+
+  // A forming bar that arrives without its high is a gap of its own, and the
+  // complete bar that replaces it restores the reading.
+  const forming = await page.evaluate(async () => {
+    const { source, study, paint, ink } = window.__numeric;
+    source.update({ time: 1700000000 + 5 * 60, open: 11, high: NaN, low: 10, close: 12, volume: 1 });
+    await paint();
+    const gap = { values: study!.values().atr, line: ink(study!.series('atr')!, study!.paneIndex, 4.5, (2.875 + 2.4375) / 2) };
+    source.update({ time: 1700000000 + 5 * 60, open: 11, high: 12, low: 10, close: 12, volume: 1 });
+    await paint();
+    return { gap, values: study!.values().atr, line: ink(study!.series('atr')!, study!.paneIndex, 4.5, (2.875 + 2.4375) / 2) };
+  });
+  expect(forming.gap.values[5]).toBeNull();
+  expect(forming.gap.line).toBe(0);
+  expect(forming.values).toEqual(result.atr);
+  expect(forming.line).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+});
+
+test('VWAP and its band continue past a bar with a NaN volume', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const result = await page.evaluate(async () => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData([
+      [10, 11, 9, 10, 100], [10, 12, 10, 11, NaN], [11, 13, 11, 12, 100], [12, 13, 11, 12, 200],
+    ].map(([open, high, low, close, volume], i) => ({ time: 1700000000 + i * 60, open, high, low, close, volume })));
+    const study = chart.addIndicator('vwap', { anchor: 'continuous', color: '#ff9900', band1Color: '#00c8ff' });
+    const line = study.series('vwap')!;
+    line.applyOptions({ lineWidth: 3 });
+    study.series('upper1')!.applyOptions({ lineWidth: 3 });
+    source.priceScale().setAutoScale(false);
+    source.priceScale().setPriceRange({ min: 9, max: 13 });
+    chart.setVisibleLogicalRange({ from: -1, to: 4 });
+    await paint();
+    return {
+      values: study.values(),
+      resumed: ink(line, 0, 2.5, 11.25),
+      bridged: ink(line, 0, 1, 10.5),
+      band: ink(study.series('upper1')!, 0, 2.5, (12 + 11.5 + Math.sqrt(0.75)) / 2, [0, 200, 255]),
+    };
+  });
+  expect(result.values.vwap).toEqual([10, null, 11, 11.5]);
+  expect(result.values.upper1).toEqual([10, null, 12, 11.5 + Math.sqrt(0.75)]);
+  expect(result.resumed).toBeGreaterThan(1);
+  expect(result.bridged).toBe(0);
+  expect(result.band).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('vwap-nan-volume.png') });
+});
+
+test('Parabolic SAR and OBV keep drawing after an incomplete bar', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const result = await page.evaluate(async () => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData([
+      [10, 11, 9, 10, 100], [10, 12, 10, 11, NaN], [11, 13, NaN, 12, 100],
+      [12, 14, 12, 13, 100], [13, 15, 13, 14, 100], [14, 16, 14, 15, 100],
+    ].map(([open, high, low, close, volume], i) => ({ time: 1700000000 + i * 60, open, high, low, close, volume })));
+    const sar = chart.addIndicator('parabolic-sar', { color: '#ff9900' });
+    const obv = chart.addIndicator('obv', { color: '#00c8ff' });
+    const dots = sar.series('sar')!;
+    dots.applyOptions({ markerRadius: 4 });
+    source.priceScale().setAutoScale(false);
+    source.priceScale().setPriceRange({ min: 8, max: 17 });
+    const total = obv.series('obv')!;
+    total.applyOptions({ lineWidth: 3 });
+    total.priceScale().setAutoScale(false);
+    total.priceScale().setPriceRange({ min: -50, max: 450 });
+    chart.setPaneWeight(obv.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 6 });
+    await paint();
+    const values = sar.values().sar;
+    return {
+      sar: values, obv: obv.values().obv,
+      lateDot: ink(dots, 0, 5, values[5]!),
+      holeDot: ink(dots, 0, 2, 9),
+      obvLine: ink(total, obv.paneIndex, 4.5, 350, [0, 200, 255]),
+    };
+  });
+  expect(result.sar[2]).toBeNull();
+  expect(result.sar.slice(3).every(value => value !== null)).toBe(true);
+  expect(result.obv).toEqual([0, 0, 100, 200, 300, 400]);
+  expect(result.lateDot).toBeGreaterThan(3);
+  expect(result.holeDot).toBe(0);
+  expect(result.obvLine).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('psar-obv-incomplete-bar.png') });
+});
