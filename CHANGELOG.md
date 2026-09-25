@@ -16,8 +16,9 @@ All notable changes to OpenAlgo Charts.
   its pane through a move, a separator drag and a collapse. Its whole box, not only
   its anchors, is kept on the plot at every edge, through every gesture, at any
   device pixel ratio and after a resize, so a note or a table laid out from one
-  corner can always be seen and grabbed; a custom tool that paints beyond its
-  anchors declares the new `DrawingTool.bounds`. Pinning a drawing that is off the
+  corner, or a box or an ellipse with its label above it, can always be seen and
+  grabbed; a custom tool that paints beyond its anchors declares the new
+  `DrawingTool.bounds`. Pinning a drawing that is off the
   plot, or larger than it, brings it onto the plot, and the magnet does not pull
   while a pinned drawing is placed. Text, rectangle, ellipse and table declare the
   new `DrawingTool.viewport` flag; tools that print prices, point at a bar or
@@ -26,7 +27,8 @@ All notable changes to OpenAlgo Charts.
   places a pinned drawing, `activeToolSpace()` reports the armed space and
   `screenPoints(id)` gives any drawing's anchors in container px for host
   overlays. `update` returns false when a change of space cannot be made (a pane
-  folded or hidden), and the widget's Anchor row says why. `draw:tool` carries
+  folded or hidden), and the widget's Anchor row and the reference host's pin
+  toggle say why. `draw:tool` carries
   `space: 'viewport'` while a tool is armed for the viewport. The settings schema offers the choice as `SPACE_FIELD` over
   `SPACE_OPTIONS`, so the widget's drawing properties show an Anchor row and the
   reference host's properties bar a pin toggle, both only for those four tools;

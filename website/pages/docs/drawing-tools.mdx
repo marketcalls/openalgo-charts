@@ -490,8 +490,9 @@ folded to its strip) leaves the drawing as it was, and `update` returns false. A
 drawing has no price, so it offers no alert levels, and the magnet does not pull while one
 is placed: it lands where it is clicked.
 
-**The whole drawing stays on screen.** A note or a table is laid out from one corner, so it
-is the drawing's box, not its anchor, that is kept inside the plot: at every edge, through a
+**The whole drawing stays on screen.** A note or a table is laid out from one corner, and a
+box or an ellipse can carry its label above it, so it is the drawing's box, label included,
+not its anchors, that is kept inside the plot: at every edge, through a
 drag, a handle, a nudge or a paste, at any device pixel ratio, and after the chart is resized
 smaller than the place it was pinned at. A custom pinnable tool that paints beyond its
 anchors declares `bounds(pts, drawing)` to say how far.
@@ -503,7 +504,7 @@ anchors declares `bounds(pts, drawing)` to say how far.
 | Linked charts | A pinned drawing is never shared: the same fraction of another chart's pane sits over different bars. Pinning a shared drawing takes it out of the link on that chart only; the other charts keep their copy. |
 | Device pixel ratio | Painted at the same fraction of the plot at any ratio. |
 | Widget | The drawing properties dialog shows an **Anchor** row (Time and price, Screen) for the four tools. |
-| Reference host | The properties bar in `examples/yfinance` shows a pin toggle for the same tools. |
+| Reference host | The properties bar in `examples/yfinance` shows a pin toggle for the same tools, and says why when a folded pane left the drawing where it was. |
 
 ## Keyboard shortcuts
 

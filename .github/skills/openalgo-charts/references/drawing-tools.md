@@ -862,10 +862,15 @@ right of and below one anchor, so holding the anchors inside the pane would
 still let a note sit wholly outside it, clipped away and out of reach of the
 pointer. What is kept inside is the drawing's box instead:
 `DrawingTool.bounds(pts, drawing)` returns it in media px (the text tool and the
-table declare it from the same measurement their hit test uses; without it the
-box is the anchors' bounds, which is right for a rectangle or an ellipse). The
-layer paints and hit-tests a pinned drawing with its box moved inside the plot,
-and where the box is larger than the plot its top-left corner is kept in view.
+table declare it from the same measurement their hit test uses, and the
+rectangle and the ellipse from the label they paint, which with
+`position: 'outside'` sits above the shape and can run past its sides; without
+it the box is the anchors' bounds). The layer paints and hit-tests a pinned
+drawing with its box moved inside the plot, and where the box is larger than the
+plot its top-left corner is kept in view. A handle dragged toward an edge that
+the box reaches first (a label above a box, at the top) stops short of it, so
+the other corners stay where they are, and a box cut to the plot when it is
+pinned leaves room on the plot for its label.
 Every gesture (body drag, handle drag, nudge, paste, duplicate, placement,
 conversion) starts from where the drawing is painted and stores the result
 with the box inside, so what is stored is what is on screen. Fractions a host
@@ -877,7 +882,8 @@ The settings schema carries the choice as `SPACE_FIELD` (path `space`, a select
 over `SPACE_OPTIONS`: Time and price, Screen), declared by exactly the four
 tools, so a generated properties panel offers it where it works and nowhere
 else. The widget's drawing properties show it as the Anchor row, and the
-reference host's properties bar as a pin toggle.
+reference host's properties bar as a pin toggle. Both read the model back after
+the write and say why when a folded or hidden pane left the drawing where it was.
 
 Persistence and transfer: `migrateDrawings` keeps a viewport entry and drops
 one without usable `viewportPoints`; a document with no viewport drawing loads
