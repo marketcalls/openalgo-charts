@@ -566,13 +566,23 @@ describe('Relative Volatility Index', () => {
    * the deviation's window only. The two averages are smoothed over a fixed 14
    * whatever `length` says, which is why the first reading is at
    * (length - 1) + 13 and not at (length - 1) + (length - 1).
+   *
+   * That holds while the deviation warms up in fewer bars than a fourteen-bar
+   * one-way run needs. At length 30 the warmup is 29 bars: the falling run of
+   * bars 9 to 22 seeds the upper average on its real zeros, the rising run of
+   * bars 24 to 37 seeds the lower one, and both hold across the absent bars in
+   * between, so the first reading is 100 on bar 37 rather than on bar 42. The
+   * companion language engine gives the same bar and value.
    */
   it('smooths over a fixed fourteen, not over the deviation window', () => {
     const data = wave(140);
-    for (const length of [2, 5, 10, 30]) {
+    for (const length of [2, 5, 10]) {
       const out = run(RELATIVE_VOLATILITY_INDEX, data, { length });
       expect(firstIndex(out.rvi), `length ${length}`).toBe(length + 12);
     }
+    const long = run(RELATIVE_VOLATILITY_INDEX, data, { length: 30 });
+    expect(firstIndex(long.rvi)).toBe(37);
+    expect(long.rvi[37]).toBe(100);
   });
 
   it('reads 100 on a one-way rise and 0 on a one-way fall', () => {
