@@ -16,7 +16,11 @@ export interface PriceLineOptions {
   color: string;
   /** Line thickness in media px. Default 1. */
   lineWidth?: number;
-  /** Legacy two-state dash switch, equivalent to `lineStyle: 'dashed'`. */
+  /**
+   * Two-state shorthand for `lineStyle`: `true` draws `'dashed'`. A retained
+   * form rather than a deprecated one (COMPATIBILITY.md lists why); reach for
+   * `lineStyle` when a line needs `'dotted'`.
+   */
   dashed?: boolean;
   /**
    * Dash style, the three-way form of `dashed`. Set, it wins over the boolean;

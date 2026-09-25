@@ -16,6 +16,7 @@
  */
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import { deprecationVersionRule } from './scripts/check-deprecated.mjs';
 
 /**
  * Lazy tiers: each is its own bundle and its own size budget. The widget is the
@@ -123,6 +124,18 @@ export default tseslint.config(
         },
       ],
     },
+  },
+
+  // ── the deprecation policy ─────────────────────────────────────────────────
+  // COMPATIBILITY.md keeps a deprecated API until the next major. Every
+  // `@deprecated` tag in shipped source names the release that removes it, and
+  // fails once the package reaches that release. The rule lives in
+  // scripts/check-deprecated.mjs, where tests/deprecation-policy.test.ts
+  // drives it through this config.
+  {
+    files: ['src/**/*.ts'],
+    plugins: { oac: { rules: { 'deprecation-version': deprecationVersionRule } } },
+    rules: { 'oac/deprecation-version': 'error' },
   },
 
   // `openalgo-trade.ts` is the OpenAlgo broker adapter. It is types-plus-one-

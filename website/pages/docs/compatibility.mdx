@@ -12,6 +12,26 @@ a documented replacement and migration example before removal in a later major.
 Correctness and security fixes can change incorrect behavior in patch releases,
 with affected inputs explained in release notes.
 
+## Deprecated APIs
+
+A deprecated declaration carries a `@deprecated` tag naming the release that
+removes it, always the next major, and its replacement. Your editor strikes the
+name through, and the API reference marks it. The library's lint fails any tag
+that names no removal release, so none can stay open-ended.
+
+| Deprecated | Removed in | Use instead |
+| --- | --- | --- |
+| `mapOrder` | 3.0.0 | `decodeOrder`, which returns why a row could not be read, or `OpenAlgoTradeFeed.getOrderBook()` |
+| `level.dashed` received by a custom `IndicatorHost.addIndicatorLevel` | 3.0.0 | `level.lineStyle`, which is always resolved |
+| `depth_level` key in a depth subscribe frame | 3.0.0 | `depth`, which is sent beside it |
+| Widget message key "Enter a valid expiry date and time in UTC" | 3.0.0 | Nothing: the widget no longer shows it |
+
+Some older forms are kept on purpose and are not deprecated: the `dashed`
+shorthand on a price line or a study level, `magnet: true | false` on a drawing
+controller, and the readers that upgrade older saved documents.
+
+## Documents, hosts and releases
+
 Saved chart, drawing, alert and workspace documents carry independent versions.
 Use the matching public validation/restore APIs, inspect partial failures and retain
 the last good document when a migration fails. Do not put credentials, orders,

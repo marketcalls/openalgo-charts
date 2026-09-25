@@ -2,6 +2,35 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Deprecated
+
+- `mapOrder` is deprecated in favour of `decodeOrder`, which returns the reason a
+  row could not be read, or `OpenAlgoTradeFeed.getOrderBook()`, which sets such
+  rows aside as `quarantined`. It keeps working until 3.0.0.
+- The `dashed` field that an `IndicatorHost` receives in `addIndicatorLevel` is
+  deprecated: read `lineStyle`, which the study always resolves and which also
+  carries `'dotted'`. It is still sent until 3.0.0. The `dashed` shorthand a
+  descriptor's `levels()` or `addPriceLine` accepts is unchanged and not
+  deprecated.
+- Depth subscribe frames stop sending the `depth_level` key beside `depth` in
+  3.0.0, and the widget message key "Enter a valid expiry date and time in UTC",
+  which the widget no longer shows, is removed then. Neither has a declaration
+  to tag, so COMPATIBILITY.md lists both.
+- COMPATIBILITY.md now has a table of every deprecated API with its
+  replacement, the release that replacement arrived in and the release that
+  removes the old form, and a list of older forms that are kept on purpose (the
+  `dashed` and `magnet: true` shorthands, and the readers of older saved
+  documents).
+
+### Changed
+
+- `npm run lint` enforces the deprecation policy: a `@deprecated` tag in `src`
+  must name the release that removes the API ("removed in X.Y.Z"), that release
+  must be a later major than the package version, and the tag must sit in a doc
+  block. Once the package reaches the named release, the tag fails the lint.
+
 ## 2.5.5
 
 2026-09-26

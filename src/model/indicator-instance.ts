@@ -195,7 +195,13 @@ export interface IndicatorHost {
     level: {
       price: number;
       color: string;
-      /** Kept for hosts predating `lineStyle`; always `lineStyle === 'dashed'`. */
+      /**
+       * Kept for hosts predating `lineStyle`; always `lineStyle === 'dashed'`.
+       *
+       * @deprecated Removed in 3.0.0. Read `lineStyle` (since 1.7.1), which
+       * also carries `'dotted'`. The instance resolves it before calling the
+       * host, so it is never absent.
+       */
       dashed: boolean;
       lineWidth: number;
       lineStyle: IndicatorLineStyle;

@@ -378,7 +378,7 @@ Every request sends `apikey` in the body. Non-OK responses surface OpenAlgo's ow
 
 **`modify` requires the full order context, so it throws for an order this feed has never seen.** OpenAlgo's `modifyorder` needs symbol/action/exchange/pricetype/product/quantity, not just the delta. The feed caches that context on `place` and on `getOrders`; modifying an order placed elsewhere means calling `getOrders()` first.
 
-`mapOrder` / `mapPosition` (exported) coerce OpenAlgo's string-or-number fields and map `order_status` into the chart's vocabulary (`open`/`trigger pending` -> `working`, `pending` -> `pending`, `complete` -> `filled`, `cancelled`, `rejected`, default `working`). A `trigger_price` of 0 is normalized to `undefined` so an order line does not render at zero.
+`decodeOrder` / `mapPosition` (exported) coerce OpenAlgo's string-or-number fields and map `order_status` into the chart's vocabulary (`open`/`trigger pending` -> `working`, `pending` -> `pending`, `complete` -> `filled`, `cancelled`, `rejected`; anything else is `'unknown'` with the broker's text in `rawStatus`). `decodeOrder` returns `{ ok: true, order }` or `{ ok: false, issue }` instead of guessing a side or a number. A `trigger_price` of 0 is normalized to `undefined` so an order line does not render at zero. `mapOrder` is deprecated (removed in 3.0.0): it hands back a placeholder row marked `status: 'unknown'` where `decodeOrder` reports the issue, so new code should not call it.
 
 ## Writing a custom DataFeed
 

@@ -20,11 +20,72 @@ security fixes can change incorrect behavior within a patch; explain affected
 inputs and the resulting behavior in release notes instead of silently preserving
 a defect. Experimental or host-specific examples do not imply a permanent API.
 
+A deprecated declaration carries a `@deprecated` tag, so editors strike the name
+through and the API reference marks it. The tag names the release that removes
+the API, which is the next major, and the replacement with the release it
+arrived in:
+
+```ts
+/** @deprecated Removed in 3.0.0. Use {@link decodeOrder} (since 1.6.0). */
+```
+
+`npm run lint` enforces the tag in `src`. It fails a tag that names no removal
+release, one whose removal falls inside the current major, and one outside a
+`/** */` doc block, where neither the editor nor the reference reads it. It also
+fails every tag whose removal release the package has reached, so a major
+release cannot ship a deprecated API it promised to remove. The table under
+[Deprecated APIs](#deprecated-apis) lists each deprecation, and a test keeps it
+in step with the tags.
+
 Saved chart, drawing, alert and workspace formats have their own version fields.
 Do not rewrite them to the package version. Use their public validation/restore
 APIs and inspect failures or partial-restore reports. Preserve the last good stored
 document when a migration fails. Broker orders, positions, credentials and armed
 state do not belong in portable layout files.
+
+## Deprecated APIs
+
+Each entry keeps working until the release in the "Removed in" column. Two
+entries have no declaration a tag can sit on (a key the feed sends on the wire,
+and one member of a string union), so this table is where they are recorded.
+
+| Deprecated | Declared in | Replacement since | Removed in | Use instead |
+| --- | --- | --- | --- | --- |
+| `mapOrder` | `src/feed/openalgo-trade.ts` | 1.6.0 | 3.0.0 | `decodeOrder`, which returns why a row could not be read, or `OpenAlgoTradeFeed.getOrderBook()`, which sets such rows aside as `quarantined` |
+| `IndicatorHost.addIndicatorLevel` argument `level.dashed` | `src/model/indicator-instance.ts` | 1.7.1 | 3.0.0 | `level.lineStyle`, which a study always resolves and which also carries `'dotted'` |
+| `depth_level` key in a depth subscribe frame | `src/feed/openalgo-ws.ts` (`formatSubscribe`), a wire key | 2.0.1 | 3.0.0 | `depth`, the key the OpenAlgo proxy reads, which is sent beside it today |
+| Widget message key "Enter a valid expiry date and time in UTC" | `src/widget/localization.ts`, a union member | 2.4.6 | 3.0.0 | Nothing: the widget no longer shows it, so drop it from a translation catalog |
+
+Migration, for the two a host is most likely to hold:
+
+```ts
+// before
+const order = mapOrder(raw);
+// after: a row with no honest order form is reported, not disguised
+const result = decodeOrder(raw);
+if (result.ok) use(result.order); else report(result.issue);
+
+// a custom IndicatorHost, before
+addIndicatorLevel(level, pane) { draw(level.price, level.dashed ? 'dashed' : 'solid'); }
+// after
+addIndicatorLevel(level, pane) { draw(level.price, level.lineStyle); }
+```
+
+### Kept on purpose
+
+These older forms are supported, not deprecated, and no major is scheduled to
+remove them:
+
+- **The `dashed` shorthand** on `PriceLineOptions` and on an indicator level.
+  `dashed: true` is `lineStyle: 'dashed'`, and `lineStyle` wins when both are
+  set. It is the common case and the form the built-in study levels use.
+- **`magnet: true | false`** on `DrawingController`, meaning `'strong'` and
+  `'off'`. A boolean is the obvious form of an on/off magnet.
+- **Readers of older saved documents**: a 1.9.x drawings array given to
+  `fromJSON` or `migrateDrawings`, a version 1 clipboard body, an unversioned
+  alert list, a cache entry without a version and a partial pane state. A
+  reader stays as long as such a document can still be in someone's storage,
+  and follows the document's own version field rather than the package version.
 
 ## Runtime boundary
 
