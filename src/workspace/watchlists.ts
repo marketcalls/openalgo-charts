@@ -44,8 +44,9 @@ export interface WatchlistStorage {
 export interface WatchlistRepositoryOptions { now?: () => number; id?: () => string }
 
 /**
- * What a watchlist panel calls. `WatchlistRepository` implements it; a host
- * with its own server-side lists can implement it directly instead.
+ * What a watchlist panel calls, and nothing more. `WatchlistRepository`
+ * implements it, with `duplicateList` besides; a host with its own
+ * server-side lists can implement it directly instead.
  */
 export interface WatchlistStore {
   load(): Promise<WatchlistCatalog>;
@@ -57,7 +58,6 @@ export interface WatchlistStore {
   subscribe(listener: (catalog: WatchlistCatalog) => void): () => void;
   createList(name: string, entries?: readonly WatchlistEntry[], options?: WatchlistOperationOptions): Promise<Watchlist>;
   renameList(id: string, name: string, options?: WatchlistOperationOptions): Promise<Watchlist>;
-  duplicateList(id: string, name: string, options?: WatchlistOperationOptions): Promise<Watchlist>;
   removeList(id: string, options?: WatchlistOperationOptions): Promise<void>;
   setActiveList(id: string | null, options?: WatchlistOperationOptions): Promise<void>;
   addEntry(id: string, entry: WatchlistEntry, options?: WatchlistOperationOptions & { index?: number }): Promise<Watchlist>;

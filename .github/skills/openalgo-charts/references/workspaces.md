@@ -120,7 +120,8 @@ await lists.setActiveList(tech.id);
   `setActiveList(id | null)`, `addEntry(id, entry, { index? })`, `removeEntry`,
   `moveEntry(id, entry, index)`, and `subscribe(listener)`, called with a detached copy
   after every change this repository commits. It implements the `WatchlistStore`
-  contract, which is what the widget's panel takes; a host with server-side lists can
+  contract, which is what the widget's panel takes: every member above except
+  `duplicateList`, which the panel never calls. A host with server-side lists can
   implement `WatchlistStore` itself. Its `subscribe` listeners must run before the
   change's own promise resolves, as the repository's do: the panel computes a queued
   move (a held Alt+Arrow) from the catalog they deliver.

@@ -240,6 +240,29 @@ describe('watchlist panel', () => {
     r.panel.destroy();
   });
 
+  it('runs on a store that implements only what the panel calls', async () => {
+    let n = 0;
+    const repo = new WatchlistRepository(createMemoryWatchlistStorage(), 'user', { id: () => `l${++n}`, now: () => 1000 });
+    // A server-backed store owes the panel these members and no others (typecheck holds this).
+    const store: WatchlistStore = {
+      load: () => repo.load(), subscribe: listener => repo.subscribe(listener),
+      createList: (name, entries, options) => repo.createList(name, entries, options),
+      renameList: (id, name, options) => repo.renameList(id, name, options),
+      removeList: (id, options) => repo.removeList(id, options),
+      setActiveList: (id, options) => repo.setActiveList(id, options),
+      addEntry: (id, entry, options) => repo.addEntry(id, entry, options),
+      removeEntry: (id, entry, options) => repo.removeEntry(id, entry, options),
+      moveEntry: (id, entry, index, options) => repo.moveEntry(id, entry, index, options),
+    };
+    const r = await rig({ store, lists: [['Tech', [nse('TCS')]]] });
+    r.button('Add INFY').click(); await flush();
+    const open = r.rows()[1].querySelector('.oac-watchlist__open') as FakeElement;
+    fireKey(open, 'ArrowUp', { altKey: true }); await flush();
+    expect(r.symbols()).toEqual(['INFY', 'TCS']);
+    expect((await repo.load()).lists[0].entries).toEqual([nse('INFY'), nse('TCS')]);
+    r.panel.destroy();
+  });
+
   it('reports a storage conflict and shows the saved lists instead of the local guess', async () => {
     const storage = createMemoryWatchlistStorage();
     let n = 0;
