@@ -199,6 +199,49 @@ describe('switching accounts during a pending order', () => {
     expect(accounts.getState().snapshot).toMatchObject({ accountId: 'SBX-2', marginUsed: 0 });
   });
 
+  it('refuses an account from the other ledger before sending, when given the account view', async () => {
+    const broker = new FakeBroker({ accounts: SEEDS, now: () => NOW });
+    broker.setMark('SYN', 100);
+    const live = new AccountManager({ feed: broker, mode: 'live' });
+    await live.refresh();
+    const place = vi.spyOn(broker, 'place');
+    const close = vi.spyOn(broker, 'closePosition');
+    const bracket = vi.spyOn(broker, 'placeBracket');
+    const engine = new OrderEngine({ feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05 }, selectedAccount: live });
+    const reason = 'The selected account LIVE-1 is in live mode, not analyzer';
+    expect(await engine.placeOrder(market())).toMatchObject({ ok: false, intent: 'BLOCKED', reason });
+    expect(await engine.closePosition({ symbol: 'SYN' })).toMatchObject({ ok: false, intent: 'BLOCKED', reason });
+    expect(await engine.placeBracket({ ...market(), stopLoss: 95, takeProfit: 110 })).toMatchObject({ ok: false, reason });
+    expect(await engine.previewOrder(market())).toMatchObject({ ok: false, reason });
+    expect(place).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(bracket).not.toHaveBeenCalled();
+    expect(broker.accountPositions('LIVE-1')).toEqual([]);
+    // A host's own view that lists a live account under a sandbox heading is caught by the account's mode.
+    const mixed = { getState: () => ({ ...live.getState(), mode: 'analyzer' as const }) };
+    const fooled = new OrderEngine({ feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05 }, selectedAccount: mixed });
+    expect(await fooled.placeOrder(market())).toMatchObject({ ok: false, intent: 'BLOCKED', reason });
+    expect(place).not.toHaveBeenCalled();
+  });
+
+  it('takes the selection from the account view in its own mode, and still sends nothing after a switch while confirming', async () => {
+    const broker = new FakeBroker({ accounts: SEEDS, now: () => NOW });
+    broker.setMark('SYN', 100);
+    const accounts = new AccountManager({ feed: broker, mode: 'analyzer' });
+    const confirmed = deferred<boolean>();
+    const engine = new OrderEngine({ feed: broker, mode: 'analyzer', constraints: { tickSize: 0.05 }, selectedAccount: accounts, gate: () => confirmed.promise });
+    expect(await engine.placeOrder(market())).toMatchObject({ ok: false, reason: 'No account is selected' });
+    await accounts.refresh();
+    const pending = engine.placeOrder(market({ clientToken: 'view' }));
+    await accounts.select('SBX-2');
+    confirmed.resolve(true);
+    expect(await pending).toMatchObject({ ok: false, reason: 'The account changed before the order was sent; nothing was sent' });
+    const armed = new OrderEngine({ feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05 }, selectedAccount: accounts });
+    expect(await armed.placeOrder(market({ clientToken: 'view' }))).toMatchObject({ ok: true });
+    expect(armed.orderAccount('view')).toBe('SBX-2');
+    expect(broker.accountPositions('SBX-2')).toEqual([{ symbol: 'SYN', netQty: 10, avgPrice: 100 }]);
+  });
+
   it('refuses a sandbox order routed to a live account at the broker as well', async () => {
     const broker = new FakeBroker({ accounts: SEEDS, now: () => NOW });
     broker.setMark('SYN', 100);

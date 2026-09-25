@@ -254,7 +254,7 @@ Snapshots are validated: a non-finite figure is an unreadable snapshot (`error`)
 
 `OrderEngine` additions:
 
-- `selectedAccount: () => accounts.selectedAccount()` stamps the selected account on every order and command, refuses one naming a different account, refuses `No account is selected`, and after confirmation refuses `The account changed before the order was sent; nothing was sent` (token released). An order already sent stays with its account; `orderAccount(clientId)` reads it.
+- `selectedAccount: accounts` (the `AccountManager`, or any `{ getState() }` source; a `() => id` function also works) stamps the selected account on every order and command, refuses a selection from the other ledger (`The selected account X is in live mode, not analyzer`, checked on the view's mode and the account's own; a bare id function cannot be checked), refuses one naming a different account, refuses `No account is selected`, and after confirmation refuses `The account changed before the order was sent; nothing was sent` (token released). An order already sent stays with its account; `orderAccount(clientId)` reads it.
 - `account`, `duration`, `expiresAt`, `leverage` are checked before confirmation and again after: an undeclared one is refused (`... is not declared by this provider`), never dropped. `GTD` needs a future `expiresAt` (`clock`, UTC seconds, default `Date.now() / 1000`); an expiry needs `GTD`.
 - `previewOrder(req)`: `PreviewResult` = `{ ok: true, preview: OrderPreview, request }` or `{ ok: false, reason, unsupported?, stale? }`. Claims no token, never calls `place`, is `stale` when the account changed while it was out. `OrderPreview` carries `estimatedPrice`, `estimatedValue`, `marginRequired`, `marginAvailableAfter`, `fees`, `currency`, `warnings`, `rejectReason`, `asOf`.
 - `closePosition({ symbol, qty? })` (`partialClose` feature when `qty` is set, validated against lot and freeze limits), `reversePosition({ symbol })` and `placeBracket({ ...PlaceRequest, stopLoss, takeProfit })` return `CommandResult` (`PlaceResult` plus `kind` and, for a bracket, `legs` client ids `<token>:stop` / `<token>:target`). Each has its own `clientToken`. They need the feature **and** the feed method; otherwise they are `BLOCKED` with a reason. **An opposite order is never sent instead.** `TradingCommand` is what `confirmCommand` approves when not `armed` (omitted declines, like the gate). The place flag and `modes` still apply (a host lock stops them); `orderTypes` does not apply to close or reverse.
@@ -269,7 +269,7 @@ import { AccountManager, FakeBroker, OrderEngine } from 'openalgo-charts/trade';
 const broker = new FakeBroker({ accounts: [{ id: 'SBX-1', mode: 'analyzer', balance: 100000 }] });
 const accounts = new AccountManager({ feed: broker, mode: 'analyzer' });
 const engine = new OrderEngine({ feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05 },
-  selectedAccount: () => accounts.selectedAccount() });
+  selectedAccount: accounts });
 broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
 await accounts.refresh();
 broker.setMark('SYN', 100);

@@ -105,7 +105,7 @@ provider's declaration before confirmation and again after it.
 ```ts
 const engine = new OrderEngine({
   feed: broker, mode: 'analyzer', constraints,
-  selectedAccount: () => accounts.selectedAccount(),
+  selectedAccount: accounts,         // the account view, not just its id
   gate: req => confirmDialog(req),   // req.account is the account on screen
 });
 await engine.placeOrder({ symbol: 'SBIN', side: 'BUY', type: 'LIMIT', price: 800, qty: 10,
@@ -115,7 +115,10 @@ await engine.placeOrder({ symbol: 'SBIN', side: 'BUY', type: 'LIMIT', price: 800
 With `selectedAccount` configured, every order names the selected account, an order naming
 a different one is refused, and **an account switch while the user is confirming sends
 nothing**. An order already in flight stays with the account it was sent for
-(`orderAccount(clientId)`).
+(`orderAccount(clientId)`). Pass the account view itself, as above, rather than a function
+returning its id: the engine then also refuses a selection from the other ledger, so a
+sandbox engine wired to a live view never stamps a live account on its orders. A function
+(`() => accounts.selectedAccount()`) still works, but a bare id cannot be checked that way.
 
 `OpenAlgoTradeFeed` refuses these four fields before any network call: OpenAlgo's
 `placeorder` has no field for them and one API key is one account.

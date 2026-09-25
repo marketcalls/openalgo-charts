@@ -24,7 +24,7 @@ const broker = new lib.FakeBroker({ accounts: [
 const accounts = new lib.AccountManager({ feed: broker, mode: 'analyzer' });
 const engine = new lib.OrderEngine({
   feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05 },
-  selectedAccount: () => accounts.selectedAccount(),
+  selectedAccount: accounts,
 });
 // The broker's order stream settles every order and command.
 broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
@@ -103,7 +103,7 @@ const broker = new lib.FakeBroker({ accounts: [
 ] });
 const accounts = new lib.AccountManager({ feed: broker, mode: 'analyzer' });
 const engine = new lib.OrderEngine({ feed: broker, mode: 'analyzer', armed: true,
-  constraints: { tickSize: 0.05 }, selectedAccount: () => accounts.selectedAccount() });
+  constraints: { tickSize: 0.05 }, selectedAccount: accounts });
 broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
 
 const bars = lib.generateBars(1700000000, 160, 300);

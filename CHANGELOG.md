@@ -24,7 +24,9 @@ All notable changes to OpenAlgo Charts.
   dropped on the way to the wire. With `selectedAccount`, the engine stamps the
   selected account on each order, refuses one naming another account, and
   sends nothing when the account changes while the user is confirming; an order
-  already in flight keeps its account.
+  already in flight keeps its account. Given the account view itself
+  (`selectedAccount: accounts`), it also refuses a selection from the other
+  ledger, so a sandbox engine never stamps a live account on an order.
 - `OrderEngine.previewOrder`: the provider's estimated value, margin and
   refusal reason for an order, without claiming its token or placing it.
 - Provider-native `closePosition` (whole or partial), `reversePosition` and

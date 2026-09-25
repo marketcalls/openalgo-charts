@@ -35,6 +35,7 @@ import { validateOrder, validatePrice, validateQuantity, type OrderConstraints, 
 import type { OrderRole, OrderSide, OrderStatus, OrderType } from './types';
 import { checkTradingCapability, type TradingCapabilities, type TradingCapabilityRequest, type TradingCapabilityResult, type TradingCapabilitySource } from 'openalgo-charts';
 import { checkTradingFeature, ORDER_DURATIONS, type OrderDuration, type TradingFeature, type TradingFeatureRequest, type TradingFeatureSource } from './features';
+import type { AccountStateSource } from './account';
 
 export interface PlaceRequest {
   symbol: string;
@@ -272,11 +273,13 @@ export interface OrderEngineOptions {
   /** Host restrictions on the newer operations, combined with the feed's `features`; either can refuse. */
   features?: TradingFeatureSource;
   /**
-   * The account selection, for example `() => accounts.selectedAccount()`.
-   * When set, every order and command is stamped with it, one naming another
-   * account is refused, and a change while confirming sends nothing.
+   * The account selection. When set, every order and command is stamped with
+   * it, one naming another account is refused, and a change while confirming
+   * sends nothing. Pass the account view itself (an `AccountManager`) and a
+   * selection from the other ledger is refused as well: a bare id cannot say
+   * whether it is a live account about to take a sandbox order.
    */
-  selectedAccount?: () => string | null | undefined;
+  selectedAccount?: (() => string | null | undefined) | Pick<AccountStateSource, 'getState'>;
   /** Approves close, reverse and bracket commands when not armed. Omitted declines them. */
   confirmCommand?: (command: TradingCommand) => boolean | Promise<boolean>;
   /** Wall clock in UTC seconds, for expiry checks. Default `Date.now() / 1000`. */
@@ -397,7 +400,7 @@ export class OrderEngine {
   private readonly _feed: OrderFeed;
   private readonly _capabilities?: TradingCapabilitySource;
   private readonly _features?: TradingFeatureSource;
-  private readonly _selectedAccount?: () => string | null | undefined;
+  private readonly _selectedAccount?: OrderEngineOptions['selectedAccount'];
   private readonly _confirmCommand?: (command: TradingCommand) => boolean | Promise<boolean>;
   private readonly _clock: () => number;
   private readonly _constraints: OrderConstraints;
@@ -494,18 +497,33 @@ export class OrderEngine {
     const support = this._feature({ feature: 'accounts', account: req.account, mode: this._mode });
     if (!support.supported) return support.reason;
     if (this._selectedAccount !== undefined) {
-      const selected = this._selectedAccount();
-      if (!nonEmpty(selected)) return 'No account is selected';
-      if (req.account !== undefined && req.account !== selected) return `The order names account ${req.account} but ${selected} is selected`;
-      req.account = selected;
+      const selected = this._selection();
+      if (!selected.ok) return selected.reason;
+      if (req.account !== undefined && req.account !== selected.id) return `The order names account ${req.account} but ${selected.id} is selected`;
+      req.account = selected.id;
     }
     return nonEmpty(req.account) ? null : 'The account id must be a non-empty string';
   }
 
+  /** The selected account, or why there is none this engine may stamp on an order. */
+  private _selection(): { ok: true; id: string } | { ok: false; reason: string } {
+    const source = this._selectedAccount!;
+    if (typeof source === 'function') {
+      const id = source();
+      return nonEmpty(id) ? { ok: true, id } : { ok: false, reason: 'No account is selected' };
+    }
+    const state = source.getState();
+    const id = state.selectedId;
+    if (!nonEmpty(id)) return { ok: false, reason: 'No account is selected' };
+    const mode = state.mode !== this._mode ? state.mode : state.accounts.find(account => account.id === id)?.mode ?? state.mode;
+    return mode === this._mode ? { ok: true, id } : { ok: false, reason: `The selected account ${id} is in ${mode} mode, not ${this._mode}` };
+  }
+
   /** After an await: the account the user confirmed must still be the one selected. */
   private _accountStill(req: { account?: string }): string | null {
-    if (this._selectedAccount === undefined || this._selectedAccount() === req.account) return null;
-    return 'The account changed before the order was sent; nothing was sent';
+    if (this._selectedAccount === undefined) return null;
+    const selected = this._selection();
+    return selected.ok && selected.id === req.account ? null : 'The account changed before the order was sent; nothing was sent';
   }
 
   /** Duration, expiry and leverage: each is either carried by the provider or refused here. */

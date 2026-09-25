@@ -34,7 +34,7 @@ export function createDesk(options = {}) {
   let approvedCommand = null;
   const engine = new OrderEngine({
     feed: broker, mode: 'analyzer', constraints: { tickSize: 0.01 },
-    selectedAccount: () => accounts.selectedAccount(),
+    selectedAccount: accounts,
     gate: (req) => { const ok = approvedOrder !== null && approvedOrder === fingerprint(req); approvedOrder = null; return ok; },
     confirmCommand: (command) => { const ok = approvedCommand === command.kind; approvedCommand = null; return ok; },
     clock: options.now,
