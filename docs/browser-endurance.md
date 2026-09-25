@@ -107,8 +107,10 @@ display latency, nor prove that every animation callback painted a new chart.
 Long-task counts and durations are included as diagnostic evidence.
 
 Initial and final price canvases must contain candle-colored pixels, and the
-price-plot pixel hash must change on every live chart. Axis labels and crosshair
-overlays have separate canvases and cannot satisfy this change check. `start.png`
+pixel hash of each live chart's price-pane base canvas must change. That canvas
+also carries the price-axis strip, so a moving last-price tag alone could change
+the hash; the candle-pixel count is what shows candles were painted. The
+crosshair is on the separate overlay canvas and is not hashed. `start.png`
 and `end.png` preserve full rendered charts for visual inspection. Inspect both
 images before citing a report as release evidence. The run finally destroys the
 live charts and requires zero remaining canvas elements.
@@ -152,6 +154,41 @@ arriving in its first five seconds, exceeded the unchanged slope budget. The
 follow-up used the documented 60-second smoke with the default five-second
 warmup. The failed report was retained. A short result must not be called an
 endurance result, and a warmup or duration change must be recorded explicitly.
+
+## Recorded results
+
+### Bar count, 2.5.5
+
+Three runs of the default live workload, changing only the bar count, on the
+2.5.5 build on 2026-09-26:
+
+```sh
+node scripts/browser-endurance.mjs --bars 2000 --duration-seconds 120 --sample-seconds 30 --cycles 5 --output /absolute/p3-2k-bars
+node scripts/browser-endurance.mjs --bars 10000 --duration-seconds 120 --sample-seconds 30 --cycles 5 --output /absolute/p3-10k-bars
+node scripts/browser-endurance.mjs --bars 50000 --duration-seconds 120 --sample-seconds 30 --cycles 5 --output /absolute/p3-50k-bars
+```
+
+Each run had two charts, 150 bars in view, ten requested forming-bar replacements
+per second per chart, five studies per chart (EMA, Bollinger Bands, RSI, MACD,
+volume), Canvas2D, a 1440 by 900 viewport and DPR 1. The machine was an AMD
+Ryzen 7 7700 (16 logical processors, 31.2 GiB RAM) on Windows 11 (build 26200)
+with headless Chromium 149.0.7827.55. Other builds and test runs were active on
+the machine; the harness does not control concurrent host activity.
+
+| Bars per chart | Result | Frame p95 | Frame p99 | Frames over 50 ms | Pointer p95 | Updates delivered |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2,000 | passed | 17 ms | 17 ms | 0% | 28 ms | 1,195 of 1,200 requested |
+| 10,000 | failed | 134 ms | 150 ms | 49% | 137 ms | 958 of 1,200 |
+| 50,000 | failed | 717 ms | 734 ms | 44% | 738 ms | 194 of 1,200 |
+
+At 2,000 bars every gate passed. At 10,000 the frame-interval, slow-frame and
+update-delivery gates failed; at 50,000 the pointer-latency and frame-count gates
+failed as well. The memory, teardown, painted-candle and browser-error gates
+passed in all three, and the screenshots show both charts drawn. The view
+is the same 150 bars throughout, so the growth is work over the whole history
+rather than drawing. Until a render benchmark sets budgets per bar count, treat
+these as the recorded state of 2.5.5 on this machine, not as a guarantee for
+another device.
 
 ## Artifacts and completion
 

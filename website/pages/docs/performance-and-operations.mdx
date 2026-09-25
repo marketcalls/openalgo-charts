@@ -16,8 +16,9 @@ away.
 
 - Multiple `series.update(...)` calls before the next animation frame are
   coalesced into one render frame.
-- Rendering, autoscaling, and hit testing read only the visible range of a
-  series, not every bar in history.
+- The series pass and autoscaling read only the visible range of a series,
+  not every bar in history. Study recomputes are the exception: they walk the
+  whole history once per frame that carries a tick.
 - `withBarCache` has LRU limits for both cache entries and total cached bars.
 - `chart.destroy()` cancels its pending animation work, disconnects its resize
   observer, removes chart listeners and canvases, detaches primitives, and
@@ -81,7 +82,8 @@ an explicit upper bound.
 Each indicator holds output aligned with its source bars. A deep retained range
 therefore costs more in a chart with several indicators or multi-plot studies
 than in a bare price chart. `calcTail` can reduce the calculation work for a
-forming bar, but it is not a data-retention policy: output arrays still follow
+forming bar in a custom study (no built-in implements it yet), but it is not a
+data-retention policy: output arrays still follow
 the length of the retained source history.
 
 Keep the live layout purposeful. Remove hidden studies that are no longer
@@ -210,6 +212,21 @@ Live updates are coalesced to animation frames, but a source-bar update currentl
 invalidates the base rendering work across active panes. The visible-range data
 path keeps drawing bounded by what is on screen, while retained history and the
 number of indicator outputs still determine calculation and allocation cost.
+
+The endurance workload shows how much. Changing only the bars per chart, with
+150 bars in view, two charts and five studies each, the 2.5.5 build recorded:
+
+| Bars per chart | Frame p95 | Pointer p95 | Result |
+| --- | --- | --- | --- |
+| 2,000 | 17 ms | 28 ms | every gate passed |
+| 10,000 | 134 ms | 137 ms | frame and update-delivery gates failed |
+| 50,000 | 717 ms | 738 ms | frame, pointer and update-delivery gates failed |
+
+Those figures come from one machine (an 8-core desktop CPU, headless Chromium,
+Canvas2D, DPR 1) with other work running, so read them as a trend rather than a
+budget for your device. The
+[recorded results](https://github.com/marketcalls/openalgo-charts/blob/master/docs/browser-endurance.md#recorded-results)
+give the commands and the full conditions.
 
 For a sustained chart, the practical order is: bound source history, keep the
 forming bar on `update`, cap canvas density where needed, remove unused panes

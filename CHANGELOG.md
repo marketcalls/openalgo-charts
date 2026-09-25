@@ -31,6 +31,27 @@ All notable changes to OpenAlgo Charts.
   must be a later major than the package version, and the tag must sit in a doc
   block. Once the package reaches the named release, the tag fails the lint.
 
+### Documentation
+
+- README and ARCHITECTURE.md now describe the engine as it is: two canvases per
+  pane with the axes painted on the base canvas, a data write (a study
+  recompute or a live tick) repainting every pane, a time-scale operation queue
+  that nothing fills, kinetic scroll and eased zoom on their own frame loops,
+  conflation applied to every series in a pane, per-bar candle colours, a
+  marker pass that walks every marker, and `mergeRange` not implemented.
+- The unmeasured "60 fps" and "50k+ bars" claims are replaced by a recorded
+  measurement from `scripts/browser-endurance.mjs` at 2,000, 10,000 and 50,000
+  bars per chart (frame-interval p95 17 ms, 134 ms and 717 ms on the recorded
+  machine), with its workload and machine in `docs/browser-endurance.md`. The
+  README states the large-history cost as a known limit.
+- The README limitation that a pane had one shared comparison scale is removed:
+  each comparison has had a scale of its own since independent comparison
+  scales shipped.
+- `tests/docs-claims.test.ts` ties these statements to the code: a frame rate or
+  percentile in README or ARCHITECTURE.md must cite its measurement record, the
+  canvas count must match what a pane creates, and the repaint scope a document
+  states must match what the chart does.
+
 ## 2.5.5
 
 2026-09-26
