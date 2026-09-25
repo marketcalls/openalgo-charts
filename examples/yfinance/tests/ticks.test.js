@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { HOST_TICK_BANDS, tickScheduleFor, snapPrice, tickNote } from '../src/ticks.js';
+import * as engine from '/dist/openalgo-charts.mjs';
+import { HOST_INSTRUMENTS, instrumentFor, tickScheduleFor, axisMinMove, snapPrice, tickNote } from '../src/ticks.js';
 import { initOrders, placeOrder, fillMarket, repriceOrder } from '../src/orders.js';
 import { initBracket, makeBracket, setBracketPrice } from '../src/bracket.js';
 import { fakeDom, fakeStorage, flatBar } from './helpers.js';
@@ -9,11 +10,30 @@ globalThis.requestAnimationFrame = () => 0;
 describe('the host tick rules', () => {
   it('supplies a schedule only for the fixture symbol that carries one', () => {
     const ticks = tickScheduleFor('banded');
-    expect(ticks.bands).toEqual(HOST_TICK_BANDS.BANDED);
+    expect(ticks.bands).toEqual(HOST_INSTRUMENTS.BANDED.tickBands);
     expect(ticks.minMove).toBe(0.01);
     expect(tickScheduleFor('AAPL')).toBeNull();
     expect(tickScheduleFor('RELIANCE.NS')).toBeNull();
     expect(tickScheduleFor(undefined)).toBeNull();
+  });
+
+  it('takes the schedule from instrument metadata the library validates', () => {
+    const instrument = instrumentFor('BANDED');
+    expect(instrument).toBeInstanceOf(engine.Instrument);
+    expect(instrument.metadata.tickBands).toEqual(HOST_INSTRUMENTS.BANDED.tickBands);
+    expect(instrument.metadata.priceTick).toBe(instrument.tickSchedule.minMove);
+    // Metadata whose price tick is not the grid every band lies on is refused
+    // before anything snaps to it.
+    expect(() => new engine.Instrument({ ...HOST_INSTRUMENTS.BANDED, priceTick: 0.05 })).toThrow(/minimum move 0\.01/);
+    expect(instrumentFor('AAPL')).toBeNull();
+  });
+
+  it('gives the price axis the instrument grid over the market guess', () => {
+    // The guess for BANDED by its suffix is 0.01 too, so a different fallback
+    // shows which one the axis takes.
+    expect(axisMinMove('BANDED', 0.05)).toBe(0.01);
+    expect(axisMinMove('RELIANCE.NS', 0.05)).toBe(0.05);
+    expect(axisMinMove('AAPL', 0.01)).toBe(0.01);
   });
 
   it('rounds to two decimals without a schedule, exactly as before', () => {

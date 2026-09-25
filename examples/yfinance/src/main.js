@@ -24,7 +24,7 @@ import {
   initOrders, saveState, restoreState, cancelOrder, attachOrderLines, removeAllOrders,
   updatePositionLine, restyleTradeChrome, clearPosition, executionAllowed, repriceOrder,
 } from './orders.js';
-import { tickScheduleFor } from './ticks.js';
+import { tickScheduleFor, axisMinMove } from './ticks.js';
 import { initBracket, attachBracketLines, setBracketPrice, updateBracket, removeBracket } from './bracket.js';
 import { initIndicators, fillIndicatorPicker, renderIndicatorChips, openSettings, rememberIndicators } from './indicators.js';
 import { chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
@@ -252,10 +252,11 @@ function render({ keepView = true, state } = {}) {
   // so plainly. A real host reads it from its own instrument master, the way
   // OpenAlgo reads tick_size out of its symbol table, rather than guessing.
   //
-  // A symbol with a tick schedule gives the axis the schedule's common grid:
-  // every price it can trade at lies on it, whichever band it is in.
+  // A symbol the host holds metadata for gives the axis its price tick, which
+  // with a tick schedule is the grid every band lies on: every price it can
+  // trade at is on it, whichever band that price is in.
   app.ticks = tickScheduleFor(app.req.symbol);
-  app.chart.setPriceScaleOptions({ minMove: app.ticks ? app.ticks.minMove : tickFor(app.req.symbol) });
+  app.chart.setPriceScaleOptions({ minMove: axisMinMove(app.req.symbol, tickFor(app.req.symbol)) });
   attachVolume(1, !isTransform || sel === 't:heikin-ashi');
   if (!isTransform) {
     app.markersApi = app.price.createMarkers();

@@ -56,6 +56,9 @@ const orders = (page: Page): Promise<HostOrder[]> => page.evaluate(() => (window
 const status = (page: Page): Promise<string> => page.locator('#status').innerText();
 
 test('right-click entry and a dragged order line follow the band each price is in', async ({ page }, info) => {
+  // The host instrument's price tick, the grid both bands lie on. The market
+  // guess for this symbol is 0.01 too, so this is a smoke check only: the
+  // choice between them is covered by examples/yfinance/tests/ticks.test.js.
   expect(await page.evaluate(() => (window as any).__oac.app.chart.panes()[0].priceScale.options.minMove)).toBe(0.01);
   await pinRange(page, 99, 101);
   const upper = await point(page, 100.33, 0.5);
