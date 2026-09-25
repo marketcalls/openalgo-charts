@@ -144,7 +144,12 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // when measured alone; their controllers, panels and grid chrome stay in the
 // optional tiers. The merged 2.5.4 build measures 74.43 KiB (76220 bytes);
 // allow 74.44 KiB.
-const LIMIT_BYTES = 74.44 * 1024;
+// A drag on `chart.trading` can now snap its order and bracket lines to the
+// instrument's tick schedule: the controller's setter and the two rounded
+// drag prices ship with every chart, since `chart.trading` does. The schedule
+// class itself only rides in by type and is shaken out here. Measured 76220 to
+// 76287 bytes (74.43 to 74.50 KiB); allow 74.50 KiB.
+const LIMIT_BYTES = 74.5 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

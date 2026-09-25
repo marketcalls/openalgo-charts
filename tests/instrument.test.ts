@@ -179,3 +179,57 @@ describe('instrument chart and quantity integration', () => {
     expect(orderConstraintsForInstrument(new Instrument({ ...cash(), quantityStep: 75 })).lotSize).toBe(75);
   });
 });
+
+describe('instrument tick schedules', () => {
+  // Synthetic rules: 0.02 below 20 and 0.05 from 20. Neither tick divides the
+  // other, so the common grid (0.01) is the only honest minimum move.
+  const banded = (): InstrumentMetadata => ({
+    ...cash(), symbol: 'BANDED', priceTick: 0.01, tickBands: [{ tick: 0.02 }, { from: 20, tick: 0.05 }],
+  });
+
+  it('keeps a constant-tick profile byte-identical and still offers its one-band schedule', () => {
+    const instrument = new Instrument(cash());
+    expect(instrument.metadata).not.toHaveProperty('tickBands');
+    expect(Object.keys(orderConstraintsForInstrument(instrument))).toEqual(['tickSize', 'lotSize', 'allowFractionalQty']);
+    expect(orderConstraintsForInstrument(instrument)).toEqual({ tickSize: 0.05, lotSize: 1, allowFractionalQty: false });
+    expect(instrument.tickSchedule.bands).toEqual([{ tick: 0.05 }]);
+    expect(instrument.tickSchedule.round(100.07)).toBe(100.05);
+  });
+
+  it('detaches, freezes and applies a banded schedule to validation', () => {
+    const source = banded();
+    const bands = source.tickBands as { from?: number; tick: number }[];
+    const instrument = new Instrument(source);
+    bands[1].tick = 1;
+    expect(instrument.metadata.tickBands).toEqual([{ tick: 0.02 }, { from: 20, tick: 0.05 }]);
+    expect(Object.isFrozen(instrument.metadata.tickBands)).toBe(true);
+    expect(instrument.tickSchedule.bands).toEqual(instrument.metadata.tickBands);
+    const constraints = orderConstraintsForInstrument(instrument);
+    expect(constraints.tickSchedule).toBe(instrument.tickSchedule);
+    expect(constraints.tickSize).toBe(0.01);
+    expect(validatePrice(19.97, constraints).price).toBe(19.98);
+    expect(validatePrice(20.03, constraints).price).toBe(20.05);
+  });
+
+  it('sets the price scale minimum move to the common grid and formats every band', () => {
+    const c = chart(); c.addIndicator('rsi');
+    const oscillator = { ...c.panes()[1].priceScale.options };
+    new Instrument(banded()).applyTo(c, '1m');
+    const scale = c.primarySeries()!.priceScale();
+    expect(scale.options.minMove).toBe(0.01);
+    // A valid price in the coarse band survives the scale's own snap.
+    expect(scale.snapToTick(20.05)).toBeCloseTo(20.05, 10);
+    expect(scale.format(20.05)).toBe('20.05');
+    expect(c.panes()[1].priceScale.options).toEqual(oscillator);
+  });
+
+  it.each<[string, Record<string, unknown>, RegExp]>([
+    ['a price tick that is not the common grid', { priceTick: 0.02 }, /price tick 0\.02 must equal the schedule's minimum move 0\.01/],
+    ['a precision too coarse for the grid', { priceTick: 0.5, pricePrecision: 0, tickBands: [{ tick: 1 }, { from: 20, tick: 0.5 }] }, /precision/],
+    ['unordered bands', { tickBands: [{ tick: 0.02 }, { from: 40, tick: 0.05 }, { from: 20, tick: 0.1 }] }, /ascending/],
+    ['a lower bound on the first band', { tickBands: [{ from: 0, tick: 0.01 }] }, /bands\[0\] covers every lower price/],
+    ['bands that are not a list', { tickBands: { tick: 0.01 } }, /1 to 64 bands/],
+  ])('rejects %s before use', (_label, patch, message) => {
+    expect(() => new Instrument({ ...banded(), ...patch })).toThrow(message);
+  });
+});

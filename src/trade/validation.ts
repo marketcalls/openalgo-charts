@@ -10,6 +10,7 @@
  * live in the feed (see the OpenAlgo compatibility note: the production terminal
  * calls `trade.place` directly and never constructs `OrderEngine`).
  */
+import type { TickSchedule } from 'openalgo-charts';
 import { roundToTick } from '../helpers/math';
 
 export interface PriceBand {
@@ -42,6 +43,12 @@ export interface ValidationResult {
 
 export interface OrderConstraints {
   tickSize: number;
+  /**
+   * Price-dependent ticks. When set it decides every snap and `tickSize` is
+   * only read by older code, so give it the schedule's `minMove`. Absent, the
+   * constant `tickSize` snaps exactly as it always has.
+   */
+  tickSchedule?: TickSchedule;
   priceBand?: PriceBand;
   /** Max quantity per single order (exchange freeze limit). */
   freezeQty?: number;
@@ -120,7 +127,12 @@ export function validatePrice(price: number, c: OrderConstraints): ValidationRes
   if (!Number.isFinite(price)) {
     return { ok: false, code: 'PRICE_INVALID', reason: 'price must be a finite number' };
   }
-  const snapped = roundToTick(price, c.tickSize);
+  const ticks = c.tickSchedule;
+  // A band list pasted in place of a schedule would round nothing and pass.
+  if (ticks !== undefined && typeof ticks.round !== 'function') {
+    throw new TypeError('OrderConstraints.tickSchedule must be built with new TickSchedule(bands)');
+  }
+  const snapped = ticks ? ticks.round(price) : roundToTick(price, c.tickSize);
   if (c.priceBand && !withinPriceBand(snapped, c.priceBand)) {
     return {
       ok: false,

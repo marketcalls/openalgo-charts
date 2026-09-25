@@ -70,10 +70,10 @@ export default defineConfig({
   projects: [
     // The engine suite, against the static server. The demo spec is not in
     // it: that page needs /api/history, which serve.cjs does not answer.
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /(?:yfinance(?:-(?:ui-253|mobile|templates|indicator-source|routed-study|grid))?|widget-grid|widget-ui-253|widget-data-loading|widget-localization|widget-alerts|chart-data-export|instruments|indicator-source-markers|alert-line-drag|table-layout|date-navigation)\.spec\.ts/ },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /(?:yfinance(?:-(?:ui-253|mobile|templates|indicator-source|routed-study|grid|tick-schedule))?|tick-schedule-drag|widget-grid|widget-ui-253|widget-data-loading|widget-localization|widget-alerts|chart-data-export|instruments|indicator-source-markers|alert-line-drag|table-layout|date-navigation)\.spec\.ts/ },
     ...(['chromium', 'firefox', 'webkit'] as const).map(browserName => ({
       name: `widget-loading-${browserName}`,
-      testMatch: /(?:widget-grid|widget-ui-253|widget-data-loading|widget-localization|widget-alerts|drawing-future|drawing-catalog|analysis-linked-events|widget-objects|navigation-wheel|widget-mobile|branding-watermark|crosshair-snap|workspace-storage|open-interest|alerts|alert-line-drag|table-layout|replay-time|chart-data-export|instruments|indicator-source-markers|indicator-visuals|scale-state|native-timeframe-navigation|native-fill-gradients|native-series-scale-assignment|native-indicator-lifecycle|native-study-scale-assignment|native-requested-provider|native-external-lifecycle|native-indicator-alerts|native-study-dependencies|native-study-source-ui|native-multiple-price-axes|native-plot-scale-assignments|native-template-layouts|native-numerical-indicators|native-chart-preferences|native-typed-inputs|indicator-curved-polylines|table-cell-tooltips|indicator-window-arithmetic|cpr-period-observations|user-navigation-policy(?:-reference)?|indicator-text-style|date-navigation|pane-collapse|native-output-targets)\.spec\.ts/,
+      testMatch: /(?:widget-grid|widget-ui-253|widget-data-loading|widget-localization|widget-alerts|drawing-future|drawing-catalog|analysis-linked-events|widget-objects|navigation-wheel|widget-mobile|branding-watermark|crosshair-snap|workspace-storage|open-interest|alerts|alert-line-drag|table-layout|replay-time|chart-data-export|instruments|indicator-source-markers|indicator-visuals|scale-state|native-timeframe-navigation|native-fill-gradients|native-series-scale-assignment|native-indicator-lifecycle|native-study-scale-assignment|native-requested-provider|native-external-lifecycle|native-indicator-alerts|native-study-dependencies|native-study-source-ui|native-multiple-price-axes|native-plot-scale-assignments|native-template-layouts|native-numerical-indicators|native-chart-preferences|native-typed-inputs|indicator-curved-polylines|table-cell-tooltips|indicator-window-arithmetic|cpr-period-observations|user-navigation-policy(?:-reference)?|indicator-text-style|date-navigation|pane-collapse|native-output-targets|tick-schedule-drag)\.spec\.ts/,
       use: { browserName, baseURL: WIDGET_URL },
     })),
     // The demo, against its own server. Kept in the list even with no
@@ -81,7 +81,7 @@ export default defineConfig({
     { name: 'yfinance-demo', testMatch: /yfinance\.spec\.ts/, use: { ...devices['Desktop Chrome'], baseURL: DEMO_URL } },
     ...(['chromium', 'firefox', 'webkit'] as const).map(browserName => ({
       name: `yfinance-mobile-${browserName}`,
-      testMatch: /yfinance-(?:ui-253|mobile|templates|indicator-source|grid|routed-study)\.spec\.ts/,
+      testMatch: /yfinance-(?:ui-253|mobile|templates|indicator-source|grid|routed-study|tick-schedule)\.spec\.ts/,
       use: { browserName, baseURL: DEMO_URL },
     })),
   ],

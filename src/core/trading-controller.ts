@@ -8,6 +8,7 @@
  */
 import type { IPrimitive, PrimitiveHost, PrimitiveRenderContext, ZOrder } from '../primitives/primitive';
 import { PriceLine, type PriceLineOptions } from '../primitives/price-line';
+import type { TickSchedule } from '../feed/tick-schedule';
 import { contrastText, roundRectPath } from '../render/pill';
 
 export type PositionSide = 'long' | 'short';
@@ -223,6 +224,7 @@ export class TradingController {
   private readonly _dragPrev = new Map<string, number>();
   private _colors: TradingColors = { ...DEFAULT_TRADING_COLORS };
   private _markers: TradeMarkersPrimitive | null = null;
+  private _ticks: TickSchedule | null = null;
 
   public constructor(host: TradingHost) {
     this._host = host;
@@ -268,6 +270,15 @@ export class TradingController {
   }
 
   public getSettings(): TradingColors { return { ...this._colors }; }
+
+  /**
+   * Snap dragged order and bracket lines, and the price their modify events
+   * carry, to the instrument's ticks. Null, the default, passes the pointer's
+   * price through unrounded, as it always has. The host's own validation stays
+   * authoritative either way; this only stops a drag previewing a price the
+   * instrument cannot trade at.
+   */
+  public setTickSchedule(schedule: TickSchedule | null): void { this._ticks = schedule; }
 
   // ── data ──────────────────────────────────────────────────────────────────
   public setPositions(positions: readonly TradingPosition[]): void { this._sync(this._positions, positions, 'pos'); }
@@ -427,8 +438,9 @@ export class TradingController {
     }
   }
 
-  private _onDrag(externalId: string, price: number): void {
+  private _onDrag(externalId: string, raw: number): void {
     if (!externalId.startsWith('ord:')) return;
+    const price = this._ticks?.round(raw) ?? raw;
     const cur = this._orders.get(externalId.slice(4));
     if (cur === undefined) return;
     const id = externalId.slice(4);
@@ -439,8 +451,9 @@ export class TradingController {
     cur.line.setPrice(price);
   }
 
-  private _onDragEnd(externalId: string, price: number): void {
+  private _onDragEnd(externalId: string, raw: number): void {
     if (!externalId.startsWith('ord:')) return;
+    const price = this._ticks?.round(raw) ?? raw;
     const id = externalId.slice(4);
     const cur = this._orders.get(id);
     if (cur === undefined) return;
