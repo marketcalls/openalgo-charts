@@ -719,3 +719,63 @@ const report = grid.applyWorkspace(parseWorkspacePayload(fileText)); // { applie
   and BSE) reaches the followers.
 - Below `compactWidth` only the active cell shows, with a tab strip to switch; splitters
   hide. `CHART_GRID_CSS` is part of `WIDGET_COMPONENT_CSS`.
+
+## Watchlist and news panels (unreleased)
+
+Two optional sources for the panel dock, beside Data and Objects. A tab (and the top bar
+and mobile More entries) appears only when its source is supplied, and each needs
+`panels` on. Sources: `src/widget/watchlist-panel.ts`, `news-panel.ts`, `quote-board.ts`,
+`news-reader.ts`.
+
+```ts
+import { createWidget } from 'openalgo-charts/widget';
+import { WatchlistRepository, createIndexedDbWatchlistStorage } from 'openalgo-charts/workspace';
+
+const widget = createWidget('#chart', {
+  feed, symbol: 'INFY', exchange: 'NSE',
+  watchlist: { store: new WatchlistRepository(createIndexedDbWatchlistStorage(indexedDB), 'account-7'), quotes },
+  news: { feed: newsFeed, pageSize: 20 },
+});
+widget.openWatchlist(); // false without a watchlist source, with panels off, or after destroy
+widget.openNews();
+```
+
+- `WidgetOptions.watchlist` (`WidgetWatchlistOptions`): `store` (a `WatchlistStore`,
+  usually `WatchlistRepository`), `quotes?` (`QuoteFeed`), `staleAfterMs?` (default
+  60000), `pollMs?` (snapshot-only sources, default 15000, 0 off), `formatPrice?(value,
+  instrument)`. Choosing a row calls `setSymbol(symbol, exchange)`. `WidgetOptions.news`
+  (`WidgetNewsOptions`): `feed`, `pageSize?` (20), `staleAfterMs?` (300000), `maxItems?` (500).
+- `PanelDockId` adds `'watchlist'` and `'news'`; `PanelDockOptions` takes optional
+  `watchlist(host)` and `news(host)` factories. `sanitizePanelDockState` keeps both ids;
+  restoring one on a dock without that source leaves it closed.
+- `mountWatchlistPanel(ctx, host, WatchlistPanelOptions)` returns a `WatchlistPanelHandle`
+  (`el`, `initialFocus`, `reload()`, `destroy()`), for a custom host's dock as the
+  reference host does. A table of the active list: symbol, last, change and percent
+  change from the provider's `previousClose`. List select, New, Rename and Delete (inline
+  forms, confirm before delete), an Add input (the host's `symbolSearch` when there is
+  one; typed text is uppercased and saved on the chart's exchange), and "Add {symbol}"
+  for the chart's instrument. Remove per row; Alt+ArrowUp/Down reorders in list order
+  with the revision it was computed from; ArrowUp/Down moves between rows.
+- Rows take prices only from `quotes`. Without it every row is `unavailable` and shows
+  `n/a`. Row `data-state` is a `QuoteRowStatus`: `loading`, `live`, `delayed`,
+  `snapshot`, `stale`, `unavailable`, `error`; the status line reads the
+  `QuoteBoardStatus`. Only rows an `IntersectionObserver` reports on screen hold a
+  stream; a list switch, a hidden page, closing or switching the panel, and `destroy`
+  release them. Sorting by header (`WatchlistSort`, `WatchlistSortKey`: `list`, `symbol`,
+  `last`, `change`, `percent`; a third click returns to list order) is stable, sinks
+  unknowns in both directions, and holds row order while the pointer or focus is in the
+  rows. Conflicts show "The watchlists changed in another session" and reload the store.
+- `mountNewsPanel(ctx, host, NewsPanelOptions)` returns a `NewsPanelHandle` (`el`,
+  `initialFocus`, `refresh()`, `destroy()`). It follows the chart's `data:context`
+  instrument (an interval change is the same instrument), cancels the previous request
+  on a switch, and lists headline, source and time in the chart's timezone. A detail
+  view shows the summary and "Open article" only for `safeNewsUrl(url)`: absolute http or
+  https without credentials, opened with `rel="noopener noreferrer"` and
+  `referrerpolicy="no-referrer"`. All provider text is set as text.
+- DOM-free controllers, exported for custom hosts: `QuoteBoard` (`setVisible`, `row`,
+  `status`, `error`, `subscribed`, `destroy`; `QuoteBoardOptions`, `QuoteRow`) and
+  `NewsReader` (`setInstrument`, `refresh`, `loadMore`, `snapshot`, `destroy`;
+  `NewsReaderOptions`, `NewsSnapshot` with `refreshFailed`, `NewsStatus`: `idle`,
+  `loading`, `ready`, `empty`, `error`). `quoteChange(quote)` returns
+  `{ change, percent }` or null without a positive `previousClose`.
+- `WATCHLIST_PANEL_CSS` and `NEWS_PANEL_CSS` are part of `WIDGET_COMPONENT_CSS`.

@@ -334,6 +334,60 @@ return widget;`} />
 
 Every option and event is on [The Widget Tier](/docs/widget).
 
+## Watchlists and news
+
+Named lists with live quote rows, and the news for the chart's symbol, in the same
+panel as Data and Objects. Only the rows on screen hold a quote stream. Sort by a
+column, open a row to chart it, or switch to **News** and open an item. Unreleased:
+see [Watchlists & News](/docs/watchlists-and-news).
+
+<RunnableExample height={560} tiers={['widget']} caption="Simulated quotes and headlines. The rows take prices only from the quote source; this simulated source starts each symbol at its simulated last close." code={`${STOCK_BARS_SOURCE}
+const names = ['NOVA', 'ORBIT', 'PULSE', 'QUILL', 'RIDGE', 'SOLAR', 'TIDAL', 'UMBRA'];
+const base = symbol => 40 + Array.from(symbol).reduce((n, c) => n + c.charCodeAt(0), 0) % 160;
+const bars = (symbol, seconds) => stockBars(1700000000, 180, seconds, base(symbol), symbol.length);
+// The simulated market's own price: its last 5m close, then a small drift.
+const opening = {};
+const reference = symbol => (opening[symbol] ??= bars(symbol, 300).at(-1).close);
+const quote = (item, step) => {
+  const last = reference(item.symbol) * (1 + Math.sin(step / 4 + item.symbol.length) * 0.01);
+  return { ...item, last: Math.round(last * 100) / 100, previousClose: Math.round(reference(item.symbol) * 98.5) / 100 };
+};
+const quotes = {
+  getQuotes: async ({ instruments }) => instruments.map(item => quote(item, 0)),
+  subscribeQuotes(instruments, { onQuote, onStatus }) {
+    const [item] = instruments;
+    let step = 0;
+    if (onStatus) onStatus('live');
+    const timer = setInterval(() => onQuote(quote(item, ++step)), 700);
+    return () => clearInterval(timer);
+  },
+};
+const news = {
+  getNews: async ({ symbol, cursor, limit }) => {
+    const page = Number(cursor || 0);
+    const items = Array.from({ length: limit }, (_, k) => {
+      const i = page * limit + k;
+      return { id: symbol + '-' + i, headline: symbol + ' update ' + (i + 1) + ': simulated headline',
+        source: 'Simulated desk', time: 1700000000 - i * 5400, summary: 'Simulated text for this example. It is not market news.' };
+    });
+    return { items, nextCursor: page < 2 ? String(page + 1) : null };
+  },
+};
+let next = 0;
+const store = new lib.WatchlistRepository(lib.createMemoryWatchlistStorage(), 'example', { id: () => 'list-' + (++next) });
+store.createList('Simulated', names.map(symbol => ({ symbol, exchange: 'DEMO' }))).then(list => store.setActiveList(list.id));
+const widget = lib.createWidget(el, {
+  symbol: 'NOVA', exchange: 'DEMO', interval: '5m', persist: false, intervals: ['5m', '1d'],
+  feed: {
+    getBars: async request => bars(request.symbol, request.interval === '1d' ? 86400 : 300),
+    subscribeBars: () => () => {},
+  },
+  watchlist: { store, quotes },
+  news: { feed: news, pageSize: 8 },
+});
+widget.openWatchlist();
+return widget;`} />
+
 ## Objects and compact dialogs
 
 Find drawings, indicators and registered profiles in one panel. Hide, lock, edit or

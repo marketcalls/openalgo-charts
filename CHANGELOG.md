@@ -2,6 +2,43 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- Named watchlists. `WatchlistRepository` in `openalgo-charts/workspace` keeps named
+  symbol lists keyed by the exact symbol and exchange pair, so one ticker on two
+  venues is two entries and nothing is case-folded. Lists are created, renamed,
+  duplicated, removed and reordered through queued, revision-checked writes: each
+  change applies to the catalog as stored, a position-based change can name the
+  revision it was computed from, and a write that loses a race across tabs raises
+  `WatchlistConflictError` without replacing anything. `createIndexedDbWatchlistStorage`
+  commits in one IndexedDB transaction, `createMemoryWatchlistStorage` serves tests
+  and previews, and corrupt storage is reported rather than overwritten.
+- Optional quote and news contracts beside `DataFeed`: `QuoteFeed` (snapshots and
+  per-instrument streams with `connecting`, `live`, `reconnecting` and `disconnected`
+  states) and `NewsFeed` (cursor pages of plain-text items). They are types only in
+  the base entry. A quote comes only from a `QuoteFeed`, never from a bar's close.
+- Watchlist and News panels in the widget's panel dock, beside Data and Objects, with
+  top bar and mobile More entries, shown only when the host supplies `watchlist` or
+  `news`. Watchlist rows update live, subscribe only while on screen, and release
+  their streams on a list switch, a hidden page, closing the panel and `destroy`.
+  Sorting by symbol, last, change or percent change is stable, sinks unknown values
+  and holds row order while the pointer or focus is on the rows. Quotes held through
+  a reconnect, or past `staleAfterMs` for a snapshot-only source, are shown as stale,
+  and a reconnect refetches snapshots. The news reader follows the chart instrument,
+  pages older items by the provider cursor, drops repeats, reports empty, error and
+  stale states, cancels on a switch, and opens only http and https links with
+  `noopener` and `noreferrer`; provider text is never rendered as markup. The
+  DOM-free `QuoteBoard` and `NewsReader`, `mountWatchlistPanel`, `mountNewsPanel`,
+  `safeNewsUrl` and `quoteChange` are exported for custom hosts, and
+  `widget.openWatchlist()` and `widget.openNews()` open the panels.
+- The yfinance reference host shows both panels in its dock, with lists in IndexedDB.
+  Its server's `--fixture` mode answers `/api/quotes` and `/api/news`
+  deterministically, including an unknown instrument, a markup headline and a script
+  link for the reader to refuse; without `--fixture` both answer 501, since the
+  server has no live quote or news source.
+
 ## 2.5.4
 
 2026-09-25

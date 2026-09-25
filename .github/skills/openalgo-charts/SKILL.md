@@ -185,6 +185,7 @@ Detailed reference for each topic is in `references/`. Read the one that matches
 | A level or axis row with no data | `available(kind)`, `state.active` | render it disabled with its state visible | hiding the control |
 | Corner clock, bar-close countdown | `ChartOptions.axisChrome` | `{ sessionClock: true, barCountdown: true }`, plus a `clock` for a delayed feed | a DOM overlay positioned over the axis |
 | Named multi-chart layouts and templates | [workspaces](references/workspaces.md) | `WorkspaceRepository` plus a storage adapter; each pane carries `getState()` | treating a single chart snapshot as the whole host workspace |
+| Watchlists with live prices, or symbol news | [widget](references/widget.md#watchlist-and-news-panels-unreleased), [workspaces](references/workspaces.md#named-watchlists-unreleased) | `WatchlistRepository` plus a `QuoteFeed` and a `NewsFeed`, as the widget's `watchlist` and `news` options | pricing a row from the last candle, or rendering provider text as HTML |
 | React lifecycle | where the chart instance lives | create in an effect, hold in a ref, `chart.destroy()` on cleanup | chart instance in state |
 | Bundle size | which tiers are imported | drop the unused tier import | code-splitting the base |
 
