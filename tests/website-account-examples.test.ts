@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { SANDBOX_BROKER_EXAMPLE } from '../website/components/account-examples';
+import { ACCOUNT_SUMMARY_EXAMPLE, SANDBOX_BROKER_EXAMPLE } from '../website/components/account-examples';
 import { AccountManager, FakeBroker, OrderEngine, type FakeBrokerOptions } from '../src/trade/index';
 import { generateBars } from '../src/index';
 
@@ -43,7 +43,7 @@ async function run(code: string) {
     await settle();
     return nodes.find(node => node.tag === 'span')!.textContent;
   };
-  return { broker: brokers[0], click };
+  return { broker: brokers[0], click, buttons: nodes.filter(node => node.tag === 'button').map(node => node.textContent) };
 }
 
 describe('website sandbox broker example', () => {
@@ -79,5 +79,17 @@ describe('website sandbox broker example', () => {
     expect(broker.accountPositions('SBX-CASH')).toMatchObject([{ symbol: 'NOVA', netQty: -30 }]);
     expect(await click('Close all')).toBe('Close all: filled');
     expect(broker.accountPositions('SBX-CASH')).toEqual([]);
+  });
+});
+
+describe('website account summary example', () => {
+  it('sends no order until the reader asks for one', async () => {
+    const { broker, click, buttons } = await run(ACCOUNT_SUMMARY_EXAMPLE);
+    // Loaded and settled: the accounts are listed and nothing has been sent.
+    expect(broker.orders()).toEqual([]);
+    expect(broker.accountPositions('SBX-CASH')).toEqual([]);
+    expect(buttons).toEqual(['Buy 40']);
+    expect(await click('Buy 40')).toBe('Buy 40: filled');
+    expect(broker.accountPositions('SBX-CASH')).toMatchObject([{ symbol: 'NOVA', netQty: 40 }]);
   });
 });

@@ -86,8 +86,17 @@ action('Reconnect', async () => {
 controls.appendChild(log);
 return widget;`;
 
-/** Docs page: the account summary in the widget's status line. */
-export const ACCOUNT_SUMMARY_EXAMPLE = `const broker = new lib.FakeBroker({ accounts: [
+/** Docs page: the account summary in the widget's status line. Nothing is sent until the reader asks. */
+export const ACCOUNT_SUMMARY_EXAMPLE = `el.style.display = 'flex';
+el.style.flexDirection = 'column';
+const controls = document.createElement('div');
+controls.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 8px;font:12px sans-serif';
+controls.addEventListener('pointerdown', event => event.stopPropagation());
+const host = document.createElement('div');
+host.style.cssText = 'flex:1;min-height:0';
+el.append(controls, host);
+
+const broker = new lib.FakeBroker({ accounts: [
   { id: 'SBX-CASH', name: 'Sandbox cash', mode: 'analyzer', currency: 'INR', balance: 500000 },
   { id: 'SBX-MARGIN', name: 'Sandbox margin', mode: 'analyzer', currency: 'INR', balance: 1500000, leverage: 5, maxLeverage: 5 },
   { id: 'LIVE', name: 'Live', mode: 'live', currency: 'INR', balance: 9000000 },
@@ -98,9 +107,22 @@ const engine = new lib.OrderEngine({ feed: broker, mode: 'analyzer', armed: true
 broker.onOrderUpdate((order, info) => engine.onBrokerOrder({ ...order, clientToken: info.clientToken }));
 
 const bars = lib.generateBars(1700000000, 160, 300);
-const widget = lib.createWidget(el, { symbol: 'NOVA', exchange: 'DEMO', interval: '5m', intervals: ['5m'],
+const widget = lib.createWidget(host, { symbol: 'NOVA', exchange: 'DEMO', interval: '5m', intervals: ['5m'],
   persist: false, locale: 'en-IN', account: accounts });
 widget.series.setData(bars);
 broker.setMark('NOVA', bars[bars.length - 1].close);
-accounts.refresh().then(() => engine.placeOrder({ symbol: 'NOVA', side: 'BUY', type: 'MARKET', qty: 40 }));
+accounts.refresh();
+
+// The only order this page sends is the one the reader clicks for.
+const buy = document.createElement('button');
+buy.type = 'button';
+buy.textContent = 'Buy 40';
+buy.style.cssText = 'padding:4px 9px;border:1px solid #667085;border-radius:4px;background:transparent;color:inherit;font:12px sans-serif;cursor:pointer';
+const log = document.createElement('span');
+log.style.opacity = '0.8';
+buy.onclick = async () => {
+  const result = await engine.placeOrder({ symbol: 'NOVA', side: 'BUY', type: 'MARKET', qty: 40 });
+  log.textContent = result.ok ? 'Buy 40: ' + (engine.brokerStatus(result.clientId) || result.intent) : 'Buy 40 refused: ' + result.reason;
+};
+controls.append(buy, log);
 return widget;`;
