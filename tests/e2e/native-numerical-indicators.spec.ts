@@ -490,3 +490,46 @@ test('Trend Strength Index paints a reading at a price level of one billion', as
   expect(errors).toEqual([]);
   await page.screenshot({ path: info.outputPath('trend-strength-large-level.png') });
 });
+
+test('NVI and its average paint on through a bar with no close', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  // Volume falls on every bar, so every bar qualifies for NVI. Bar 2 has no
+  // close: the index holds there and on bar 3, then compounds 132/120.
+  const closes = [100, 110, NaN, 120, 132, 145.2, 159.72, 175.692];
+  const bars = closes.map((close, i) => ({
+    time: 1700000000 + i * 60, open: close, high: close, low: close, close, volume: 80 - 10 * i,
+  }));
+  const result = await page.evaluate(async (data) => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData(data);
+    const study = chart.addIndicator('nvi', { maLength: 2, color: '#ff9900', emaColor: '#00ffff' });
+    const line = study.series('nvi')!;
+    const average = study.series('ema')!;
+    line.applyOptions({ lineWidth: 3 });
+    average.applyOptions({ lineWidth: 3 });
+    line.priceScale().setAutoScale(false);
+    line.priceScale().setPriceRange({ min: 950, max: 1800 });
+    chart.setPaneWeight(study.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 8 });
+    await paint();
+    const values = study.values();
+    const nvi = values.nvi as number[];
+    const ema = values.ema as number[];
+    return {
+      nvi, ema,
+      held: ink(line, study.paneIndex, 2.5, 1100),
+      resumed: ink(line, study.paneIndex, 4.5, (nvi[4] + nvi[5]) / 2),
+      averageResumed: ink(average, study.paneIndex, 4.5, (ema[4] + ema[5]) / 2, [0, 255, 255]),
+    };
+  }, bars);
+  expect(result.nvi.slice(0, 5)).toEqual([1000, 1100, 1100, 1100, (110 / 100) * (132 / 120) * 1000]);
+  expect(result.nvi.every(v => v !== null)).toBe(true);
+  expect(result.ema.slice(1).every(v => v !== null)).toBe(true);
+  expect(result.held).toBeGreaterThan(1);
+  expect(result.resumed).toBeGreaterThan(1);
+  expect(result.averageResumed).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('nvi-missing-close.png') });
+});
