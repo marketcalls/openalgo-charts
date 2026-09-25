@@ -315,6 +315,34 @@ describe('watchlist panel', () => {
     r.panel.destroy();
   });
 
+  it('keeps taking Alt+Arrow moves after one fails in a way its own handler cannot report', async () => {
+    let n = 0;
+    const repo = new WatchlistRepository(createMemoryWatchlistStorage(), 'user', { id: () => `l${++n}`, now: () => 1000 });
+    let broken = true;
+    const store: WatchlistStore = {
+      load: () => repo.load(), subscribe: listener => repo.subscribe(listener),
+      createList: (name, entries, options) => repo.createList(name, entries, options),
+      renameList: (id, name, options) => repo.renameList(id, name, options),
+      removeList: (id, options) => repo.removeList(id, options),
+      setActiveList: (id, options) => repo.setActiveList(id, options),
+      addEntry: (id, entry, options) => repo.addEntry(id, entry, options),
+      removeEntry: (id, entry, options) => repo.removeEntry(id, entry, options),
+      moveEntry: (id, entry, index, options) => {
+        // A rejection with no text in it throws again inside the panel's own failure handler.
+        if (broken) { broken = false; return Promise.reject(Object.create(null)); }
+        return repo.moveEntry(id, entry, index, options);
+      },
+    };
+    const r = await rig({ store, lists: [['Order', [nse('A'), nse('B'), nse('C')]]] });
+    const a = () => r.rows().find(row => row.dataset.symbol === 'A')!.querySelector('.oac-watchlist__open') as FakeElement;
+    fireKey(a(), 'ArrowDown', { altKey: true }); await flush();
+    expect(r.symbols()).toEqual(['A', 'B', 'C']);
+    fireKey(a(), 'ArrowDown', { altKey: true }); await flush();
+    expect(r.symbols()).toEqual(['B', 'A', 'C']);
+    expect((await repo.load()).lists[0].entries).toEqual([nse('B'), nse('A'), nse('C')]);
+    r.panel.destroy();
+  });
+
   it('opens the chosen instrument and marks the chart\'s own row', async () => {
     const r = await rig({ lists: [['Dual', [nse('INFY'), { symbol: 'INFY', exchange: 'BSE' }]]] });
     expect(r.rows()[0].getAttribute('aria-current')).toBe('true');

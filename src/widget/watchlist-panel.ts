@@ -332,7 +332,9 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
   /**
    * Moves run one at a time, each computed from the catalog the one before it
    * saved, so a held key is a run of moves rather than a conflict with itself.
-   * The revision still refuses a move another session has overtaken.
+   * The revision still refuses a move another session has overtaken, and a move
+   * that throws past its own handler is dropped alone, not with every move queued
+   * behind it.
    */
   let moving: Promise<void> = Promise.resolve();
   function moveRow(entry: WatchlistEntry, step: number): void {
@@ -344,7 +346,7 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
       if (index < 0 || target < 0 || target >= list.entries.length) return;
       showMessage('');
       try { await store.moveEntry(list.id, entry, target, { expectedRevision: catalog.revision }); } catch (error) { fail(error); }
-    });
+    }).catch(() => {});
   }
 
   function sorted(): string[] {
