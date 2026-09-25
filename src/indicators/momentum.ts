@@ -4,7 +4,8 @@
  */
 import { rsi, atr, trueRange, sourceValues } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
-import { sma, wma, rma, vwma, smaSeededEma, stdev, highest, lowest, nulls } from './calc';
+import { sma, rma, smaSeededEma, stdev, highest, lowest, nulls } from './calc';
+import { fromFirstValue, smoothingMa } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -44,47 +45,6 @@ const SMOOTHING_MA_TYPES: readonly { label: string; value: string }[] = [
 
 /** Set by `maType` when the two Bollinger band plots become visible. */
 const BOLLINGER_MA = 'SMA + Bollinger Bands';
-
-/**
- * Run `smooth` over the tail that begins at the series' first real value, then
- * pad the answer back to full length.
- *
- * Chaining a smoother straight onto a series that already has a warmup gap gets
- * the wrong answer: a recursive average carries one NaN forever, and a windowed
- * one counts holes as bars. A study simply does not exist before its first
- * value, and the smoother's window has to start counting there.
- */
-function fromFirstValue(
-  values: readonly number[],
-  smooth: (tail: readonly number[], start: number) => number[],
-): number[] {
-  const n = values.length;
-  const out = new Array<number>(n).fill(NaN);
-  let start = 0;
-  while (start < n && !Number.isFinite(values[start])) start += 1;
-  if (start >= n) return out;
-  const tail = smooth(values.slice(start), start);
-  for (let i = 0; i < tail.length && start + i < n; i++) out[start + i] = tail[i];
-  return out;
-}
-
-/** The smoothing block's kernel switch, applied to an indicator's own output. */
-function smoothingMa(
-  kind: string,
-  values: readonly number[],
-  volumes: readonly number[],
-  length: number,
-): number[] {
-  switch (kind) {
-    case 'EMA': return fromFirstValue(values, (t) => smaSeededEma(t, length));
-    case 'SMMA (RMA)': return fromFirstValue(values, (t) => rma(t, length));
-    case 'WMA': return fromFirstValue(values, (t) => wma(t, length));
-    case 'VWMA': return fromFirstValue(values, (t, start) => vwma(t, volumes.slice(start), length));
-    // 'SMA', the Bollinger variant, and (because a settings blob can carry
-    // anything) everything else.
-    default: return fromFirstValue(values, (t) => sma(t, length));
-  }
-}
 
 export const RSI: IndicatorDescriptor = {
   id: 'rsi',

@@ -18,7 +18,8 @@
  */
 import { sourceValues } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
-import { sma, nulls, smaSeededEma, change, roc, highest, lowest } from './calc';
+import { sma, nulls, change, roc, highest, lowest } from './calc';
+import { emaOfGapped } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -30,22 +31,6 @@ const len = (s: Readonly<Record<string, unknown>>, k: string, d: number): number
 const src = (s: Readonly<Record<string, unknown>>): IndicatorSource => (s.source as IndicatorSource) ?? 'close';
 const text = (s: Readonly<Record<string, unknown>>, k: string, d: string): string =>
   typeof s[k] === 'string' ? (s[k] as string) : d;
-
-/**
- * Align a chained SMA-seeded EMA with its input's leading warmup gap.
- * Smoothing starts at the first finite value and the result is padded back to
- * the original bar positions. Seeding and later gaps follow `smaSeededEma`.
- */
-function emaOfGapped(values: readonly number[], period: number): number[] {
-  const n = values.length;
-  const out = new Array<number>(n).fill(NaN);
-  let start = 0;
-  while (start < n && !Number.isFinite(values[start])) start += 1;
-  if (start >= n) return out;
-  const tail = smaSeededEma(values.slice(start), period);
-  for (let i = 0; i < tail.length; i++) out[start + i] = tail[i];
-  return out;
-}
 
 /**
  * The upstream `tsi(source, shortLength, longLength)`.

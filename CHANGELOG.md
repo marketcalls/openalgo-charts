@@ -2,6 +2,36 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Internal
+
+- The indicator tier's warmup-gap alignment and its Smoothing block are
+  written once, in an internal module the tier does not export, instead of as
+  private copies in seven study modules: four of the gapped EMA, three of the
+  Smoothing kernel switch and two of the first-value alignment. The canvas
+  colour helpers and the widget's tokens share one luminance calculation, each
+  still reading colours through its own parser, because the two parsers
+  disagree on malformed input and merging them would move a colour. No output
+  changed: all 105 built-in studies over 16 synthetic datasets and 31,312
+  setting combinations, and 12,037 colour probes across both parsers, give
+  bit-identical results before and after, from source and from the built
+  bundles. `tests/shared-helpers.test.ts` checks the merged helpers bitwise
+  against the copies they replaced.
+- The two public `withAlpha` functions stay separate on purpose, and their
+  declarations now say so: the base package's writes `rgba()` with the alpha
+  as given, for canvas, and the widget's writes `#rrggbb` for an opaque colour
+  and clamps and rounds the alpha, for a token value.
+
+### Sizes
+
+Measured on this change against 2.5.5, Brotli bytes: base engine 119,149 to
+119,085, base + trade 135,788 to 135,772, indicator tier 36,345 to 36,335, draw
+tier 44,870 to 44,835, widget tier 82,302 to 82,220, widget terminal 282,666 to
+282,475, everything 335,150 to 335,007. The transform, profile, WebGL2 and
+workspace rows did not move, and the chart-only import (`npm run shake`) fell
+from 76,874 to 76,850. No budget changed.
+
 ## 2.5.5
 
 2026-09-26

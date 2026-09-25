@@ -3,7 +3,8 @@
  * Part of the lazy `openalgo-charts/indicators` tier.
  */
 import type { Bar, IndicatorDescriptor } from 'openalgo-charts';
-import { nulls, sma, wma, rma, vwma, smaSeededEma, stdev } from './calc';
+import { nulls, sma, stdev } from './calc';
+import { smoothingMa } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -38,28 +39,6 @@ const SMOOTHING_MA_TYPES: readonly { label: string; value: string }[] = [
 
 /** Set by `maType` when the two Bollinger band plots become visible. */
 const BOLLINGER_MA = 'SMA + Bollinger Bands';
-
-/**
- * The smoothing block's kernel switch. No warmup-gap handling here, unlike the
- * same block on a windowed study: a running total prints from bar 0, so the
- * smoother's window can start there too.
- */
-function smoothingMa(
-  kind: string,
-  values: readonly number[],
-  volumes: readonly number[],
-  length: number,
-): number[] {
-  switch (kind) {
-    case 'EMA': return smaSeededEma(values, length);
-    case 'SMMA (RMA)': return rma(values, length);
-    case 'WMA': return wma(values, length);
-    case 'VWMA': return vwma(values, volumes, length);
-    // 'SMA', the Bollinger variant, and (because a settings blob can carry
-    // anything) everything else.
-    default: return sma(values, length);
-  }
-}
 
 export const VOLUME: IndicatorDescriptor = {
   id: 'volume',

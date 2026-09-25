@@ -33,20 +33,40 @@ export function parseColor(color: string): Rgba | null {
 /** Relative luminance (0..1) of a color; 0.5 for unparseable strings. */
 export function luminance(color: string): number {
   const c = parseColor(color);
-  if (c === null) return 0.5;
-  const lin = (v: number): number => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  return c === null ? 0.5 : srgbLuminance(c);
 }
 
-/** Legible text color (near-black or white) for the given fill. */
+/**
+ * Legible text color (near-black or white) for the given fill. The unparsed
+ * fallback is written out here rather than calling `luminance`: measured, this
+ * is the form that keeps the base, draw and chart-only bundles from growing.
+ */
 export function contrastText(bg: string): string {
-  return luminance(bg) > 0.45 ? '#10131a' : '#ffffff';
+  const c = parseColor(bg);
+  return (c !== null ? srgbLuminance(c) : 0.5) > 0.45 ? '#10131a' : '#ffffff';
 }
 
-/** The color as rgba() with the given alpha (parse failure returns the input). */
+const srgbLinear = (v: number): number => {
+  const s = v / 255;
+  return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+};
+
+/**
+ * Relative luminance (0 black, 1 white) of parsed channels on the sRGB curve.
+ * The one copy of this arithmetic: the widget's tokens import it by path and
+ * feed it from their own parser. The parsers stay separate on purpose, since
+ * the widget's also reads space-separated `rgb()` and the two disagree on
+ * malformed input, so sharing one would move a colour on one side or the other.
+ */
+export function srgbLuminance(c: Rgba): number {
+  return 0.2126 * srgbLinear(c.r) + 0.7152 * srgbLinear(c.g) + 0.0722 * srgbLinear(c.b);
+}
+
+/**
+ * The color as rgba() with the given alpha (parse failure returns the input).
+ * The canvas form, published as the package's `withAlpha`. The widget's
+ * `withAlpha` is a different function on purpose: it writes token values.
+ */
 export function withAlpha(color: string, alpha: number): string {
   const c = parseColor(color);
   if (c === null) return color;
