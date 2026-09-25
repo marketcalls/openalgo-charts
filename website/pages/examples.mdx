@@ -6,6 +6,7 @@ description: Live, in-page chart demos powered by the real OpenAlgo Charts libra
 import RunnableExample from '../components/RunnableExample'
 import TypedInputsDemo from '../components/TypedInputsDemo'
 import { STOCK_BARS_SOURCE } from '../components/synthetic-market'
+import { SANDBOX_BROKER_EXAMPLE } from '../components/account-examples'
 import { ProfileDemo, ProfileThemeGallery } from '../components/ProfileShowcase'
 import DepthLadderDemo from '../components/DepthLadderDemo'
 import DrawingToolsDemo from '../components/DrawingToolsDemo'
@@ -599,6 +600,15 @@ chart.trading.on('trading:order_modify', (event) => {
 });
 chart.fitContent();
 return chart;`} />
+## Sandbox accounts and native position commands
+
+A simulated provider with two sandbox accounts and one live account. The status line
+shows the selected account's equity and margin; its menu lists only the sandbox
+accounts. Buy, then close part of the position, reverse it or close it: each is the
+provider's own command, never an opposite order. Drop the connection to see the
+figures kept and marked stale. See [Accounts and advanced orders](/docs/trading-accounts).
+
+<RunnableExample height={520} tiers={['widget', 'trade']} caption="Simulated sandbox broker in analyzer mode. Use the account menu in the status line to switch accounts." code={SANDBOX_BROKER_EXAMPLE} />
 
 ## Open interest and instrument rules
 

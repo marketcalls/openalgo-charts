@@ -11,10 +11,18 @@ export { WorkingOrderLine } from './order-line';
 export { PositionMarker } from './position';
 export { BracketGroup, type BracketState } from './bracket';
 export { TradeController, type TradeHost } from './trade-controller';
-export { FakeBroker } from './fake-broker';
+export {
+  FakeBroker,
+  type FakeBrokerOptions,
+  type FakeAccountSeed,
+  type FakeBrokerOperation,
+  type FakeBrokerFailure,
+  type FakeOrderInfo,
+} from './fake-broker';
 export {
   OrderEngine,
   isPreflightFailure,
+  isBrokerRejection,
   type OrderEngineOptions,
   type OrderFeed,
   type PlaceRequest,
@@ -26,7 +34,46 @@ export {
   type ModifyOptions,
   type MarketOrderOptions,
   type PreflightFailure,
+  type BrokerRejection,
+  type BrokerOrderUpdate,
+  type OrderPreview,
+  type PreviewResult,
+  type PositionCommandRequest,
+  type ClosePositionRequest,
+  type ReversePositionRequest,
+  type BracketOrderRequest,
+  type CommandReceipt,
+  type BracketReceipt,
+  type CommandResult,
+  type TradingCommand,
+  type TradingCommandKind,
+  type OrderKind,
 } from './order-engine';
+export {
+  checkTradingFeature,
+  tradingFeatureLabel,
+  ORDER_DURATIONS,
+  type OrderDuration,
+  type TradingFeature,
+  type TradingFeatures,
+  type TradingFeatureRequest,
+  type TradingFeatureSource,
+} from './features';
+export {
+  AccountManager,
+  type AccountManagerOptions,
+  type AccountFeed,
+  type AccountState,
+  type AccountStatus,
+  type AccountStateSource,
+  type AccountSnapshot,
+  type AccountSelectResult,
+  type AccountReadResult,
+  type AccountHistoryQuery,
+  type TradingAccount,
+  type Execution,
+  type OrderHistoryEntry,
+} from './account';
 export {
   transition,
   canTransition,

@@ -26,6 +26,7 @@ import {
 } from './orders.js';
 import { tickScheduleFor, axisMinMove } from './ticks.js';
 import { initBracket, attachBracketLines, setBracketPrice, updateBracket, removeBracket } from './bracket.js';
+import { initAccount } from './account.js';
 import { initIndicators, fillIndicatorPicker, renderIndicatorChips, openSettings, rememberIndicators } from './indicators.js';
 import { chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
 import { bindIndicatorSource, initIndicatorSource } from './indicator-source.js';
@@ -524,6 +525,7 @@ initFeed(app);
 initVolume(app);
 initOrders(app);
 initBracket(app);
+initAccount(app);
 initIndicators(app);
 initIndicatorSource();
 initRoutedStudy();

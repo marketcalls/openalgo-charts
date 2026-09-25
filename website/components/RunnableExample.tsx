@@ -33,12 +33,17 @@ interface Props {
 // demo code only ever hands it plain bar data, which belongs to no instance.
 async function loadLib(tiers: readonly Tier[]): Promise<Record<string, unknown>> {
   const lib = await import('../lib/oac/openalgo-charts.all.mjs');
-  if (!tiers.includes('widget')) return lib as unknown as Record<string, unknown>;
+  // The trade tier is not in the combined bundle either. Its broker, account
+  // and engine classes hold no registry, so running them on the tier file's
+  // own engine instance is safe; only these three are merged in.
+  const trade = tiers.includes('trade') ? await import('../lib/oac/openalgo-charts.trade.mjs') : null;
+  const extra = trade === null ? {} : { AccountManager: trade.AccountManager, FakeBroker: trade.FakeBroker, OrderEngine: trade.OrderEngine };
+  if (!tiers.includes('widget')) return { ...lib, ...extra } as unknown as Record<string, unknown>;
   const [widget] = await Promise.all([
     import('../lib/oac/openalgo-charts.widget.mjs'),
     import('../lib/oac/openalgo-charts.indicators.mjs'),
   ]);
-  return { ...lib, createWidget: widget.createWidget } as unknown as Record<string, unknown>;
+  return { ...lib, ...extra, createWidget: widget.createWidget } as unknown as Record<string, unknown>;
 }
 
 export default function RunnableExample({ code, tiers = [], height = 360, hideCode = false, caption }: Props) {

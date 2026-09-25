@@ -284,6 +284,81 @@ returned, except TEMA's last-digit rounding. No public signature changed.
   deterministically, including an unknown instrument, a markup headline and a script
   link for the reader to refuse; without `--fixture` both answer 501, since the
   server has no live quote or news source, and the page asks for quotes once.
+- Account state in the trade tier. `AccountManager` lists a provider's accounts
+  for one mode, loads the selected account's balance, equity, margin used and
+  available, P&L and leverage, follows its stream, and reads its positions,
+  executions and order history, dropping and counting rows that name another
+  account (a position names one through the new optional `Position.accountId`
+  when the provider stamps it). Switching accounts aborts the old account's
+  requests and stream, so a late answer is never shown under the new name; a
+  pushed reading older than the one on screen, a snapshot from the other
+  ledger, and a non-finite figure are all refused. A dropped connection keeps
+  the last figures marked stale until `reconnect()`. It never writes.
+- Declared newer operations. `TradingFeatures` (`accounts`, `executions`,
+  `orderHistory`, `preview`, `durations`, `leverage`, `close`, `partialClose`,
+  `reverse`, `brackets`) on `OrderFeed.features`, checked with
+  `checkTradingFeature`. Unlike the place, modify and cancel flags, an omitted
+  feature is unsupported, and every refusal names the feature.
+- `PlaceRequest.account`, `duration` (`DAY`, `IOC`, `FOK`, `GTC`, `GTD`),
+  `expiresAt` and `leverage`, checked before and after confirmation and never
+  dropped on the way to the wire. With `selectedAccount`, the engine stamps the
+  selected account on each order, refuses one naming another account, and
+  sends nothing when the account changes while the user is confirming; an order
+  already in flight keeps its account. Given the account view itself
+  (`selectedAccount: accounts`), it also refuses a selection from the other
+  ledger, so a sandbox engine never stamps a live account on an order.
+- `OrderEngine.previewOrder`: the provider's estimated value, margin and
+  refusal reason for an order, without claiming its token or placing it.
+- Provider-native `closePosition` (whole or partial), `reversePosition` and
+  `placeBracket`, each with its own idempotency token, its own feature and
+  `confirmCommand` approval when not armed. An opposite order is never sent in
+  place of a close. A close or reverse without a known outcome holds the
+  position against another, whether or not either names the exchange;
+  `onBrokerOrder` settles a write whose answer was lost through the client
+  token the broker echoes, `releaseAmbiguous` frees one the host has shown
+  never arrived, and a feed error marked `rejected: true` (`isBrokerRejection`)
+  settles as the broker's refusal. A bracket gives each
+  leg its own client token (`legClientTokens`), and `onBrokerOrder` adopts a
+  leg by that token or by its entry and role (`parentId`, `role`), so a bracket
+  whose answer was lost still has legs that can be cancelled and filled. A leg
+  that names an entry not yet bound (a history listed newest first, or legs
+  streamed before the entry's id comes back) is held until the entry binds, so
+  the broker's rows can arrive in any order.
+- `FakeBroker({ accounts })` simulates all of it: per-account ledgers filled at
+  a mark price, preview, `IOC`/`FOK` cancellation, `GTD` expiry, leverage
+  limits, native close, reverse and linked bracket legs, server-side refusals
+  (including a cancel or modify of an order that has already filled), and
+  hooks to hold, fail or lose any answer and drop the connection. A call
+  made while the connection is down fails as never sent (a pre-flight
+  failure), so the engine blocks it rather than holding it ambiguous; one
+  already out when it drops fails like a lost answer. Without `accounts` it
+  is otherwise unchanged and declares none of it.
+- Widget account summary. The `account` option shows the selected account,
+  an Analyzer tag for the sandbox ledger, equity and margin in the status line,
+  with a menu to switch; a source whose provider declares no accounts renders
+  disabled with the reason. `mountAccountSummary` and `ACCOUNT_SUMMARY_CSS`
+  are exported for custom hosts.
+- The reference host's Account button opens a sandbox broker panel: account
+  switching, preview-gated placement with durations and leverage, native close,
+  partial close, reverse and brackets, executions, and a dropped connection
+  whose Reconnect settles every write the panel sent from the order history of
+  every account it has written to, as the sandbox example on the examples page
+  does, so the legs of a filled bracket stay live across any number of
+  reconnects.
+
+### Fixed
+
+- `onBrokerUpdate` on a row the client had written off as `AMBIGUOUS` (a lost
+  answer reads `rejected`, a row a reconnect snapshot missed reads `stale`) now
+  takes the broker's status. An order the broker reports working is live
+  again, so it can be modified and cancelled, and it is no longer pruned as if
+  it had settled. A row the broker reports as pending counts as accepted.
+
+### Changed
+
+- `OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and
+  `leverage` before any network call: OpenAlgo's placeorder has no such fields
+  and one key is one account.
 
 ## 2.5.4
 

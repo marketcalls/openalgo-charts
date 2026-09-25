@@ -17,6 +17,11 @@ through a small `OrderFeed` interface (`place` / `modify` / `cancel`) - the Open
 Try the [simulated live depth ladder](/docs/depth-of-market) to explore bid/ask
 quantities, configurable price grouping and different book depths.
 
+Account selection and figures, order preview, durations and leverage, and a provider's
+own close, partial close, reverse and brackets are covered in
+[Accounts and advanced orders](/docs/trading-accounts). Each is declared by the provider
+and refused when it is not.
+
 [Trader alerts](/docs/alerts) use the base-tier `AlertController`. Their draggable
 thresholds and `alert:triggered` notifications do not place or modify broker orders.
 Keep alert delivery separate from the trading write path.
@@ -598,7 +603,9 @@ bracket.update({ ...state, target: 3050 }); // adjust TP
 
 `FakeBroker` is a deterministic in-memory broker that implements `OrderFeed`.
 Use it to exercise `OrderEngine` and `TradeController` without a network
-connection.
+connection. Constructed with `accounts`, it also simulates account ledgers,
+preview, durations and native position commands; see
+[Accounts and advanced orders](/docs/trading-accounts#fakebroker).
 
 ```ts
 import { FakeBroker, OrderEngine, TradeController } from 'openalgo-charts/trade';

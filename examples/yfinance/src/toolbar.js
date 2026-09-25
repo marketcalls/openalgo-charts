@@ -496,6 +496,15 @@ export function renderToolbar() {
   sell.classList.add('tbtn--sell');
   sell.addEventListener('click', () => { if (pane === 1 && currentTarget(target)) el('sell').click(); });
   bar.appendChild(sell);
+  // The sandbox broker: the trade tier's account, preview and native close
+  // contract against a simulated provider, beside the page's own simulation.
+  const account = tbtn('<span>Account</span>', 'Sandbox broker account',
+    pane === 2 ? 'The sandbox broker trades chart 1' : 'figures, preview, durations, native close and reverse');
+  account.id = 'account';
+  account.disabled = pane === 2;
+  account.setAttribute('aria-haspopup', 'dialog');
+  account.addEventListener('click', () => { if (pane === 1 && currentTarget(target)) app.openAccount?.(account); });
+  bar.appendChild(account);
 
   bar.appendChild(divider());
   bar.appendChild(iconBtn('gear', 'Chart settings (or right-click the chart)', () => openChartSettings(undefined, target)));

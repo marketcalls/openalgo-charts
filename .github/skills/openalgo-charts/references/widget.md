@@ -173,6 +173,8 @@ the status line and download resources are released after handoff or failure.
 |---|---|---|
 | `mountStatusline(ctx, host, opts?)` | function | Symbol, interval, O H L C, change, volume, the hovered bar's time, bar count, timezone; a transient message slot. Returns a `StatuslineHandle` (`setSymbol`, `setMessage`, `destroy`). |
 | `priceDigits(chart)` | function | Decimals for the readout: the pane's own precision floored at `MIN_PRICE_DIGITS`. |
+| `mountAccountSummary(ctx, host, { source, locale? })` | function | Account summary: the selected account (a menu switches it), an Analyzer tag for the sandbox ledger, equity, margin used and available, and a Stale or error state. `source` is an `AccountStateSource`, usually the trade tier's `AccountManager`. Read-only apart from switching; it has no order controls. An `unsupported` source renders disabled (`aria-disabled`, class `is-disabled`) with the provider's reason visible. Mounted before `.oac-statusline__tz` when the host has one. In a narrow status line (a container query on the row) the hover time yields first, then margin used, equity and available drop out, and below 860 px the summary moves beside the title so the account and its tag are never the part that is clipped; the picker's tooltip keeps the figures. Returns an `AccountSummaryHandle` (`el`, `refresh`, `destroy`). |
+| `ACCOUNT_SUMMARY_CSS` | const | The summary's rules, part of `WIDGET_COMPONENT_CSS`. |
 | `MIN_PRICE_DIGITS` | const `2` | |
 | `mountToasts(host, doc?)` | function | The toast stack. Returns a `Toaster` (`toast(message, kind?)`, `destroy`). |
 | `TOAST_MS` | const | `{ info: 4000, success: 3500, error: 0 }`; 0 stays until dismissed. |
@@ -191,7 +193,7 @@ the status line and download resources are released after handoff or failure.
 | `OBJECTS_PANEL_CSS` | const | Object list rules, included in the widget stylesheet; custom hosts append it alongside `WIDGET_CSS` and `DIALOG_CSS`. |
 | `WIDGET_STYLE_ID` | const `'oac-widget-css'` | Id of the injected `<style>`, one per document. |
 | `injectWidgetStyles(doc, extra?, nonce?)` | function | Inject or fill an empty sheet once per document; `extra` is appended when filling it. Assigns the nonce before filling/insertion, preserves an existing nonce and leaves populated host CSS untouched. |
-| `StatuslineOptions`, `StatuslineHandle`, `Toaster`, `ToastHandle`, `ToastKind`, `ToastOptions`, `WidgetThemeName`, `WidgetTokens`, `Rgba` | types | |
+| `AccountSummaryOptions`, `AccountSummaryHandle`, `StatuslineOptions`, `StatuslineHandle`, `Toaster`, `ToastHandle`, `ToastKind`, `ToastOptions`, `WidgetThemeName`, `WidgetTokens`, `Rgba` | types | |
 
 ### Dialogs and forms (`dialogs/`, `form.ts`)
 
@@ -281,6 +283,7 @@ Color swatches stay compact. Theme overrides should target these tokens.
 | `now` | `() => number` | `Date.now` | Clock for the load window and the capture filename. |
 | `onOrder` | `(order: OrderRequest) => void` | none | Order entry from the right-click menu. Without it the menu draws no trade rows. |
 | `movablePrimaryPane` | `boolean` | `false`, as in the engine | Pass `true` to let a trader move the price pane below its studies; the widget's own chrome (pane menu, status line, alerts, Objects panel) follows it wherever it sits. Leave it off while host code drives `widget.chart` with an explicit pane `0` for the price, or drop those zeros first. `createChartGrid` hands it to every chart it builds. See [scales-and-panes](scales-and-panes.md#moving-the-price-pane-opt-in). |
+| `account` | `AccountStateSource` | none | Account summary in the status line (see `mountAccountSummary`). Omitted shows nothing; a source whose provider declares no accounts shows disabled with the reason. Hidden with the status line (`statusline: false`, and the compact mobile controls, which hide the status line). It only reads and switches accounts. |
 | `styleNonce` | `string` | none | Response CSP nonce for the shared widget and dialog stylesheet. Style-attribute policy remains the host's responsibility. |
 | `keyboardRoute` | `() => boolean \| undefined` | none | For hosts with several widgets: false silences this widget's chords and chart shortcuts, true sends them here, undefined keeps the usual rule (pointer or focus, or always for a `shortcuts` scope of `global`). Applies to a `ShortcutManager` instance too, shared or not. The chart grid sets it per cell. |
 
