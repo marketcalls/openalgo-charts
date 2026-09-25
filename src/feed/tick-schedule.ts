@@ -52,7 +52,10 @@ export class TickSchedule {
   public constructor(bands: readonly TickBand[]) {
     if (!Array.isArray(bands) || !bands.length || bands.length > MAX_BANDS) fail(`expected 1 to ${MAX_BANDS} bands`);
     const out: TickBand[] = [], digits: number[] = [];
-    bands.forEach((band: unknown, i) => {
+    // An index loop, not forEach: forEach skips a hole, and the band after it
+    // would then find no previous band to check its bound against.
+    for (let i = 0; i < bands.length; i++) {
+      const band: unknown = bands[i];
       const tick = own(band, 'tick'), from = own(band, 'from'), name = `bands[${i}]`;
       if (typeof tick !== 'number' || !Number.isFinite(tick) || tick <= 0 || decimals(tick) < 0) {
         fail(`${name}.tick must be a positive number with at most 12 decimals`);
@@ -61,7 +64,7 @@ export class TickSchedule {
       if (!i) {
         if (from !== undefined) fail(`${name} covers every lower price, including zero and negatives, so it takes no from; use price limits for a floor`);
         out.push(Object.freeze({ tick }));
-        return;
+        continue;
       }
       if (typeof from !== 'number' || !Number.isFinite(from)) fail(`${name}.from must be a finite number`);
       const previous = out[i - 1];
@@ -70,7 +73,7 @@ export class TickSchedule {
       if (!onGrid(from, previous.tick)) fail(`${name}.from ${from} is not a multiple of bands[${i - 1}].tick ${previous.tick}`);
       // Stored exactly as `round` would return it, so a boundary compares equal.
       out.push(Object.freeze({ from: +(Math.round(from / tick) * tick).toFixed(digits[i]), tick }));
-    });
+    }
     const scale = 10 ** Math.max(...digits);
     const units = out.map(band => Math.round(band.tick * scale));
     if (units.some(unit => !Number.isSafeInteger(unit))) fail('the ticks have no common grid in safe integers');
@@ -100,13 +103,20 @@ export class TickSchedule {
   /**
    * The nearest valid price, NaN when `price` is not finite. A price halfway
    * between two valid prices, as written in decimal, rounds toward positive
-   * infinity: the nudge undoes the binary error that stores 10.025 a hair
-   * below itself, which is not the same thing as moving a real price.
+   * infinity.
    */
   public round(price: number): number {
     if (!Number.isFinite(price)) return NaN;
-    const band = this._band(price), units = price / this.bands[band].tick;
-    return this._at(Math.round(units + Math.abs(units) * 16 * Number.EPSILON), band);
+    const band = this._band(price), { tick } = this.bands[band];
+    // The midpoint is itself a decimal with one more digit than the tick, so
+    // it is parsed from that decimal: 10.025 then compares equal to a typed
+    // 10.025, which binary stores a hair below itself. Any allowance for that
+    // error instead would grow with price / tick, until it moved real prices.
+    // Near a whole tick the quotient may floor to either neighbour; the price
+    // is then half a tick from that midpoint and still goes to the one it is on.
+    const below = Math.floor(price / tick);
+    const middle = +((below + 0.5) * tick).toFixed(this._digits[band] + 1);
+    return this._at(price < middle ? below : below + 1, band);
   }
 
   /**

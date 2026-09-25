@@ -5,6 +5,12 @@ import { TickSchedule, type TickBand } from '../src/feed/tick-schedule';
 // a price can cross each boundary in both directions.
 const BANDS: TickBand[] = [{ tick: 0.01 }, { from: 10, tick: 0.05 }, { from: 100, tick: 0.1 }];
 const schedule = (): TickSchedule => new TickSchedule(BANDS);
+/** Two bands with an unset slot between them, as JSON never makes but code can. */
+function holey(): unknown[] {
+  const bands: unknown[] = [{ tick: 0.01 }];
+  bands[2] = { from: 100, tick: 0.05 };
+  return bands;
+}
 
 describe('tick schedule construction', () => {
   it('detaches and freezes the bands, dropping unrelated fields', () => {
@@ -50,6 +56,8 @@ describe('tick schedule construction', () => {
     ['a bound off its own grid', [{ tick: 0.01 }, { from: 10.02, tick: 0.05 }], /bands\[1\]\.from 10\.02 is not a multiple of bands\[1\]\.tick 0\.05/],
     ['a bound off the previous grid', [{ tick: 0.05 }, { from: 10.02, tick: 0.01 }], /bands\[1\]\.from 10\.02 is not a multiple of bands\[0\]\.tick 0\.05/],
     ['ticks with no common grid in safe integers', [{ tick: 1e-12 }, { from: 10000, tick: 10000 }], /common grid/],
+    // A hole is skipped by forEach, so the next band once met no previous one.
+    ['a hole in the band list', holey(), /bands\[1\]\.tick/],
   ])('rejects %s with a clear error', (_label, input, message) => {
     expect(() => new TickSchedule(input as TickBand[])).toThrow(message);
     expect(() => new TickSchedule(input as TickBand[])).toThrow(/^Invalid tick schedule: /);
@@ -93,6 +101,30 @@ describe('tick schedule boundaries', () => {
     expect(ticks.round(10.07)).toBe(10.05);
     expect(ticks.round(12.345678)).toBe(12.35);
     expect(new TickSchedule([{ tick: 0.05 }]).round(100.07)).toBe(100.05);
+  });
+
+  it('rounds to the nearer valid price however many ticks the price is from zero', () => {
+    // A halfway allowance that grew with price / tick once sent a price 0.49
+    // of a tick above a valid price up to the next one.
+    const pico = new TickSchedule([{ tick: 1e-12 }]), fine = new TickSchedule([{ tick: 1e-8 }]);
+    expect(pico.round(5.00000000000049)).toBe(5);
+    expect(pico.round(5.00000000000051)).toBe(5.000000000001);
+    expect(fine.round(50000.0000000049)).toBe(50000);
+    expect(fine.round(50000.0000000051)).toBe(50000.00000001);
+    // A price written exactly halfway still rounds up at that scale.
+    expect(pico.round(5.0000000000005)).toBe(5.000000000001);
+    expect(fine.round(50000.000000005)).toBe(50000.00000001);
+    expect(fine.round(-50000.000000005)).toBe(-50000);
+    // Every price between two valid ones goes to the nearer of them.
+    const ticks = schedule();
+    for (let cents = 900; cents <= 1100; cents++) {
+      for (const part of [0.1, 0.3, 0.45, 0.55, 0.7, 0.9]) {
+        const price = (cents + part) / 100, tick = ticks.tickAt(price);
+        const below = Math.floor(price / tick + 1e-9) * tick;
+        const nearer = price - below < below + tick - price ? below : below + tick;
+        expect(ticks.round(price)).toBeCloseTo(nearer, 9);
+      }
+    }
   });
 
   it('keeps zero and negative prices on the first band without a signed zero', () => {
