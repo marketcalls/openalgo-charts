@@ -1951,7 +1951,7 @@ package root) is how you get the input array out of the bars in the first place.
 | `swma` | `(values)` | The fixed four-bar symmetric average, 1/2/2/1 over 6. |
 | `stoch` | `(source, high, low, period)` | Three independent series, which is why it does not take bars: Stochastic RSI passes the RSI in for all three. |
 | `cci` | `(values, period)` | `(value - sma) / (0.015 * dev)`. |
-| `correlation` | `(a, b, period)` | Pearson correlation over the window. |
+| `correlation` | `(a, b, period)` | Population Pearson correlation over the window, in two passes oldest first: both means before any deviation, so it keeps its precision at high price levels. A window with a missing value or an overflowing step is `NaN`, and so is a flat window whose deviations are all exactly zero (three bars of 5). A flat window whose mean is inexact reads what the arithmetic gives, as in the companion scripting language: three bars of 0.1 average to slightly more than 0.1, so the deviations are a few units in the last place and the reading is exactly 0 against a bar index (Trend Strength Index) and within rounding of 0 against another series. |
 | `percentRank` | `(values, period, options?)` | Percentage of the previous `period` observations at or below the current one, excluding the current subject from the window. |
 | `percentileNearestRank` | `(values, period, percentage)` | Nearest-rank, so the result is an actual member of the window rather than an interpolation between two. Visible on a window as short as 3. |
 | `pivotHigh` / `pivotLow` | `(values, left, right)` | Confirmed `right` bars late: the answer lands on the confirming bar and refers to the value `right` bars back. Strict on both sides, so a tie is not a pivot. |
@@ -2149,6 +2149,198 @@ const sample = rollingVariance(observations, 2, { missing: 'skip', sample: true 
 const signals = crossesAbove(observations, median);
 const plotted = nulls(median);
 ```
+
+## Numerical contract
+
+The built-in studies are compared cell by cell with the companion scripting
+language, which runs the same published formulas under its own rules for missing
+data and floating point. Most readings agree to the last bit. Where they do not,
+the difference is either a defect, corrected as it is found and listed in the
+changelog, or one of the thirteen documented choices below. These are deliberate
+and stay as they are. Each gives the chart's rule, the language's rule, the
+studies it touches with the number of differing cells in the audit corpus, and
+the one thing you can rely on. The engineering record, with the specification
+references, is `docs/reference-coverage/numerical-audit.md` in the repository.
+
+Here a missing observation is a price field that is `NaN`, or a bar without
+volume.
+
+### K1: extremes skip a missing bar
+
+- **Chart:** `highest`, `lowest`, `highestBars` and `lowestBars` without
+  options ignore a missing value in the window and report the extreme of the
+  bars that are present, including when the window reaches into a chained
+  study's warmup.
+- **Language:** every windowed function has no value while any bar of its
+  window is missing, and warmups add up.
+- **Studies:** Ichimoku, Stochastic, Williams VIX Fix, Donchian, Chande Kroll
+  Stop, Chandelier Exit, Aroon, Aroon Oscillator, Fisher Transform, Bollinger
+  BandWidth expansion and contraction, Chop Zone, SMI, Ulcer Index, Stochastic
+  RSI and Williams %R (6,704 cells).
+- **You can rely on:** channel, range and extreme-age studies keep printing
+  across a missing bar. In your own descriptor, pass `{ missing: 'propagate' }`
+  to these helpers when a window with a gap must have no reading.
+
+### K2: no volume means no trade
+
+- **Chart:** a bar whose volume is `undefined` traded nothing. The money-flow
+  studies also count a bar with a missing price as no flow, so running totals
+  print their unchanged value and averages over them advance on that bar.
+- **Language:** a missing volume is missing, not zero, and a missing bar
+  prints a gap and leaves totals and averages where they were.
+- **Studies:** VWAP, MFI, Volume, OBV, A/D, Chaikin Money Flow, Chaikin
+  Oscillator, Elder Force Index, Net Volume, VWMA, PVT, PVO and AlphaTrend
+  (6,200 cells).
+- **You can rely on:** every built-in reads an `undefined` volume as zero
+  traded. A `NaN` volume is a different case, covered under
+  [Missing volume](#missing-volume) below.
+
+### K3: CCI on a flat window
+
+- **Chart:** when every typical price in the window is the same, the mean
+  deviation is exactly 0 and CCI prints 0; its average and bands follow.
+- **Language:** dividing by a zero deviation has no value, so CCI is absent.
+- **Studies:** CCI (1,915 cells).
+- **You can rely on:** CCI reads 0 only on a genuinely flat window. A window
+  holding a missing bar, or one whose deviation overflows, has no reading.
+
+### K4: first reading one bar early
+
+- **Chart:** Supertrend prints its raw band on the ATR seed bar, PVT prints 0
+  on the first bar, and Choppiness counts the first bar's high minus low as its
+  true range.
+- **Language:** each of these withholds that bar and starts one bar later.
+- **Studies:** Supertrend, PVT and Choppiness Index (42 cells).
+- **You can rely on:** these three print one bar before the language
+  equivalent; every later bar is unaffected by this rule.
+
+### K5: host exponential and logarithms
+
+- **Chart:** ALMA, Choppiness and Fisher Transform use the JavaScript engine's
+  `Math.exp`, `Math.log10` and `Math.log`, which are not required to be
+  correctly rounded.
+- **Language:** uses correctly rounded recipes for these functions.
+- **Studies:** ALMA, Fisher Transform and Choppiness Index (6,078 cells).
+- **You can rely on:** these three can differ from the language, and between
+  browsers, in the last bit only.
+
+### K6: units and scaling
+
+- **Chart:** Historical Volatility is a percentage,
+  `(100 * stdev) * sqrt(365 / per)`, and Ease of Movement applies its divisor
+  (10000 by default) inside each bar's term before averaging.
+- **Language:** historical volatility is a ratio and ease of movement has no
+  scaling constant, so a comparison applies the factor at a different step.
+- **Studies:** Historical Volatility and Ease of Movement (5,013 cells).
+- **You can rely on:** Historical Volatility reads in percent and Ease of
+  Movement is scaled per bar; a converted language reading can differ in the
+  last bits.
+
+### K7: Aroon Oscillator in one step
+
+- **Chart:** the oscillator is `(100 * (upAge - downAge)) / length`, rounded
+  once.
+- **Language:** has no oscillator call; composing one subtracts two separately
+  rounded Aroon readings.
+- **Studies:** Aroon Oscillator (2,117 cells).
+- **You can rely on:** the oscillator can differ in the last bits from Aroon Up
+  minus Aroon Down.
+
+### K8: Parabolic SAR conventions
+
+- **Chart:** the stop is held outside the previous two bars' range, a reversal
+  puts the new stop at the larger of the extreme and the reversal bar's high
+  (the lower of the extreme and its low for a short), and a tie on the first
+  pair starts long.
+- **Language:** its parabolic stop is the unclamped recurrence, a reversal stop
+  is the extreme reached, and the first pair starts long only on a strictly
+  higher close.
+- **Studies:** Parabolic SAR (1,570 cells).
+- **You can rely on:** the chart's stop never enters the previous two bars'
+  range and includes the reversal bar, so on most bars of a fast trend it is a
+  different line from the language's.
+
+### K9: overflow near the largest number
+
+- **Chart:** arithmetic that overflows keeps an infinity, which can settle to a
+  finite limit (a zero weight, a 90 degree angle, a sign) or be skipped.
+- **Language:** a step that overflows has no value at once, and a condition on
+  a missing value is false.
+- **Studies:** Connors RSI, Chop Zone, Net Volume, Klinger Oscillator,
+  McGinley Dynamic, Volatility Stop and AlphaTrend (1,240 cells).
+- **You can rely on:** only values near 1.8e308 are affected; ordinary prices
+  and volumes never reach them.
+
+### K10: negative zero
+
+- **Chart:** the Chop Zone angle and Net Volume can return `-0`.
+- **Language:** always stores `0`.
+- **Studies:** Chop Zone and Net Volume (143 cells).
+- **You can rely on:** `-0` plots and prints as 0. Compare with `=== 0`, not
+  `Object.is`.
+
+### K11: Klinger and a NaN volume
+
+- **Chart:** Klinger skips a bar whose volume is `NaN`, as a missing bar, and
+  reads an `undefined` volume as zero.
+- **Language:** a missing volume is missing, not zero. The comparison supplies
+  zero for it explicitly (`orElse(volume, 0)`), to test the chart's documented
+  rule rather than the language's.
+- **Studies:** Klinger Oscillator (904 cells).
+- **You can rely on:** send a bar without volume as `undefined`, and Klinger
+  reads it as zero like every other volume study.
+
+### K12: Relative Volatility Index warmup
+
+- **Chart:** the study's two 14-bar averages restart after every missing value
+  until the standard deviation has its first reading. During that warmup the
+  upper average has nothing on a bar that rose and the lower one nothing on a
+  bar that did not, so a fourteen-bar one-way run can seed one of them only for
+  the next bar the other way to restart it. After the warmup, a missing close
+  is held across instead.
+- **Language:** has no call for this study. Composed from its exponential
+  average, each average keeps a seed made in the warmup and holds it across the
+  missing values that follow.
+- **Studies:** Relative Volatility Index with a Length above 16, on a series
+  whose warmup holds a fourteen-bar one-way run followed by a turn. The default
+  Length 10 is never affected. On a 400-bar test wave the first reading is bar
+  42 against the language's 38 at Length 30, and 52 against 39 at Length 40;
+  later readings differ by an amount that shrinks bar by bar.
+- **You can rely on:** on complete data the study reads exactly as it always
+  has, at every Length.
+
+### K13: PVO signal after a stretch with no volume
+
+- **Chart:** PVO has no reading where its slow volume average is exactly 0, and
+  its signal average then starts again: once PVO prints again, the signal and
+  histogram wait `signalLength - 1` bars for a fresh seed.
+- **Language:** has no call for this study. Composed from its exponential
+  average, the signal holds across the missing readings and continues on the
+  next one.
+- **Studies:** PVO with the SMA oscillator type, after zero or missing volume
+  for at least a slow window. With the default EMA oscillator the slow average
+  never returns to 0 once it has seen volume. On a 300-bar test series with 40
+  bars of zero volume the chart's signal is missing on 8 bars where the
+  language prints, and later values differ.
+- **You can rely on:** a stretch with no traded volume costs the PVO signal
+  one signal window after PVO returns; a series without such a stretch reads
+  as it always has.
+
+### Missing volume
+
+An `undefined` volume is zero traded in every built-in; that is the rule to
+build on. A `NaN` volume is not handled the same way everywhere yet, so there is
+no single rule for it. Each built-in that reads volume does one of two things
+with it:
+
+| A `NaN` volume is read as | Built-ins |
+| --- | --- |
+| Zero, exactly like `undefined` | Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index, Net Volume, VWMA, the VWMA lines of MA Ribbon, NVI, PVI, PVT, PVO, OBV with its smoothing and bands, A/D |
+| A missing bar: that bar, and any window or average holding it, has no reading, then the study recovers | Volume and its average, MFI, Klinger Oscillator, AlphaTrend, the VWMA smoothing option of CCI and of Relative Volatility Index, VWAP and its bands (the running totals leave that bar out) |
+
+Neither treatment loses the rest of the history. Until every study treats
+`NaN` the same way, map a feed's missing or unparseable volume to `undefined`
+before it reaches the chart.
 
 ## Open interest studies
 

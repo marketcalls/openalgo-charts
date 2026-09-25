@@ -343,7 +343,10 @@ export const FISHER_TRANSFORM: IndicatorDescriptor = {
     let prevFish = 0;
     for (let i = 0; i < n; i++) {
       const span = hi[i] - lo[i];
-      if (!Number.isFinite(span)) {
+      // The window extremes skip a missing midpoint, so the span alone can stay
+      // finite on a bar that has none; letting that NaN into the two recursions
+      // would blank the study for the rest of the history.
+      if (!Number.isFinite(span) || !Number.isFinite(mid[i])) {
         prevValue = 0;
         prevFish = 0;
         continue;

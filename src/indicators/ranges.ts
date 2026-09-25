@@ -15,14 +15,14 @@
  *
  * `ema` from the base bundle is deliberately absent from the imports: it seeds
  * from `values[0]`, where the reference `ema` seeds from an SMA of the first
- * `length` values and is `na` before that. `seededEma` below is the reference own
- * definition, generalised to a source with holes in it, which is what the
+ * `length` values and is `na` before that. `seededEma` below is the reference's
+ * own definition, generalised to a source with holes in it, which is what the
  * Relative Volatility Index feeds its two averages.
  */
 import { rsi, sourceValues } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
 import {
-  sma, wma, rma, stdev, highest, lowest, nulls,
+  sma, wma, rma, stdev, highest, lowest, nulls, smaSeededEma,
   change, roc, vwma, rollingSum, swma, stoch, cci,
 } from './calc';
 
@@ -73,14 +73,21 @@ function fromFirstValue(
  *
  *   sum := na(sum[1]) ? sma(src, length) : alpha * src + (1 - alpha) * sum[1]
  *
- * The recursion only starts once an SMA seed exists, and a hole in the source
- * knocks it back to waiting for a fresh one. `smaSeededEma` in `./calc` assumes the
- * source is finite from bar 0, which the Relative Volatility Index's is not: its
+ * The recursion only starts once an SMA seed exists. `smaSeededEma` in `./calc`
+ * cannot stand in for it here: the Relative Volatility Index's
  * `change(src) <= 0 ? 0 : stddev` alternates real zeros with `na` for as long
- * as the standard deviation is still warming up, so the seed cannot simply be
- * the first `length` values.
+ * as the standard deviation is still warming up, and before `holdFrom` (the
+ * deviation's first reading) a hole knocks the average back to waiting for a
+ * fresh seed, exactly as it always has. That is what fixes the first reading,
+ * and every value after it, on a complete series at any length (K12 in the
+ * numerical audit: the companion language holds a seed made in that warmup).
+ *
+ * From `holdFrom` on, a hole can only come from a missing close. The average
+ * then holds: that bar has no value, and the next present one continues from
+ * where the last left off, instead of blanking the study for another
+ * `period` bars and printing a fresh-seed value.
  */
-function seededEma(values: readonly number[], period: number): number[] {
+function seededEma(values: readonly number[], period: number, holdFrom: number): number[] {
   const n = values.length;
   const out = new Array<number>(n).fill(NaN);
   if (period <= 0) return out;
@@ -90,11 +97,15 @@ function seededEma(values: readonly number[], period: number): number[] {
   const k = 2 / (period + 1);
   let prev = NaN;
   for (let i = 0; i < n; i++) {
+    const v = values[i];
     if (!Number.isFinite(prev)) {
       prev = seed[i];
+    } else if (Number.isFinite(v)) {
+      prev = v * k + prev * (1 - k);
+    } else if (i < holdFrom) {
+      prev = NaN;
     } else {
-      const v = values[i];
-      prev = Number.isFinite(v) ? v * k + prev * (1 - k) : NaN;
+      continue;
     }
     out[i] = prev;
   }
@@ -346,8 +357,8 @@ function smoothingMa(
   length: number,
 ): number[] {
   switch (kind) {
-    // `seededEma` finds its own seed, so it needs no slicing.
-    case 'EMA': return seededEma(values, length);
+    // `smaSeededEma` finds its own seed, so it needs no slicing.
+    case 'EMA': return smaSeededEma(values, length);
     case 'SMMA (RMA)': return fromFirstValue(values, (t) => rma(t, length));
     case 'WMA': return fromFirstValue(values, (t) => wma(t, length));
     case 'VWMA': return fromFirstValue(values, (t, start) => vwma(t, volumes.slice(start), length));
@@ -425,8 +436,13 @@ export const RELATIVE_VOLATILITY_INDEX: IndicatorDescriptor = {
       upSource[i] = Number.isFinite(d) && d <= 0 ? 0 : sd[i];
       downSource[i] = Number.isFinite(d) && d > 0 ? 0 : sd[i];
     }
-    const upper = seededEma(upSource, emaLength);
-    const lower = seededEma(downSource, emaLength);
+    // A missing close after the deviation's first reading leaves the sources
+    // absent for a stretch; the averages hold across it. Inside the warmup
+    // they restart as they always have, so a complete series reads as before.
+    let holdFrom = 0;
+    while (holdFrom < n && !Number.isFinite(sd[holdFrom])) holdFrom += 1;
+    const upper = seededEma(upSource, emaLength, holdFrom);
+    const lower = seededEma(downSource, emaLength, holdFrom);
     const rvi = new Array<number>(n).fill(NaN);
     for (let i = 0; i < n; i++) {
       const total = upper[i] + lower[i];

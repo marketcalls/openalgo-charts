@@ -49,6 +49,53 @@ All notable changes to OpenAlgo Charts.
 
 On complete data every finite reading of the studies above is exactly what 2.5.4
 returned, except TEMA's last-digit rounding. No public signature changed.
+- CCI has no reading on a window that holds a missing high, low or close, or
+  whose mean deviation overflows. It used to print 0 there for a whole window's
+  worth of bars, and the CCI-based average and its bands smoothed those invented
+  zeros. A genuinely flat window still reads 0.
+- Stochastic %K multiplies by 100 before dividing by the window range, the order
+  the definition fixes, so a reading can move in its last bit and %D follows. A
+  window whose range overflows has no reading instead of a flat 0, and neither
+  does one whose scaled distance overflows (above about 1.8e306).
+- Fisher Transform restarts both recursions on the bar after a missing midpoint,
+  as its documented rule says. The missing value used to enter the recursion and
+  leave the study blank for the rest of the history.
+- Relative Volatility Index and Mass Index hold their exponential averages across
+  a missing bar and resume on the next present one, instead of reseeding and
+  blanking the study for another 14 (RVI) or 9 (Mass Index) bars. The RVI's EMA
+  smoothing option follows the same rule. Inside the RVI's deviation warmup its
+  averages still restart as before, so complete data reads exactly as in 2.5.4
+  at every Length.
+- NVI and PVI hold their index across a missing close, as they already did after
+  a zero previous close, instead of losing the index and its average for the
+  rest of the history. Complete data is unchanged.
+- True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator multiply
+  the smoothed change by 100 before dividing, which can move readings in the last
+  bit. Above about 1.8e306 that product overflows and the bar is a gap, as in the
+  companion scripting language, where the former order still printed a reading.
+- Trend Strength Index and the exported `correlation` helper finish both window
+  means before forming any deviation, taking two passes oldest first. The former
+  single-pass sums cancelled at ordinary price levels: at 1e5 with 0.01 moves the
+  reading was about one percent off, and at 1e9 it had no value.
+- On a window of identical closes, Trend Strength Index and `correlation` read
+  what the arithmetic gives, as the companion scripting language does, so
+  availability there can differ from 2.5.4 in either direction. The window has
+  no reading when its deviations are all exactly zero, which happens when the
+  mean comes out exact: fourteen bars of 5, or of 0.1, where 2.5.4 printed
+  -1.2e-8. When the mean is inexact, as for three bars of 0.1 or fourteen of
+  2.01, the deviations are a few units in the last place and Trend Strength
+  reads exactly 0, where 2.5.4 printed nothing or its own residue (2.8e-8 for
+  fourteen bars of 2.01). Against a second series other than the bar index,
+  `correlation` reads within rounding of 0 there.
+
+### Documentation
+
+- The indicators page has a Numerical contract section: the thirteen documented
+  differences from the companion scripting language (missing observations in
+  extremes, missing volume, flat CCI windows, first-bar conventions, host
+  logarithms, units, the Aroon Oscillator, Parabolic SAR, overflow, signed zero,
+  Klinger, the RVI warmup and the PVO signal after a stretch with no volume),
+  and how each built-in treats a NaN volume.
 
 ## 2.5.4
 

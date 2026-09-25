@@ -300,30 +300,337 @@ Accumulation/Distribution readings, a Supertrend that keeps its side across a
 missing close, and no bridge across a gap, in all three browser engines.
 Screenshots were inspected.
 
-## Remaining contract distinctions
+## Cell classification
 
-Known distinctions include:
+A classification of the post-directional refresh assigns each of its 106
+differing columns (100,030 cells) exactly one class, the highest-priority class
+among its verified causes: chart defect (49 columns), contract difference (49),
+comparison artifact (7) and companion engine defect (1). Every cell is
+attributed to one cause. The recorded companion arrays are 0.7.0; the released
+0.7.1 engines reproduce every recorded cell used here.
 
-- Bandwidth and historical volatility use percentage display units in the chart;
-  the corresponding language readings are ratios and require multiplication by
-  100 in the compared expression.
-- The native parabolic stop clamps against previous price ranges. The existing
-  language call explicitly specifies an unclamped recurrence. Matching its name
-  and parameters alone does not make those algorithms equivalent.
-- Several native recursive studies remain unavailable after an interior source
-  hole, while the language recurrences preserve their prior state and resume.
-  ATR and the studies built on it, Supertrend, VWAP, TWAP,
-  Accumulation/Distribution and Parabolic SAR now resume after a missing price
-  or volume, and OBV after a missing volume; the rest remain open. Two of the
-  corrected studies still do not hold their state across every gap. Volatility
-  Stop restarts its stop at the source on a bar with no true range, as its
-  reference definition does, and after a missing source, so its level and
-  sometimes its side differ from complete data for some bars. OBV adds nothing
-  on a bar with a missing close or on the next bar, which compares with it, so
-  its total stays offset by that step.
-- Native extrema, zero-denominator handling and missing-volume defaults can
-  change availability even when complete, ordinary inputs agree.
+### Chart defects corrected in this change
 
-These remain open audit items. The wider comparison does not replace the
-independently derived Hull and directional fixtures above or establish complete
-numerical coverage.
+- **CCI** (979 cells). The deviation guard read `md > 0 ? ... : 0`, so a window
+  holding a missing high, low or close (a NaN mean deviation) or an overflowing
+  one printed CCI 0 for `period` bars, and the CCI-based average and Bollinger
+  bands smoothed those invented zeros. A non-finite deviation now leaves the bar
+  absent. The flat-window zero is the separate, documented K3 below.
+- **Stochastic** (1,931 cells). %K is `(100 * (close - lowest)) / span`, the
+  arrangement the language fixes in standard library section 20.4, where it
+  divided first. A span that overflows is absent instead of dividing a finite
+  distance down to 0; an overflowing scaled distance is an infinity that the
+  smoothing and plot drop. %D inherits both.
+- **Fisher Transform** (1,273 cells). The two recursions reset only when the
+  window span was not finite. Because the window extremes skip a missing
+  midpoint (K1), the span stayed finite on such a bar and NaN entered both
+  recursions for the rest of the history. A missing midpoint now resets and
+  skips the bar, which is the descriptor's own documented rule.
+- **Relative Volatility Index and Mass Index** (3,507 cells). The RVI's private
+  EMA and the Mass Index's run-by-run second EMA restarted from a fresh simple
+  mean after any gap, blanking the study for another 14 or 9 bars. The Mass
+  Index now runs the SMA-seeded EMA over the whole series, which holds its
+  state across a gap (standard library 20.2.2). The RVI's two averages keep the
+  reference recursion inside the deviation warmup, where a hole restarts them
+  as before (K12), and hold across a hole from the deviation's first reading
+  on, which only a missing close can make. The RVI's EMA smoothing option uses
+  the SMA-seeded EMA and holds as well.
+- **True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator**
+  (8,869 cells). The ratio is `(100 * doubleSmoothedChange) / doubleSmoothedSize`
+  (standard library 20.4). Above about 1.8e306 the product overflows and the
+  bar is absent, as in the language.
+- **Trend Strength Index and `correlation`** (3,638 cells). Each window takes
+  two passes, oldest first: both means are finished, then cross products and
+  squares of the deviations, and the result is
+  `(cross / len) / (sqrt(squaresA / len) * sqrt(squaresB / len))` (standard
+  library 20.8). The single pass lost about one percent of the reading at a
+  price of 1e5 with 0.01 moves and had no reading at 1e9.
+- **NVI and PVI** (not a classified cause). A missing close on a bar whose
+  volume qualified was compounded into the running product and removed the
+  index and its average for the rest of the history. A missing close now holds
+  the index, as a zero or missing previous close already did, so both lines
+  carry on. The index therefore has no gap for its average to restart after.
+
+The boundary tests in `tests/indicator-numeric-absence.test.ts` use recorded
+companion readings or hand derivations, and failed on the previous sources.
+Reverting each individual change (the CCI guard, the Stochastic order and span
+guard, the Fisher midpoint guard, the RVI hold after the deviation warmup, the
+RVI smoothing average, the Mass Index second average, the TSI order, the
+two-pass correlation and the NVI and PVI close guard) makes between one and
+three of them fail; holding the RVI averages inside the warmup as well makes
+the complete-data check and the Length 30 parity case fail. Five
+built-package browser regressions (CCI, Fisher, RVI with Mass Index, Trend
+Strength at 1e9, and NVI across a missing close) failed on a build of
+the previous sources and pass on the corrected build in Chromium, Firefox and
+WebKit; the screenshots were inspected.
+
+Ordinary data was compared against the previous sources on 22 gapless series
+(a sine wave at 100 and 1e5, random walks at levels 1, 5, 100, 25,000 and
+100,000): all 105 descriptors at their defaults and the affected ones at varied
+settings, 4,060,000 cells in 311 columns. CCI, Fisher Transform, Mass Index and
+every unrelated descriptor are bit-for-bit unchanged. Stochastic and the TSI
+family move only in the last bits (at most 5.4e-16 relative for %K and %D, and
+2.9e-14 on the 0 to 100 scale of the signal lines) with identical availability.
+Trend Strength is within 6.7e-16 of an exact rational correlation on every
+cell; the former single pass was off by up to 0.084 on 2-bar windows and missed
+one reading.
+
+The RVI, NVI and PVI are bit-for-bit unchanged on complete data at every
+setting tried. Their unit tests compare the RVI with the 2.5.4 formula at
+deviation Lengths 2, 10, 14, 16, 17, 30 and 100, with and without the EMA
+smoothing, on six series chosen so that the longer lengths meet a seed inside
+the warmup followed by a hole, the case where holding would move the reading;
+NVI and PVI are compared at four average lengths on three series. A sweep
+against the 2.5.4 sources themselves covered deviation Lengths 1 to 120, 150
+and 200 with all eight smoothing options, NVI and PVI at four average lengths
+and PVO at five settings, over fourteen complete series including stretches of
+zero volume: 33,555,900 cells, none different. Every built-in at its defaults
+on eight further complete series (1,170,400 cells) differs from 2.5.4 only in
+Stochastic and the TSI family, in the last bits, and in Trend Strength, by the
+former single pass's error. Availability is identical on those series, none of
+which holds a window of identical closes, and for Trend Strength that is as far
+as the statement goes. On such a window the two-pass form gives
+no reading when the deviations are all exactly zero, which needs an exact mean
+(fourteen bars of 5 or of 0.1), and reads exactly 0 when the mean is inexact
+(three bars of 0.1, fourteen of 2.01), as the language does. The single pass
+printed nothing or its own residue on these windows, so availability moves in
+both directions: three bars of 0.1 went from none to 0 and fourteen of 0.1 from
+-1.2e-8 to none, while fourteen of 2.01 went from 2.8e-8 to 0. On four simulated
+5,000-bar tick series (at 2, 8, 350.15 and 24,000, the first three with
+frequent unchanged closes) at Lengths 3, 14 and 30, up to 1,274 cells per series
+and Length went from none to 0 and up to 658 from a reading to none. Every one
+of them was a window of identical closes, and every new reading was 0.
+Circuit-locked and illiquid instruments produce these windows.
+
+These corrections move the indicator tier from 36.27 to 36.31 kB Brotli
+(36,310 bytes), the widget terminal from 267.55 to 267.59 kB (267,594 bytes)
+and all tiers from 310.09 to 310.13 kB (310,127 bytes). Their budgets are now
+36.31, 267.60 and 310.13 kB, the smallest two-decimal values that pass.
+
+### Contract differences
+
+These thirteen are documented choices, not defects, and this change does not
+alter them. The website indicators page carries the same rules for users under
+Numerical contract. For K1 to K11, cell counts are each cause's attributed
+cells in the classified corpus (31,926 in all); a column can carry more than
+one cause. K12 and K13 came out of correcting D11 and are measured on the
+fixtures named in each entry.
+
+**K1. Extremes skip missing observations inside the window** (6,704 cells).
+- Chart: `highest`, `lowest`, `highestBars` and `lowestBars` without options
+  ignore NaN (it loses every comparison), so a window holding a missing bar, or
+  reaching into a chained source's warmup, reports the extreme of the bars that
+  are present.
+- Language: every windowed function is absent while any bar of its window is
+  absent, and warmups compose (standard library sections 1 and 2.4, language
+  section 6.7).
+- Affected: Ichimoku (661), Stochastic (176), Williams VIX Fix (1,453),
+  Donchian (286), Chande Kroll Stop (68), Chandelier Exit (164), Aroon (124),
+  Aroon Oscillator (184), Fisher Transform (1,292), Bollinger BandWidth
+  expansion and contraction (1,102), Chop Zone (114), SMI (888), Ulcer Index
+  (56), Stochastic RSI (52) and Williams %R (84). The same descriptors run
+  with the propagate option are exact.
+- Rely on: channel, range and extreme-age studies keep printing across a
+  missing bar; pass `{ missing: 'propagate' }` to these helpers in your own
+  descriptor when a window with a gap must have no reading.
+
+**K2. Missing volume, and in flow studies a missing price, counts as no trade**
+(6,200 cells).
+- Chart: an undefined volume is zero traded. The money-flow studies also read a
+  non-finite flow term as 0, so running totals print their unchanged value and
+  averages over them advance on that bar.
+- Language: volume is absent, not zero (standard library 3.1); an absent bar
+  gives an absent reading and leaves totals and averages unchanged (20.6 and
+  20.2.2).
+- Affected: VWAP (14), MFI (29), Volume (46), OBV (128), A/D (12), Chaikin Money
+  Flow (84), Chaikin Oscillator (1,744), Elder Force Index (942), Net Volume
+  (6), VWMA (84), PVT (12), PVO (2,890) and AlphaTrend (209). Treating missing
+  volume and price as absent makes Volume, MFI, VWMA, CMF, EFI, PVO and the
+  Chaikin Oscillator exact.
+- Rely on: a bar with no volume is a bar that traded nothing; totals hold and
+  averages still advance where the language would print a gap.
+
+**K3. CCI reads 0 on a window with no deviation** (1,915 cells).
+- Chart: a flat window (mean deviation exactly 0) prints CCI 0, and the
+  CCI-based average and bands follow.
+- Language: dividing by a zero deviation has no value, so `cci` is absent
+  (standard library 2.4, language 6.3).
+- Affected: CCI (cci 493, average and both bands 474 each).
+- Rely on: CCI prints 0 when every typical price in its window is equal; a
+  window with a missing bar or an overflowing deviation has no reading.
+
+**K4. First reading one bar earlier** (42 cells).
+- Chart: Supertrend prints the raw band on the ATR seed bar (`atrLength - 1`);
+  PVT prints 0 on bar 0; Choppiness sums the plain true range, whose bar 0 is
+  high minus low, so it prints from bar `length - 1`.
+- Language: `supertrend` is absent on the seed bar and starts at `atrLen`,
+  `pvt` starts at bar 1, and `chop` uses the gap-aware true range and starts at
+  bar `len` (standard library sections 4, 6 and 7; 20.3, 20.5 and 20.6).
+- Affected: Supertrend (22), Choppiness Index (9) and PVT (11).
+- Rely on: these three print one bar before the language equivalent, which
+  withholds that bar.
+
+**K5. Host exponential and logarithms are not correctly rounded** (6,078
+cells).
+- Chart: ALMA, Choppiness and Fisher use `Math.exp`, `Math.log10` and
+  `Math.log`.
+- Language: the 0.7 engines use correctly rounded portable recipes (standard
+  library 20.10.2); the specification exempts these functions from conformance
+  (20.11, gap 1).
+- Affected: ALMA (4,616), Fisher Transform (1,068) and Choppiness Index (394).
+  Substituting the engine functions makes ALMA exact and removes the Fisher and
+  Choppiness bit differences.
+- Rely on: these three can differ from the language, and between JavaScript
+  engines, in the last bit.
+
+**K6. Percentage units and scaling constants at a different step** (5,013
+cells).
+- Chart: Historical Volatility is a percentage formed as
+  `(100 * stdev) * sqrt(365 / per)`; Ease of Movement applies its divisor
+  (10000) inside each bar's term before averaging.
+- Language: `hv` is a ratio (20.5), so a comparison multiplies `100 * hv(...)`
+  outside the annualisation; `eom` has no scaling constant (20.11, gap 3), so a
+  comparison multiplies the mean.
+- Affected: Historical Volatility (1,700) and Ease of Movement (3,313).
+  Applying the factor at the reference step makes both exact. Bollinger
+  BandWidth also reads in percent; compared with the language ratio times 100,
+  its reading has no differing cell in the classified corpus.
+- Rely on: Historical Volatility reads in percent and Ease of Movement is
+  scaled inside each bar; a converted language reading can differ in the last
+  bits.
+
+**K7. Aroon Oscillator scales the age difference once** (2,117 cells).
+- Chart: `(100 * (upAge - downAge)) / length`, one rounding.
+- Language: there is no oscillator call; composing it subtracts two separately
+  rounded Aroon percentages (20.3).
+- Affected: Aroon Oscillator (2,117).
+- Rely on: the oscillator can differ in the last bits from Aroon Up minus Aroon
+  Down.
+
+**K8. Parabolic SAR clamp and reversal conventions** (1,570 cells).
+- Chart: the stop is clamped to the previous two bars' range, a reversal
+  places the stop at the larger of the extreme and this bar's high (mirrored
+  for a short), and a tie on the seed pair starts long.
+- Language: `psar` is the unclamped recurrence, a reversal stop is the extreme
+  reached, and the seed is long only on a strictly higher close (20.3, which
+  names the clamp as a different function).
+- Affected: Parabolic SAR (1,570). The specification recipe with only the clamp
+  added accounts for 1,565 of these; the reversal and tie conventions for the
+  rest.
+- Rely on: the chart's stop stays outside the previous two bars' range and
+  includes the reversal bar, so it differs from the language `psar` on most
+  bars of a fast trend.
+
+**K9. Overflow: IEEE infinities against per-operation absence** (1,240 cells).
+- Chart: native arithmetic keeps an overflowing intermediate as an infinity,
+  which can reach a finite limit (a zero weight, a 90 degree angle, a sign) or
+  be skipped.
+- Language: every non-finite intermediate is absent at once and a condition on
+  an absent value takes the false branch (compiled program 3.1, language 6.3
+  and 6.6).
+- Affected: Connors RSI (102), Chop Zone (262), Net Volume (3), Klinger
+  Oscillator (524), McGinley Dynamic (262), Volatility Stop (2) and AlphaTrend
+  (85). Modelling per-operation absence makes McGinley, Chop Zone, Klinger and
+  Net Volume exact; the Connors RSI cells were traced by inspection.
+- Rely on: near the largest double (about 1.8e308) readings at and after an
+  overflowing bar can differ from the language or be absent; ordinary prices
+  never reach it.
+
+**K10. Signed zero** (143 cells).
+- Chart: the Chop Zone angle and Net Volume can return -0.
+- Language: negative zero is normalised to positive zero on every result
+  (compiled program 3.1).
+- Affected: Chop Zone (60) and Net Volume (83).
+- Rely on: a negative zero plots and prints as 0; compare with `=== 0`, not
+  `Object.is`.
+
+**K11. Klinger reads a NaN volume as a missing bar** (904 cells).
+- Chart: a NaN volume passes through `volume ?? 0`, so the Klinger averages
+  skip that bar, while an undefined volume is zero.
+- Language: absent volume is absent (3.1); the compared composition encodes the
+  chart's documented zero rule with `orElse(volume, 0)`, so this is not a
+  departure from the specification.
+- Affected: Klinger Oscillator (kvo 458, signal 446). Reading NaN volume as
+  zero makes these cells exact.
+- Rely on: pass missing volume as `undefined`; Klinger then reads it as zero,
+  like every other volume study.
+
+**K12. The RVI averages restart inside the deviation warmup** (measured on
+fixtures).
+- Chart: the Relative Volatility Index's two 14-bar averages follow the
+  reference recursion,
+  `sum := na(sum[1]) ? sma(src, 14) : alpha * src + (1 - alpha) * sum[1]`.
+  Until the standard deviation's first reading, the upper average's source is
+  absent on every bar that rose and the lower average's on every bar that did
+  not, and each absent bar restarts the average, which seeds again on the next
+  fourteen present bars. From the deviation's first reading on, a hole can
+  only come from a missing close, and the averages hold across it.
+- Language: there is no call for this study; composed with `ema`, each average
+  seeds on its first fourteen present inputs and holds across every later
+  absent one, the warmup's included (20.2.2).
+- Affected: the RVI at a deviation Length above 16 on a series whose warmup
+  holds a fourteen-bar one-way run followed by a bar the other way; the default
+  Length 10 never. Against the 0.7.1 engine on the 400-bar test wave the first
+  reading is bar 42 in the chart and 38 in the language at Length 30, 52 and 39
+  at Length 40, and 112 and 99 at Length 100, and the later readings differ by
+  a shrinking amount (4 availability and 241 value cells at Length 30); Lengths
+  2 to 25 agree bit for bit there. On runs of exactly fourteen bars the first
+  reading is bar 29 against 28 at Length 17.
+- Rely on: on complete data the RVI reads exactly as it always has, at every
+  length; at a long deviation Length the language's first reading can come
+  earlier, and its later readings differ from the chart's until the difference
+  decays.
+
+**K13. The PVO signal restarts after a stretch with no reading** (measured on
+fixtures).
+- Chart: after its warmup PVO has no reading only where the slow volume
+  average is exactly 0. The signal average then starts again on the next full
+  window of readings, so after PVO prints again the signal and histogram wait
+  `signalLength - 1` bars for a new seed.
+- Language: there is no call for this study; composed with `ema`, the signal
+  holds across the absent readings and resumes on the next one (20.2.2).
+- Affected: PVO with the SMA oscillator and the EMA signal, after a stretch of
+  zero or missing volume at least one slow window long. With the default EMA
+  oscillator the slow average stays above 0 once it has seeded on any volume.
+  Against the 0.7.1 engine on a 300-bar wave with 40 bars of zero volume the
+  chart's signal and histogram are absent on 8 bars where the language prints,
+  and 152 later values differ; with the EMA oscillator nothing differs.
+- Rely on: a stretch with no traded volume costs the PVO signal one signal
+  window after PVO returns; complete data without such a stretch reads as it
+  always has.
+
+### NaN volume
+
+An undefined volume is zero traded in every built-in (K2), and that is the rule
+to rely on. A NaN volume is treated two different ways, so no single rule can be
+written down for it. Setting one bar's volume to NaN and, separately, to
+`undefined` on a 300-bar series, for every descriptor at its defaults and with
+each VWMA smoothing option, gives:
+
+| Treatment of a NaN volume | Built-ins |
+| --- | --- |
+| Zero, identical to an undefined volume | Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index, Net Volume, VWMA, the VWMA lines of MA Ribbon, NVI, PVI, PVT, PVO, OBV with its smoothing and bands, A/D |
+| A missing bar: that bar and any window or average holding it are absent, then the study recovers | Volume and its average, MFI, Klinger Oscillator (K11), AlphaTrend, the VWMA smoothing option of CCI and of the RVI, VWAP and its bands (that bar has no reading and the running totals leave it out) |
+
+VWAP, OBV and A/D follow the gap recovery change (D2 and D4). In 2.5.4 a NaN
+volume blanked VWAP until its next anchor restart, which on the continuous
+anchor was never, and removed OBV and A/D for the rest of the history on any
+bar where it entered the total. Until the chart settles on one treatment, hosts
+should send a bar without volume as `undefined`.
+
+### Still open
+
+The other classified chart defects (ATR after a missing observation, VWAP and
+TWAP running totals, OBV and A/D with a NaN volume, the TEMA grouping and
+Parabolic SAR after a missing high or low) are corrected by the gap recovery
+change, not here. Two of those studies still do not hold their state across
+every gap. Volatility Stop restarts its stop at the source on a bar with no true
+range, as its reference definition does, and after a missing source, so its
+level and sometimes its side differ from complete data for some bars. OBV adds
+nothing on a bar with a missing close or on the next bar, which compares with
+it, so its total stays offset by that step. One companion engine defect (PVT committed an overflowing
+total) belonged to the companion engines and is corrected in their 0.7.2, and three comparison artifacts (the
+slope reference, a newest-first CCI reference and the consolidation reference)
+belong to the comparison harness. The wider comparison does not replace the independently
+derived Hull and directional fixtures above or establish complete numerical
+coverage.
