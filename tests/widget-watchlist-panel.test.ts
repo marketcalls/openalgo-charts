@@ -303,6 +303,36 @@ describe('watchlist panel', () => {
     r.panel.destroy();
   });
 
+  it('builds one time formatter per zone however many quotes repaint the rows', async () => {
+    const r = await rig({ lists: [['Tech', [nse('INFY'), nse('TCS'), nse('WIPRO')]]] });
+    const Real = Intl.DateTimeFormat;
+    let built = 0;
+    const counting = function (this: unknown, ...args: ConstructorParameters<typeof Intl.DateTimeFormat>) { built++; return new Real(...args); };
+    Intl.DateTimeFormat = counting as unknown as typeof Intl.DateTimeFormat;
+    try {
+      for (let step = 0; step < 10; step++) {
+        for (const symbol of ['INFY', 'TCS', 'WIPRO']) {
+          r.quotes!.streams.get(`${symbol}@NSE`)!.onQuote({ symbol, exchange: 'NSE', last: 100 + step, previousClose: 100, time: 1700000000 + step });
+        }
+        await flush();
+      }
+    } finally { Intl.DateTimeFormat = Real; }
+    expect(r.cell(r.rows()[2], 'last').title).toBe('Live 3:43:29 AM');
+    expect(built).toBeLessThanOrEqual(1);
+    r.panel.destroy();
+  });
+
+  it('shows row times in a new chart timezone at once, without waiting for the next quote', async () => {
+    const r = await rig({ lists: [['Tech', [nse('INFY')]]] });
+    r.quotes!.streams.get('INFY@NSE')!.onQuote({ symbol: 'INFY', exchange: 'NSE', last: 1500, previousClose: 1480, time: 1700000000 });
+    await flush();
+    expect(r.cell(r.rows()[0], 'last').title).toBe('Live 3:43:20 AM');
+    r.chart.setTimezone('UTC');
+    await flush();
+    expect(r.cell(r.rows()[0], 'last').title).toBe('Live 10:13:20 PM');
+    r.panel.destroy();
+  });
+
   it('repaints once when its snapshots age into stale, then does no work while the board sits idle', async () => {
     vi.useFakeTimers();
     const feed: QuoteFeed = { getQuotes: async ({ instruments }) => instruments.map(i => ({ ...i, last: 100, previousClose: 99 })) };

@@ -194,9 +194,17 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
     return number.format(value);
   };
   const signed = (value: number, format: (n: number) => string): string => (value > 0 ? '+' : value < 0 ? '-' : '') + format(Math.abs(value));
+  // One formatter per zone, not per row: every quote repaints each row's time.
+  let stamp: { zone: string; format: Intl.DateTimeFormat | null } | null = null;
   const clock = (ms: number): string => {
-    try { return new Intl.DateTimeFormat(ctx.locale, { timeZone: ctx.chart.timezone(), timeStyle: 'medium' }).format(new Date(ms)); }
-    catch { return new Date(ms).toISOString(); }
+    const zone = ctx.chart.timezone();
+    if (stamp?.zone !== zone) {
+      let format: Intl.DateTimeFormat | null = null;
+      try { format = new Intl.DateTimeFormat(ctx.locale, { timeZone: zone, timeStyle: 'medium' }); } catch { /* An unusable locale or zone falls back to ISO text. */ }
+      stamp = { zone, format };
+    }
+    try { if (stamp.format !== null) return stamp.format.format(new Date(ms)); } catch { /* Out of range: ISO text below. */ }
+    return new Date(ms).toISOString();
   };
   const write = (node: HTMLElement, value: string): void => { if (node.textContent !== value) node.textContent = value; };
 
@@ -404,7 +412,8 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
       }
       // The exchange's own time when the provider gave one, in the chart's zone like every other time.
       const at = quote?.time !== undefined ? quote.time * 1000 : state.receivedAt;
-      row.last.title = at === null ? stateLabel(state.status) : `${stateLabel(state.status)} ${clock(at)}`;
+      const title = at === null ? stateLabel(state.status) : `${stateLabel(state.status)} ${clock(at)}`;
+      if (row.last.title !== title) row.last.title = title;
     }
 
     // Order: the sort, unless the hand is on the rows and the sort follows values.
@@ -568,6 +577,8 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
   const onVisibility = (): void => syncVisible();
   doc.addEventListener('visibilitychange', onVisibility);
   const offContext = ctx.chart.on('data:context', () => schedule());
+  // Row times are shown in the chart's zone, and a stale row gets no quote to repaint it.
+  const offZone = ctx.chart.on('timezone:changed', () => schedule());
   const offStore = store.subscribe(next => apply(next));
 
   const destroy = (): void => {
@@ -578,6 +589,7 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
     picker?.destroy();
     offStore();
     offContext();
+    offZone();
     doc.removeEventListener('visibilitychange', onVisibility);
     select.removeEventListener('change', onSelectList);
     nameForm.removeEventListener('submit', onSubmit);
