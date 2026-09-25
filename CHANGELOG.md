@@ -4,6 +4,16 @@ All notable changes to OpenAlgo Charts.
 
 ## Unreleased
 
+### Fixed
+
+- Ichimoku Cloud reads its three periods and its displacement as whole bars,
+  the way the other built-in studies read a length. A fractional period (a
+  conversion period of 9.4, say, from a saved layout or a host's own settings
+  UI) made the calculation throw a TypeError, and a fractional displacement
+  blanked both spans and the lagging span. Each is now rounded to the nearest
+  whole bar, and a period below one reads as one, the declared minimum, where
+  it used to print nothing. Whole values compute exactly as before.
+
 ### Internal
 
 - The indicator tier's warmup-gap alignment and its Smoothing block are
