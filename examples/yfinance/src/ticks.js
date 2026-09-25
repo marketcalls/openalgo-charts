@@ -1,12 +1,14 @@
-// Price-dependent ticks for the demo's instruments. yfinance reports no tick
-// size at all, so the only schedule here belongs to the fixture server's
-// synthetic BANDED symbol, which trades around 100 so its boundary is on screen.
+// Price-dependent ticks and trading hours for the demo's instruments. yfinance
+// reports no tick size at all, so the only schedule here belongs to the fixture
+// server's synthetic BANDED symbol, which trades around 100 so its boundary is
+// on screen.
 import * as engine from '/dist/openalgo-charts.mjs';
 import { round2 } from './ui.js';
+import { SESSIONS, exchangeOf } from './status.js';
 
 // Read off the namespace, like the other version-dependent surfaces: an older
 // dist/ without schedules still loads and draws every other symbol.
-const { Instrument } = engine;
+const { Instrument, SessionCalendar } = engine;
 
 /**
  * Host-supplied instrument metadata, keyed by symbol. Synthetic, not any
@@ -29,6 +31,27 @@ export const HOST_INSTRUMENTS = Object.freeze({
 export function instrumentFor(symbol) {
   const meta = HOST_INSTRUMENTS[String(symbol || '').toUpperCase()];
   return meta && Instrument ? new Instrument(meta) : null;
+}
+
+const hhmm = (minutes) => String(Math.floor(minutes / 60)).padStart(2, '0') + String(minutes % 60).padStart(2, '0');
+
+/**
+ * The hours the space right of the last candle is laid out in, for
+ * `chart.dataLayer.setSessionCalendar`: a drawing placed past Friday's close
+ * then lands on Monday's bars, not on Friday night. A symbol with host
+ * metadata brings its own calendar; otherwise the venue's regular hours from
+ * the status line's table. Null for a venue with no hours here, one that never
+ * closes, or a dist/ without calendars, and the chart then spaces the future
+ * at the recent median bar interval. There is no holiday list behind this, so
+ * an exchange holiday is laid out as a trading day, the same limit the status
+ * line states.
+ */
+export function sessionCalendarFor(symbol) {
+  const instrument = instrumentFor(symbol);
+  if (instrument && typeof instrument.sessionFrom === 'function') return instrument;
+  const hours = SESSIONS[exchangeOf(symbol)];
+  if (!hours || !SessionCalendar) return null;
+  return new SessionCalendar({ timezone: hours.zone, sessions: [`${hhmm(hours.open)}-${hhmm(hours.close)}:23456`] });
 }
 
 /** The instrument's tick schedule, or null: no metadata, a constant tick, or a dist/ without schedules. */

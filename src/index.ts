@@ -192,7 +192,7 @@ export { IndicatorDrawings } from './primitives/indicator-draws';
 export { IndicatorBackground } from './primitives/indicator-background';
 // `chart.dataLayer` is public, so its type has to be nameable by a consumer —
 // and a tier that takes one in its own public API needs to name *this* one.
-export type { DataLayer, IndexedBar, SeriesId } from './model/data-layer';
+export type { DataLayer, IndexedBar, SeriesId, SessionCalendarSource } from './model/data-layer';
 export { PriceLine } from './primitives/price-line';
 export type { PriceLineOptions } from './primitives/price-line';
 // price-level family: previous close, session high/low, extended-hours opens
@@ -244,8 +244,8 @@ export { isWhitespace, toBar } from './model/bar';
 
 export type { DataFeed, TradeFeed, BarsRequest, BarsPageRequest, BarsPage, BarSubscriptionOptions, LiveBarMeta, MarketDepth, DepthLevel, OrderSide, OrderType, PlaceOrder, UnsubscribeFn } from './feed/types';
 export type { InstrumentKey, QuoteSnapshot, QuoteRequest, QuoteStreamStatus, QuoteStreamHandlers, QuoteFeed, NewsRequest, NewsItem, NewsPage, NewsFeed } from './feed/types';
-export { Instrument } from './feed/instrument';
-export type { InstrumentMetadata, InstrumentCalendar, InstrumentSession } from './feed/instrument';
+export { Instrument, SessionCalendar } from './feed/instrument';
+export type { InstrumentMetadata, InstrumentCalendar, InstrumentSession, SessionCalendarSpec } from './feed/instrument';
 export { TickSchedule } from './feed/tick-schedule';
 export type { TickBand } from './feed/tick-schedule';
 export { checkTradingCapability, assertTradingCapability, TradingCapabilityError } from './feed/trading-capabilities';

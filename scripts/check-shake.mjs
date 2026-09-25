@@ -164,7 +164,12 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // the indicator gap recovery measure 75.07 KiB (76874 bytes); allow 75.08 KiB.
 // Watchlists, news, account state and viewport drawings live in the optional
 // tiers; the widget check below keeps the panels out of this import.
-const LIMIT_BYTES = 75.08 * 1024;
+// Times past the last bar belong to every chart: drawing placement, study
+// shapes and linked viewports all read them. Replacing the last-gap
+// extrapolation with the median spacing and a lazily generated, bounded
+// session-calendar plan measures 76874 to 77551 bytes (75.07 to 75.73 KiB,
+// 0.66 KiB); allow 75.74 KiB. SessionCalendar itself only rides in by type.
+const LIMIT_BYTES = 75.74 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

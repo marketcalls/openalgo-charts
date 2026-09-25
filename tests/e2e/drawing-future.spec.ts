@@ -196,3 +196,142 @@ test('a future endpoint remains draggable after moving the primary scale left', 
   expect(Math.abs(moved.x - (start.x + 40))).toBeLessThanOrEqual(1);
   expect(Math.abs(moved.y - (start.y - 30))).toBeLessThanOrEqual(1);
 });
+
+// Intraday bars in an IST cash session, 09:15 to 15:25 on 2026-02-02 (a
+// Monday) through 2026-02-06 (Friday), so the space right of the last candle
+// begins across a weekend.
+const ist = (wall: string): number => Date.parse(`${wall}+05:30`) / 1000;
+
+async function mountIntraday(page: Page, { calendar, mondayOpen }: { calendar: boolean; mondayOpen: boolean }) {
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await page.goto('/');
+  await page.waitForFunction(() => (window as any).__ready);
+  await page.evaluate(async ({ calendar, mondayOpen }) => {
+    (window as any).__api.chart.destroy();
+    const base = '/dist/openalgo-charts.mjs';
+    const tier = '/dist/openalgo-charts.draw.mjs';
+    const { createChart, SessionCalendar } = await import(base);
+    const { DrawingController } = await import(tier);
+    const chart = createChart(document.getElementById('c'), { priceAxisWidth: 64, timeAxisHeight: 28, timeNavigator: false });
+    const times: number[] = [];
+    for (const day of ['2026-02-02', '2026-02-03', '2026-02-04', '2026-02-05', '2026-02-06']) {
+      const open = Date.parse(`${day}T09:15:00+05:30`) / 1000;
+      for (let t = open; t <= open + 370 * 60; t += 300) times.push(t);
+    }
+    // Monday's opening bar last: the last gap is the whole weekend.
+    if (mondayOpen) times.push(Date.parse('2026-02-09T09:15:00+05:30') / 1000);
+    const bars = times.map((time, i) => {
+      const close = 23800 + Math.sin(i / 12) * 60;
+      return { time, open: close - 8, high: close + 14, low: close - 16, close };
+    });
+    const series = chart.addSeries('candlestick');
+    series.setData(bars);
+    if (calendar) chart.dataLayer.setSessionCalendar(new SessionCalendar({ timezone: 'Asia/Kolkata', sessions: ['0915-1530:23456'] }));
+    const last = bars.length - 1;
+    chart.setVisibleLogicalRange({ from: last - 60, to: last + 40 });
+    const draw = new DrawingController(chart, { defaultStyle: { color: '#ff00ff', lineWidth: 3 } });
+    (window as any).__future = { chart, draw, series, bars, last };
+  }, { calendar, mondayOpen });
+}
+
+/** Magenta pixels right of the last candle inside the plot, and on the price axis, on the drawing layer. */
+async function futureRegions(page: Page) {
+  return page.locator('#c canvas').nth(1).evaluate(canvas => {
+    const c = canvas as HTMLCanvasElement;
+    const { chart, last } = (window as any).__future;
+    const dpr = c.width / c.getBoundingClientRect().width;
+    const future = Math.ceil((chart.timeScale.indexToX(last) + 6) * dpr);
+    const right = Math.floor(chart.timeScale.width * dpr);
+    const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    let plot = 0, axis = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 180 && data[i + 1] < 90 && data[i + 2] > 180 && data[i + 3] > 80) {
+        const x = (i / 4) % c.width;
+        if (x >= right) axis++;
+        else if (x >= future) plot++;
+      }
+    }
+    return { plot, axis };
+  });
+}
+
+/** Page coordinates of a logical index and a price on the price pane. */
+async function at(page: Page, index: number, price: number) {
+  return page.evaluate(({ index, price }) => {
+    const { chart } = (window as any).__future;
+    const rect = document.getElementById('c')!.getBoundingClientRect();
+    return { x: rect.left + chart.timeScale.indexToX(index), y: rect.top + chart.priceToCoordinate(price) };
+  }, { index, price });
+}
+
+test('an intraday trend line drawn past Friday\'s close ends on Monday\'s session', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mountIntraday(page, { calendar: true, mondayOpen: false });
+  const last = await page.evaluate(() => (window as any).__future.last as number);
+  const from = await at(page, last - 20, 23820);
+  // Twelve bars past Friday 15:25: Monday 09:15 is the first, so 10:10 the twelfth.
+  const to = await at(page, last + 12, 23770);
+  await page.evaluate(() => (window as any).__future.draw.setTool('trend-line'));
+  await page.mouse.click(from.x, from.y);
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+  await page.mouse.click(to.x, to.y);
+  await page.mouse.move(5, 5);
+  const points = await page.evaluate(() => (window as any).__future.draw.drawings()[0].points as { time: number; price: number }[]);
+  // A click sits within half a CSS pixel of the bar's x: a small fraction of one five-minute bar.
+  expect(Math.abs(points[1].time - ist('2026-02-09T10:10:00'))).toBeLessThan(60);
+  expect(Math.abs(points[0].time - ist('2026-02-06T13:45:00'))).toBeLessThan(60);
+  // Painted where it was placed, and inside the plot only.
+  const drawnX = await page.evaluate(t => {
+    const { chart } = (window as any).__future;
+    return chart.timeToCoordinate(t) + document.getElementById('c')!.getBoundingClientRect().left;
+  }, points[1].time);
+  expect(Math.abs(drawnX - to.x)).toBeLessThanOrEqual(1);
+  await expect.poll(async () => (await futureRegions(page)).plot).toBeGreaterThan(100);
+  expect((await futureRegions(page)).axis).toBe(0);
+  await page.screenshot({ path: info.outputPath('intraday-future-calendar.png') });
+  expect(errors).toEqual([]);
+});
+
+test('saved anchors on Monday\'s session sit one bar past Friday\'s close and clip at the price axis', async ({ page }, info) => {
+  await mountIntraday(page, { calendar: true, mondayOpen: false });
+  const placed = await page.evaluate(() => {
+    const { chart, draw, bars, last } = (window as any).__future;
+    const monday = (wall: string) => Date.parse(`2026-02-09T${wall}:00+05:30`) / 1000;
+    draw.add({ tool: 'rectangle', paneIndex: 0, style: { color: '#ff00ff', lineWidth: 3 },
+      points: [{ time: monday('09:15'), price: 23830 }, { time: monday('09:40'), price: 23790 }] });
+    // 13:00 is 46 bars past the last one, beyond the 40 on screen: the line runs off the plot.
+    draw.add({ tool: 'trend-line', paneIndex: 0, style: { color: '#ff00ff', lineWidth: 4 },
+      points: [{ time: bars[last - 30].time, price: 23740 }, { time: monday('13:00'), price: 23860 }] });
+    return {
+      open: chart.dataLayer.timeToIndexFloat(monday('09:15')) - last,
+      oneBar: chart.timeToCoordinate(monday('09:15')) - chart.timeScale.indexToX(last + 1),
+      afternoon: chart.dataLayer.timeToIndexFloat(monday('13:00')) - last,
+    };
+  });
+  expect(placed.open).toBe(1);
+  expect(Math.abs(placed.oneBar)).toBeLessThan(0.5);
+  expect(placed.afternoon).toBe(46);
+  await page.mouse.move(5, 5);
+  await expect.poll(async () => (await futureRegions(page)).plot).toBeGreaterThan(100);
+  expect((await futureRegions(page)).axis).toBe(0);
+  await page.screenshot({ path: info.outputPath('intraday-future-saved.png') });
+});
+
+test('without a calendar, a weekend in the last gap does not stretch the future', async ({ page }, info) => {
+  await mountIntraday(page, { calendar: false, mondayOpen: true });
+  const last = await page.evaluate(() => (window as any).__future.last as number);
+  const from = await at(page, last - 10, 23800);
+  const to = await at(page, last + 3, 23760);
+  await page.evaluate(() => (window as any).__future.draw.setTool('trend-line'));
+  await page.mouse.click(from.x, from.y);
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.click(to.x, to.y);
+  await page.mouse.move(5, 5);
+  const end = await page.evaluate(() => (window as any).__future.draw.drawings()[0].points[1].time as number);
+  // Three median bars after Monday 09:15, not three weekends.
+  expect(Math.abs(end - ist('2026-02-09T09:30:00'))).toBeLessThan(60);
+  await expect.poll(async () => (await futureRegions(page)).plot).toBeGreaterThan(50);
+  expect((await futureRegions(page)).axis).toBe(0);
+  await page.screenshot({ path: info.outputPath('intraday-future-median.png') });
+});

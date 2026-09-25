@@ -16,6 +16,16 @@ instrument clears it on a symbol switch); call `chart.trading.setTickSchedule` a
 `applyTo` to override. See [instrument rules](../../../../docs/instruments.md)
 for breaks, DST, validation, quantity units and safe host source transitions.
 
+`sessionFrom(t)` returns the window active at `t`, or else the next one to open
+(about a year of lookahead, null when nothing opens). `SessionCalendar` is the same
+hours without price or quantity rules: `new SessionCalendar({ timezone, sessions,
+exceptions })` (a `SessionCalendarSpec`) validates, detaches and freezes like an
+instrument's calendar, throws `Invalid session calendar: ...`, and reads with
+`sessionAt` and `sessionFrom`. Either one is a `SessionCalendarSource` for
+`chart.dataLayer.setSessionCalendar(calendar)` (read back with the `sessionCalendar`
+getter, `null` clears), and `applyTo` sets the instrument itself there. See
+[times past the last bar](#times-past-the-last-bar) for what it changes.
+
 `OpenAlgoConfig.hasOpenInterest(request)` optionally supplies instrument
 capability to the REST adapter. Explicit false removes the API's placeholder
 OI column before caching or calculation. True/undefined preserves finite
@@ -102,7 +112,7 @@ Consequences you must design around:
 - **One bar per time, per series, is an invariant.** Times map through a `Set`, so two bars sharing a time resolve to the same x and draw on top of each other. `setData` collapses duplicates keeping the last occurrence in the caller's array (`Array#sort` is stable); `addBars`/`prependData` upsert through a `Map`, so incoming bars win.
 - **Reconnect overlap is safe.** Re-fetch a window that overlaps what you already have and hand it to `prependData`, the merge dedupes by time. No gap arithmetic needed.
 - **Logical indices are not stable across a prepend.** Anything you cached as an index is wrong afterwards. Cache times, not indices.
-- **The axis is gapless, so most x positions have no bar behind them.** `indexToTime(i)` answers only for whole indices that have a bar; `indexToTimeFloat(i)` interpolates between bars and extrapolates past either edge at the nearest bar spacing, and `timeToIndexFloat(t)` is its inverse. Both return `NaN` with no data. `chart.coordinateToTime(x)` / `chart.timeToCoordinate(time)` wrap them.
+- **The axis is gapless, so most x positions have no bar behind them.** `indexToTime(i)` answers only for whole indices that have a bar; `indexToTimeFloat(i)` interpolates between bars and extrapolates past either edge (see below), and `timeToIndexFloat(t)` is its exact inverse. Both return `NaN` with no data. `chart.coordinateToTime(x)` / `chart.timeToCoordinate(time)` wrap them.
 - `visibleBars(id, from, to)` binary-searches into the window, so a repaint costs `O(log n + visible)`, not `O(total)`. Prefer it over scanning `seriesBars(id)` (which returns the live array, treat as read-only).
 
 `DataLayer.update` classifies each live bar and returns the kind, which is what drives the auto-scroll decision:
@@ -112,6 +122,16 @@ Consequences you must design around:
 | `'append'` | Newer than this series' last bar **and** newer than every time on the shared axis. |
 | `'replace'` | Same time as the last bar (intra-bar tick), or any existing time. |
 | `'insert'` | An older time that does not exist yet (late / out-of-order arrival). |
+
+### Times past the last bar
+
+Whole indices right of the last bar are the bar times still to come; drawing anchors, study shapes and linked viewports placed there all go through them.
+
+- **With a session calendar** (`chart.dataLayer.setSessionCalendar(calendar)`, which `Instrument.applyTo` does for you), the bar after a session's last one is the next session's first: Friday's 15:25 is followed by Monday's 09:15, a closed date is skipped, a shortened day ends early and a lunch break is stepped over. Intraday bars keep the offset the feed gives a session's first bar (hourly bars stamped 09:00 against a 09:15 open stay on the hour); daily bars step through trading dates at the last bar's offset from its opening; weekly and longer bars use the median below.
+- **Without one**, or when the last 64 bars do not sit in its sessions (a calendar left from another instrument, regular hours against extended-hours data), the axis continues at the lower median of the last 64 bar intervals. Never at the last gap alone: that is the gap most likely to be a night or a weekend. Left of the first bar, the median of the first 64.
+- A position between two future bar times interpolates across the closed hours between them, as it does between two loaded bars, and converts back exactly. A calendar that throws (a window in a daylight-saving gap) falls back to the median; it never stops the paint.
+- Generation is lazy and bounded: past 4096 future bars or 512 calendar reads the axis continues at the average pace already generated, so an anchor years ahead stays cheap.
+- Stored drawings keep their times. A host with no calendar still gets the median, which removes the weekend-sized spacing on its own.
 
 ## Infinite history paging
 

@@ -49,7 +49,7 @@ Inside the covered range with no bar at exactly that second, `whenMissing` decid
 | `'nearest'` (default) | Use the last bar whose opening is at or before the instant. Never select a future candle merely because its timestamp is closer. |
 | `'hide'` | Draw nothing unless there is a bar at exactly that time. For a workspace where a linked crosshair is a data claim. |
 
-`followerRange` returns `null` rather than guessing when the answer would be meaningless: either layer empty, a follower with fewer than 2 bars (every time maps to index 0 and the span collapses), or a non-finite or inverted endpoint. A follower whose history does not overlap the window at all is **not** refused: `timeToIndexFloat` extrapolates at the edge bar spacing, so it scrolls into its own empty margin and shows nothing, which is the truth. Clamping it back onto its last bars would show a different period than the leader.
+`followerRange` returns `null` rather than guessing when the answer would be meaningless: either layer empty, a follower with fewer than 2 bars (every time maps to index 0 and the span collapses), or a non-finite or inverted endpoint. A follower whose history does not overlap the window at all is **not** refused: `timeToIndexFloat` extrapolates past either edge (past the last bar on the follower's own session calendar when one is set, otherwise at its median bar interval; see [times past the last bar](data-and-time.md#times-past-the-last-bar)), so it scrolls into its own empty margin and shows nothing, which is the truth. Clamping it back onto its last bars would show a different period than the leader.
 
 ## `createLinkGroup(options)`
 

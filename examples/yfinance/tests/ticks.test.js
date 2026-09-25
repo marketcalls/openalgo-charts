@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as engine from '/dist/openalgo-charts.mjs';
-import { HOST_INSTRUMENTS, instrumentFor, tickScheduleFor, axisMinMove, snapPrice, tickNote } from '../src/ticks.js';
+import { HOST_INSTRUMENTS, instrumentFor, tickScheduleFor, axisMinMove, snapPrice, tickNote, sessionCalendarFor } from '../src/ticks.js';
+import { fakeDocument } from '../../../tests/helpers/fake-dom';
 import { initOrders, placeOrder, fillMarket, repriceOrder } from '../src/orders.js';
 import { initBracket, makeBracket, setBracketPrice } from '../src/bracket.js';
 import { fakeDom, fakeStorage, flatBar } from './helpers.js';
@@ -49,6 +50,47 @@ describe('the host tick rules', () => {
     expect(snapPrice(ticks, 100.03)).toBe(100.05);
     expect(tickNote(ticks, 99.99)).toBe(', tick 0.01');
     expect(tickNote(ticks, 100)).toBe(', tick 0.05');
+  });
+});
+
+describe('the host trading hours', () => {
+  const ist = (wall) => Date.parse(`${wall}+05:30`) / 1000;
+  const nyc = (wall) => engine.zonedStringToUtcSeconds(wall, 'America/New_York');
+
+  it('lays the future out in the venue hours the status line uses', () => {
+    const nse = sessionCalendarFor('RELIANCE.NS');
+    expect(nse).toBeInstanceOf(engine.SessionCalendar);
+    expect(nse.timezone).toBe('Asia/Kolkata');
+    expect(nse.calendar.sessions).toEqual(['0915-1530:23456']);
+    // Friday after the close: the next opening is Monday's.
+    expect(nse.sessionFrom(ist('2026-02-06T16:00:00'))).toEqual({
+      date: '2026-02-09', open: ist('2026-02-09T09:15:00'), close: ist('2026-02-09T15:30:00'),
+    });
+    const us = sessionCalendarFor('AAPL');
+    expect(us.calendar.sessions).toEqual(['0930-1600:23456']);
+    expect(us.sessionFrom(nyc('2026-02-06 16:00')).open).toBe(nyc('2026-02-09 09:30'));
+    expect(sessionCalendarFor('^NSEI').timezone).toBe('Asia/Kolkata');
+  });
+
+  it('uses the host instrument where one exists and nothing for a venue that never closes', () => {
+    expect(sessionCalendarFor('BANDED')).toBeInstanceOf(engine.Instrument);
+    expect(sessionCalendarFor('BTC-USD')).toBeNull();
+    expect(sessionCalendarFor('^FTSE')).toBeNull();
+  });
+
+  it('puts a chart\'s next bar after Friday\'s close on Monday\'s open', () => {
+    const doc = fakeDocument();
+    const chart = engine.createChart(doc.createElement('div'), { document: doc, shortcuts: false,
+      raf: { schedule: () => 1, cancel: () => {} } });
+    const times = [];
+    for (const day of ['2026-02-05', '2026-02-06']) {
+      for (let t = ist(`${day}T09:15:00`); t <= ist(`${day}T15:25:00`); t += 300) times.push(t);
+    }
+    chart.addSeries('candlestick').setData(times.map(time => flatBar(time, 100)));
+    chart.dataLayer.setSessionCalendar(sessionCalendarFor('RELIANCE.NS'));
+    expect(chart.dataLayer.indexToTimeFloat(times.length)).toBe(ist('2026-02-09T09:15:00'));
+    expect(chart.dataLayer.indexToTimeFloat(times.length + 1)).toBe(ist('2026-02-09T09:20:00'));
+    chart.destroy();
   });
 });
 

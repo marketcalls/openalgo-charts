@@ -40,41 +40,66 @@ export interface InstrumentSession {
   readonly close: number;
 }
 
-function fail(message: string): never { throw new Error(`Invalid instrument: ${message}`); }
-function record(value: unknown): Record<string, unknown> {
+/**
+ * Trading hours on their own: the calendar part of {@link InstrumentMetadata}
+ * with the zone its times are written in, for a host that knows a venue's
+ * hours but has no tick or quantity rules to supply.
+ */
+export interface SessionCalendarSpec extends InstrumentCalendar {
+  /** IANA zone the session windows and exception dates are read in. */
+  readonly timezone: string;
+}
+
+type Fail = (message: string) => never;
+const failWith = (subject: string): Fail => message => { throw new Error(`Invalid ${subject}: ${message}`); };
+const fail = failWith('instrument');
+function record(value: unknown, f: Fail = fail): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return fail('expected a plain object');
-  if (Object.values(Object.getOwnPropertyDescriptors(value)).some(item => !('value' in item))) return fail('accessors are not metadata');
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return f('expected a plain object');
+  if (Object.values(Object.getOwnPropertyDescriptors(value)).some(item => !('value' in item))) return f('accessors are not metadata');
   return value as Record<string, unknown>;
 }
-function text(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > 200 || Array.from(value).some(char => char.charCodeAt(0) < 32)) return fail(label);
+function text(value: unknown, label: string, f: Fail = fail): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 200 || Array.from(value).some(char => char.charCodeAt(0) < 32)) return f(label);
   return value;
 }
 function positive(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fail(label);
   return value;
 }
-function strings(value: unknown, limit: number): string[] {
-  if (!Array.isArray(value) || value.length > limit) return fail('invalid list');
-  return value.map(item => text(item, 'invalid list item'));
+function strings(value: unknown, limit: number, f: Fail = fail): string[] {
+  if (!Array.isArray(value) || value.length > limit) return f('invalid list');
+  return value.map(item => text(item, 'invalid list item', f));
 }
-function sessions(value: unknown): readonly string[] {
-  const result = strings(value, 16);
-  if (result.some(item => !parseSessionSpec(item))) return fail('invalid session');
+function sessions(value: unknown, f: Fail): readonly string[] {
+  const result = strings(value, 16, f);
+  if (result.some(item => !parseSessionSpec(item))) return f('invalid session');
   return Object.freeze(result);
 }
 function dateString(date: Date): string { return date.toISOString().slice(0, 10); }
-function date(value: string): Date {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return fail('invalid exception date');
+function date(value: string, f: Fail): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return f('invalid exception date');
   const result = new Date(value + 'T00:00:00Z');
-  if (!Number.isFinite(result.getTime()) || dateString(result) !== value) return fail('invalid exception date');
+  if (!Number.isFinite(result.getTime()) || dateString(result) !== value) return f('invalid exception date');
   return result;
 }
+function zone(value: unknown, f: Fail): string {
+  const timezone = text(value, 'timezone', f);
+  return isValidTimezone(timezone) ? timezone : f('unknown timezone');
+}
+/** One validation for an instrument's calendar and a bare one, so both refuse the same input. */
+function calendarOf(value: unknown, f: Fail): InstrumentCalendar {
+  const calendar = record(value, f), exceptions: Record<string, readonly string[]> = {};
+  if (calendar.exceptions !== undefined) {
+    const values = record(calendar.exceptions, f);
+    if (Object.keys(values).length > 3660) return f('too many session exceptions');
+    for (const [key, value] of Object.entries(values)) { date(key, f); exceptions[key] = sessions(value, f); }
+  }
+  return Object.freeze({ sessions: sessions(calendar.sessions, f), exceptions: Object.freeze(exceptions) });
+}
 function metadata(input: unknown): InstrumentMetadata {
-  const raw = record(input), calendar = record(raw.calendar);
-  const timezone = text(raw.timezone, 'timezone');
-  if (!isValidTimezone(timezone)) return fail('unknown timezone');
+  const raw = record(input);
+  const timezone = zone(raw.timezone, fail);
   const priceTick = positive(raw.priceTick, 'price tick');
   const precision = raw.pricePrecision;
   if (typeof precision !== 'number' || !Number.isInteger(precision) || precision < 0 || precision > 12) return fail('price precision must be 0..12');
@@ -88,12 +113,7 @@ function metadata(input: unknown): InstrumentMetadata {
     const rule = tryResolveInterval(code)?.bucketing;
     if (!rule || (rule.mode === 'interval' && (!Number.isFinite(rule.seconds) || rule.seconds <= 0))) return fail(`unsupported interval ${code}`);
   }
-  const exceptions: Record<string, readonly string[]> = {};
-  if (calendar.exceptions !== undefined) {
-    const values = record(calendar.exceptions);
-    if (Object.keys(values).length > 3660) return fail('too many session exceptions');
-    for (const [key, value] of Object.entries(values)) { date(key); exceptions[key] = sessions(value); }
-  }
+  const calendar = calendarOf(raw.calendar, fail);
   if (raw.hasOpenInterest !== undefined && typeof raw.hasOpenInterest !== 'boolean') return fail('invalid OI capability');
   const bands = raw.tickBands === undefined ? undefined : new TickSchedule(raw.tickBands as readonly TickBand[]);
   // One number for the axis and the old tickSize readers, so it has to be the
@@ -103,22 +123,127 @@ function metadata(input: unknown): InstrumentMetadata {
     symbol: text(raw.symbol, 'symbol'), exchange: text(raw.exchange, 'exchange'), timezone,
     priceTick, pricePrecision: precision, quantityStep: positive(raw.quantityStep, 'quantity step'),
     intervals: Object.freeze(intervals),
-    calendar: Object.freeze({ sessions: sessions(calendar.sessions), exceptions: Object.freeze(exceptions) }),
+    calendar,
     ...(raw.hasOpenInterest === undefined ? {} : { hasOpenInterest: raw.hasOpenInterest }),
     ...(bands ? { tickBands: bands.bands } : {}),
   });
 }
 
-function boundary(day: Date, minute: number, timezone: string): number {
+function boundary(day: Date, minute: number, timezone: string, f: Fail): number {
   const civil = new Date(day.getTime() + minute * 60000);
   const year = civil.getUTCFullYear(), month = civil.getUTCMonth() + 1, d = civil.getUTCDate();
   const hour = civil.getUTCHours(), min = civil.getUTCMinutes();
   const answer = zonedWallClockToUtcSeconds(year, month, d, hour, min, 0, timezone);
   const actual = utcSecondsToZonedParts(answer, timezone);
   if (actual.year !== year || actual.month !== month || actual.day !== d || actual.hour !== hour || actual.minute !== min) {
-    return fail('session boundary is absent in this timezone');
+    return f('session boundary is absent in this timezone');
   }
   return answer;
+}
+
+/**
+ * How far ahead `sessionFrom` looks for an opening. Past a year of closed
+ * dates the answer is "none", not a scan that grows with whatever a caller
+ * asked about.
+ */
+const LOOKAHEAD_DAYS = 370;
+
+/** Compiled windows and the reads over them, shared by an instrument and a bare calendar. */
+class SessionHours {
+  private readonly _sessions: readonly SessionSpec[];
+  private readonly _exceptions: ReadonlyMap<string, readonly SessionSpec[]>;
+
+  public constructor(private readonly _zone: string, calendar: InstrumentCalendar, private readonly _fail: Fail) {
+    this._sessions = calendar.sessions.map(item => parseSessionSpec(item)!);
+    this._exceptions = new Map(Object.entries(calendar.exceptions ?? {})
+      .map(([key, value]) => [key, value.map(item => parseSessionSpec(item)!)]));
+  }
+
+  /**
+   * The windows opening on a local date. Asked about the day before an
+   * instant, only a window running past midnight can still be open, and the
+   * others are skipped before their boundaries are resolved: one of them may
+   * fall in a daylight-saving gap that has nothing to do with the instant.
+   */
+  private _windows(day: Date, overnightOnly: boolean): InstrumentSession[] {
+    const out: InstrumentSession[] = [], key = dateString(day);
+    for (const spec of this._exceptions.get(key) ?? this._sessions) {
+      if (spec.days && !spec.days.includes(day.getUTCDay() + 1)) continue;
+      if (overnightOnly && spec.end > spec.start) continue;
+      out.push({
+        date: key,
+        open: boundary(day, spec.start, this._zone, this._fail),
+        close: boundary(day, spec.end + (spec.end <= spec.start ? 1440 : 0), this._zone, this._fail),
+      });
+    }
+    return out;
+  }
+
+  private _day(utcSeconds: number): (offset: number) => Date {
+    if (!Number.isFinite(utcSeconds) || !Number.isFinite(new Date(utcSeconds * 1000).getTime())) return this._fail('invalid timestamp');
+    const p = utcSecondsToZonedParts(utcSeconds, this._zone);
+    return offset => new Date(Date.UTC(p.year, p.month - 1, p.day + offset));
+  }
+
+  public at(utcSeconds: number): InstrumentSession | null {
+    const day = this._day(utcSeconds);
+    let found: InstrumentSession | null = null;
+    for (const offset of [0, -1]) {
+      for (const window of this._windows(day(offset), offset === -1)) {
+        // UTC comparisons survive a repeated DST hour; wall minutes do not.
+        if (utcSeconds < window.open || utcSeconds >= window.close) continue;
+        if (found) return this._fail('overlapping active sessions');
+        found = window;
+      }
+    }
+    return found;
+  }
+
+  public from(utcSeconds: number): InstrumentSession | null {
+    const day = this._day(utcSeconds);
+    // Yesterday first, for an overnight window still running. Windows are
+    // grouped by opening date and every window of a date opens before any of
+    // the next date's, so the first date with a window not yet closed holds
+    // the answer: its earliest opening.
+    for (let offset = -1; offset <= LOOKAHEAD_DAYS; offset++) {
+      let found: InstrumentSession | null = null;
+      for (const window of this._windows(day(offset), offset === -1)) {
+        if (window.close > utcSeconds && (found === null || window.open < found.open)) found = window;
+      }
+      if (found) return found;
+    }
+    return null;
+  }
+}
+
+/**
+ * Validated, detached trading hours: the calendar an {@link Instrument}
+ * carries, without the price and quantity rules. Pass one to
+ * `chart.dataLayer.setSessionCalendar` so times past the last bar follow the
+ * venue's sessions, and read it with the same `sessionAt` and `sessionFrom`.
+ */
+export class SessionCalendar {
+  /** The validated IANA zone. */
+  public readonly timezone: string;
+  /** A frozen copy of the windows and exceptions, detached from the input. */
+  public readonly calendar: InstrumentCalendar;
+  private readonly _hours: SessionHours;
+
+  public constructor(input: unknown) {
+    const f = failWith('session calendar'), raw = record(input, f);
+    this.timezone = zone(raw.timezone, f);
+    this.calendar = calendarOf(raw, f);
+    this._hours = new SessionHours(this.timezone, this.calendar, f);
+  }
+
+  /** The window active at an instant. Closed dates and breaks return null, never inferred hours. */
+  public sessionAt(utcSeconds: number): InstrumentSession | null { return this._hours.at(utcSeconds); }
+
+  /**
+   * The window active at an instant, or else the next one to open, looking at
+   * most about a year ahead. Null when nothing opens in that time.
+   */
+  public sessionFrom(utcSeconds: number): InstrumentSession | null { return this._hours.from(utcSeconds); }
 }
 
 /** Validated, detached rules. Construction does not change global intervals or chart defaults. */
@@ -130,15 +255,12 @@ export class Instrument {
    * path: the order constraints, chart drags and anything the host builds.
    */
   public readonly tickSchedule: TickSchedule | null;
-  private readonly _sessions: readonly SessionSpec[];
-  private readonly _exceptions: ReadonlyMap<string, readonly SessionSpec[]>;
+  private readonly _hours: SessionHours;
 
   public constructor(input: unknown) {
     this.metadata = metadata(input);
     this.tickSchedule = this.metadata.tickBands ? new TickSchedule(this.metadata.tickBands) : null;
-    this._sessions = this.metadata.calendar.sessions.map(item => parseSessionSpec(item)!);
-    this._exceptions = new Map(Object.entries(this.metadata.calendar.exceptions ?? {})
-      .map(([key, value]) => [key, value.map(item => parseSessionSpec(item)!)]));
+    this._hours = new SessionHours(this.metadata.timezone, this.metadata.calendar, fail);
   }
 
   /** Provider tokens are exact: a feed may distinguish monthly M from minute m. */
@@ -148,25 +270,13 @@ export class Instrument {
   public formatPrice(value: number): string { return Number.isFinite(value) ? value.toFixed(this.metadata.pricePrecision) : ''; }
 
   /** Resolve an active window. Closed dates and breaks return null, never inferred hours. */
-  public sessionAt(utcSeconds: number): InstrumentSession | null {
-    if (!Number.isFinite(utcSeconds) || !Number.isFinite(new Date(utcSeconds * 1000).getTime())) return fail('invalid timestamp');
-    const p = utcSecondsToZonedParts(utcSeconds, this.metadata.timezone);
-    let found: InstrumentSession | null = null;
-    for (const offset of [0, -1]) {
-      const day = new Date(Date.UTC(p.year, p.month - 1, p.day + offset)), key = dateString(day);
-      for (const spec of this._exceptions.get(key) ?? this._sessions) {
-        if (spec.days && !spec.days.includes(day.getUTCDay() + 1)) continue;
-        // UTC comparisons below survive a repeated DST hour; wall minutes do not.
-        if (offset === -1 && spec.end > spec.start) continue;
-        const open = boundary(day, spec.start, this.metadata.timezone);
-        const close = boundary(day, spec.end + (spec.end <= spec.start ? 1440 : 0), this.metadata.timezone);
-        if (utcSeconds < open || utcSeconds >= close) continue;
-        if (found) return fail('overlapping active sessions');
-        found = { date: key, open, close };
-      }
-    }
-    return found;
-  }
+  public sessionAt(utcSeconds: number): InstrumentSession | null { return this._hours.at(utcSeconds); }
+
+  /**
+   * The window active at an instant, or else the next one to open, looking at
+   * most about a year ahead. Null when nothing opens in that time.
+   */
+  public sessionFrom(utcSeconds: number): InstrumentSession | null { return this._hours.from(utcSeconds); }
 
   /** The host clears old bars and owns source loading; only metadata is applied here. */
   public applyTo(chart: Chart, interval: string): void {
@@ -186,6 +296,10 @@ export class Instrument {
     series.priceScale().setOptions({ minMove: m.priceTick });
     series.priceScale().setPriceFormatter(value => this.formatPrice(value));
     chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest });
+    // Times past the last bar follow this instrument's sessions, so a drawing
+    // placed there after a close lands on the next opening, and a symbol
+    // switch replaces the previous instrument's hours.
+    chart.dataLayer.setSessionCalendar(this);
     // Drags snap by the same schedule the order constraints carry, and a
     // constant tick clears the one an earlier instrument left.
     applyInstrumentTicks(chart, this.tickSchedule);

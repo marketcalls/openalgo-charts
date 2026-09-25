@@ -30,8 +30,8 @@ const quantityCheck = validateQuantity(150, orderConstraintsForInstrument(instru
 
 The chart must already have a primary series. Clear old bars before applying a
 different source or interval; unsupported intervals reject before chart mutation.
-`applyTo` updates the timezone, price tick, primary price-scale formatting and data
-context. Oscillators and volume keep their own units. Reapply after replacing the
+`applyTo` updates the timezone, price tick, primary price-scale formatting, data
+context and the [calendar for times past the last bar](#times-past-the-last-bar). Oscillators and volume keep their own units. Reapply after replacing the
 primary series or restoring its formatting. Hosts own stale-request cancellation.
 
 `InstrumentMetadata.pricePrecision` accepts 0 through 12 and must represent the
@@ -51,6 +51,10 @@ boundary, including 23/25-hour days. A nonexistent daylight-saving boundary or
 overlapping active windows throws; provide an explicit date exception rather than
 guessing. Feed adapters can use the resolved open as their candle-builder anchor.
 
+`sessionFrom` returns the session active at an instant, or else the next one to
+open, looking about a year ahead, and null when nothing opens in that time. An
+overnight session still running is returned on its opening date.
+
 `supportsInterval` matches exact provider tokens. Register custom interval codes
 before constructing the profile. OI support remains true, false or unknown,
 independently of zero or missing observations.
@@ -60,6 +64,37 @@ synthetic cash, futures and crypto profiles, a shortened session and an OI pane.
 It sends no orders. See the repository's
 [full integration guide](https://github.com/marketcalls/openalgo-charts/blob/master/docs/instruments.md)
 for streaming-builder lifetime and source-transition details.
+
+## Times past the last bar
+
+`applyTo` also hands the instrument to `chart.dataLayer.setSessionCalendar`, so the
+empty space right of the last candle is laid out in the instrument's sessions. On a
+five-minute chart whose last candle is Friday's 15:25, the next bar time is Monday's
+09:15: a trend line or a box drawn there ends on Monday's session, and a saved anchor
+at Monday 09:30 is drawn four bars past the last candle. Closed dates are skipped,
+shortened days end early and breaks are stepped over. Daily bars step through
+trading dates.
+
+A host that knows a venue's hours but has no tick or quantity rules can pass a
+`SessionCalendar` instead:
+
+```ts
+import { SessionCalendar } from 'openalgo-charts';
+
+chart.dataLayer.setSessionCalendar(new SessionCalendar({
+  timezone: 'Asia/Kolkata',
+  sessions: ['0915-1530:23456'],
+  exceptions: { '2026-01-26': [] },
+}));
+```
+
+It is validated, detached and frozen like an instrument's calendar, throws
+`Invalid session calendar: ...`, and reads with the same `sessionAt` and
+`sessionFrom`. Pass `null` to clear it. Without a calendar, or when the recent bars
+do not sit in its sessions (one left from another instrument, or regular hours
+against extended-hours data), the space past the last bar runs at the median of the
+recent bar intervals, never at a night- or weekend-sized last gap. The reference
+host does this with each venue's regular hours.
 
 ## Price-dependent ticks
 

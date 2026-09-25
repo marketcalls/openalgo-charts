@@ -2,6 +2,59 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Fixed
+
+- Times past the last bar no longer take their spacing from the gap between
+  the last two bars. That gap is the one most likely to be a night or a
+  weekend: on a five-minute chart whose last candle was Monday's 09:15 open,
+  every bar of empty space to its right stood for almost three days, so a
+  trend line drawn three bars past it ended more than eight days later.
+  `DataLayer.indexToTimeFloat` and `timeToIndexFloat` (and so
+  `chart.coordinateToTime`, `chart.timeToCoordinate`, drawing placement, study
+  shapes past the last bar and linked viewports) now continue at the median of
+  the last 64 bar intervals, and left of the first bar at the median of the
+  first 64. Evenly spaced data maps exactly as before, and stored drawings keep
+  their times: an anchor saved at a future time is simply drawn where that
+  time now falls.
+- With a session calendar the space past the last bar follows the venue's
+  hours. The bar after Friday's 15:25 candle is Monday's 09:15, so a saved
+  anchor at Monday 09:30 is drawn four bars past the last candle rather than
+  about 800 five-minute bars off screen in the night and weekend. A date the
+  calendar closes is skipped, a shortened day ends early, a lunch break is
+  stepped over, and a feed that stamps its first hourly bar 09:00 against a
+  09:15 open keeps doing so. Daily bars step through trading dates. Positions
+  between two future bar times interpolate across the closed hours and convert
+  back exactly. A calendar the recent bars do not sit in (one left over from
+  another instrument, or regular hours against extended-hours data) is ignored
+  in favour of the median, and a calendar that throws never stops a chart
+  painting. Generation is bounded: past 4096 future bars or 512 calendar reads
+  the axis continues at the average pace already generated.
+
+### Added
+
+- `chart.dataLayer.setSessionCalendar(calendar)` and the `sessionCalendar`
+  getter set and read the hours the time axis follows past the last bar;
+  `null` clears them. Any object with `sessionFrom(utcSeconds)` qualifies
+  (`SessionCalendarSource`). `Instrument.applyTo` now sets the instrument
+  itself, so a host that applies instrument metadata gets the fix with no other
+  change, and a symbol switch replaces the previous instrument's hours.
+- `SessionCalendar`, trading hours without price or quantity rules: built from
+  `{ timezone, sessions, exceptions }` (`SessionCalendarSpec`), validated,
+  detached and frozen by the same rules as an instrument's calendar, with
+  errors reading `Invalid session calendar: ...`. It reads with the same
+  `sessionAt`.
+- `sessionFrom(utcSeconds)` on `Instrument` and `SessionCalendar` returns the
+  window active at an instant, or else the next one to open, looking about a
+  year ahead, and null when nothing opens in that time. An overnight window
+  still running is returned on its opening date.
+- The reference host lays the empty space right of the last candle out in the
+  venue's regular hours (NSE and BSE 09:15 to 15:30 IST, US 09:30 to 16:00 New
+  York, weekdays), on both charts of the split view, and in the host
+  instrument's own calendar for a symbol it holds metadata for. Crypto and
+  venues without hours keep the median spacing.
+
 ## 2.5.5
 
 2026-09-26

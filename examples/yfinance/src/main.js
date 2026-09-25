@@ -24,7 +24,7 @@ import {
   initOrders, saveState, restoreState, cancelOrder, attachOrderLines, removeAllOrders,
   updatePositionLine, restyleTradeChrome, clearPosition, executionAllowed, repriceOrder,
 } from './orders.js';
-import { tickScheduleFor, axisMinMove } from './ticks.js';
+import { tickScheduleFor, axisMinMove, sessionCalendarFor } from './ticks.js';
 import { initBracket, attachBracketLines, setBracketPrice, updateBracket, removeBracket } from './bracket.js';
 import { initAccount } from './account.js';
 import { initIndicators, fillIndicatorPicker, renderIndicatorChips, openSettings, rememberIndicators } from './indicators.js';
@@ -247,6 +247,10 @@ function render({ keepView = true, state } = {}) {
   }
   app.price = app.chart.addSeries(type, { style }); // first series -> drives the OHLC legend
   app.price.setData(data);
+  // The venue's hours for the empty space right of the last candle, so a
+  // trend line or a box drawn there after Friday's close ends on Monday's
+  // bars. Optional-called: an older dist/ has no calendar to take.
+  app.chart.dataLayer.setSessionCalendar?.(sessionCalendarFor(app.req.symbol));
 
   // Tell the engine the instrument's tick. Left unset, `minMove` is 0, which
   // means "infer precision from the visible range": the axis then renders a
