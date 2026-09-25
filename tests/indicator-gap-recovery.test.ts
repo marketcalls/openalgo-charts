@@ -303,7 +303,7 @@ describe('TWAP counts only the bars it has a price for', () => {
   });
 });
 
-describe('OBV and A/D read an unusable volume as nothing traded', () => {
+describe('OBV and A/D keep their totals through a bar they cannot use', () => {
   it('OBV keeps its running total through a NaN volume', () => {
     const out = run(OBV, barsOf([[10, 10, 10, 10, 100], [11, 11, 11, 11, null], [12, 12, 12, 12, 100], [11, 11, 11, 11, 100]]));
     expect(out.obv).toEqual([0, 0, 100, 0]);
@@ -325,6 +325,31 @@ describe('OBV and A/D read an unusable volume as nothing traded', () => {
       const out = run(ADL, barsOf([[10, 12, 8, 11, 100], [11, 13, 9, 12, volume], [12, 14, 10, 13, 100]]));
       expect(out.adl, String(volume)).toEqual([50, 50, 100]);
     }
+  });
+
+  it('A/D leaves a bar with a range but no close absent and keeps its total', () => {
+    // The finite range made the old span test pass, the missing close made the
+    // term NaN, and the NaN total blanked every later bar.
+    const out = run(ADL, barsOf([[10, 12, 8, 11, 100], [11, 13, 9, null, 100], [12, 14, 10, 13, 100], [12, 14, 10, 13, 100]]));
+    expect(out.adl).toEqual([50, null, 100, 150]);
+  });
+
+  it('A/D treats a missing high or low and an overflowing span or term as no term', () => {
+    const rows: Row[] = [
+      [10, 12, 8, 11, 100],
+      // A missing high or low is not a doji, so it no longer prints the total.
+      [11, null, 9, 12, 100],
+      [11, 13, null, 12, 100],
+      // The span overflows, which would divide the position down to an exact 0.
+      [0, 1e308, -1e308, 0, 100],
+      // A close far above the high: (20 - 8) - (12 - 20) = 20 over a span of 4 is
+      // 5, and 5 times 1e308 overflows.
+      [11, 12, 8, 20, 1e308],
+      [12, 14, 10, 13, 100],
+      // A doji still contributes nothing and prints the carried total.
+      [12, 12, 12, 12, 100],
+    ];
+    expect(run(ADL, barsOf(rows)).adl).toEqual([50, null, null, null, null, 100, 100]);
   });
 });
 

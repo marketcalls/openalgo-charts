@@ -172,10 +172,20 @@ export const ADL: IndicatorDescriptor = {
     let acc = 0;
     for (let i = 0; i < bars.length; i++) {
       const b = bars[i];
+      // A bar missing its high, low or close, or whose span or term overflows, has
+      // no term: it is absent and the total stays where it was. Added in, one NaN
+      // would blank the line for the rest of the history, and a missing high used
+      // to pass for a doji and print the carried total as if it were a reading.
+      if (!Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(b.close)) continue;
       const span = b.high - b.low;
+      if (!Number.isFinite(span)) continue;
       // A doji bar (high === low) has an undefined money-flow multiplier;
       // the standard treatment is to contribute nothing.
-      if (span > 0) acc += (((b.close - b.low) - (b.high - b.close)) / span) * vol(b);
+      if (span > 0) {
+        const term = (((b.close - b.low) - (b.high - b.close)) / span) * vol(b);
+        if (!Number.isFinite(term)) continue;
+        acc += term;
+      }
       out[i] = acc;
     }
     return { adl: nulls(out) };
