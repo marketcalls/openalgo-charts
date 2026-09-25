@@ -77,8 +77,8 @@ export {
 export {
   composeSettings, readDrawingSetting, readDrawingSettings, coerceSettingValue, applyDrawingSettings,
   LINE_FIELDS, FILL_FIELDS, EXTEND_FIELDS, LEVEL_FIELDS, TEXT_FIELDS, FONT_FIELDS, SHAPE_TEXT_FIELDS, PLATE_TEXT_FIELDS,
-  COLOR_FIELD, LINE_WIDTH_FIELD, LINE_STYLE_FIELD, SHOW_LABELS_FIELD, TEXT_VALUE_FIELD,
-  LINE_STYLE_OPTIONS, ALIGN_OPTIONS, VALIGN_OPTIONS, TEXT_POSITION_OPTIONS, FONT_OPTIONS,
+  COLOR_FIELD, LINE_WIDTH_FIELD, LINE_STYLE_FIELD, SHOW_LABELS_FIELD, TEXT_VALUE_FIELD, SPACE_FIELD,
+  LINE_STYLE_OPTIONS, ALIGN_OPTIONS, VALIGN_OPTIONS, TEXT_POSITION_OPTIONS, FONT_OPTIONS, SPACE_OPTIONS,
   type FieldKind, type FieldGroup, type SettingsField, type SettingsSchema,
 } from './schema';
 
@@ -110,6 +110,7 @@ export {
   type DrawingControllerOptions,
   type DrawingChangeKind,
   type DrawingEditOptions,
+  type DrawingPlacementOptions,
 } from './controller';
 
 // Keyboard editing. Pure: the host owns the listener and asks what a key means.
@@ -153,6 +154,9 @@ export type {
   DrawingPatch,
   DrawingPolicy,
   DrawingPoint,
+  // Viewport anchoring: a drawing pinned to the screen instead of to time and price.
+  DrawingSpace,
+  ViewportPoint,
   DrawingGroup,
   DrawingStyle,
   DrawingText,

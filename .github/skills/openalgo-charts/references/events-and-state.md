@@ -71,7 +71,7 @@ Every name emitted by the engine, verified against the `emit(` call sites in `sr
 | `trading:position_close` | `{ positionId }` | A position's close box was clicked. |
 | `trading:position_click` | `{ position }` | A position pill was clicked. |
 | `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` | A bracket leg (TP/SL) was dragged. |
-| `draw:tool` | `{ tool }` | A drawing tool was armed or disarmed (`null`). Drawing tier only. |
+| `draw:tool` | `{ tool, space? }` | A drawing tool was armed or disarmed (`null`). `space: 'viewport'` is present only while the armed tool places a drawing pinned to the screen (`setTool(id, { space: 'viewport' })`); `activeToolSpace()` reads the same. Drawing tier only. |
 | `draw:add` | `{ drawing }` | A drawing was created. Drawing tier only. |
 | `draw:update` | `{ drawing }` | A drawing's points, style, text, props or flags changed. Fires once per drawing, so a multi-drag emits one per member. Drawing tier only. |
 | `draw:remove` | `{ drawing }` | A drawing was deleted. Drawing tier only. |

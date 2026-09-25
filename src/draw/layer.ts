@@ -14,6 +14,13 @@
  * Hit ids are `draw:<id>` for the body and `draw:<id>#<n>` for anchor `n`, so
  * the controller can tell "move the whole shape" from "move this handle".
  *
+ * A viewport drawing (`space: 'viewport'`) skips the time and price mapping:
+ * its anchors are fractions of this pane's plot and scale by the plot size in
+ * the render context, which is all that pan and zoom never touch. The one step
+ * added is keeping its box inside the plot. Everything after the projection
+ * (paint, handles, hit-testing) is shared, so the two spaces cannot drift
+ * apart in how they are grabbed.
+ *
  * The hover ring, the magnet ring and the hover handles are all overlay
  * state: they change on every pointer move, so they must only ever cost the
  * top canvas. The layer that paints them is the one whose `requestUpdate`
@@ -21,9 +28,11 @@
  * stores that state and asks for nothing.
  */
 import type { IPrimitive, PrimitiveHost, PrimitiveRenderContext, PrimitiveHit, ZOrder } from 'openalgo-charts';
-import type { Drawing, DrawingPoint, ScreenPoint } from './types';
+import type { Drawing, DrawingPoint, ScreenPoint, ViewportPoint } from './types';
 import { getDrawingTool, hasDrawingTool } from './tools';
 import { withDrawingTextMetrics } from './text-metrics';
+import { anchorCount, containInPlot, viewportToPlot } from './viewport';
+import { boundsOf } from './geometry';
 
 /** Grab radius for a shape, in media px. */
 const GRAB = 6;
@@ -49,6 +58,44 @@ const zOf = (d: Drawing): number => (Number.isFinite(d.zIndex) ? d.zIndex : 0);
 
 /** Read-only to the user (`policy.editable` false): selectable, never grabbed. */
 const readOnly = (d: Drawing): boolean => d.policy?.editable === false;
+
+/**
+ * Whether the layer can run this drawing's tool at all. A viewport drawing
+ * whose tool never declared viewport support (a plugin tool, a hand-edited
+ * save) would hand the tool an empty `drawing.points` it may index into, so
+ * it is kept in the model and left unpainted and unhittable instead.
+ */
+function runnable(d: Drawing): boolean {
+  return hasDrawingTool(d.tool) && (d.space !== 'viewport' || getDrawingTool(d.tool).viewport === true);
+}
+
+/**
+ * Where a viewport drawing with anchors `points` sits on a plot of `width` by
+ * `height`, in plot-relative media px: at those fractions, moved as a whole as
+ * far as it takes to keep the tool's box (`DrawingTool.bounds`) inside the
+ * plot. The fractions scale with the plot and a note's type does not, so it
+ * is the box, measured here in pixels, that decides what stays on screen at
+ * any size. What the layer paints and hit-tests, and what the controller
+ * moves from, so a drag starts where the eye sees the drawing.
+ */
+export function placeViewportAnchors(d: Drawing, points: readonly ViewportPoint[], width: number, height: number): ScreenPoint[] {
+  const pts = viewportToPlot(points, width, height);
+  if (pts.length === 0) return pts;
+  const box = hasDrawingTool(d.tool) ? getDrawingTool(d.tool).bounds?.(pts, d) : undefined;
+  return containInPlot(pts, box ?? boundsOf(pts), width, height);
+}
+
+/**
+ * A drawing's anchors in plot-relative media px: time and price through the
+ * pane's scales, or viewport fractions through the plot size.
+ */
+export function projectAnchors(rc: PrimitiveRenderContext, d: Drawing): ScreenPoint[] {
+  if (d.space === 'viewport') return placeViewportAnchors(d, d.viewportPoints ?? [], rc.plotWidth, rc.plotHeight);
+  return d.points.map((p) => ({
+    x: rc.timeScale.indexToX(rc.dataLayer.timeToIndexFloat(p.time)),
+    y: rc.priceScale.priceToY(p.price),
+  }));
+}
 
 /**
  * Paint order: by `zIndex`, ties by array position. `Array.prototype.sort` is
@@ -207,14 +254,14 @@ export class DrawingLayer implements IPrimitive {
   }
 
   private _points(rc: PrimitiveRenderContext, d: Drawing): ScreenPoint[] {
-    return d.points.map((p) => this._project(rc, p.time, p.price));
+    return projectAnchors(rc, d);
   }
 
   /** Selected, unlocked drawings of this layer, in paint order. */
   private _handled(): Drawing[] {
     if (this._selected.length === 0) return [];
     const sel = new Set(this._selected);
-    return this._drawings.filter((d) => sel.has(d.id) && d.locked !== true && d.visible !== false);
+    return this._drawings.filter((d) => sel.has(d.id) && d.locked !== true && d.visible !== false && runnable(d));
   }
 
   /**
@@ -225,7 +272,7 @@ export class DrawingLayer implements IPrimitive {
     const id = this._hovered;
     if (id === null || this._selected.includes(id)) return null;
     const d = this._drawings.find((x) => x.id === id);
-    return d === undefined || d.locked === true || d.visible === false || readOnly(d) ? null : d;
+    return d === undefined || d.locked === true || d.visible === false || readOnly(d) || !runnable(d) ? null : d;
   }
 
   public draw(ctx: CanvasRenderingContext2D, rc: PrimitiveRenderContext): void {
@@ -248,11 +295,11 @@ export class DrawingLayer implements IPrimitive {
     const selected = new Set(this._selected);
     const all = this._preview === null ? this._drawings : [...this._drawings, this._preview];
     for (const d of all) {
-      if (d.visible === false || !hasDrawingTool(d.tool)) continue;
+      if (d.visible === false || !runnable(d)) continue;
       const tool = getDrawingTool(d.tool);
       const media = this._points(rc, d);
       if (media.length === 0 || !media.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
-      if (d.points.length < Math.max(1, tool.points)) {
+      if (anchorCount(d) < Math.max(1, tool.points)) {
         // A multi-point tool cannot paint its final geometry yet. Keep the
         // chosen anchors visible so each click has immediate feedback.
         if (d === this._preview) this._drawPlacementGuide(ctx, rc, media, d);
@@ -395,9 +442,9 @@ export class DrawingLayer implements IPrimitive {
       const d = this._drawings[i];
       // An unselectable drawing is not there to the pointer: the click goes
       // through to whatever lies under it.
-      if (d.visible === false || d.locked === true || d.policy?.selectable === false || !hasDrawingTool(d.tool)) continue;
+      if (d.visible === false || d.locked === true || d.policy?.selectable === false || !runnable(d)) continue;
       const tool = getDrawingTool(d.tool);
-      if (d.points.length < Math.max(1, tool.points)) continue;
+      if (anchorCount(d) < Math.max(1, tool.points)) continue;
       const dist = tool.distance(x, y, { pts: this._points(rc, d), drawing: d, rc });
       // A non-finite distance must miss, not hit: `NaN > GRAB` is false, so a
       // drawing with an unmappable anchor would otherwise swallow every click
