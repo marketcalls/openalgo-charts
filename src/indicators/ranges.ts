@@ -15,9 +15,9 @@
  *
  * `ema` from the base bundle is deliberately absent from the imports: it seeds
  * from `values[0]`, where the reference `ema` seeds from an SMA of the first
- * `length` values and is `na` before that. `smaSeededEma` is that definition,
- * and it also seeds on the first clean window of a source that starts with
- * holes, which is what the Relative Volatility Index feeds its two averages.
+ * `length` values and is `na` before that. `seededEma` below is the reference's
+ * own definition, generalised to a source with holes in it, which is what the
+ * Relative Volatility Index feeds its two averages.
  */
 import { rsi, sourceValues } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
@@ -65,6 +65,50 @@ function fromFirstValue(
   if (start >= n) return out;
   const tail = smooth(values.slice(start), start);
   for (let i = 0; i < tail.length && start + i < n; i++) out[start + i] = tail[i];
+  return out;
+}
+
+/**
+ * the reference `ema`, written the way the reference manual defines it:
+ *
+ *   sum := na(sum[1]) ? sma(src, length) : alpha * src + (1 - alpha) * sum[1]
+ *
+ * The recursion only starts once an SMA seed exists. `smaSeededEma` in `./calc`
+ * cannot stand in for it here: the Relative Volatility Index's
+ * `change(src) <= 0 ? 0 : stddev` alternates real zeros with `na` for as long
+ * as the standard deviation is still warming up, and before `holdFrom` (the
+ * deviation's first reading) a hole knocks the average back to waiting for a
+ * fresh seed, exactly as it always has. That is what fixes the first reading,
+ * and every value after it, on a complete series at any length (K12 in the
+ * numerical audit: the companion language holds a seed made in that warmup).
+ *
+ * From `holdFrom` on, a hole can only come from a missing close. The average
+ * then holds: that bar has no value, and the next present one continues from
+ * where the last left off, instead of blanking the study for another
+ * `period` bars and printing a fresh-seed value.
+ */
+function seededEma(values: readonly number[], period: number, holdFrom: number): number[] {
+  const n = values.length;
+  const out = new Array<number>(n).fill(NaN);
+  if (period <= 0) return out;
+  // `sma` here is NaN-strict, so it is exactly the "is there a clean window yet"
+  // question the reference seed asks.
+  const seed = sma(values, period);
+  const k = 2 / (period + 1);
+  let prev = NaN;
+  for (let i = 0; i < n; i++) {
+    const v = values[i];
+    if (!Number.isFinite(prev)) {
+      prev = seed[i];
+    } else if (Number.isFinite(v)) {
+      prev = v * k + prev * (1 - k);
+    } else if (i < holdFrom) {
+      prev = NaN;
+    } else {
+      continue;
+    }
+    out[i] = prev;
+  }
   return out;
 }
 
@@ -392,11 +436,13 @@ export const RELATIVE_VOLATILITY_INDEX: IndicatorDescriptor = {
       upSource[i] = Number.isFinite(d) && d <= 0 ? 0 : sd[i];
       downSource[i] = Number.isFinite(d) && d > 0 ? 0 : sd[i];
     }
-    // A missing close leaves both sources absent for a bar or two. The
-    // averages hold across that and resume, rather than reseeding and blanking
-    // the study for another fourteen bars.
-    const upper = smaSeededEma(upSource, emaLength);
-    const lower = smaSeededEma(downSource, emaLength);
+    // A missing close after the deviation's first reading leaves the sources
+    // absent for a stretch; the averages hold across it. Inside the warmup
+    // they restart as they always have, so a complete series reads as before.
+    let holdFrom = 0;
+    while (holdFrom < n && !Number.isFinite(sd[holdFrom])) holdFrom += 1;
+    const upper = seededEma(upSource, emaLength, holdFrom);
+    const lower = seededEma(downSource, emaLength, holdFrom);
     const rvi = new Array<number>(n).fill(NaN);
     for (let i = 0; i < n; i++) {
       const total = upper[i] + lower[i];

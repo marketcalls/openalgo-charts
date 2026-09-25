@@ -5,7 +5,7 @@ import { indicatorDefaults } from '../src/model/indicator-registry';
 import { CCI, STOCHASTIC } from '../src/indicators/momentum';
 import { FISHER_TRANSFORM } from '../src/indicators/oscillators';
 import { RELATIVE_VOLATILITY_INDEX } from '../src/indicators/ranges';
-import { MASS_INDEX } from '../src/indicators/indices';
+import { MASS_INDEX, NVI, PVI, PVO } from '../src/indicators/indices';
 import { TSI, SMI_ERGODIC_INDICATOR, SMI_ERGODIC_OSCILLATOR } from '../src/indicators/strength';
 import { TREND_STRENGTH_INDEX } from '../src/indicators/signals';
 import {
@@ -139,6 +139,13 @@ describe('Fisher Transform restarts its recursion after a missing midpoint', () 
   });
 });
 
+/** Language engine 0.7.1, RVI composition at deviation length 30, bars 55 to 94 (bar 60 missing). */
+const RVI_30_GAP_55_TO_94: (number | null)[] = [
+  45.41492269409936, 52.678572279239376, 45.845997532311216, 39.82753940209933, 47.81779288417503,
+  ...new Array<null>(30).fill(null),
+  19.158320801590772, 49.661512209913305, 65.43743504020281, 47.708376997786104, 59.90520272216512,
+];
+
 describe('Relative Volatility Index keeps its averages across a missing bar', () => {
   // Recorded from the language engine: the RVI composition with a 14-bar EMA
   // over a 2-bar standard deviation. Bar 20 is missing, so bars 20 and 21 have
@@ -175,16 +182,37 @@ describe('Relative Volatility Index keeps its averages across a missing bar', ()
     );
   });
 
-  it('seeds on a one-way run inside a long deviation warmup and holds it', () => {
+  it('holds across a missing close after a long deviation warmup', () => {
+    // Recorded from the language engine: the same composition with a 30-bar
+    // deviation over 130 bars, bar 60 missing. The deviation has no value on
+    // the thirty windows holding bar 60, so on those bars each average only
+    // takes its real zeros and holds on the others; the reading comes back on
+    // bar 90 from the held state. Reseeding would wait fourteen more bars.
+    const long: Row[] = Array.from({ length: 130 }, (_, i): Row => {
+      const c = 100 + ((i * 7) % 5) - ((i * 3) % 4);
+      return [c, c + 1, c - 1, c, 1];
+    });
+    long[60] = [null, null, null, null, 1];
+    const out = run(RELATIVE_VOLATILITY_INDEX, barsOf(long), { length: 30, maType: 'None' });
+    expect(out.rvi.findIndex((v) => v !== null)).toBe(42);
+    expect(out.rvi.slice(55, 95)).toEqual(RVI_30_GAP_55_TO_94);
+  });
+
+  it('reseeds inside a long deviation warmup, as it always has (K12)', () => {
     // With a 40-bar deviation the two sources are real zeros on one side and
-    // absent on the other for 39 bars. The lower average meets fourteen
-    // zeros of a rising run during that warmup, so it seeds at 0 and holds;
-    // on bar 39 the upper average has a value and the reading is exactly 100.
-    // Recorded from the language engine for bars 38 to 42. The former private
-    // average reseeded on every absent bar and printed nothing until bar 52.
-    const out = run(RELATIVE_VOLATILITY_INDEX, wave(), { length: 40, maType: 'None' });
-    expect(out.rvi.findIndex((v) => v !== null)).toBe(39);
-    expect(out.rvi.slice(38, 43)).toEqual([null, 100, 100, 61.50613115716168, 42.55143054942978]);
+    // absent on the other for 39 bars. The lower average meets fourteen zeros
+    // of a rising run in that warmup. The chart restarts it on the next absent
+    // bar, the reference recursion, and prints nothing until bar 52, exactly
+    // as the formula it has always used. The language holds that seed: its
+    // engine starts at bar 39 with exactly 100, and a seeded average over the
+    // whole series, which is that rule, reproduces the recording.
+    const data = wave();
+    const out = run(RELATIVE_VOLATILITY_INDEX, data, { length: 40, maType: 'None' });
+    expect(out.rvi.findIndex((v) => v !== null)).toBe(52);
+    expect(out.rvi).toEqual(nulls(legacyRvi(data, 40)));
+    const language = nulls(heldRvi(data, 40));
+    expect(language.findIndex((v) => v !== null)).toBe(39);
+    expect(language.slice(38, 43)).toEqual([null, 100, 100, 61.50613115716168, 42.55143054942978]);
   });
 });
 
@@ -209,6 +237,63 @@ describe('Mass Index keeps its second EMA across a missing bar', () => {
       3.0016387634851918, 3.0014298501040826, 3.001205143393612, 3.0010174650328496,
       3.0008408008696956, 3.0006672384309936,
     ]);
+  });
+});
+
+describe('NVI and PVI hold their index across a missing close', () => {
+  // Volume falls on every bar for NVI and rises on every bar for PVI, so each
+  // bar qualifies and a missing close would be compounded in. Bar 2 has no
+  // close: the change into it and the change out of it are unknown, so the
+  // index holds on both bars, as it already did after a zero previous close.
+  //   bar 0  base              1000
+  //   bar 1  * 110/100         1100
+  //   bar 2  close missing     held
+  //   bar 3  previous missing  held
+  //   bar 4  * 132/120         1000 * 1.1 * 1.1
+  const closes = [100, 110, null, 120, 132];
+  const falling = barsOf(closes.map((c, i): Row => [c, c, c, c, 60 - 10 * i]));
+  const rising = barsOf(closes.map((c, i): Row => [c, c, c, c, 10 + 10 * i]));
+  const index = [1000, (110 / 100) * 1000, (110 / 100) * 1000, (110 / 100) * 1000, (110 / 100) * (132 / 120) * 1000];
+
+  it('keeps the index instead of losing it for the rest of the history', () => {
+    expect(run(NVI, falling, { maLength: 2 }).nvi).toEqual(index);
+    expect(run(PVI, rising, { maLength: 2 }).pvi).toEqual(index);
+  });
+
+  it('carries the index average through the same bars', () => {
+    // Seeded on bars 0 and 1 at (1000 + 1100) / 2, then alpha 2 / (2 + 1).
+    const alpha = 2 / 3;
+    let expected = (index[0] + index[1]) / 2;
+    const ema = run(NVI, falling, { maLength: 2 }).ema;
+    expect(ema[0]).toBeNull();
+    expect(ema[1] as number).toBeCloseTo(expected, 10);
+    for (let i = 2; i < index.length; i++) {
+      expected = index[i] * alpha + expected * (1 - alpha);
+      expect(ema[i] as number, `bar ${i}`).toBeCloseTo(expected, 10);
+    }
+    expect(run(PVI, rising, { maLength: 2 }).ema).toEqual(ema);
+  });
+});
+
+describe('PVO restarts its signal after a window with no traded volume (K13)', () => {
+  // SMA oscillator, fast 1, slow 2, EMA signal 2. The slow average is exactly
+  // 0 on bars 3 and 4, where two bars in a row traded nothing, so PVO has no
+  // reading there:
+  //   pvo 1 = (100 * (20 - 15)) / 15    pvo 2 = (100 * (0 - 10)) / 10 = -100
+  //   pvo 5 = (100 * (30 - 15)) / 15 = 100    pvo 6 = (100 * (40 - 35)) / 35
+  // The chart's signal starts again on the next full window of readings, so
+  // bar 5 has no signal and bar 6 is the fresh seed (pvo 5 + pvo 6) / 2. The
+  // language's average would hold its bar 2 value and print on bar 5.
+  const volumes = [10, 20, 0, 0, 0, 30, 40, 50, 60];
+  const data = barsOf(volumes.map((v): Row => [10, 10, 10, 10, v]));
+  const over = { oscType: 'SMA', sigType: 'EMA', fastLength: 1, slowLength: 2, signalLength: 2 };
+
+  it('waits a whole signal window after the gap, as it always has', () => {
+    const out = run(PVO, data, over);
+    expect(out.pvo.slice(0, 7)).toEqual([null, (100 * (20 - 15)) / 15, -100, null, null, 100, (100 * (40 - 35)) / 35]);
+    expect(out.signal[2]).toBe(((100 * (20 - 15)) / 15 + -100) / 2);
+    expect(out.signal.slice(3, 6)).toEqual([null, null, null]);
+    expect(out.signal[6]).toBe((100 + (100 * (40 - 35)) / 35) / 2);
   });
 });
 
@@ -329,16 +414,56 @@ function legacySeededEma(values: readonly number[], period: number): number[] {
   });
 }
 
-function legacyRvi(data: readonly Bar[], length: number): number[] {
+function rviWith(data: readonly Bar[], length: number, average: (v: readonly number[], p: number) => number[]): number[] {
   const close = data.map((b) => b.close);
   const sd = stdev(close, length);
   const delta = change(close);
   const up = delta.map((d, i) => (Number.isFinite(d) && d <= 0 ? 0 : sd[i]));
   const down = delta.map((d, i) => (Number.isFinite(d) && d > 0 ? 0 : sd[i]));
-  const upper = legacySeededEma(up, 14);
-  const lower = legacySeededEma(down, 14);
+  const upper = average(up, 14);
+  const lower = average(down, 14);
   return upper.map((u, i) => (u + lower[i] === 0 ? NaN : (u / (u + lower[i])) * 100));
 }
+
+/** The RVI as 2.5.4 computed it. */
+function legacyRvi(data: readonly Bar[], length: number): number[] {
+  return rviWith(data, length, legacySeededEma);
+}
+
+/**
+ * The language's rule for the same composition: each average seeds on its
+ * first fourteen present inputs and holds across every later gap, the
+ * warmup's included (K12).
+ */
+function heldRvi(data: readonly Bar[], length: number): number[] {
+  return rviWith(data, length, smaSeededEma);
+}
+
+/** One-way runs of `run` bars, alternating direction, starting with a fall. */
+const zigzag = (n: number, run: number): Bar[] => {
+  let c = 100;
+  let direction = -1;
+  return Array.from({ length: n }, (_, i) => {
+    if (i > 1 && (i - 1) % run === 0) direction = -direction;
+    if (i > 0) c += direction * (1 + (i % 3) * 0.1);
+    return {
+      time: 1700000000 + i * 60, open: c - 0.25, high: c + 1.5, low: c - 1.5, close: c, volume: 100 + (i % 5),
+    };
+  });
+};
+
+/** A seeded random walk: nothing about it is tuned to a length. */
+const walk = (n: number, level: number, seed: number): Bar[] => {
+  let s = seed >>> 0;
+  let c = level;
+  return Array.from({ length: n }, (_, i) => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    c += (s / 2 ** 32 - 0.5) * level * 0.01;
+    return {
+      time: 1700000000 + i * 60, open: c, high: c + level * 0.002, low: c - level * 0.002, close: c, volume: 100 + (i % 7),
+    };
+  });
+};
 
 /** The Mass Index's former run-by-run smoothing of its second EMA and sum. */
 function legacyRuns(values: readonly number[], period: number, smooth: (v: readonly number[], p: number) => number[]): number[] {
@@ -358,6 +483,21 @@ function legacyMassIndex(data: readonly Bar[], length: number): number[] {
   const double = legacyRuns(single, 9, smaSeededEma);
   const ratio = single.map((v, i) => (double[i] !== 0 ? v / double[i] : NaN));
   return legacyRuns(ratio, length, rollingSum);
+}
+
+/** NVI and PVI as 2.5.4 formed them, with the index average run by run. */
+function legacyVolumeIndex(data: readonly Bar[], on: 'falling' | 'rising', maLength: number): [number[], number[]] {
+  const vol = (b: Bar): number => (typeof b.volume === 'number' && Number.isFinite(b.volume) ? b.volume : 0);
+  let index = 1;
+  const out = data.map((b, i) => {
+    if (i > 0) {
+      const prevClose = data[i - 1].close;
+      const moved = on === 'falling' ? vol(b) < vol(data[i - 1]) : vol(b) > vol(data[i - 1]);
+      if (moved && prevClose !== 0 && Number.isFinite(prevClose)) index *= b.close / prevClose;
+    }
+    return index * 1000;
+  });
+  return [out, legacyRuns(out, maLength, smaSeededEma)];
 }
 
 function legacyStochasticRaw(data: readonly Bar[], period: number): number[] {
@@ -444,15 +584,52 @@ describe('ordinary gapless data keeps its readings', () => {
     for (const length of [1, 2, 9, 30]) {
       expect(run(FISHER_TRANSFORM, data, { length }).fisher).toEqual(nulls(legacyFisher(data, length)));
     }
-    // Up to a 16-bar deviation window the averages cannot seed before the
-    // deviation exists: bar 0 is absent and fourteen present bars are needed,
-    // so an absent bar after a seed would have to fall at bar 15 or later of
-    // the warmup. Beyond 16 see the long-warmup case above.
-    for (const length of [2, 10, 14, 16]) {
-      expect(run(RELATIVE_VOLATILITY_INDEX, data, { length, maType: 'None' }).rvi).toEqual(nulls(legacyRvi(data, length)));
-    }
     for (const length of [1, 3, 10, 25]) {
       expect(run(MASS_INDEX, data, { length }).mi).toEqual(nulls(legacyMassIndex(data, length)));
+    }
+  });
+
+  it('RVI is bit-for-bit what 2.5.4 printed at every deviation length', () => {
+    // Up to a 16-bar deviation no average can seed and then meet an absent
+    // bar inside the warmup. From 17 on it can: a fourteen-bar one-way run in
+    // the warmup seeds one average, the next bar the other way is absent for
+    // it, and 2.5.4 restarted there. The zigzag of fourteen-bar runs does that
+    // at Length 17, the waves and walks at the longer lengths, so these series
+    // pin the restart and not only the easy case.
+    const series = [wave(), wave(400, 1e5), zigzag(400, 14), zigzag(400, 20), walk(600, 100, 7), walk(600, 25000, 99)];
+    const lengths = [2, 10, 14, 16, 17, 30, 100];
+    for (const bars of series) {
+      for (const length of lengths) {
+        const former = legacyRvi(bars, length);
+        expect(run(RELATIVE_VOLATILITY_INDEX, bars, { length, maType: 'None' }).rvi, `length ${length}`)
+          .toEqual(nulls(former));
+        for (const maLength of [3, 14]) {
+          expect(run(RELATIVE_VOLATILITY_INDEX, bars, { length, maType: 'EMA', maLength }).ma, `length ${length}`)
+            .toEqual(nulls(legacySeededEma(former, maLength)));
+        }
+      }
+    }
+    // The language's hold-everywhere rule would move every one of the longer
+    // lengths on at least one of these series, so the check above has teeth.
+    for (const length of [17, 30, 100]) {
+      const moved = series.some((bars) =>
+        JSON.stringify(nulls(heldRvi(bars, length))) !== JSON.stringify(nulls(legacyRvi(bars, length))));
+      expect(moved, `length ${length}`).toBe(true);
+    }
+  });
+
+  it('NVI and PVI are bit-for-bit unchanged', () => {
+    for (const bars of [data, wave(400, 1e5), walk(600, 100, 7)]) {
+      for (const maLength of [1, 2, 20, 255]) {
+        const [nvi, nviEma] = legacyVolumeIndex(bars, 'falling', maLength);
+        const [pvi, pviEma] = legacyVolumeIndex(bars, 'rising', maLength);
+        const negative = run(NVI, bars, { maLength });
+        const positive = run(PVI, bars, { maLength });
+        expect(negative.nvi).toEqual(nulls(nvi));
+        expect(negative.ema).toEqual(nulls(nviEma));
+        expect(positive.pvi).toEqual(nulls(pvi));
+        expect(positive.ema).toEqual(nulls(pviEma));
+      }
     }
   });
 
