@@ -45,10 +45,10 @@ export interface OrderConstraints {
   tickSize: number;
   /**
    * Price-dependent ticks. When set it decides every snap and `tickSize` is
-   * only read by older code, so give it the schedule's `minMove`. Absent, the
-   * constant `tickSize` snaps exactly as it always has.
+   * only read by older code, so give it the schedule's `minMove`. Absent or
+   * null, the constant `tickSize` snaps exactly as it always has.
    */
-  tickSchedule?: TickSchedule;
+  tickSchedule?: TickSchedule | null;
   priceBand?: PriceBand;
   /** Max quantity per single order (exchange freeze limit). */
   freezeQty?: number;
@@ -129,7 +129,8 @@ export function validatePrice(price: number, c: OrderConstraints): ValidationRes
   }
   const ticks = c.tickSchedule;
   // A band list pasted in place of a schedule would round nothing and pass.
-  if (ticks !== undefined && typeof ticks.round !== 'function') {
+  // Null means none, as it does for chart.trading.setTickSchedule.
+  if (ticks != null && typeof ticks.round !== 'function') {
     throw new TypeError('OrderConstraints.tickSchedule must be built with new TickSchedule(bands)');
   }
   const snapped = ticks ? ticks.round(price) : roundToTick(price, c.tickSize);

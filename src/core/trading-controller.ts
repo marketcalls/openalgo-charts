@@ -215,6 +215,26 @@ export class TradeMarkersPrimitive implements IPrimitive {
 
 interface Tracked<E> { entity: E; line: PriceLine; sig: string; }
 
+// The tick schedule of the instrument last applied to each chart. The trading
+// layer is built on first use, often after the instrument was applied, and
+// applying one cannot build the layer early: its click and drag subscriptions
+// would replace the host's own. So the layer starts from what is left here.
+const instrumentTicks = new WeakMap<object, TickSchedule | null>();
+
+/**
+ * `Instrument.applyTo`'s hand-off: a layer built later starts from `ticks`,
+ * and one that exists takes them now, so a symbol switch never leaves the
+ * previous instrument's bands on a drag. Null, for a constant tick, keeps the
+ * raw pointer price the layer has always reported.
+ * @internal
+ */
+export function applyInstrumentTicks(
+  chart: { hasTrading(): boolean; readonly trading: TradingController }, ticks: TickSchedule | null,
+): void {
+  instrumentTicks.set(chart, ticks);
+  if (chart.hasTrading()) chart.trading.setTickSchedule(ticks);
+}
+
 export class TradingController {
   private readonly _host: TradingHost;
   private readonly _positions = new Map<string, Tracked<TradingPosition>>();
@@ -224,10 +244,11 @@ export class TradingController {
   private readonly _dragPrev = new Map<string, number>();
   private _colors: TradingColors = { ...DEFAULT_TRADING_COLORS };
   private _markers: TradeMarkersPrimitive | null = null;
-  private _ticks: TickSchedule | null = null;
+  private _ticks: TickSchedule | null;
 
   public constructor(host: TradingHost) {
     this._host = host;
+    this._ticks = instrumentTicks.get(host) ?? null;
     host.subscribeClick((externalId) => this._onClick(externalId));
     host.subscribeDrag(
       (externalId, price) => this._onDrag(externalId, price),
@@ -276,9 +297,17 @@ export class TradingController {
    * carry, to the instrument's ticks. Null, the default, passes the pointer's
    * price through unrounded, as it always has. The host's own validation stays
    * authoritative either way; this only stops a drag previewing a price the
-   * instrument cannot trade at.
+   * instrument cannot trade at. `Instrument.applyTo` sets it from the
+   * instrument, so call this after applying one to override it.
    */
-  public setTickSchedule(schedule: TickSchedule | null): void { this._ticks = schedule; }
+  public setTickSchedule(schedule: TickSchedule | null): void {
+    // Refused here, where the host made the mistake, rather than as a pointer
+    // handler error on the first drag.
+    if (schedule != null && typeof (schedule as Partial<TickSchedule>).round !== 'function') {
+      throw new TypeError('chart.trading.setTickSchedule takes a schedule built with new TickSchedule(bands), or null');
+    }
+    this._ticks = schedule ?? null;
+  }
 
   // ── data ──────────────────────────────────────────────────────────────────
   public setPositions(positions: readonly TradingPosition[]): void { this._sync(this._positions, positions, 'pos'); }

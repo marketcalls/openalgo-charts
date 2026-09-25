@@ -2,6 +2,7 @@ import type { Chart } from '../core/chart';
 import { tryResolveInterval } from './intervals';
 import { isValidTimezone, parseSessionSpec, utcSecondsToZonedParts, zonedWallClockToUtcSeconds, type SessionSpec } from './time';
 import { TickSchedule, type TickBand } from './tick-schedule';
+import { applyInstrumentTicks } from '../core/trading-controller';
 
 export interface InstrumentCalendar {
   /** HHMM-HHMM[:days], with opening weekdays 1 (Sunday) through 7. */
@@ -123,14 +124,18 @@ function boundary(day: Date, minute: number, timezone: string): number {
 /** Validated, detached rules. Construction does not change global intervals or chart defaults. */
 export class Instrument {
   public readonly metadata: InstrumentMetadata;
-  /** The price rules as a schedule; a constant tick is a schedule of one band. */
-  public readonly tickSchedule: TickSchedule;
+  /**
+   * The validated `tickBands`, or null for a constant tick. A constant tick
+   * has no schedule, so it keeps a single snapping rule, `priceTick`, on every
+   * path: the order constraints, chart drags and anything the host builds.
+   */
+  public readonly tickSchedule: TickSchedule | null;
   private readonly _sessions: readonly SessionSpec[];
   private readonly _exceptions: ReadonlyMap<string, readonly SessionSpec[]>;
 
   public constructor(input: unknown) {
     this.metadata = metadata(input);
-    this.tickSchedule = new TickSchedule(this.metadata.tickBands ?? [{ tick: this.metadata.priceTick }]);
+    this.tickSchedule = this.metadata.tickBands ? new TickSchedule(this.metadata.tickBands) : null;
     this._sessions = this.metadata.calendar.sessions.map(item => parseSessionSpec(item)!);
     this._exceptions = new Map(Object.entries(this.metadata.calendar.exceptions ?? {})
       .map(([key, value]) => [key, value.map(item => parseSessionSpec(item)!)]));
@@ -181,5 +186,8 @@ export class Instrument {
     series.priceScale().setOptions({ minMove: m.priceTick });
     series.priceScale().setPriceFormatter(value => this.formatPrice(value));
     chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest });
+    // Drags snap by the same schedule the order constraints carry, and a
+    // constant tick clears the one an earlier instrument left.
+    applyInstrumentTicks(chart, this.tickSchedule);
   }
 }

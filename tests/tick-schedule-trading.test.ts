@@ -59,6 +59,16 @@ describe('validatePrice with a tick schedule', () => {
     }
   });
 
+  it('treats a null schedule as none, as chart.trading.setTickSchedule(null) does', async () => {
+    const none: OrderConstraints = { tickSize: 0.05, tickSchedule: null };
+    for (const price of [100.07, 10.025, -1.03]) {
+      expect(validatePrice(price, none).price).toBe(roundToTick(price, 0.05));
+    }
+    const { broker, eng } = engine(none);
+    await eng.placeOrder({ symbol: 'X', side: 'BUY', type: 'LIMIT', qty: 1, price: 100.07 });
+    expect(broker.orders()[0].price).toBe(roundToTick(100.07, 0.05));
+  });
+
   it('refuses a schedule that was never validated, naming the fix', () => {
     const raw = { tickSize: 0.01, tickSchedule: [{ tick: 0.01 }] } as unknown as OrderConstraints;
     expect(() => validatePrice(10, raw)).toThrow(/new TickSchedule/);
@@ -163,6 +173,25 @@ describe('chart trading drags with a tick schedule', () => {
     h.drag('ord:sl', 9.9951);
     h.end('ord:sl', 9.9951);
     expect(bracket).toHaveBeenCalledWith({ parentId: 'p1', bracketRole: 'sl', newPrice: 10 });
+  });
+
+  it('refuses a band list when it is set, not with a pointer error on the first drag', () => {
+    const h = tradingHost();
+    const trading = new TradingController(h.host);
+    const modify = vi.fn();
+    trading.on('trading:order_modify', modify);
+    trading.setOrders([{ id: 'o1', type: 'limit', side: 'buy', price: 9.98, size: 1 }]);
+    trading.setTickSchedule(TICKS);
+    for (const bad of [[{ tick: 0.05 }], { tick: 0.05 }, 0.05, 'ticks']) {
+      expect(() => trading.setTickSchedule(bad as unknown as TickSchedule)).toThrow(TypeError);
+      expect(() => trading.setTickSchedule(bad as unknown as TickSchedule)).toThrow(/new TickSchedule\(bands\)/);
+    }
+    // A refused value leaves the schedule that was in force.
+    h.end('ord:o1', 10.031);
+    // A plain-JS host that clears with undefined gets the same as null.
+    trading.setTickSchedule(undefined as unknown as null);
+    h.end('ord:o1', 10.0312);
+    expect(modify.mock.calls.map(([event]) => event.newPrice)).toEqual([10.05, 10.0312]);
   });
 
   it('keeps raw pointer prices without a schedule and after clearing one', () => {
