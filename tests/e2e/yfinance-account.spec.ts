@@ -53,6 +53,16 @@ test('the sandbox broker previews, places, closes part, reverses and closes thro
   await expect(panel.locator('.acct-fills li')).toHaveCount(3);
   await expect(panel.locator('.acct-fills li').first()).toContainText('SELL 14');
   await page.screenshot({ path: info.outputPath('account-reversed.png'), animations: 'disabled' });
+  // A dropped connection and a reconnect settle the engine from the provider's
+  // history, so the commands still work afterwards.
+  await panel.locator('#acct-connection').click();
+  await expect(summary).toHaveAttribute('data-status', 'stale');
+  await expect(panel.locator('#acct-close')).toBeDisabled();
+  await panel.locator('#acct-connection').click();
+  await expect(panel.locator('.acct-msg')).toHaveText('Reconnected to the simulated provider');
+  await expect(summary).toHaveAttribute('data-status', 'ready');
+  await expect(panel.locator('.acct-position')).toContainText('Short 7 @');
+  await page.screenshot({ path: info.outputPath('account-reconnected.png'), animations: 'disabled' });
   await panel.locator('#acct-close').click();
   await expect(panel.locator('.acct-position')).toHaveText('No open position in AAPL');
   // The page's own simulated orders are separate and untouched.
