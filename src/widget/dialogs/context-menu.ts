@@ -353,7 +353,7 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
   }
 
   // The pane under the pointer: it moves up or down a slot, the price pane
-  // included when the chart lets it (`movablePrimaryPane`, on in the widget),
+  // included when the host opted in (`movablePrimaryPane`),
   // and a study pane folds to its header strip and opens again. The price
   // pane stays open in any slot. A menu raised from a button names no pane,
   // and the time axis belongs to the whole chart, so neither gets these.

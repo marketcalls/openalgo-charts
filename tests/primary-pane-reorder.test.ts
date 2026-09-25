@@ -989,16 +989,35 @@ describe('the packaged widget', () => {
     return w;
   };
 
-  it('turns the option on for its chart, and a host can still turn it off', () => {
-    expect(make().chart.movablePrimaryPane()).toBe(true);
-    const pinned = make({ movablePrimaryPane: false });
+  it('leaves the option off, as the chart does, and a host turns it on', () => {
+    // A host that builds on the widget and passes an explicit 0 for the price
+    // (a volume overlay, a coordinate call) keeps working unless it opts in.
+    const pinned = make();
     pinned.chart.addIndicator('rsi');
     expect(pinned.chart.movablePrimaryPane()).toBe(false);
     expect(pinned.chart.setPrimaryPaneIndex(1)).toBe(false);
+    expect(make({ movablePrimaryPane: false }).chart.movablePrimaryPane()).toBe(false);
+    expect(make({ movablePrimaryPane: true }).chart.movablePrimaryPane()).toBe(true);
+  });
+
+  it('keeps the up control of the first study pane from moving the price pane of a widget that did not opt in', () => {
+    const w = make();
+    const rsi = w.chart.addIndicator('rsi');
+    const y = w.chart.priceToCoordinate(100, 0)!;
+    const press = (id: string): boolean =>
+      (w.chart as unknown as { _handleLegendAction(id: string): boolean })._handleLegendAction(id);
+    expect(press(`indicator:${rsi.id}::up`)).toBe(true);
+    expect(rsi.paneIndex).toBe(1);
+    expect(w.chart.primaryPaneIndex()).toBe(0);
+    expect(w.chart.coordinateToPrice(y, 0)).toBeCloseTo(100, 6);
+    // Nothing moved, so the saved layout is the one every earlier reader opens.
+    const saved = JSON.parse(JSON.stringify(w.getState()));
+    expect(saved.chart.version).toBe(1);
+    expect(saved.chart).not.toHaveProperty('primaryPane');
   });
 
   it('reports a move of the price pane as a layout change and restores it in another widget', () => {
-    const w = make();
+    const w = make({ movablePrimaryPane: true });
     w.chart.addIndicator('rsi');
     const reasons: string[] = [];
     w.on('layout', (event) => reasons.push((event as { reason: string }).reason));
@@ -1008,7 +1027,12 @@ describe('the packaged widget', () => {
     expect(saved.chart.version).toBe(2);
     expect(saved.chart.primaryPane).toBe(1);
 
-    const other = make();
+    // A widget that did not opt in refuses the moved layout rather than lay the
+    // price pane's scales on the study pane; one that did restores it.
+    const pinned = make();
+    expect(pinned.restoreState(saved).applied).toBe(false);
+    expect(pinned.chart.primaryPaneIndex()).toBe(0);
+    const other = make({ movablePrimaryPane: true });
     expect(other.restoreState(saved).applied).toBe(true);
     expect(other.chart.primaryPaneIndex()).toBe(1);
     expect(other.chart.indicators().map((item) => [item.indicatorId, item.paneIndex])).toEqual([['rsi', 0]]);

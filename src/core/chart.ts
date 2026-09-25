@@ -417,7 +417,8 @@ export interface ChartOptions {
    * alert check, `panes()[0]`) would read a study's units the moment a user
    * moved a study above the candles. Before turning it on, drop those explicit
    * zeros or ask `primaryPaneIndex()`, and follow `paneMoved`. Decided once,
-   * at construction; read it back with `movablePrimaryPane()`.
+   * at construction; read it back with `movablePrimaryPane()`. `createWidget`
+   * and `createChartGrid` hand it to their charts as given, off by default too.
    */
   movablePrimaryPane?: boolean;
 }

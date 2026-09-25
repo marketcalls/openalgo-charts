@@ -223,11 +223,13 @@ test('without the option the up control of the first study leaves the price pane
   expect(errors).toEqual([]);
 });
 
-test('the widget pane menu moves the price pane to the bottom and the saved widget state keeps it there', async ({ page }, info) => {
-  const errors: string[] = [];
-  page.on('pageerror', error => errors.push(error.message));
+/**
+ * The packaged widget over the same stack. `movable` undefined leaves the
+ * option out, which is what a host that never heard of it builds.
+ */
+async function mountWidget(page: Page, movable?: boolean) {
   await route(page, 'pane-reorder-widget.html');
-  await page.evaluate(async ([up, down]) => {
+  await page.evaluate(async ([up, down, movablePrimaryPane]) => {
     const { createWidget } = await import('/dist/openalgo-charts.widget.mjs');
     await import('/dist/openalgo-charts.indicators.mjs');
     const bars = Array.from({ length: 160 }, (_, i) => {
@@ -237,6 +239,7 @@ test('the widget pane menu moves the price pane to the bottom and the saved widg
     const widget = createWidget(document.getElementById('c')!, {
       symbol: 'NOVA', exchange: 'NSE', interval: '5m', persist: false, rail: false, animZoom: false, animAutoscale: false,
       feed: { getBars: async () => bars, subscribeBars: () => () => {} },
+      ...(movablePrimaryPane === null ? {} : { movablePrimaryPane }),
     });
     widget.series.setData(bars);
     const hex = (c: number[]) => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
@@ -246,8 +249,14 @@ test('the widget pane menu moves the price pane to the bottom and the saved widg
     const macd = widget.chart.addIndicator('macd');
     (window as unknown as { __widget: unknown }).__widget = widget;
     window.__paneReorder = { chart: widget.chart, rsi, macd };
-  }, [UP, DOWN] as const);
+  }, [UP, DOWN, movable ?? null] as const);
   await paint(page);
+}
+
+test('the widget pane menu moves the price pane to the bottom and the saved widget state keeps it there', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mountWidget(page, true);
   const moveDown = async () => {
     const boxes = await paneBoxes(page);
     const primary = await page.evaluate(() => window.__paneReorder.chart.primaryPaneIndex());
@@ -276,5 +285,45 @@ test('the widget pane menu moves the price pane to the bottom and the saved widg
   const state = await page.evaluate(() => JSON.parse(JSON.stringify((window as unknown as { __widget: { getState(): unknown } }).__widget.getState())));
   expect(state.chart).toMatchObject({ version: 2, primaryPane: 2 });
   await page.screenshot({ path: info.outputPath('widget-price-bottom.png') });
+  expect(errors).toEqual([]);
+});
+
+test('a widget built without the option keeps the price pane on top: the up control of the first study and its menu row do nothing', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mountWidget(page);
+  const probe = () => page.evaluate(() => {
+    const { chart, rsi } = window.__paneReorder;
+    const y = chart.priceToCoordinate(100, 0);
+    return { movable: chart.movablePrimaryPane(), primary: chart.primaryPaneIndex(), rsi: rsi.paneIndex,
+      price: y === null ? null : chart.coordinateToPrice(y, 0) };
+  });
+  const before = await probe();
+  expect(before).toMatchObject({ movable: false, primary: 0, rsi: 1 });
+  expect(before.price).toBeCloseTo(100, 6);
+  const up = await rowControl(page, 'rsi', 'up');
+  await page.mouse.click(up.x, up.y);
+  await page.mouse.move(990, 695);
+  await paint(page);
+  // The study pane's menu greys the row that would displace the price pane, and says why.
+  const boxes = await paneBoxes(page);
+  await page.mouse.click(300, boxes[1].top + boxes[1].height / 2, { button: 'right' });
+  const row = page.locator('.oac-ctx__row[data-act="pane-up"]');
+  await expect(row).toHaveAttribute('aria-disabled', 'true');
+  await expect(row).toContainText('price pane stays on top');
+  await page.screenshot({ path: info.outputPath('widget-pinned-menu.png') });
+  await row.click({ force: true });
+  await page.keyboard.press('Escape');
+  await page.mouse.move(990, 695);
+  await paint(page);
+  const after = await probe();
+  expect(after).toMatchObject({ movable: false, primary: 0, rsi: 1 });
+  expect(after.price).toBeCloseTo(100, 6);
+  expect(await candles(page, 0)).toBeGreaterThan(200);
+  expect(await candles(page, 1)).toBe(0);
+  const state = await page.evaluate(() => JSON.parse(JSON.stringify((window as unknown as { __widget: { getState(): unknown } }).__widget.getState())));
+  expect(state.chart.version).toBe(1);
+  expect(state.chart).not.toHaveProperty('primaryPane');
+  await page.screenshot({ path: info.outputPath('widget-pinned-price-top.png') });
   expect(errors).toEqual([]);
 });
