@@ -61,19 +61,26 @@ export function paneCollapseRow(chart, paneIndex) {
 /**
  * The move rows: the pane under the pointer up or down one slot. Every pane
  * moves, the price pane included, which is how a trader puts the price below
- * the studies or back on top. A row at an edge stays in the menu, greyed, so
- * the pair keeps its place. Empty on a single pane and on an engine whose
- * price pane cannot move, where a swap would be refused anyway.
+ * the studies or back on top; this host builds its charts with
+ * `movablePrimaryPane` for that. A row at an edge stays in the menu, greyed,
+ * so the pair keeps its place, and so does one the chart would refuse because
+ * it keeps its price pane pinned on top. Empty on a single pane and on an
+ * engine that predates the move.
  */
 export function paneMoveRows(chart, paneIndex) {
   if (typeof chart?.movePane !== 'function' || typeof chart.primaryPaneIndex !== 'function') return [];
   const count = chart.panes().length;
   if (count < 2 || !(paneIndex >= 0 && paneIndex < count)) return [];
+  const price = chart.primaryPaneIndex();
+  const pinned = typeof chart.movablePrimaryPane === 'function' && !chart.movablePrimaryPane();
+  const row = (label, direction, edge, edgeReason) => {
+    const reason = edge ? edgeReason
+      : pinned && (paneIndex === price || paneIndex + direction === price) ? 'The price pane stays on top on this chart' : '';
+    return { label, disabled: reason !== '', reason, onSelect: () => { chart.movePane(paneIndex, direction); } };
+  };
   return [
-    { label: 'Move pane up', disabled: paneIndex === 0, reason: paneIndex === 0 ? 'Already the top pane' : '',
-      onSelect: () => { chart.movePane(paneIndex, -1); } },
-    { label: 'Move pane down', disabled: paneIndex === count - 1, reason: paneIndex === count - 1 ? 'Already the bottom pane' : '',
-      onSelect: () => { chart.movePane(paneIndex, 1); } },
+    row('Move pane up', -1, paneIndex === 0, 'Already the top pane'),
+    row('Move pane down', 1, paneIndex === count - 1, 'Already the bottom pane'),
   ];
 }
 

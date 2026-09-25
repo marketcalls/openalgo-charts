@@ -272,6 +272,8 @@ export function buildChart2({ keepView = true, typeChanged = false, state } = {}
     legendIconSize: normalizeLegendIconSize(app.p2.legendIconSize),
     grid: { vertLines: el('vgrid').checked, horzLines: el('hgrid').checked },
     timezone: app.p2.timezone || app.chartTimezone,
+    // As on the main chart: the price pane moves from the right-click menu.
+    movablePrimaryPane: true,
     ...chartMotionOptions(),
     ...decorations,
   });

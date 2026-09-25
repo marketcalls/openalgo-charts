@@ -190,6 +190,10 @@ function render({ keepView = true, state } = {}) {
     // A chart-type switch builds a new chart; the zone the user picked is
     // the demo's to carry across, like activeIndicators.
     timezone: app.chartTimezone,
+    // The price pane can go below the studies from the right-click menu. Every
+    // part of this host that means the price pane asks primaryPaneIndex() or
+    // names no pane, which is what the option asks of a host before it is on.
+    movablePrimaryPane: true,
     ...chartMotionOptions(),
     ...decorations,
   });

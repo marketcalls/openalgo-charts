@@ -136,4 +136,18 @@ describe('reference host pane moves', () => {
     expect(paneCollapseRow(chart, 2)).toBeNull();
     expect(paneCollapseRow(chart, 1)?.label).toBe('Collapse pane');
   });
+
+  it('greys the rows that would move a price pane the chart keeps pinned on top', () => {
+    const chart = { ...stackChart(), movablePrimaryPane: () => false };
+    const [topUp, topDown] = paneMoveRows(chart, 0);
+    expect(topUp.disabled).toBe(true);
+    expect(topDown).toMatchObject({ disabled: true, reason: 'The price pane stays on top on this chart' });
+    const [studyUp, studyDown] = paneMoveRows(chart, 1);
+    expect(studyUp).toMatchObject({ disabled: true, reason: 'The price pane stays on top on this chart' });
+    expect(studyDown.disabled).toBe(false);
+    const rig = setup(chart);
+    rig.open(1);
+    expect(rig.row('paneup').disabled).toBe(true);
+    expect(rig.row('panedown').disabled).toBe(false);
+  });
 });

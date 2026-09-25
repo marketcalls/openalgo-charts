@@ -92,3 +92,64 @@ test('the right-click menu puts the price pane below a study, with its trading l
   await page.screenshot({ path: info.outputPath('host-price-pane-bottom-reloaded.png') });
   expect(errors).toEqual([]);
 });
+
+test('a drawing copied beside the candles pastes beside the candles on either chart, wherever each keeps its price pane', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.evaluate(() => {
+    const app = (window as any).__oac.app;
+    app.chart.restoreState({ version: 1, indicators: [] });
+    app.chart.addIndicator('rsi');
+  });
+  await page.getByRole('button', { name: /Open a second, linked chart/ }).click();
+  await page.waitForFunction(() => {
+    const app = (window as any).__oac.app;
+    return Boolean(app.chart2?.primaryBars().length) && !app.loading2 && Boolean(app.draw2);
+  });
+  await paint(page);
+  // Chart 1 puts its price pane below RSI from its right-click menu; chart 2 keeps its price pane on top.
+  await rightClick(page, 0);
+  await page.locator('#ctxmenu [data-act="panedown"]').click();
+  await paint(page);
+  const result = await page.evaluate(async () => {
+    const app = (window as any).__oac.app;
+    const path = '/examples/yfinance/src/clipboard.js';
+    const { clipboardAction } = await import(path);
+    const ids = (draw: any) => new Set(draw.drawings().map((d: any) => d.id));
+    // Everything a paste added to one chart, by pane.
+    const pasteInto = async (pane: 1 | 2) => {
+      const draw = pane === 1 ? app.draw : app.draw2;
+      const before = ids(draw);
+      app.focusPane = pane;
+      await clipboardAction('paste');
+      return draw.drawings().filter((d: any) => !before.has(d.id)).map((d: any) => d.paneIndex);
+    };
+    const bars = app.chart.primaryBars(), at = bars[bars.length - 12];
+    const line = app.draw.add({ tool: 'horizontal-line', paneIndex: app.chart.primaryPaneIndex(), style: {},
+      points: [{ time: at.time, price: at.close }] });
+    app.focusPane = 1;
+    app.draw.select(line.id);
+    await clipboardAction('copy');
+    const same = await pasteInto(1);
+    const other = await pasteInto(2);
+    const bars2 = app.chart2.primaryBars(), at2 = bars2[bars2.length - 20];
+    const line2 = app.draw2.add({ tool: 'horizontal-line', paneIndex: app.chart2.primaryPaneIndex(), style: {},
+      points: [{ time: at2.time, price: at2.close }] });
+    app.focusPane = 2;
+    app.draw2.select(line2.id);
+    await clipboardAction('copy');
+    const back = await pasteInto(1);
+    return { primary1: app.chart.primaryPaneIndex(), primary2: app.chart2.primaryPaneIndex(), same, other, back };
+  });
+  expect(result.primary1).toBe(1);
+  expect(result.primary2).toBe(0);
+  expect(result.same).toEqual([1]);
+  expect(result.other.length).toBeGreaterThan(0);
+  expect(result.other.every((pane: number) => pane === 0)).toBe(true);
+  expect(result.back.length).toBeGreaterThan(0);
+  expect(result.back.every((pane: number) => pane === 1)).toBe(true);
+  await page.mouse.move(1300, 880);
+  await paint(page);
+  await page.screenshot({ path: info.outputPath('host-paste-price-pane.png') });
+  expect(errors).toEqual([]);
+});
