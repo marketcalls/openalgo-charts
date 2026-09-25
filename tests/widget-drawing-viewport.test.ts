@@ -90,6 +90,33 @@ describe('the Anchor row in the drawing properties', () => {
   });
 });
 
+describe('a pin the controller cannot make', () => {
+  it('leaves the row on the space the drawing is in and says why, on a folded pane', () => {
+    const rig = makeRig();
+    rig.chart.addSeries('line', { paneIndex: 1 }).setData(BARS.map((b) => ({ time: b.time, value: b.close })));
+    const r = rig.draw.add({ tool: 'rectangle', paneIndex: 1, style: {},
+      points: [{ time: T0 + 600, price: 98 }, { time: T0 + 1800, price: 103 }] });
+    expect(rig.chart.setPaneCollapsed(1, true)).toBe(true);
+    const toasts: string[] = [];
+    rig.ctx.toast = (message) => { toasts.push(message); return { node: rig.ctx.document.createElement('div'), dismiss: () => {} }; };
+    rig.draw.select(r.id);
+    mountDrawingProperties(rig.ctx);
+    const select = rig.q('[data-key="space"] select') as FakeElement;
+    select.value = 'viewport';
+    select.fire('change');
+    expect(rig.draw.get(r.id)!.space).toBeUndefined();
+    expect((rig.q('[data-key="space"] select') as FakeElement).value).toBe('data');
+    expect(toasts).toEqual(["The anchor changes only while the drawing's pane is on screen"]);
+    // On screen again, the same choice pins it, and says nothing.
+    expect(rig.chart.setPaneCollapsed(1, false)).toBe(true);
+    const again = rig.q('[data-key="space"] select') as FakeElement;
+    again.value = 'viewport';
+    again.fire('change');
+    expect(rig.draw.get(r.id)!.space).toBe('viewport');
+    expect(toasts).toHaveLength(1);
+  });
+});
+
 describe('the inline text editor', () => {
   it('opens over a pinned note at the place the controller reports, after the chart has panned', () => {
     const rig = makeRig();

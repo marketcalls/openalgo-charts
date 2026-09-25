@@ -319,6 +319,7 @@ export type WidgetBuiltinMessage =
   | "That indicator is no longer on the chart"
   | "That side is already in use"
   | "That text is off the chart"
+  | "The anchor changes only while the drawing's pane is on screen"
   | "The canvas produced no image"
   | "The chart changed; reopen Capture for its current source"
   | "The chart changed; reopen the menu before placing an order"

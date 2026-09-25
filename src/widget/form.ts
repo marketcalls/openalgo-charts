@@ -1005,6 +1005,9 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         if (errors.has(b.key)) continue;
         if (!(b.key in values)) continue;
         b.write(values[b.key]);
+        // What the control shows now is what it last reported: a value the
+        // model refused and wrote back over must be choosable again.
+        if (last.has(b.key)) last.set(b.key, b.read());
       }
     },
     values: () => {
