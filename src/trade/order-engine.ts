@@ -14,18 +14,27 @@
  *                 acknowledged, settled. A transport result never reaches past
  *                 SUBMITTED.
  *   brokerStatus  what the BROKER said. Undefined until an authoritative event
- *                 arrives, and written by nothing else.
+ *                 arrives (a stream or book update, or the broker's own explicit
+ *                 refusal of the request), and written by nothing else.
  *
  * A resolved promise is not an order: it says the request left and an answer
  * came back, not that the exchange has anything. The v2 broker contract replaces
  * `state` outright with the two-field `OrderRow`; removing it here would break
  * every consumer of `ClientOrderState`, so the honest fields are added alongside
  * and the merge is deferred to v2.
+ *
+ * Closing, partly closing and reversing a position, and brackets whose legs the
+ * provider links itself, are commands of their own with their own tokens. They
+ * go only to a feed that declares and implements them. An opposite order is
+ * never sent in place of a close: it can open a position the other way when
+ * the one being closed has already gone, which is exactly the order nobody
+ * asked for.
  */
 import { transition, isTerminal, type ClientOrderState, type OrderEvent } from './order-state-machine';
-import { validateOrder, type OrderConstraints, type ValidationResult } from './validation';
+import { validateOrder, validatePrice, validateQuantity, type OrderConstraints, type ValidationResult } from './validation';
 import type { OrderSide, OrderStatus, OrderType } from './types';
-import { checkTradingCapability, type TradingCapabilityRequest, type TradingCapabilityResult, type TradingCapabilitySource } from 'openalgo-charts';
+import { checkTradingCapability, type TradingCapabilities, type TradingCapabilityRequest, type TradingCapabilityResult, type TradingCapabilitySource } from 'openalgo-charts';
+import { checkTradingFeature, ORDER_DURATIONS, type OrderDuration, type TradingFeature, type TradingFeatureRequest, type TradingFeatureSource } from './features';
 
 export interface PlaceRequest {
   symbol: string;
@@ -39,6 +48,88 @@ export interface PlaceRequest {
   product?: 'CNC' | 'NRML' | 'MIS';
   /** Idempotency token; a retry with the same token is never double-sent. */
   clientToken?: string;
+  /** The account the order is for. Needs the `accounts` feature; never dropped on the way to the wire. */
+  account?: string;
+  /** Time in force. Omitted leaves the provider's own default. Needs the provider to list it. */
+  duration?: OrderDuration;
+  /** When a `GTD` order lapses, UTC seconds. Only with `GTD`. */
+  expiresAt?: number;
+  /** Margin multiplier to request. Needs the `leverage` feature. */
+  leverage?: number;
+}
+
+/** What a provider says an order would cost before it is placed. Absent fields were not reported. */
+export interface OrderPreview {
+  readonly accountId?: string;
+  readonly estimatedPrice?: number;
+  readonly estimatedValue?: number;
+  readonly marginRequired?: number;
+  readonly marginAvailableAfter?: number;
+  readonly fees?: number;
+  readonly currency?: string;
+  readonly warnings?: readonly string[];
+  /** Set when the provider would refuse the order, and why. */
+  readonly rejectReason?: string;
+  /** UTC seconds. */
+  readonly asOf?: number;
+}
+
+export type PreviewResult =
+  | { ok: true; preview: OrderPreview; request: PlaceRequest }
+  | { ok: false; reason: string; unsupported?: boolean; stale?: boolean };
+
+/** Identifies the position a command acts on. */
+export interface PositionCommandRequest {
+  symbol: string;
+  exchange?: string;
+  product?: 'CNC' | 'NRML' | 'MIS';
+  account?: string;
+  /** Idempotency token for this command alone. */
+  clientToken?: string;
+}
+
+export interface ClosePositionRequest extends PositionCommandRequest {
+  /** How much to close. Omitted closes the whole position; a quantity is a partial close. */
+  qty?: number;
+}
+
+export type ReversePositionRequest = PositionCommandRequest;
+
+/** An entry whose stop and target legs the provider places and links itself. */
+export interface BracketOrderRequest extends PlaceRequest {
+  /** Trigger of the protective stop leg. */
+  stopLoss: number;
+  /** Limit price of the target leg. */
+  takeProfit: number;
+}
+
+/** The broker's handle on a position command. `commandId` is what its order stream reports on. */
+export interface CommandReceipt {
+  commandId: string;
+  orderIds?: readonly string[];
+}
+
+export interface BracketReceipt {
+  orderId: string;
+  stopLossId?: string;
+  takeProfitId?: string;
+}
+
+export type TradingCommandKind = 'close' | 'reverse' | 'bracket';
+
+/** What a command confirmation is asked to approve. The request carries the account it will use. */
+export type TradingCommand =
+  | { kind: 'close'; request: Readonly<ClosePositionRequest> }
+  | { kind: 'reverse'; request: Readonly<ReversePositionRequest> }
+  | { kind: 'bracket'; request: Readonly<BracketOrderRequest> };
+
+export type OrderKind = 'order' | TradingCommandKind | 'bracket-stop' | 'bracket-target';
+
+/** One authoritative order row from the broker, with the client token it echoes when it has one. */
+export interface BrokerOrderUpdate {
+  id: string;
+  clientToken?: string;
+  status: OrderStatus;
 }
 
 /** Fields a modify may change. Whole-order feeds fill the rest from their cache. */
@@ -57,9 +148,16 @@ export interface ModifyPatch {
 export interface OrderFeed {
   /** Optional support declaration; a configured provider can report unavailable metadata. */
   readonly capabilities?: TradingCapabilitySource;
+  /** Declares preview, durations, leverage, accounts and the position commands. Omitted declares none. */
+  readonly features?: TradingFeatureSource;
   place(req: PlaceRequest & { mode: TradeMode }): Promise<{ orderId: string }>;
   modify(orderId: string, patch: ModifyPatch): Promise<void>;
   cancel(orderId: string): Promise<void>;
+  /** Read-only: what the order would cost. Must not place anything. */
+  previewOrder?(req: PlaceRequest & { mode: TradeMode }): Promise<OrderPreview>;
+  closePosition?(req: ClosePositionRequest & { mode: TradeMode }): Promise<CommandReceipt>;
+  reversePosition?(req: ReversePositionRequest & { mode: TradeMode }): Promise<CommandReceipt>;
+  placeBracket?(req: BracketOrderRequest & { mode: TradeMode }): Promise<BracketReceipt>;
 }
 
 export type TradeMode = 'live' | 'analyzer';
@@ -107,6 +205,21 @@ export function isPreflightFailure(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { preflight?: unknown }).preflight === true;
 }
 
+/**
+ * What a feed throws when the broker ANSWERED and refused: the request arrived
+ * and was turned down, so nothing is live. That is an authoritative outcome,
+ * unlike a transport failure, and it settles the intent as rejected. The token
+ * stays claimed because the request did leave; a retry is a new decision.
+ */
+export interface BrokerRejection {
+  readonly rejected: true;
+}
+
+/** True when a thrown value is the broker's explicit refusal rather than a lost answer. */
+export function isBrokerRejection(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { rejected?: unknown }).rejected === true;
+}
+
 /** Extra fields for the one-click market order, which a chart button cannot otherwise set. */
 export interface MarketOrderOptions {
   exchange?: string;
@@ -144,6 +257,18 @@ export interface OrderEngineOptions {
    * for its whole life. 0 drops each order the moment it settles.
    */
   maxSettledOrders?: number;
+  /** Host restrictions on the newer operations, combined with the feed's `features`; either can refuse. */
+  features?: TradingFeatureSource;
+  /**
+   * The account selection, for example `() => accounts.selectedAccount()`.
+   * When set, every order and command is stamped with it, one naming another
+   * account is refused, and a change while confirming sends nothing.
+   */
+  selectedAccount?: () => string | null | undefined;
+  /** Approves close, reverse and bracket commands when not armed. Omitted declines them. */
+  confirmCommand?: (command: TradingCommand) => boolean | Promise<boolean>;
+  /** Wall clock in UTC seconds, for expiry checks. Default `Date.now() / 1000`. */
+  clock?: () => number;
 }
 
 export interface PlaceResult {
@@ -155,19 +280,85 @@ export interface PlaceResult {
   reason?: string;
 }
 
+export interface CommandResult extends PlaceResult {
+  kind: TradingCommandKind;
+  /** Client ids of a bracket's legs, when the provider named them. */
+  legs?: { stopLoss?: string; takeProfit?: string };
+}
+
+/** What the engine remembers of a request. Position commands have no side or type of their own. */
+interface TrackedRequest {
+  symbol: string;
+  exchange?: string;
+  side?: OrderSide;
+  type?: OrderType;
+  qty?: number;
+  price?: number;
+  triggerPrice?: number;
+  account?: string;
+}
+
 interface Tracked {
   clientId: string;
+  kind: OrderKind;
   state: ClientOrderState;
   intent: IntentState;
   /** Last state the BROKER reported. Undefined until it reports one. */
   brokerStatus?: OrderStatus;
   brokerId?: string;
-  req: PlaceRequest;
+  req: TrackedRequest;
   /** New writes and broker reconciliation supersede older transport completions. */
   writeRevision: number;
   ocoPeer?: string;
+  /** Account, exchange and symbol of the position a close or reverse acts on. */
+  position?: string;
+  legs?: { stopLoss?: string; takeProfit?: string };
   /** Counted once into the settled ring, so a repeated terminal event cannot double-count. */
   pruned?: boolean;
+}
+
+/** A position command whose outcome is not yet known holds the position against another. */
+const UNRESOLVED: ReadonlySet<IntentState> = new Set<IntentState>(['SUBMITTING', 'SUBMITTED', 'AMBIGUOUS', 'RECONCILING']);
+
+const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '';
+const errorText = (err: unknown): string => String((err as Error)?.message ?? err);
+const PREVIEW_NUMBERS = ['estimatedPrice', 'estimatedValue', 'marginRequired', 'marginAvailableAfter', 'fees', 'asOf'] as const;
+
+/** A readable preview, or the name of the first field that is not. */
+function readPreview(raw: unknown): OrderPreview | string {
+  if (typeof raw !== 'object' || raw === null) return 'preview';
+  const r = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of PREVIEW_NUMBERS) {
+    if (r[key] === undefined) continue;
+    if (typeof r[key] !== 'number' || !Number.isFinite(r[key])) return key;
+    out[key] = r[key];
+  }
+  for (const key of ['accountId', 'currency', 'rejectReason'] as const) {
+    if (r[key] === undefined) continue;
+    if (typeof r[key] !== 'string') return key;
+    out[key] = r[key];
+  }
+  if (r.warnings !== undefined) {
+    if (!Array.isArray(r.warnings) || !r.warnings.every(w => typeof w === 'string')) return 'warnings';
+    out.warnings = [...r.warnings];
+  }
+  return out as OrderPreview;
+}
+
+/**
+ * The place flag and accepted modes still govern a close or reverse, so a host
+ * lock stops them too. The order-type list does not: it describes new orders,
+ * and a native close has no type the host chose.
+ */
+function withoutOrderTypes(source: TradingCapabilitySource | undefined): TradingCapabilitySource | undefined {
+  if (source === undefined) return undefined;
+  const strip = (c: TradingCapabilities | undefined): TradingCapabilities | undefined => {
+    if (!c || typeof c !== 'object' || Array.isArray(c) || 'then' in c) return c;
+    const { orderTypes: _types, ...rest } = c;
+    return rest;
+  };
+  return typeof source === 'function' ? (request) => strip(source(request)) : strip(source);
 }
 
 type PatchResult = { ok: true; patch: ModifyPatch } | { ok: false; reason: string };
@@ -189,6 +380,10 @@ const DEFAULT_MAX_SETTLED = 500;
 export class OrderEngine {
   private readonly _feed: OrderFeed;
   private readonly _capabilities?: TradingCapabilitySource;
+  private readonly _features?: TradingFeatureSource;
+  private readonly _selectedAccount?: () => string | null | undefined;
+  private readonly _confirmCommand?: (command: TradingCommand) => boolean | Promise<boolean>;
+  private readonly _clock: () => number;
   private readonly _constraints: OrderConstraints;
   private readonly _mode: TradeMode;
   private readonly _armed: boolean;
@@ -211,6 +406,10 @@ export class OrderEngine {
   public constructor(opts: OrderEngineOptions) {
     this._feed = opts.feed;
     this._capabilities = opts.capabilities;
+    this._features = opts.features;
+    this._selectedAccount = opts.selectedAccount;
+    this._confirmCommand = opts.confirmCommand;
+    this._clock = opts.clock ?? (() => Date.now() / 1000);
     this._constraints = opts.constraints;
     this._mode = opts.mode ?? 'live';
     this._armed = opts.armed ?? false;
@@ -234,6 +433,18 @@ export class OrderEngine {
    */
   public brokerStatus(clientId: string): OrderStatus | undefined { return this._orders.get(clientId)?.brokerStatus; }
 
+  /** Whether a row is a plain order, a position command, or a leg of a provider bracket. */
+  public orderKind(clientId: string): OrderKind | undefined { return this._orders.get(clientId)?.kind; }
+
+  /** The account an order or command was sent for, fixed when it was sent. */
+  public orderAccount(clientId: string): string | undefined { return this._orders.get(clientId)?.req.account; }
+
+  /** Client ids of a provider bracket's legs. */
+  public bracketLegs(clientId: string): { stopLoss?: string; takeProfit?: string } | undefined {
+    const legs = this._orders.get(clientId)?.legs;
+    return legs === undefined ? undefined : { ...legs };
+  }
+
   private _capability(request: TradingCapabilityRequest): TradingCapabilityResult {
     const feed = checkTradingCapability(this._feed.capabilities, request);
     return feed.supported ? checkTradingCapability(this._capabilities, request) : feed;
@@ -244,45 +455,191 @@ export class OrderEngine {
       type: order.req.type, mode: this._mode, orderId: order.brokerId });
   }
 
-  public async placeOrder(request: PlaceRequest): Promise<PlaceResult> {
-    const req = { ...request };
+  /** The feed must declare a feature; host features, when given, may refuse it as well. */
+  private _feature(request: TradingFeatureRequest): TradingCapabilityResult {
+    const feed = checkTradingFeature(this._feed.features, request);
+    return feed.supported && this._features !== undefined ? checkTradingFeature(this._features, request) : feed;
+  }
+
+  private _featureRequest(feature: TradingFeature, req: TrackedRequest & { duration?: OrderDuration }): TradingFeatureRequest {
+    return { feature, symbol: req.symbol, exchange: req.exchange, account: req.account, mode: this._mode,
+      type: req.type, duration: req.duration };
+  }
+
+  /**
+   * Resolve the account an order goes to, writing it onto `req`. With a
+   * selection configured the account is the one on screen; a request that
+   * names a different one is refused rather than silently redirected.
+   */
+  private _account(req: { account?: string }): string | null {
+    if (this._selectedAccount === undefined && req.account === undefined) return null;
+    // A provider without accounts is the first thing to say: no selection
+    // could make an account-bound order deliverable through it.
+    const support = this._feature({ feature: 'accounts', account: req.account, mode: this._mode });
+    if (!support.supported) return support.reason;
+    if (this._selectedAccount !== undefined) {
+      const selected = this._selectedAccount();
+      if (!nonEmpty(selected)) return 'No account is selected';
+      if (req.account !== undefined && req.account !== selected) return `The order names account ${req.account} but ${selected} is selected`;
+      req.account = selected;
+    }
+    return nonEmpty(req.account) ? null : 'The account id must be a non-empty string';
+  }
+
+  /** After an await: the account the user confirmed must still be the one selected. */
+  private _accountStill(req: { account?: string }): string | null {
+    if (this._selectedAccount === undefined || this._selectedAccount() === req.account) return null;
+    return 'The account changed before the order was sent; nothing was sent';
+  }
+
+  /** Duration, expiry and leverage: each is either carried by the provider or refused here. */
+  private _schema(req: PlaceRequest): string | null {
+    const duration = req.duration;
+    if (duration !== undefined) {
+      if (!ORDER_DURATIONS.includes(duration)) return `Unknown duration ${String(duration)}`;
+      const support = this._feature(this._featureRequest('duration', req));
+      if (!support.supported) return support.reason;
+    }
+    if (duration === 'GTD' && req.expiresAt === undefined) return 'A GTD order needs an expiry';
+    if (req.expiresAt !== undefined) {
+      if (duration !== 'GTD') return 'An expiry needs the GTD duration';
+      if (!Number.isFinite(req.expiresAt) || req.expiresAt <= this._clock()) return 'The expiry is not in the future';
+    }
+    if (req.leverage !== undefined) {
+      if (!Number.isFinite(req.leverage) || req.leverage <= 0) return 'Leverage must be a positive number';
+      const support = this._feature(this._featureRequest('leverage', req));
+      if (!support.supported) return support.reason;
+    }
+    return null;
+  }
+
+  /** Place capability, then the newer request fields. Null when the order may go. */
+  private _permitOrder(req: PlaceRequest): string | null {
+    const capability = this._capability({
+      operation: 'place', symbol: req.symbol, exchange: req.exchange, type: req.type, mode: this._mode,
+    });
+    return capability.supported ? this._schema(req) : capability.reason;
+  }
+
+  /** Price, trigger and quantity checks, with both prices snapped. */
+  private _validate(req: PlaceRequest): { ok: true; price?: number; triggerPrice?: number } | { ok: false; reason: string } {
     // Quantity constraints (freeze, lot grid) bind on EVERY order type; only the
     // price checks are conditional, because a market order has no price. Gating
     // the whole validate call on `price !== undefined` left the market order, the
     // one that cannot be taken back, as the single unchecked path.
     const v: ValidationResult = validateOrder(req.price, req.qty, this._constraints);
-    if (!v.ok) return { ok: false, reason: v.reason, intent: 'BLOCKED' };
-    const snappedPrice = req.price === undefined ? undefined : v.price;
+    if (!v.ok) return { ok: false, reason: v.reason ?? 'invalid order' };
+    const price = req.price === undefined ? undefined : v.price;
 
     // A stop trigger is a price and earns the same tick snap and band check.
-    let snappedTrigger = req.triggerPrice;
+    let triggerPrice = req.triggerPrice;
     if (req.triggerPrice !== undefined) {
       const t = validateOrder(req.triggerPrice, req.qty, this._constraints);
-      if (!t.ok) return { ok: false, reason: `trigger: ${t.reason}`, intent: 'BLOCKED' };
-      snappedTrigger = t.price;
+      if (!t.ok) return { ok: false, reason: `trigger: ${t.reason}` };
+      triggerPrice = t.price;
     }
+    return { ok: true, price, triggerPrice };
+  }
+
+  /** The refusal for a token this engine has already put on the wire, if it has. */
+  private _duplicate(token: string): PlaceResult | null {
+    if (!this._sentTokens.has(token)) return null;
+    const held = this._orders.get(token);
+    return {
+      ok: false,
+      reason: held?.intent === 'AMBIGUOUS'
+        ? 'duplicate clientToken: the first attempt was never confirmed and may be live'
+        : 'duplicate clientToken (idempotent skip)',
+      clientId: token,
+      state: held?.state,
+      intent: held?.intent,
+    };
+  }
+
+  /**
+   * A command's confirmation, the same contract as the order gate: it runs
+   * before any network call, so declining or throwing frees the token and the
+   * same one may be offered again. Callers skip it when armed, so an armed
+   * command reaches the feed in the same tick, as an armed order does.
+   */
+  private async _confirmed(token: string, ask: (() => boolean | Promise<boolean>) | undefined): Promise<boolean> {
+    let approved = false;
+    try {
+      approved = await (ask ? ask() : Promise.resolve(false));
+    } catch (err) {
+      this._sentTokens.delete(token);
+      throw err;
+    }
+    if (!approved) this._sentTokens.delete(token);
+    return approved;
+  }
+
+  /**
+   * The transport answered with an id. `state` keeps its historical optimism
+   * for existing consumers; `intent` stops at SUBMITTED and `brokerStatus`
+   * stays undefined, because the transport answering is not the exchange
+   * answering. An order stream can describe the order before the transport
+   * returns, and its word outranks the transport's, so a row the broker has
+   * already described is left as the broker left it.
+   */
+  private _submitted(o: Tracked, brokerId: string): void {
+    if (o.brokerId === undefined) {
+      o.brokerId = brokerId;
+      this._byBroker.set(brokerId, o.clientId);
+    }
+    if (o.brokerStatus !== undefined) return;
+    o.state = transition(o.state, 'ack');
+    o.intent = 'SUBMITTED';
+  }
+
+  /** A write threw. Returns the reason to report. */
+  private _failed(o: Tracked, err: unknown): string {
+    const message = errorText(err);
+    const preflight = isPreflightFailure(err);
+    // The stream already described the order, so the lost answer changes nothing.
+    if (!preflight && o.brokerStatus !== undefined) return message;
+    if (!preflight && isBrokerRejection(err)) {
+      // The broker answered and refused. That is its word, not a guess, so the
+      // row settles as rejected; the token stays claimed because it was sent.
+      o.brokerStatus = 'rejected';
+      o.state = transition(o.state, 'reject');
+      o.intent = 'SETTLED';
+      this._settle(o);
+      return `rejected by the broker: ${message}`;
+    }
+    o.state = transition(o.state, 'reject');
+    o.intent = preflight ? 'BLOCKED' : 'AMBIGUOUS';
+    // A transport failure says the RESPONSE did not arrive. It says nothing
+    // about whether the REQUEST did: a 504, a socket reset after the body was
+    // flushed, a tab suspended mid-flight all leave the order possibly live.
+    // Releasing the token would make the retry indistinguishable from a first
+    // attempt to every layer that dedupes on it, and double a live position on
+    // a chart that draws Buy and Sell buttons. So the token is kept unless the
+    // feed proves the request never left. Pessimistic is the safe default.
+    if (preflight) this._sentTokens.delete(o.clientId);
+    this._settle(o);
+    return preflight ? message : `${message} (may have reached the broker; check the order book before retrying)`;
+  }
+
+  /** `ok` after a failure only when the broker's own stream already reports the write as accepted. */
+  private _outcome(o: Tracked, reason?: string): PlaceResult {
+    const ok = reason === undefined || (o.brokerStatus !== undefined && o.brokerStatus !== 'rejected');
+    return { ok, clientId: o.clientId, state: o.state, intent: o.intent, ...(reason === undefined ? {} : { reason }) };
+  }
+
+  public async placeOrder(request: PlaceRequest): Promise<PlaceResult> {
+    const req = { ...request };
+    const v = this._validate(req);
+    if (!v.ok) return { ok: false, reason: v.reason, intent: 'BLOCKED' };
 
     const token = req.clientToken ?? this._idGen();
     // Claim the token BEFORE the first await. The confirm gate below is
     // asynchronous, and claiming after it let two clicks sail through the
     // duplicate check together and place the order twice.
-    if (this._sentTokens.has(token)) {
-      const held = this._orders.get(token);
-      return {
-        ok: false,
-        reason: held?.intent === 'AMBIGUOUS'
-          ? 'duplicate clientToken: the first attempt was never confirmed and may be live'
-          : 'duplicate clientToken (idempotent skip)',
-        clientId: token,
-        state: held?.state,
-        intent: held?.intent,
-      };
-    }
-    const capabilityRequest: TradingCapabilityRequest = {
-      operation: 'place', symbol: req.symbol, exchange: req.exchange, type: req.type, mode: this._mode,
-    };
-    const capability = this._capability(capabilityRequest);
-    if (!capability.supported) return { ok: false, reason: capability.reason, intent: 'BLOCKED' };
+    const duplicate = this._duplicate(token);
+    if (duplicate !== null) return duplicate;
+    const refusal = this._permitOrder(req) ?? this._account(req);
+    if (refusal !== null) return { ok: false, reason: refusal, intent: 'BLOCKED' };
     this._sentTokens.add(token);
 
     if (!this._armed) {
@@ -302,48 +659,219 @@ export class OrderEngine {
       }
     }
 
-    const currentCapability = this._capability(capabilityRequest);
-    if (!currentCapability.supported) {
+    // Capabilities, features and the account can all change while the user
+    // reads the confirmation, so every one of them is asked again.
+    const current = this._permitOrder(req) ?? this._accountStill(req);
+    if (current !== null) {
       this._sentTokens.delete(token);
-      return { ok: false, reason: currentCapability.reason, intent: 'BLOCKED' };
+      return { ok: false, reason: current, intent: 'BLOCKED' };
     }
 
-    const finalReq: PlaceRequest = { ...req, price: snappedPrice, triggerPrice: snappedTrigger, clientToken: token };
-    const tracked: Tracked = { clientId: token, state: 'pending_place', intent: 'SUBMITTING', req: finalReq, writeRevision: 0 };
+    const finalReq: PlaceRequest = { ...req, price: v.price, triggerPrice: v.triggerPrice, clientToken: token };
+    const tracked: Tracked = { clientId: token, kind: 'order', state: 'pending_place', intent: 'SUBMITTING', req: finalReq, writeRevision: 0 };
     this._orders.set(token, tracked);
 
     try {
       const { orderId } = await this._feed.place({ ...finalReq, mode: this._mode });
-      tracked.brokerId = orderId;
-      this._byBroker.set(orderId, token);
-      // `state` keeps its historical optimism for existing consumers. `intent`
-      // stops at SUBMITTED and `brokerStatus` stays undefined, because the
-      // transport answering is not the exchange answering.
-      tracked.state = transition(tracked.state, 'ack');
-      tracked.intent = 'SUBMITTED';
-      return { ok: true, clientId: token, state: tracked.state, intent: tracked.intent };
+      this._submitted(tracked, orderId);
+      return this._outcome(tracked);
     } catch (err) {
-      const preflight = isPreflightFailure(err);
-      tracked.state = transition(tracked.state, 'reject');
-      tracked.intent = preflight ? 'BLOCKED' : 'AMBIGUOUS';
-      // A transport failure says the RESPONSE did not arrive. It says nothing
-      // about whether the REQUEST did: a 504, a socket reset after the body was
-      // flushed, a tab suspended mid-flight all leave the order possibly live.
-      // Releasing the token would make the retry indistinguishable from a first
-      // attempt to every layer that dedupes on it, and double a live position on
-      // a chart that draws Buy and Sell buttons. So the token is kept unless the
-      // feed proves the request never left. Pessimistic is the safe default.
-      if (preflight) this._sentTokens.delete(token);
-      const message = String((err as Error).message ?? err);
-      this._settle(tracked);
-      return {
-        ok: false,
-        clientId: token,
-        state: tracked.state,
-        intent: tracked.intent,
-        reason: preflight ? message : `${message} (may have reached the broker; check the order book before retrying)`,
-      };
+      return this._outcome(tracked, this._failed(tracked, err));
     }
+  }
+
+  /**
+   * Ask the provider what an order would cost. Read-only: it claims no token,
+   * runs no confirmation and never calls `place`. The same checks as placing
+   * apply, so a preview is never shown for an order that would be refused here.
+   */
+  public async previewOrder(request: PlaceRequest): Promise<PreviewResult> {
+    const req = { ...request };
+    const support = this._feature(this._featureRequest('preview', req));
+    if (!support.supported) return { ok: false, unsupported: true, reason: support.reason };
+    const preview = this._feed.previewOrder;
+    if (preview === undefined) return { ok: false, unsupported: true, reason: 'Order preview is not implemented by this feed' };
+    const v = this._validate(req);
+    if (!v.ok) return { ok: false, reason: v.reason };
+    const refusal = this._permitOrder(req) ?? this._account(req);
+    if (refusal !== null) return { ok: false, reason: refusal };
+    const sent: PlaceRequest = { ...req, price: v.price, triggerPrice: v.triggerPrice };
+    const stale = { ok: false, stale: true, reason: 'The account changed during the preview; preview again' } as const;
+    let raw: unknown;
+    try {
+      raw = await preview.call(this._feed, { ...sent, mode: this._mode });
+    } catch (err) {
+      return this._accountStill(sent) === null ? { ok: false, reason: errorText(err) } : stale;
+    }
+    if (this._accountStill(sent) !== null) return stale;
+    const read = readPreview(raw);
+    if (typeof read === 'string') return { ok: false, reason: `The preview could not be read: ${read}` };
+    if (read.accountId !== undefined && sent.account !== undefined && read.accountId !== sent.account) {
+      return { ok: false, stale: true, reason: `The preview answered for account ${read.accountId}, not ${sent.account}` };
+    }
+    return { ok: true, preview: read, request: sent };
+  }
+
+  /** Close a whole position, or part of it when `qty` is given, through the provider's own close. */
+  public closePosition(request: ClosePositionRequest): Promise<CommandResult> {
+    const close = this._feed.closePosition;
+    return this._positionCommand('close', { ...request }, request.qty === undefined ? 'close' : 'partialClose',
+      close === undefined ? undefined : req => close.call(this._feed, { ...req, mode: this._mode }));
+  }
+
+  /** Reverse a position through the provider's own reverse. */
+  public reversePosition(request: ReversePositionRequest): Promise<CommandResult> {
+    const reverse = this._feed.reversePosition;
+    return this._positionCommand('reverse', { ...request }, 'reverse',
+      reverse === undefined ? undefined : req => reverse.call(this._feed, { ...req, mode: this._mode }));
+  }
+
+  private _positionKey(req: PositionCommandRequest): string {
+    return JSON.stringify([req.account ?? '', req.exchange ?? '', req.symbol]);
+  }
+
+  /**
+   * Everything a close or reverse must pass, asked before confirmation and
+   * again after it. The position lock is here: while an earlier close or
+   * reverse on the same position has no known outcome, a second one could
+   * reduce it twice or flip it back, so it waits for the broker's word.
+   */
+  private _permitCommand(kind: 'close' | 'reverse', req: ClosePositionRequest, feature: TradingFeature, implemented: boolean): string | null {
+    const request: TradingCapabilityRequest = { operation: 'place', symbol: req.symbol, exchange: req.exchange, mode: this._mode };
+    for (const source of [this._feed.capabilities, this._capabilities]) {
+      const write = checkTradingCapability(withoutOrderTypes(source), request);
+      if (!write.supported) return write.reason;
+    }
+    const support = this._feature(this._featureRequest(feature, req));
+    if (!support.supported) return support.reason;
+    if (!implemented) return `${kind === 'close' ? 'Closing a position' : 'Reversing a position'} is not implemented by this feed`;
+    const key = this._positionKey(req);
+    for (const row of this._orders.values()) {
+      if ((row.kind === 'close' || row.kind === 'reverse') && row.position === key && UNRESOLVED.has(row.intent)) {
+        return `A previous close or reverse for ${req.symbol} is unresolved; reconcile it with the broker first`;
+      }
+    }
+    return null;
+  }
+
+  private async _positionCommand(
+    kind: 'close' | 'reverse',
+    req: ClosePositionRequest,
+    feature: TradingFeature,
+    send: ((req: ClosePositionRequest) => Promise<CommandReceipt>) | undefined,
+  ): Promise<CommandResult> {
+    const blocked = (reason: string): CommandResult => ({ ok: false, kind, reason, intent: 'BLOCKED' });
+    if (!nonEmpty(req.symbol)) return blocked(`A ${kind} needs a symbol`);
+    if (req.qty !== undefined) {
+      const q = validateQuantity(req.qty, this._constraints);
+      if (!q.ok) return blocked(q.reason ?? 'invalid quantity');
+    }
+    const token = req.clientToken ?? this._idGen();
+    const duplicate = this._duplicate(token);
+    if (duplicate !== null) return { ...duplicate, kind };
+    const refusal = this._account(req) ?? this._permitCommand(kind, req, feature, send !== undefined);
+    if (refusal !== null) return blocked(refusal);
+    this._sentTokens.add(token);
+    const finalReq: ClosePositionRequest = { ...req, clientToken: token };
+    const ask = this._confirmCommand;
+    if (!this._armed && !await this._confirmed(token, ask ? () => ask({ kind, request: { ...finalReq } }) : undefined)) return blocked('not confirmed');
+    const current = this._accountStill(finalReq) ?? this._permitCommand(kind, finalReq, feature, send !== undefined);
+    if (current !== null) {
+      this._sentTokens.delete(token);
+      return blocked(current);
+    }
+    const tracked: Tracked = {
+      clientId: token, kind, state: 'pending_place', intent: 'SUBMITTING', writeRevision: 0,
+      req: { symbol: finalReq.symbol, exchange: finalReq.exchange, qty: finalReq.qty, account: finalReq.account },
+      position: this._positionKey(finalReq),
+    };
+    this._orders.set(token, tracked);
+    try {
+      const receipt = await send!(finalReq);
+      // The request left, and an answer naming nothing the stream could report
+      // on is the same as not knowing whether it happened.
+      if (!nonEmpty(receipt?.commandId)) return { ...this._outcome(tracked, this._failed(tracked, new Error('the broker returned no command id'))), kind };
+      this._submitted(tracked, receipt.commandId);
+      return { ...this._outcome(tracked), kind };
+    } catch (err) {
+      return { ...this._outcome(tracked, this._failed(tracked, err)), kind };
+    }
+  }
+
+  /**
+   * Place an entry whose stop and target legs the provider places and links
+   * itself. The legs are never linked client-side: one-cancels-other is the
+   * provider's job here, and a second, client-side link would race it.
+   */
+  public async placeBracket(request: BracketOrderRequest): Promise<CommandResult> {
+    const req = { ...request };
+    const blocked = (reason: string): CommandResult => ({ ok: false, kind: 'bracket', reason, intent: 'BLOCKED' });
+    const v = this._validate(req);
+    if (!v.ok) return blocked(v.reason);
+    const stop = validatePrice(req.stopLoss, this._constraints);
+    if (!stop.ok) return blocked(`stop: ${stop.reason}`);
+    const target = validatePrice(req.takeProfit, this._constraints);
+    if (!target.ok) return blocked(`target: ${target.reason}`);
+    const stopLoss = stop.price ?? req.stopLoss;
+    const takeProfit = target.price ?? req.takeProfit;
+    // A market entry has no price of its own, so only the legs' order is checked.
+    const entry = req.type === 'SL-M' ? v.triggerPrice : v.price;
+    const buy = req.side === 'BUY';
+    const [low, high] = buy ? [stopLoss, takeProfit] : [takeProfit, stopLoss];
+    if (!(low < high) || (entry !== undefined && !(low < entry && entry < high))) {
+      return blocked('The stop and target are on the wrong side of the entry');
+    }
+
+    const token = req.clientToken ?? this._idGen();
+    const duplicate = this._duplicate(token);
+    if (duplicate !== null) return { ...duplicate, kind: 'bracket' };
+    const place = this._feed.placeBracket;
+    const permit = (): string | null => {
+      const support = this._feature(this._featureRequest('brackets', req));
+      if (!support.supported) return support.reason;
+      if (place === undefined) return 'Bracket placement is not implemented by this feed';
+      return this._permitOrder(req);
+    };
+    const refusal = this._account(req) ?? permit();
+    if (refusal !== null) return blocked(refusal);
+    this._sentTokens.add(token);
+    const finalReq: BracketOrderRequest = { ...req, price: v.price, triggerPrice: v.triggerPrice, stopLoss, takeProfit, clientToken: token };
+    const ask = this._confirmCommand;
+    if (!this._armed && !await this._confirmed(token, ask ? () => ask({ kind: 'bracket', request: { ...finalReq } }) : undefined)) return blocked('not confirmed');
+    const current = this._accountStill(finalReq) ?? permit();
+    if (current !== null) {
+      this._sentTokens.delete(token);
+      return blocked(current);
+    }
+    const tracked: Tracked = { clientId: token, kind: 'bracket', state: 'pending_place', intent: 'SUBMITTING', req: finalReq, writeRevision: 0 };
+    this._orders.set(token, tracked);
+    let receipt: BracketReceipt;
+    try {
+      receipt = await place!.call(this._feed, { ...finalReq, mode: this._mode });
+    } catch (err) {
+      return { ...this._outcome(tracked, this._failed(tracked, err)), kind: 'bracket' };
+    }
+    if (!nonEmpty(receipt?.orderId)) return { ...this._outcome(tracked, this._failed(tracked, new Error('the broker returned no order id'))), kind: 'bracket' };
+    this._submitted(tracked, receipt.orderId);
+    const exit: OrderSide = buy ? 'SELL' : 'BUY';
+    const leg = (suffix: 'stop' | 'target', brokerId: string | undefined): string | undefined => {
+      if (!nonEmpty(brokerId)) return undefined;
+      const clientId = `${token}:${suffix}`;
+      const row: Tracked = {
+        clientId, kind: suffix === 'stop' ? 'bracket-stop' : 'bracket-target', state: 'pending_place', intent: 'SUBMITTING', writeRevision: 0,
+        req: suffix === 'stop'
+          ? { symbol: req.symbol, exchange: req.exchange, side: exit, type: 'SL-M', qty: req.qty, triggerPrice: stopLoss, account: req.account }
+          : { symbol: req.symbol, exchange: req.exchange, side: exit, type: 'LIMIT', qty: req.qty, price: takeProfit, account: req.account },
+      };
+      this._orders.set(clientId, row);
+      this._sentTokens.add(clientId);
+      this._submitted(row, brokerId);
+      return clientId;
+    };
+    const stopLossId = leg('stop', receipt.stopLossId);
+    const takeProfitId = leg('target', receipt.takeProfitId);
+    tracked.legs = { ...(stopLossId === undefined ? {} : { stopLoss: stopLossId }), ...(takeProfitId === undefined ? {} : { takeProfit: takeProfitId }) };
+    return { ...this._outcome(tracked), kind: 'bracket', legs: { ...tracked.legs } };
   }
 
   /** One-click market order. Omitting `opts` is exactly the previous behaviour. */
@@ -375,6 +903,7 @@ export class OrderEngine {
     const triggerPrice = opts?.triggerPrice;
     const o = this._orders.get(clientId);
     if (o === undefined || isTerminal(o.state)) return;
+    if (this._isPositionCommand(o)) return;
     const capability = this._orderCapability('modify', o);
     if (!capability.supported) {
       this._pendingModify.delete(clientId);
@@ -401,7 +930,7 @@ export class OrderEngine {
    * field it already holds.
    */
   private _buildModifyPatch(o: Tracked, price: number, explicitTrigger?: number): PatchResult {
-    const v = validateOrder(price, o.req.qty, this._constraints);
+    const v = validateOrder(price, o.req.qty ?? Number.NaN, this._constraints);
     if (!v.ok) return { ok: false, reason: v.reason ?? 'invalid modify price' };
     const level = v.price ?? price;
 
@@ -433,8 +962,8 @@ export class OrderEngine {
     return { ok: true, patch: { price: level } };
   }
 
-  private _validateTrigger(trigger: number, qty: number): { ok: true; price: number } | { ok: false; reason: string } {
-    const t = validateOrder(trigger, qty, this._constraints);
+  private _validateTrigger(trigger: number, qty: number | undefined): { ok: true; price: number } | { ok: false; reason: string } {
+    const t = validateOrder(trigger, qty ?? Number.NaN, this._constraints);
     if (!t.ok) return { ok: false, reason: `trigger: ${t.reason ?? 'invalid'}` };
     return { ok: true, price: t.price ?? trigger };
   }
@@ -481,6 +1010,7 @@ export class OrderEngine {
   public async cancelOrder(clientId: string): Promise<void> {
     const o = this._orders.get(clientId);
     if (o === undefined || o.brokerId === undefined || isTerminal(o.state)) return;
+    if (this._isPositionCommand(o)) return;
     const capability = this._orderCapability('cancel', o);
     if (!capability.supported) {
       this._onValidationError?.(capability.reason);
@@ -529,11 +1059,56 @@ export class OrderEngine {
     if (o === undefined) return;
     o.writeRevision++;
     o.brokerStatus = status;
+    // A stream can cancel an order (an IOC that found nothing) before the
+    // transport has answered for it. Being reported at all means the broker
+    // accepted it, which is the step the machine needs before a cancel.
+    if (o.state === 'pending_place' && status === 'cancelled') o.state = transition(o.state, 'ack');
     const event = BROKER_EVENT[status];
     if (event !== undefined) o.state = transition(o.state, event);
     o.intent = BROKER_FINAL.has(status) ? 'SETTLED' : 'ACKNOWLEDGED';
     if (status === 'filled') this._cancelOcoPeer(o);
     this._settle(o);
+  }
+
+  /**
+   * An order row from the broker's stream or book, matched by broker id or,
+   * failing that, by the client token the broker echoes. The token is the only
+   * handle on a write whose answer was lost: it is how an AMBIGUOUS row learns
+   * its broker id and its outcome from the broker rather than from a guess.
+   */
+  public onBrokerOrder(update: BrokerOrderUpdate): void {
+    if (!this._byBroker.has(update.id) && update.clientToken !== undefined) {
+      const row = this._orders.get(update.clientToken);
+      if (row !== undefined && row.brokerId === undefined) {
+        row.brokerId = update.id;
+        this._byBroker.set(update.id, row.clientId);
+      }
+    }
+    this.onBrokerUpdate(update.id, update.status);
+  }
+
+  /**
+   * Drop an AMBIGUOUS row and free its token, after the host has established
+   * from the broker's complete book that the request never arrived. Nothing
+   * here can decide that on its own, which is why it is a separate call. Any
+   * other row is left alone and the call returns false.
+   */
+  public releaseAmbiguous(clientId: string): boolean {
+    const o = this._orders.get(clientId);
+    if (o === undefined || o.intent !== 'AMBIGUOUS') return false;
+    this._orders.delete(clientId);
+    this._sentTokens.delete(clientId);
+    if (o.brokerId !== undefined) this._byBroker.delete(o.brokerId);
+    this._lastModifyAt.delete(clientId);
+    this._pendingModify.delete(clientId);
+    return true;
+  }
+
+  /** A close or reverse is not an order the user can drag or cancel from here. */
+  private _isPositionCommand(o: Tracked): boolean {
+    if (o.kind !== 'close' && o.kind !== 'reverse') return false;
+    this._onValidationError?.(`A ${o.kind} command cannot be modified or cancelled`);
+    return true;
   }
 
   private _cancelOcoPeer(o: Tracked): void {

@@ -1,0 +1,377 @@
+import { describe, expect, it, vi } from 'vitest';
+import { OrderEngine, type OrderEngineOptions, type OrderFeed, type PlaceRequest } from '../src/trade/order-engine';
+import { AccountManager } from '../src/trade/account';
+import { FakeBroker, type FakeAccountSeed, type FakeBrokerOperation } from '../src/trade/fake-broker';
+import { OpenAlgoTradeFeed } from '../src/feed/openalgo-trade';
+import type { Order } from '../src/trade/types';
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+const SEEDS: FakeAccountSeed[] = [
+  { id: 'SBX-1', name: 'Sandbox one', mode: 'analyzer', currency: 'INR', balance: 100_000 },
+  { id: 'SBX-2', name: 'Sandbox two', mode: 'analyzer', currency: 'INR', balance: 200_000, leverage: 2, maxLeverage: 4 },
+  { id: 'LIVE-1', mode: 'live', currency: 'INR', balance: 5_000_000 },
+];
+const NOW = 1_700_000_000;
+
+function setup(options: { engine?: Partial<OrderEngineOptions>; broker?: ConstructorParameters<typeof FakeBroker>[0] } = {}) {
+  const holds = new Map<string, Array<() => Promise<void>>>();
+  const broker = new FakeBroker({
+    accounts: SEEDS, now: () => NOW,
+    latency: (operation: FakeBrokerOperation, accountId?: string) => holds.get(`${operation}:${accountId ?? ''}`)?.shift()?.(),
+    ...options.broker,
+  });
+  broker.setMark('SYN', 100);
+  const hold = (operation: FakeBrokerOperation, accountId?: string) => {
+    const gate = deferred();
+    const key = `${operation}:${accountId ?? ''}`;
+    holds.set(key, [...(holds.get(key) ?? []), () => gate.promise]);
+    return gate;
+  };
+  const accounts = new AccountManager({ feed: broker, mode: 'analyzer' });
+  const engine = new OrderEngine({
+    feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05, freezeQty: 1000 },
+    selectedAccount: () => accounts.selectedAccount(), clock: () => NOW, ...options.engine,
+  });
+  // The order stream is the authority: every status the broker reports reaches the engine,
+  // by the client token it echoes when it has one and by broker id otherwise.
+  broker.onOrderUpdate((order: Order, info) => engine.onBrokerOrder({ id: order.id, clientToken: info.clientToken, status: order.status }));
+  return { broker, accounts, engine, hold };
+}
+
+const market = (extra: Partial<PlaceRequest> = {}): PlaceRequest => ({ symbol: 'SYN', exchange: 'NSE', side: 'BUY', type: 'MARKET', qty: 10, ...extra });
+
+describe('request schema: account, duration, expiry and leverage', () => {
+  it('stamps the selected account on an order and sends it to that ledger', async () => {
+    const { broker, accounts, engine } = setup();
+    await accounts.refresh();
+    const placed = await engine.placeOrder(market({ clientToken: 'a1' }));
+    expect(placed).toMatchObject({ ok: true });
+    expect(engine.orderAccount('a1')).toBe('SBX-1');
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 10, avgPrice: 100 }]);
+    expect(broker.accountPositions('SBX-2')).toEqual([]);
+    expect(engine.brokerStatus('a1')).toBe('filled');
+  });
+
+  it('refuses before sending when no account is selected or the order names a different one', async () => {
+    const { broker, accounts, engine } = setup();
+    const place = vi.spyOn(broker, 'place');
+    expect(await engine.placeOrder(market())).toMatchObject({ ok: false, intent: 'BLOCKED', reason: 'No account is selected' });
+    await accounts.refresh();
+    expect(await engine.placeOrder(market({ account: 'SBX-2' }))).toMatchObject({
+      ok: false, intent: 'BLOCKED', reason: 'The order names account SBX-2 but SBX-1 is selected',
+    });
+    expect(place).not.toHaveBeenCalled();
+  });
+
+  it('never drops an account, duration or leverage a provider cannot carry', async () => {
+    const legacy = new FakeBroker();
+    const place = vi.spyOn(legacy, 'place');
+    const engine = new OrderEngine({ feed: legacy, armed: true, constraints: { tickSize: 0.05 } });
+    for (const extra of [{ account: 'X' }, { duration: 'IOC' as const }, { leverage: 2 }, { duration: 'GTD' as const, expiresAt: NOW + 60 }]) {
+      const result = await engine.placeOrder(market(extra));
+      expect(result).toMatchObject({ ok: false, intent: 'BLOCKED' });
+      expect(result.reason).toMatch(/not declared by this provider/);
+    }
+    expect(place).not.toHaveBeenCalled();
+    // The legacy route itself is unchanged.
+    expect(await engine.placeOrder(market())).toMatchObject({ ok: true });
+  });
+
+  it('checks durations against the provider list and expiry against the clock', async () => {
+    const { broker, accounts, engine } = setup({ broker: { features: { accounts: true, orderHistory: true, durations: ['DAY', 'GTD'] } } });
+    await accounts.refresh();
+    const place = vi.spyOn(broker, 'place');
+    expect(await engine.placeOrder(market({ duration: 'IOC' }))).toMatchObject({ ok: false, reason: 'Duration IOC is not supported' });
+    expect(await engine.placeOrder(market({ duration: 'GTD' }))).toMatchObject({ ok: false, reason: 'A GTD order needs an expiry' });
+    expect(await engine.placeOrder(market({ duration: 'GTD', expiresAt: NOW - 1 }))).toMatchObject({ ok: false, reason: 'The expiry is not in the future' });
+    expect(await engine.placeOrder(market({ duration: 'DAY', expiresAt: NOW + 60 }))).toMatchObject({ ok: false, reason: 'An expiry needs the GTD duration' });
+    expect(await engine.placeOrder(market({ duration: 'SOON' as never }))).toMatchObject({ ok: false, reason: 'Unknown duration SOON' });
+    expect(await engine.placeOrder(market({ leverage: 2 }))).toMatchObject({ ok: false, reason: 'Leverage is not declared by this provider' });
+    expect(place).not.toHaveBeenCalled();
+    const gtd = await engine.placeOrder({ ...market({ duration: 'GTD', expiresAt: NOW + 3600, clientToken: 'g1' }), type: 'LIMIT', price: 95 });
+    expect(gtd).toMatchObject({ ok: true });
+    const history = await accounts.orderHistory();
+    expect(history.ok && history.rows.find(row => row.clientToken === 'g1')).toMatchObject({ duration: 'GTD', expiresAt: NOW + 3600, order: { status: 'working' } });
+  });
+
+  it('lets the duration change what the broker does with a resting order', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    await engine.placeOrder({ ...market({ duration: 'IOC', clientToken: 'ioc' }), type: 'LIMIT', price: 90 });
+    await engine.placeOrder({ ...market({ duration: 'DAY', clientToken: 'day' }), type: 'LIMIT', price: 90 });
+    expect(engine.brokerStatus('ioc')).toBe('cancelled');
+    expect(engine.brokerStatus('day')).toBe('working');
+    expect(broker.orders().filter(order => order.status === 'working')).toHaveLength(1);
+  });
+
+  it('carries leverage into the margin a provider reserves, within its limit', async () => {
+    const { accounts, engine } = setup();
+    await accounts.refresh();
+    await accounts.select('SBX-2');
+    await engine.placeOrder(market({ qty: 20, leverage: 4 }));
+    expect(accounts.getState().snapshot).toMatchObject({ marginUsed: 500 });
+    expect(await engine.placeOrder(market({ leverage: 8, clientToken: 'too-high' }))).toMatchObject({ ok: false, intent: 'SETTLED' });
+    expect(engine.brokerStatus('too-high')).toBe('rejected');
+  });
+});
+
+describe('order preview', () => {
+  it('is explicit when unsupported and never places anything', async () => {
+    const legacy = new FakeBroker();
+    const place = vi.spyOn(legacy, 'place');
+    const engine = new OrderEngine({ feed: legacy, armed: true, constraints: { tickSize: 0.05 } });
+    expect(await engine.previewOrder(market())).toEqual({ ok: false, unsupported: true, reason: 'Order preview is not declared by this provider' });
+    const noMethod: OrderFeed = { features: { preview: true }, place: vi.fn(), modify: vi.fn(), cancel: vi.fn() };
+    expect(await new OrderEngine({ feed: noMethod, armed: true, constraints: { tickSize: 0.05 } }).previewOrder(market()))
+      .toMatchObject({ ok: false, unsupported: true, reason: 'Order preview is not implemented by this feed' });
+    expect(place).not.toHaveBeenCalled();
+  });
+
+  it('returns the provider figures without claiming the idempotency token', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    const place = vi.spyOn(broker, 'place');
+    const preview = await engine.previewOrder(market({ clientToken: 'same' }));
+    expect(preview).toMatchObject({ ok: true, preview: { accountId: 'SBX-1', estimatedPrice: 100, estimatedValue: 1000, marginRequired: 1000, marginAvailableAfter: 99_000, currency: 'INR' } });
+    expect(place).not.toHaveBeenCalled();
+    expect(await engine.placeOrder(market({ clientToken: 'same' }))).toMatchObject({ ok: true });
+    const tooLarge = await engine.previewOrder(market({ qty: 999 }));
+    expect(tooLarge).toMatchObject({ ok: true, preview: { rejectReason: 'Insufficient margin: 99900.00 required, 99000.00 available' } });
+  });
+
+  it('reports a preview stale when the account changes before it answers', async () => {
+    const { accounts, engine, hold } = setup();
+    await accounts.refresh();
+    const slow = hold('preview', 'SBX-1');
+    const pending = engine.previewOrder(market());
+    await accounts.select('SBX-2');
+    slow.resolve();
+    expect(await pending).toMatchObject({ ok: false, stale: true });
+  });
+});
+
+describe('switching accounts during a pending order', () => {
+  it('sends nothing when the account changes while the user is confirming', async () => {
+    const confirmed = deferred<boolean>();
+    const { accounts, engine, broker } = setup({ engine: { armed: false, gate: () => confirmed.promise } });
+    await accounts.refresh();
+    const place = vi.spyOn(broker, 'place');
+    const pending = engine.placeOrder(market({ clientToken: 'switch' }));
+    await accounts.select('SBX-2');
+    confirmed.resolve(true);
+    expect(await pending).toMatchObject({ ok: false, intent: 'BLOCKED', reason: 'The account changed before the order was sent; nothing was sent' });
+    expect(place).not.toHaveBeenCalled();
+    // Nothing left, so the same token is free for a deliberate second attempt.
+    expect(await engine.placeOrder(market({ clientToken: 'switch' }))).toMatchObject({ ok: true });
+    expect(engine.orderAccount('switch')).toBe('SBX-2');
+  });
+
+  it('keeps an order already in flight on the account it was sent for', async () => {
+    const { accounts, engine, broker, hold } = setup();
+    await accounts.refresh();
+    const slow = hold('place', 'SBX-1');
+    const pending = engine.placeOrder(market({ clientToken: 'inflight' }));
+    await accounts.select('SBX-2');
+    slow.resolve();
+    expect(await pending).toMatchObject({ ok: true });
+    expect(engine.orderAccount('inflight')).toBe('SBX-1');
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 10, avgPrice: 100 }]);
+    expect(broker.accountPositions('SBX-2')).toEqual([]);
+    expect(accounts.getState().snapshot).toMatchObject({ accountId: 'SBX-2', marginUsed: 0 });
+  });
+
+  it('refuses a sandbox order routed to a live account at the broker as well', async () => {
+    const broker = new FakeBroker({ accounts: SEEDS, now: () => NOW });
+    broker.setMark('SYN', 100);
+    await expect(broker.place({ ...market(), mode: 'analyzer', account: 'LIVE-1' })).rejects.toMatchObject({ rejected: true });
+    expect(broker.accountPositions('LIVE-1')).toEqual([]);
+  });
+});
+
+describe('explicit close, partial close and reverse', () => {
+  async function long(qty = 10) {
+    const s = setup();
+    await s.accounts.refresh();
+    await s.engine.placeOrder(market({ qty, clientToken: 'open' }));
+    return s;
+  }
+
+  it('closes natively and never falls back to an opposite order', async () => {
+    const legacy = new FakeBroker();
+    const place = vi.spyOn(legacy, 'place');
+    const engine = new OrderEngine({ feed: legacy, armed: true, constraints: { tickSize: 0.05 } });
+    for (const run of [() => engine.closePosition({ symbol: 'SYN' }), () => engine.closePosition({ symbol: 'SYN', qty: 1 }), () => engine.reversePosition({ symbol: 'SYN' })]) {
+      const result = await run();
+      expect(result).toMatchObject({ ok: false, intent: 'BLOCKED' });
+      expect(result.reason).toMatch(/not declared by this provider/);
+    }
+    const missing: OrderFeed = { features: { close: true }, place: vi.fn(async () => ({ orderId: 'x' })), modify: vi.fn(), cancel: vi.fn() };
+    expect(await new OrderEngine({ feed: missing, armed: true, constraints: { tickSize: 0.05 } }).closePosition({ symbol: 'SYN' }))
+      .toMatchObject({ ok: false, reason: 'Closing a position is not implemented by this feed' });
+    expect(missing.place).not.toHaveBeenCalled();
+    expect(place).not.toHaveBeenCalled();
+  });
+
+  it('closes a whole position, part of one, and reverses one, each settled by the broker', async () => {
+    const { engine, broker } = await long(10);
+    const partial = await engine.closePosition({ symbol: 'SYN', exchange: 'NSE', qty: 4, clientToken: 'part' });
+    expect(partial).toMatchObject({ ok: true, kind: 'close', intent: 'SETTLED' });
+    expect(engine.brokerStatus('part')).toBe('filled');
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 6, avgPrice: 100 }]);
+    const reversed = await engine.reversePosition({ symbol: 'SYN', exchange: 'NSE', clientToken: 'flip' });
+    expect(reversed).toMatchObject({ ok: true, kind: 'reverse' });
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: -6, avgPrice: 100 }]);
+    expect(await engine.closePosition({ symbol: 'SYN', exchange: 'NSE', clientToken: 'all' })).toMatchObject({ ok: true });
+    expect(broker.accountPositions('SBX-1')).toEqual([]);
+    expect(engine.orderKind('flip')).toBe('reverse');
+    expect(engine.orderAccount('all')).toBe('SBX-1');
+  });
+
+  it('refuses a repeated command token without a second send', async () => {
+    const { engine, broker } = await long(10);
+    const close = vi.spyOn(broker, 'closePosition');
+    await engine.closePosition({ symbol: 'SYN', qty: 2, clientToken: 'once' });
+    expect(await engine.closePosition({ symbol: 'SYN', qty: 2, clientToken: 'once' })).toMatchObject({ ok: false, reason: 'duplicate clientToken (idempotent skip)' });
+    expect(await engine.reversePosition({ symbol: 'SYN', clientToken: 'open' })).toMatchObject({ ok: false });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a server rejection as settled and leaves the position alone', async () => {
+    const { engine, broker } = await long(10);
+    const rejected = await engine.closePosition({ symbol: 'SYN', qty: 25, clientToken: 'big' });
+    expect(rejected).toMatchObject({ ok: false, intent: 'SETTLED', state: 'rejected' });
+    expect(rejected.reason).toContain('exceeds the open position');
+    expect(engine.brokerStatus('big')).toBe('rejected');
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 10, avgPrice: 100 }]);
+    expect(await engine.closePosition({ symbol: 'NONE', clientToken: 'flat' })).toMatchObject({ ok: false, intent: 'SETTLED' });
+  });
+
+  it('holds an ambiguous close, blocks a second one, and resolves it from the broker book', async () => {
+    const { engine, broker } = await long(10);
+    const updates: string[] = [];
+    broker.onOrderUpdate((_order, info) => updates.push(info.clientToken ?? ''));
+    broker.failNext('close', 'lost-response');
+    broker.muteOrderUpdates(true);
+    const lost = await engine.closePosition({ symbol: 'SYN', qty: 4, clientToken: 'lost' });
+    expect(lost).toMatchObject({ ok: false, intent: 'AMBIGUOUS' });
+    expect(lost.reason).toContain('may have reached the broker');
+    // The broker did apply it; the client cannot know yet.
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 6, avgPrice: 100 }]);
+    const close = vi.spyOn(broker, 'closePosition');
+    expect(await engine.closePosition({ symbol: 'SYN', qty: 4, clientToken: 'second' })).toMatchObject({
+      ok: false, intent: 'BLOCKED', reason: 'A previous close or reverse for SYN is unresolved; reconcile it with the broker first',
+    });
+    expect(await engine.closePosition({ symbol: 'SYN', qty: 4, clientToken: 'lost' })).toMatchObject({
+      ok: false, reason: 'duplicate clientToken: the first attempt was never confirmed and may be live',
+    });
+    expect(close).not.toHaveBeenCalled();
+    // Authoritative reconciliation: the broker's history echoes the token.
+    broker.muteOrderUpdates(false);
+    const history = await broker.getOrderHistory({ accountId: 'SBX-1' }, new AbortController().signal);
+    const row = history.find(entry => entry.clientToken === 'lost')!;
+    engine.onBrokerOrder({ id: row.order.id, clientToken: 'lost', status: row.order.status });
+    expect(engine.intentState('lost')).toBe('SETTLED');
+    expect(engine.brokerStatus('lost')).toBe('filled');
+    expect(await engine.closePosition({ symbol: 'SYN', qty: 6, clientToken: 'rest' })).toMatchObject({ ok: true });
+    expect(broker.accountPositions('SBX-1')).toEqual([]);
+    expect(updates).toContain('rest');
+  });
+
+  it('lets the host release an ambiguous command the broker never received', async () => {
+    const { engine, broker } = await long(10);
+    broker.failNext('reverse', 'timeout');
+    expect(await engine.reversePosition({ symbol: 'SYN', clientToken: 'never' })).toMatchObject({ ok: false, intent: 'AMBIGUOUS' });
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 10, avgPrice: 100 }]);
+    expect(engine.releaseAmbiguous('open')).toBe(false);
+    expect(engine.releaseAmbiguous('never')).toBe(true);
+    expect(engine.intentState('never')).toBeUndefined();
+    expect(await engine.reversePosition({ symbol: 'SYN', clientToken: 'never' })).toMatchObject({ ok: true });
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: -10, avgPrice: 100 }]);
+  });
+
+  it('reconciles commands on reconnect instead of assuming them lost', async () => {
+    const { engine, broker } = await long(10);
+    broker.muteOrderUpdates(true);
+    const sent = await engine.closePosition({ symbol: 'SYN', qty: 2, clientToken: 'rc' });
+    expect(sent).toMatchObject({ ok: true, intent: 'SUBMITTED' });
+    engine.beginReconcile();
+    expect(engine.intentState('rc')).toBe('RECONCILING');
+    const book = new Set((await broker.getOrderHistory({ accountId: 'SBX-1' }, new AbortController().signal)).map(row => row.order.id));
+    engine.onReconnect(book);
+    expect(engine.intentState('rc')).toBe('ACKNOWLEDGED');
+    engine.beginReconcile();
+    engine.onReconnect(new Set());
+    expect(engine.intentState('rc')).toBe('AMBIGUOUS');
+  });
+
+  it('asks for confirmation of a command when not set to send immediately', async () => {
+    const { accounts, broker } = setup();
+    await accounts.refresh();
+    const confirmCommand = vi.fn(() => false);
+    const engine = new OrderEngine({ feed: broker, mode: 'analyzer', constraints: { tickSize: 0.05 }, selectedAccount: () => accounts.selectedAccount(), confirmCommand });
+    const close = vi.spyOn(broker, 'closePosition');
+    expect(await engine.closePosition({ symbol: 'SYN', clientToken: 'ask' })).toMatchObject({ ok: false, intent: 'BLOCKED', reason: 'not confirmed' });
+    expect(confirmCommand).toHaveBeenCalledWith({ kind: 'close', request: expect.objectContaining({ symbol: 'SYN', account: 'SBX-1' }) });
+    expect(close).not.toHaveBeenCalled();
+    const unconfigured = new OrderEngine({ feed: broker, mode: 'analyzer', constraints: { tickSize: 0.05 }, selectedAccount: () => accounts.selectedAccount() });
+    expect(await unconfigured.reversePosition({ symbol: 'SYN' })).toMatchObject({ ok: false, reason: 'not confirmed' });
+  });
+
+  it('honours a host lock on writes for commands too', async () => {
+    const { accounts, broker } = setup();
+    await accounts.refresh();
+    let locked = true;
+    const engine = new OrderEngine({ feed: broker, mode: 'analyzer', armed: true, constraints: { tickSize: 0.05, lotSize: 5 },
+      selectedAccount: () => accounts.selectedAccount(), capabilities: () => ({ place: !locked, orderTypes: ['LIMIT'] }) });
+    expect(await engine.closePosition({ symbol: 'SYN' })).toMatchObject({ ok: false, intent: 'BLOCKED', reason: 'Trading operation place is not supported' });
+    locked = false;
+    expect(await engine.closePosition({ symbol: 'SYN', qty: 3 })).toMatchObject({ ok: false, intent: 'BLOCKED', reason: 'quantity 3 is not a multiple of lot size 5' });
+    // An order-type list describes new orders; a native close has no order type of its own.
+    expect(await engine.closePosition({ symbol: 'SYN', clientToken: 'typeless' })).toMatchObject({ ok: false, intent: 'SETTLED' });
+  });
+});
+
+describe('provider-native brackets', () => {
+  it('places the entry and both legs as one command, with native one-cancels-other', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    const result = await engine.placeBracket({ ...market({ clientToken: 'br' }), stopLoss: 95.02, takeProfit: 110 });
+    expect(result).toMatchObject({ ok: true, kind: 'bracket', legs: { stopLoss: 'br:stop', takeProfit: 'br:target' } });
+    expect(engine.orderKind('br:stop')).toBe('bracket-stop');
+    const legs = broker.orders().filter(order => order.parentId !== undefined);
+    expect(legs.map(order => [order.role, order.type, order.triggerPrice ?? order.price])).toEqual([['sl', 'SL-M', 95], ['tp', 'LIMIT', 110]]);
+    const target = legs.find(order => order.role === 'tp')!;
+    broker.fill(target.id);
+    expect(engine.brokerStatus('br:target')).toBe('filled');
+    expect(engine.brokerStatus('br:stop')).toBe('cancelled');
+    expect(broker.accountPositions('SBX-1')).toEqual([]);
+  });
+
+  it('refuses legs on the wrong side, and brackets a provider does not declare', async () => {
+    const { accounts, engine, broker } = setup({ broker: { features: { accounts: true, brackets: false } } });
+    await accounts.refresh();
+    const bracket = vi.spyOn(broker, 'placeBracket');
+    expect(await engine.placeBracket({ ...market(), stopLoss: 110, takeProfit: 95 })).toMatchObject({
+      ok: false, intent: 'BLOCKED', reason: 'The stop and target are on the wrong side of the entry',
+    });
+    expect(await engine.placeBracket({ ...market(), type: 'LIMIT', price: 100, stopLoss: 101, takeProfit: 120 })).toMatchObject({ ok: false });
+    expect(await engine.placeBracket({ ...market(), stopLoss: 95, takeProfit: 110 })).toMatchObject({ ok: false, reason: 'Bracket placement is not supported' });
+    expect(bracket).not.toHaveBeenCalled();
+  });
+});
+
+describe('the OpenAlgo route', () => {
+  it('refuses fields its placeorder payload has no place for, before any network call', async () => {
+    const fetchImpl = vi.fn();
+    const feed = new OpenAlgoTradeFeed({ baseUrl: 'http://x', apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch, verifyMode: 'off' });
+    for (const extra of [{ account: 'A' }, { duration: 'DAY' as const }, { expiresAt: NOW }, { leverage: 2 }]) {
+      await expect(feed.place({ ...market(extra), mode: 'live' })).rejects.toMatchObject({ preflight: true });
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
