@@ -43,6 +43,10 @@ export function createDesk(options = {}) {
 
   // Every write the panel sent whose outcome may still need the broker's word.
   let sent = [];
+  // Every account the panel has written to. It is never pruned: a settled
+  // write can leave live orders behind (a filled bracket entry's legs), and
+  // an account whose history is not read leaves them absent from the book.
+  const written = new Set();
   /**
    * Restore the connection, then settle every write from the broker's own
    * history before reading the account again. A write whose answer was lost
@@ -55,7 +59,7 @@ export function createDesk(options = {}) {
     engine.beginReconcile();
     const tokens = new Set();
     const ids = new Set();
-    for (const accountId of new Set(sent.map((id) => engine.orderAccount(id)).filter(Boolean))) {
+    for (const accountId of written) {
       for (const row of await broker.getOrderHistory({ accountId })) {
         tokens.add(row.clientToken);
         ids.add(row.order.id);
@@ -64,7 +68,8 @@ export function createDesk(options = {}) {
     }
     engine.onReconnect(ids);
     for (const id of sent) if (!tokens.has(id)) engine.releaseAmbiguous(id);
-    // A settled write needs nothing more from a later reconnect.
+    // A settled write needs nothing more from a later reconnect. Its account
+    // stays in `written`, for the orders it may have left live.
     sent = sent.filter((id) => !['SETTLED', 'BLOCKED', undefined].includes(engine.intentState(id)));
     return accounts.reconnect();
   }
@@ -72,8 +77,12 @@ export function createDesk(options = {}) {
     broker, accounts, engine, reconnect,
     approveOrder: (req) => { approvedOrder = fingerprint(req); },
     approveCommand: (kind) => { approvedCommand = kind; },
-    /** Remember a write the panel sent, so a reconnect can account for it. */
-    track: (result) => { if (result.clientId) sent.push(result.clientId); return result; },
+    /** Remember a write the panel sent, and its account, so a reconnect can account for both. */
+    track: (result) => {
+      const account = result.clientId === undefined ? undefined : engine.orderAccount(result.clientId);
+      if (account !== undefined) { sent.push(result.clientId); written.add(account); }
+      return result;
+    },
   };
 }
 

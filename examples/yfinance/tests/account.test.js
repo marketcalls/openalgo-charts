@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createDesk, fingerprint, ticketRequest, SANDBOX_ACCOUNTS, TICKET_DURATIONS } from '../src/account.js';
 
 const NOW = 1_800_000_000;
@@ -89,6 +89,60 @@ describe('sandbox broker desk', () => {
     desk.approveCommand('close');
     expect(await desk.engine.closePosition({ symbol: 'AAPL', qty: 20 })).toMatchObject({ ok: true });
     expect(desk.broker.accountPositions('SBX-CASH')).toEqual([{ symbol: 'AAPL', netQty: 10, avgPrice: 100 }]);
+  });
+
+  const rows = (desk, id) => [desk.engine.state(id), desk.engine.intentState(id), desk.engine.brokerStatus(id)];
+  const dropAndReconnect = async (desk) => {
+    desk.broker.disconnect();
+    expect(await desk.reconnect()).toMatchObject({ ok: true });
+  };
+
+  it('keeps the legs of a filled bracket live across two drops and reconnects', async () => {
+    const desk = await ready();
+    desk.approveCommand('bracket');
+    const bracket = desk.track(await desk.engine.placeBracket({ symbol: 'AAPL', side: 'BUY', type: 'MARKET', qty: 10, stopLoss: 95, takeProfit: 110 }));
+    expect(bracket).toMatchObject({ ok: true, kind: 'bracket' });
+    const { stopLoss, takeProfit } = bracket.legs;
+    // The entry filled at once, so the write itself is settled; its legs are not.
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await dropAndReconnect(desk);
+      expect(rows(desk, bracket.clientId)).toEqual(['filled', 'SETTLED', 'filled']);
+      expect(rows(desk, stopLoss)).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+      expect(rows(desk, takeProfit)).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+    }
+    // Still live orders: a cancel reaches the provider, and its report settles the leg.
+    const target = desk.broker.orders().find((order) => order.role === 'tp');
+    const cancel = vi.spyOn(desk.broker, 'cancel');
+    await desk.engine.cancelOrder(takeProfit);
+    expect(cancel).toHaveBeenCalledWith(target.id);
+    expect(rows(desk, takeProfit)).toEqual(['cancelled', 'SETTLED', 'cancelled']);
+    expect(rows(desk, stopLoss)).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+  });
+
+  it('keeps a resting bracket acknowledged across reconnects, and its legs live once it fills', async () => {
+    const desk = await ready();
+    desk.approveCommand('bracket');
+    const bracket = desk.track(await desk.engine.placeBracket({ symbol: 'AAPL', side: 'BUY', type: 'LIMIT', price: 99, qty: 10, stopLoss: 95, takeProfit: 110 }));
+    const { stopLoss, takeProfit } = bracket.legs;
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await dropAndReconnect(desk);
+      expect(rows(desk, bracket.clientId)).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+      expect(rows(desk, stopLoss)).toEqual(['working', 'ACKNOWLEDGED', 'pending']);
+      expect(rows(desk, takeProfit)).toEqual(['working', 'ACKNOWLEDGED', 'pending']);
+    }
+    const entry = desk.broker.orders().find((order) => order.role === undefined);
+    desk.broker.fill(entry.id);
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await dropAndReconnect(desk);
+      expect(rows(desk, bracket.clientId)).toEqual(['filled', 'SETTLED', 'filled']);
+      expect(rows(desk, stopLoss)).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+      expect(rows(desk, takeProfit)).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+    }
+    // The provider's own link still reaches the engine: the stop fills and the target goes.
+    desk.broker.fill(desk.broker.orders().find((order) => order.role === 'sl').id);
+    expect(rows(desk, stopLoss)).toEqual(['filled', 'SETTLED', 'filled']);
+    expect(rows(desk, takeProfit)).toEqual(['cancelled', 'SETTLED', 'cancelled']);
+    expect(desk.broker.accountPositions('SBX-CASH')).toEqual([]);
   });
 
   it('previews without placing and reports what the provider would refuse', async () => {
