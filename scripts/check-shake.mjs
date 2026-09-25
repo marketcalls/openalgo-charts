@@ -164,7 +164,11 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // the indicator gap recovery measure 75.07 KiB (76874 bytes); allow 75.08 KiB.
 // Watchlists, news, account state and viewport drawings live in the optional
 // tiers; the widget check below keeps the panels out of this import.
-const LIMIT_BYTES = 75.08 * 1024;
+// Background targets route a study's shading to the price pane or a plot's
+// pane inside the indicator runtime, which every chart carries: the list form,
+// its checks and one layer per target, sharing the drawing targets' layer
+// upkeep. Measured 76874 to 77082 bytes (75.07 to 75.28 KiB); allow 75.28 KiB.
+const LIMIT_BYTES = 75.28 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.
