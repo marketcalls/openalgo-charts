@@ -45,6 +45,52 @@ export interface IndicatorStudyOutput {
   values: readonly (number | null)[];
 }
 
+/** A setting value an input condition compares with. */
+export type IndicatorInputConditionValue = string | number | boolean;
+
+/**
+ * A test over a study's current settings, read by a settings form for
+ * `activeWhen` and `visibleWhen`.
+ *
+ * `is` holds when the setting under `key` equals the value, or one of the
+ * values when it is a list; `isNot` is its negation. `all` holds when every
+ * nested condition does and `any` when at least one does, so `all` of nothing
+ * holds and `any` of nothing does not. Values compare strictly: the number 5
+ * is not the text '5'. It is data rather than a callback so a descriptor that
+ * a compiler emits, or one saved as JSON, can carry it.
+ */
+export type IndicatorInputCondition =
+  | { key: string; is: IndicatorInputConditionValue | readonly IndicatorInputConditionValue[] }
+  | { key: string; isNot: IndicatorInputConditionValue | readonly IndicatorInputConditionValue[] }
+  | { all: readonly IndicatorInputCondition[] }
+  | { any: readonly IndicatorInputCondition[] };
+
+/**
+ * How a settings form presents an input. The calculation never reads these:
+ * a hidden or inactive input keeps its value, and `calc` still receives it.
+ */
+export interface IndicatorInputPresentation {
+  /**
+   * The input can be edited only while this holds; otherwise the form shows it
+   * disabled, with its value readable and a reason naming what it depends on.
+   * Also inactive while an input the condition reads is hidden or inactive,
+   * because a setting nobody can change cannot be what enables another.
+   */
+  activeWhen?: IndicatorInputCondition;
+  /**
+   * The input is shown only while this holds; otherwise it leaves the form and
+   * the tab order, and any draft in it is kept for when it returns. Also
+   * hidden while an input the condition reads is hidden.
+   */
+  visibleWhen?: IndicatorInputCondition;
+  /**
+   * Consecutive inputs sharing this id sit on one row, the first one's label
+   * leading it: a length beside its source, a switch beside the value and
+   * colour it turns on. A multi-line text input always takes a row of its own.
+   */
+  inline?: string;
+}
+
 /**
  * One tunable input. New typed values are validated before study mutations;
  * established input kinds retain their descriptor's calculation contract.
@@ -54,8 +100,11 @@ export interface IndicatorStudyOutput {
  * ported study whose every input carried an explanation arrives here with that
  * explanation dropped. A settings UI renders it as a hover affordance beside the
  * label; the core ignores it.
+ *
+ * Every variant also takes the presentation fields of
+ * {@link IndicatorInputPresentation}: `activeWhen`, `visibleWhen` and `inline`.
  */
-export type IndicatorInput =
+export type IndicatorInput = IndicatorInputPresentation & (
   | { key: string; type: 'number'; label: string; default: number; min?: number; max?: number; step?: number; group?: string; tooltip?: string }
   | { key: string; type: 'boolean'; label: string; default: boolean; group?: string; tooltip?: string }
   | { key: string; type: 'color'; label: string; default: string; group?: string; tooltip?: string }
@@ -85,7 +134,7 @@ export type IndicatorInput =
    * as UTC seconds, so a layout saved in one zone restores to the same wall
    * clock in another, and `zonedStringToUtcSeconds` turns it into a bar time.
    */
-  | { key: string; type: 'time'; label: string; default: string; group?: string; tooltip?: string };
+  | { key: string; type: 'time'; label: string; default: string; group?: string; tooltip?: string });
 
 /** Dash pattern for a level, a drawing, or a plot. */
 export type IndicatorLineStyle = 'solid' | 'dashed' | 'dotted';

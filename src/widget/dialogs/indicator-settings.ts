@@ -195,6 +195,9 @@ export function mountIndicatorSettings(
           return;
         }
         form?.sync(shown());
+        // The sync re-read the descriptor's conditions; a pick or a search
+        // beside a field that just went out of play must follow it.
+        inputControls?.refresh();
       },
     });
     inputControls = mountIndicatorInputControls(ctx, {
@@ -208,6 +211,7 @@ export function mountIndicatorSettings(
         }
         for (const key of Object.keys(patch)) form?.setError(key, null);
         form?.sync(shown());
+        inputControls?.refresh();
         return true;
       },
     });

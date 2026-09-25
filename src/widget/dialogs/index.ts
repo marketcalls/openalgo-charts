@@ -122,6 +122,17 @@ export const DIALOG_CSS = `
 .oac-widget .oac-row--block textarea { width: 100%; min-height: 56px; resize: vertical; }
 .oac-widget .oac-row--off > .oac-row__label { color: ${v('faint')}; cursor: not-allowed; }
 .oac-widget .oac-row input:disabled, .oac-widget .oac-row select:disabled { opacity: .45; pointer-events: none; }
+/* Inline rows: the lead label, then each member's own label and control. The
+   control column takes what the label leaves and wraps inside itself, so a
+   narrow panel stacks the members rather than scrolling sideways. */
+.oac-widget .oac-row--inline { flex-wrap: wrap; row-gap: 4px; }
+.oac-widget .oac-row--inline > .oac-row__label { flex: 0 1 auto; }
+.oac-widget .oac-row--inline > .oac-row__ctl { width: auto; flex: 1 1 0; min-width: min(100%, 150px); flex-wrap: wrap; row-gap: 4px; }
+.oac-widget .oac-inline__item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.oac-widget .oac-inline__label { color: ${v('mut')}; white-space: nowrap; cursor: pointer; }
+.oac-widget .oac-inline__item--off > .oac-inline__label { color: ${v('faint')}; cursor: not-allowed; }
+.oac-widget .oac-row--inline .oac-select, .oac-widget .oac-row--inline select { width: auto; }
+.oac-widget .oac-row--inline input[type=text] { width: 96px; }
 
 /* Tab lists: a rail down the left of a settings dialog, or a row above a form. */
 .oac-widget .oac-tabs { min-width: 0; display: flex; gap: 2px; }

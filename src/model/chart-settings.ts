@@ -29,7 +29,7 @@
  * changes: a key names the option it writes, not the tab it is shown on.
  */
 import type { AxisChromeOptions, Chart, ChartEventOptions, ChartNavigationOptions, ChartWatermarkOptions } from '../core/chart';
-import type { IndicatorInput } from './indicator-registry';
+import type { IndicatorInput, IndicatorInputPresentation } from './indicator-registry';
 import { getChartType } from './chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
 import type { CanvasOptions, CanvasLineStyle, GridOptions, ScaleCanvasOptions } from '../render/grid';
@@ -63,7 +63,7 @@ export type ChartSettingsTabId = 'price' | 'readout' | 'axes' | 'appearance' | '
  * body is always drawn), which is the difference between a row whose checkbox
  * does something and one whose checkbox would be a lie.
  */
-export interface ChartSettingsColorPairInput {
+export interface ChartSettingsColorPairInput extends IndicatorInputPresentation {
   key: string;
   type: 'colorPair';
   label: string;

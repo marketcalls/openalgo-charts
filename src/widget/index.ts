@@ -117,6 +117,8 @@ export type {
 } from './dialogs/index';
 export { renderForm, controlsFromInputs, controlsFromFields } from './form';
 export type { FormControl, FormKind, FormOptions, FormHandle, FormTranslationOptions } from './form';
+export { inputConditionMet, inputStates } from './input-conditions';
+export type { InputState } from './input-conditions';
 export { mountIndicatorInputControls } from './indicator-input-controls';
 export type { IndicatorInputControlsOptions, IndicatorInputControlsHandle } from './indicator-input-controls';
 export { createAlertUi } from './alert-ui';
