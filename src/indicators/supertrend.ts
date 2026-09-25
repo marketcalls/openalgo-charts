@@ -8,7 +8,7 @@ import type { Bar } from '../model/bar';
 import { atr } from './atr';
 
 export interface SupertrendPoint {
-  /** The Supertrend band value, or NaN during ATR warmup and on a bar with no true range. */
+  /** The Supertrend band value, or NaN during ATR warmup and on a bar with no ATR or no close. */
   value: number;
   /** -1 = uptrend (bullish), +1 = downtrend (bearish). */
   direction: -1 | 1;
@@ -16,8 +16,9 @@ export interface SupertrendPoint {
 
 /**
  * Supertrend value + direction per bar. Warmup bars carry value=NaN, and so does
- * a bar whose ATR is missing; the bands resume from where they stood on the next
- * bar that has one.
+ * a bar with no ATR or no close. Such a bar leaves the bands, the direction and
+ * the last accepted close as they stood, and the next complete bar carries on
+ * from them.
  */
 export function supertrend(bars: readonly Bar[], period = 10, multiplier = 3): SupertrendPoint[] {
   const n = bars.length;
@@ -30,10 +31,17 @@ export function supertrend(bars: readonly Bar[], period = 10, multiplier = 3): S
   let prevUpper = NaN;
   let prevLower = NaN;
   let prevST = NaN;
+  let prevClose = NaN;
   let started = false;
 
   for (let i = 0; i < n; i++) {
-    if (!Number.isFinite(a[i])) continue;
+    // A missing close still has a finite ATR on its own bar, since its true range
+    // reads the close before it. Letting it through would decide the direction
+    // on a comparison with NaN, which is always false and so always a flip, and
+    // the flipped bands would carry into every later bar. The carry forward reads
+    // the last close this loop accepted, not the previous bar's, so a skipped
+    // bar's close cannot reset a band either. On complete data they are the same.
+    if (!Number.isFinite(a[i]) || !Number.isFinite(close[i])) continue;
     const hl2 = (high[i] + low[i]) / 2;
     const basicUpper = hl2 + multiplier * a[i];
     const basicLower = hl2 - multiplier * a[i];
@@ -41,10 +49,10 @@ export function supertrend(bars: readonly Bar[], period = 10, multiplier = 3): S
     // Final bands carry forward unless price broke them (standard Supertrend rule).
     const finalUpper = !started
       ? basicUpper
-      : basicUpper < prevUpper || close[i - 1] > prevUpper ? basicUpper : prevUpper;
+      : basicUpper < prevUpper || prevClose > prevUpper ? basicUpper : prevUpper;
     const finalLower = !started
       ? basicLower
-      : basicLower > prevLower || close[i - 1] < prevLower ? basicLower : prevLower;
+      : basicLower > prevLower || prevClose < prevLower ? basicLower : prevLower;
 
     let st: number;
     let dir: -1 | 1;
@@ -62,6 +70,7 @@ export function supertrend(bars: readonly Bar[], period = 10, multiplier = 3): S
     prevUpper = finalUpper;
     prevLower = finalLower;
     prevST = st;
+    prevClose = close[i];
     started = true;
   }
   return out;

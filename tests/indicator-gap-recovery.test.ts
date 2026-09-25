@@ -150,6 +150,48 @@ describe('studies built on the ATR resume after a gap', () => {
     expect(out.bodyMid).toEqual([null, 10, null, 12, 12, 11.5]);
   });
 
+  it('Supertrend leaves a missing close absent after the ATR has seeded, with no flip', () => {
+    // A steady fall with a two-point range: every true range is 2, so the ATR is 2
+    // wherever it exists and the upper band is close + 6 all the way down. Bar 12
+    // has no close. Its own true range reads bar 11's close, so its ATR is finite;
+    // bar 13's reads the missing close and is absent. Deciding bar 12 on a NaN
+    // comparison flipped the trend there and dragged the bands along for 21 bars.
+    const falling = (i: number): Bar => {
+      const c = 200 - 0.25 * i;
+      return { time: 1700000000 + i * 60, open: c, high: c + 1, low: c - 1, close: c, volume: 1 };
+    };
+    const complete = Array.from({ length: 40 }, (_, i) => falling(i));
+    const holed = complete.map((b, i) => (i === 12 ? { ...b, close: NaN } : b));
+    const { high, low, close } = columnsOf(holed);
+    expect(atr(high, low, close, 10).slice(9, 15)).toEqual([2, 2, 2, 2, NaN, 2]);
+
+    const expected = supertrend(complete);
+    const points = supertrend(holed);
+    expect(points.map((p) => p.direction)).toEqual(new Array(40).fill(1));
+    expect(points.map((p) => p.value)).toEqual(expected.map((p, i) => (i === 12 || i === 13 ? NaN : p.value)));
+
+    const full = run(SUPERTREND, complete);
+    const out = run(SUPERTREND, holed);
+    expect(out.up).toEqual(new Array(40).fill(null));
+    expect(out.down).toEqual(full.down.map((v, i) => (i === 12 || i === 13 ? null : v)));
+  });
+
+  it('Supertrend carries its bands from the last accepted close, not a skipped one', () => {
+    // Bar 6 has no high, so it has no true range and is skipped, but it still
+    // carries a close of 110, above the upper band of 100.75 that bar 5 left. The
+    // band step on bar 7 must compare with bar 5's close, 98.75, and keep the band
+    // at 100.75. Reading bar 6's close reset it to the raw 98.25 + 67 / 12.
+    const rows: Row[] = Array.from({ length: 10 }, (_, i) => {
+      const c = 100 - 0.25 * i;
+      return i === 6 ? [c, null, c - 1, 110, 1] : [c, c + 1, c - 1, c, 1];
+    });
+    const points = supertrend(barsOf(rows), 3, 1);
+    expect(points.map((p) => p.value)).toEqual([NaN, NaN, 101.5, 101.25, 101, 100.75, NaN, 100.75, 100.75, 100.75]);
+    expect(points.map((p) => p.direction)).toEqual(new Array(10).fill(1));
+    expect(run(SUPERTREND, barsOf(rows), { period: 3, multiplier: 1 }).down)
+      .toEqual([null, null, 101.5, 101.25, 101, 100.75, null, 100.75, 100.75, 100.75]);
+  });
+
   it('Chandelier Exit', () => {
     // Window extremes 12, 12, 14, 14, 13 (highs) and 8, 9, 10, 10, 10 (lows),
     // three ATRs away.
