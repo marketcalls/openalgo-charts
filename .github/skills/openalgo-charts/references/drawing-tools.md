@@ -359,13 +359,13 @@ new DrawingController(chart, {
 
 | Member | Behaviour |
 |---|---|
-| `setTool(id \| null, options?)` | Arms a tool; throws on an unregistered id. Also calls `chart.setPlacementMode(true/false)`. `options` is a `DrawingPlacementOptions`: `{ space: 'viewport' }` places the next drawing pinned to the screen, and throws for a tool without `viewport` support. |
+| `setTool(id \| null, options?)` | Arms a tool; throws on an unregistered id. Also calls `chart.setPlacementMode(true/false)`. `options` is a `DrawingPlacementOptions`: `{ space: 'viewport' }` places the next drawing pinned to the screen, and throws for a tool without `viewport` support. Emits `draw:tool` as `{ tool }`, or `{ tool, space: 'viewport' }` when armed for the viewport. |
 | `activeTool()` / `activeToolSpace()` | Armed id, or `null`; the space it places in (`'data'` unless armed for the viewport). |
 | `screenPoints(id)` | A drawing's anchors in container media px (the space `timeToCoordinate` and `priceToCoordinate` answer in), for either space. What a host places an overlay by. `null` for an unknown id or a pane with no place on screen (collapsed, or hidden by a maximize). |
 | `setOptions(patch)` | Live-patch the options above. |
 | `drawings()` / `get(id)` | Read the model. `drawings()` is the live array, in **paint order** (creation order until a reorder; `createdAt` keeps the creation time). |
 | `add(drawing)` | `add({ tool, points, style, paneIndex, text?, props?, id?, locked?, visible?, zIndex?, policy? })` (a `DrawingInput`) returns the created `Drawing`, with `zIndex` 0, `createdAt` and a minted id (a supplied id that collides with a restored one is replaced). The tool's `defaultText` merges under `text` the way `defaultStyle` merges under `style`. Adding a drawing whose `policy` sets any flag to false records no undo step: it is the host's. The `policy` object is copied. |
-| `update(id, patch, options?)` / `updateMany(patches, options?)` | Patch `points` \| `style` \| `text` \| `props` \| `locked` \| `visible` \| `zIndex` \| `policy` \| `space` \| `viewportPoints` (a `DrawingPatch`). `space` alone converts the anchors at the view on screen (see Viewport-anchored drawings). `style`, `text`, `props` and `policy` merge; `points` replaces. `updateMany([{ id, patch }])` is one undo step and one `drawing:change`. A read-only drawing is refused (`update` returns false, `updateMany` skips it) unless `options` is `{ force: true }` (`DrawingEditOptions`). A patch that carries `policy`, and any forced call, records no undo step, and every recorded step takes it as well, so no later undo or redo reverses it. |
+| `update(id, patch, options?)` / `updateMany(patches, options?)` | Patch `points` \| `style` \| `text` \| `props` \| `locked` \| `visible` \| `zIndex` \| `policy` \| `space` \| `viewportPoints` (a `DrawingPatch`). `space` alone converts the anchors at the view on screen (see Viewport-anchored drawings). `style`, `text`, `props` and `policy` merge; `points` replaces. `updateMany([{ id, patch }])` is one undo step and one `drawing:change`. A read-only drawing is refused (`update` returns false, `updateMany` skips it) unless `options` is `{ force: true }` (`DrawingEditOptions`). `update` also returns false when the patch asks for a `space` the drawing could not be moved to; the rest of that patch still applies. A patch that carries `policy`, and any forced call, records no undo step, and every recorded step takes it as well, so no later undo or redo reverses it. |
 | `remove(id, options?)` / `removeMany(ids, options?)` / `clear(options?)` | Delete one / several (one undo step) / all. Read-only drawings stay unless `{ force: true }`. A forced delete records no undo step and takes the drawing out of every recorded step, so no redo brings it back. |
 | `finish()` | Commit a `points: 0` tool at the anchors placed so far. Returns whether it committed. |
 | `cancel()` | Drop the anchors placed so far; disarms the tool unless `stayInDrawingMode` keeps it (a second call then disarms). Returns whether anything changed. |
@@ -847,12 +847,31 @@ draw.update(id, { space: 'data' });
 `add` throws for a tool without viewport support or anchors that are not finite
 numbers. A conversion the controller cannot make (a tool without support, a
 pane folded to its strip or hidden) is left out of the patch and the rest
-applies; with the new space's anchors in the patch they are taken as given.
-Editing is native: the body drags by the pointer's travel as a fraction of the
-pane, a handle lands under the pointer, `nudge` moves by screen pixels, and no
-gesture carries an anchor out of the pane (one a host parked outside may only
-move back in). `alertInfo` reports a pinned drawing unavailable: it has no
-price to watch.
+applies, and `update` returns false so a host can tell; with the new space's
+anchors in the patch they are taken as given. Pinning a drawing that is part
+way or wholly off the plot brings it onto the plot, since no pan could reach it
+afterwards, and one wider or taller than the plot is cut to it on that axis, so
+every handle is on screen. Editing is native: the body drags by the pointer's
+travel as a fraction of the pane, a handle lands under the pointer, `nudge`
+moves by screen pixels. Placement with a tool armed for the viewport lands where
+the user clicks: the magnet does not pull and shows no ring. `alertInfo` reports
+a pinned drawing unavailable: it has no price to watch.
+
+**The whole drawing stays on the plot.** A text note and a table are laid out
+right of and below one anchor, so holding the anchors inside the pane would
+still let a note sit wholly outside it, clipped away and out of reach of the
+pointer. What is kept inside is the drawing's box instead:
+`DrawingTool.bounds(pts, drawing)` returns it in media px (the text tool and the
+table declare it from the same measurement their hit test uses; without it the
+box is the anchors' bounds, which is right for a rectangle or an ellipse). The
+layer paints and hit-tests a pinned drawing with its box moved inside the plot,
+and where the box is larger than the plot its top-left corner is kept in view.
+Every gesture (body drag, handle drag, nudge, paste, duplicate, placement,
+conversion) starts from where the drawing is painted and stores the result
+with the box inside, so what is stored is what is on screen. Fractions a host
+stores outside 0..1 are kept as given and painted with the box on the plot. A
+chart resize can make a note's pixel box overflow the fraction it sits at; the
+layer moves it back in, so it stays visible and clickable at every size.
 
 The settings schema carries the choice as `SPACE_FIELD` (path `space`, a select
 over `SPACE_OPTIONS`: Time and price, Screen), declared by exactly the four
@@ -868,10 +887,18 @@ size, offset by `pasteOffsetPixels` on both axes; `duplicate` does the same.
 Drawing links never share a viewport drawing (the same fraction of another
 chart's pane sits over different bars at a different size), and pinning a
 shared drawing takes it out of the link on that chart alone, dropping its
-lineage mark, while the other charts keep their copy.
+lineage mark, while the other charts keep their copy. Undoing the pin brings the
+mark back and the drawing joins the link again, its state going to the peers as
+any undo on a linked drawing does; if the peers deleted their copies meanwhile,
+it stays on this chart alone and loses the mark, so a later restore does not
+apply their deletion to it.
 
 The controller converts through `DrawingChartHost.timeScale` (its `width` is the
 plot width) and each pane's `priceToY` / `yToPrice` / `priceScale.height`, which
 the built-in `Chart` provides. A host without them still paints viewport
-drawings but cannot place, move or convert them. Types: `DrawingSpace`,
+drawings but cannot place, move or convert them. `screenPoints` adds the plot's
+left edge, which it reads off any bar through `timeToCoordinate`; on a chart
+with no bars it falls back to the optional
+`DrawingChartHost.priceAxisLayout(paneIndex)` (each price column's `side`, `x`
+and `width` in container px), taking the innermost left column's right edge. Types: `DrawingSpace`,
 `ViewportPoint`, `DrawingPlacementOptions`.

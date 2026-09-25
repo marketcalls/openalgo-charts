@@ -12,22 +12,30 @@ All notable changes to OpenAlgo Charts.
   drawing, from its left edge to its right edge and from the top of the pane to
   the bottom of its plot. Pan and zoom leave a pinned drawing where it is, a chart
   resize keeps it in proportion, and it paints and hit-tests at any device pixel
-  ratio. It is edited natively (body drag, handle drag, nudge, undo), no gesture
-  carries an anchor out of its pane, and it follows its pane through a move, a
-  separator drag and a collapse. Text, rectangle, ellipse and table declare the
+  ratio. It is edited natively (body drag, handle drag, nudge, undo) and follows
+  its pane through a move, a separator drag and a collapse. Its whole box, not only
+  its anchors, is kept on the plot at every edge, through every gesture, at any
+  device pixel ratio and after a resize, so a note or a table laid out from one
+  corner can always be seen and grabbed; a custom tool that paints beyond its
+  anchors declares the new `DrawingTool.bounds`. Pinning a drawing that is off the
+  plot, or larger than it, brings it onto the plot, and the magnet does not pull
+  while a pinned drawing is placed. Text, rectangle, ellipse and table declare the
   new `DrawingTool.viewport` flag; tools that print prices, point at a bar or
   compute from bars stay in data space. `draw.update(id, { space })` converts at
   the view on screen as one undo step, `setTool(id, { space: 'viewport' })`
   places a pinned drawing, `activeToolSpace()` reports the armed space and
   `screenPoints(id)` gives any drawing's anchors in container px for host
-  overlays. The settings schema offers the choice as `SPACE_FIELD` over
+  overlays. `update` returns false when a change of space cannot be made (a pane
+  folded or hidden), and the widget's Anchor row says why. `draw:tool` carries
+  `space: 'viewport'` while a tool is armed for the viewport. The settings schema offers the choice as `SPACE_FIELD` over
   `SPACE_OPTIONS`, so the widget's drawing properties show an Anchor row and the
   reference host's properties bar a pin toggle, both only for those four tools;
   the widget and reference host text editors open over a pinned note. Saves stay
   version 2 and a layout with no pinned drawing is byte for byte unchanged; the
   clipboard carries the fractions, so a paste lands at the same place on a chart
   of any size. Drawing links never share a pinned drawing, and pinning a shared
-  one takes it out of the link on that chart only. New types: `DrawingSpace`,
+  one takes it out of the link on that chart only; undoing the pin joins it
+  again. New types: `DrawingSpace`,
   `ViewportPoint`, `DrawingPlacementOptions`.
 
 ## 2.5.4

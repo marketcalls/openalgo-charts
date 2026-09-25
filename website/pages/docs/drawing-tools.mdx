@@ -288,6 +288,11 @@ interface DrawingChartHost {
   priceToCoordinate?(price: number, paneIndex?: number): number | null;
   coordinateToPrice?(y: number, paneIndex?: number): number | null;
   panes?(): readonly unknown[];
+  // Optional, for drawings pinned to the screen: the time axis, whose width is the
+  // plot width a pinned x is a fraction of, and the price columns, whose innermost
+  // left edge is where the plot begins on a chart with no bars to measure against.
+  readonly timeScale?: { readonly width: number; indexToX(index: number): number; xToIndex(x: number): number };
+  priceAxisLayout?(paneIndex?: number): readonly { side: 'left' | 'right'; x: number; width: number }[];
 }
 ```
 
@@ -314,12 +319,12 @@ chart has a different interval loaded.
 
 | Member | Description |
 |---|---|
-| `setTool(id \| null, options?)` | Arm a tool for placement, or return to the cursor. `{ space: 'viewport' }` pins what it places to the screen. |
+| `setTool(id \| null, options?)` | Arm a tool for placement, or return to the cursor. `{ space: 'viewport' }` pins what it places to the screen, and `draw:tool` then carries `space: 'viewport'`. |
 | `activeTool()` / `activeToolSpace()` | The armed tool id, or null; the space it places in. |
 | `screenPoints(id)` | A drawing's anchors in container px, whichever space it is anchored in, for placing an overlay beside it. |
 | `drawings()` / `get(id)` | The model, in paint order. |
 | `add(drawing)` | Add one directly (import, or host-authored). `zIndex`, `createdAt` and `id` are filled in. A `policy` restricts what the user can do with it; see [Drawing policies](#drawing-policies). |
-| `update(id, patch, options?)` / `updateMany(patches, options?)` | Patch `points`, `style`, `text`, `props`, `locked`, `visible`, `zIndex`, `policy`, `space` or `viewportPoints`. `space` alone converts the anchors where the drawing is on screen. `updateMany` is one undo step. A read-only drawing is left alone unless `options` is `{ force: true }`, and a forced patch is not an undo step. |
+| `update(id, patch, options?)` / `updateMany(patches, options?)` | Patch `points`, `style`, `text`, `props`, `locked`, `visible`, `zIndex`, `policy`, `space` or `viewportPoints`. `space` alone converts the anchors where the drawing is on screen, and `update` returns false when that cannot be done. `updateMany` is one undo step. A read-only drawing is left alone unless `options` is `{ force: true }`, and a forced patch is not an undo step. |
 | `remove(id, options?)` / `removeMany(ids, options?)` / `clear(options?)` | Delete one, several (one undo step), or all. Read-only drawings stay unless `{ force: true }`. |
 | `finish()` | End a variable-anchor shape (`path`, `polyline`) at the anchors placed so far. Returns whether it committed. Double-click already calls it. |
 | `select(id \| ids \| null, additive?)` / `selected()` / `selection()` | Selection. `additive` toggles each id; `selected()` is the primary id, `selection()` the list in pick order. |
@@ -478,9 +483,18 @@ callouts) or that compute from bars (anchored VWAP, volume profile) stay on time
 because a fixed place on screen would contradict what they show. A custom tool can opt in
 with `viewport: true` when its `draw` and `distance` read only the screen anchors.
 
-Converting keeps the drawing where it is on screen and is one undo step. A conversion that
-cannot be made (a tool without support, a pane folded to its strip) leaves the drawing as it
-was. A pinned drawing has no price, so it offers no alert levels.
+Converting keeps the drawing where it is on screen and is one undo step. A drawing that is
+off the plot, or larger than it, when it is pinned is brought onto the plot, since no pan
+could reach it afterwards. A conversion that cannot be made (a tool without support, a pane
+folded to its strip) leaves the drawing as it was, and `update` returns false. A pinned
+drawing has no price, so it offers no alert levels, and the magnet does not pull while one
+is placed: it lands where it is clicked.
+
+**The whole drawing stays on screen.** A note or a table is laid out from one corner, so it
+is the drawing's box, not its anchor, that is kept inside the plot: at every edge, through a
+drag, a handle, a nudge or a paste, at any device pixel ratio, and after the chart is resized
+smaller than the place it was pinned at. A custom pinnable tool that paints beyond its
+anchors declares `bounds(pts, drawing)` to say how far.
 
 | Where | How it behaves |
 |---|---|
