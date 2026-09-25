@@ -272,6 +272,8 @@ export function buildChart2({ keepView = true, typeChanged = false, state } = {}
     legendIconSize: normalizeLegendIconSize(app.p2.legendIconSize),
     grid: { vertLines: el('vgrid').checked, horzLines: el('hgrid').checked },
     timezone: app.p2.timezone || app.chartTimezone,
+    // As on the main chart: the price pane moves from the right-click menu.
+    movablePrimaryPane: true,
     ...chartMotionOptions(),
     ...decorations,
   });
@@ -280,7 +282,7 @@ export function buildChart2({ keepView = true, typeChanged = false, state } = {}
   app.symbolLegend2 = new PaneLegend({ id: 'symbol', title: app.p2.symbol, row: 0, actions: [],
     status: () => symbolStatus({ symbol: app.p2.symbol, bars: app.chart2.primaryBars(), timezone: app.chart2.timezone() }),
   });
-  app.chart2.addPrimitive(app.symbolLegend2, 0);
+  app.chart2.addPrimitive(app.symbolLegend2);
   const chartType = app.p2.chartType || 'candlestick';
   const transformed = chartType.startsWith('t:');
   const { type, data } = transformed

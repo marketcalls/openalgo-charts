@@ -146,6 +146,53 @@ return chart;`} />
 
 </div>
 
+## Price pane below the studies
+
+Read the studies first and the price last. A chart built with `movablePrimaryPane` treats the
+price pane as an identity rather than a slot: moving it takes the candles, the moving average
+drawn on them, the price line and the study count along, while RSI and MACD keep their own
+panes and scales. The time navigator stays at the foot of the chart, on whichever pane is at
+the bottom. The saved layout keeps the arrangement. The option is off by default, so a host
+that still passes pane `0` for the price keeps its price pane on top. See
+[Moving the price pane](/docs/scales-and-panes#moving-the-price-pane-below-its-studies).
+
+<RunnableExample height={520} tiers={['indicators']} caption="Simulated prices. The buttons move only the price pane; every study stays on its own pane." code={`el.style.display = 'flex';
+el.style.flexDirection = 'column';
+const controls = document.createElement('div');
+controls.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 64px 8px 8px';
+el.appendChild(controls);
+const host = document.createElement('div');
+host.style.cssText = 'flex:1;min-height:0;width:100%';
+el.appendChild(host);
+const chart = lib.createChart(host, { movablePrimaryPane: true });
+const bars = lib.generateBars(1700000000, 220, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addIndicator('ema', { length: 21 });
+chart.addIndicator('rsi');
+chart.addIndicator('macd');
+chart.addPriceLine({ price: bars[bars.length - 1].close, color: '#4f8cff', lineWidth: 1, id: 'level', leftLabel: 'Level' });
+chart.timeScale.fitContent(bars.length);
+const slot = document.createElement('span');
+slot.style.cssText = 'color:#94a3b8;font:12px system-ui, sans-serif;margin-left:6px';
+const show = () => { slot.textContent = 'Price pane: slot ' + chart.primaryPaneIndex() + ' of ' + chart.panes().length; };
+for (const [label, run] of [
+  ['Price on top', () => chart.setPrimaryPaneIndex(0)],
+  ['Up', () => chart.movePane(chart.primaryPaneIndex(), -1)],
+  ['Down', () => chart.movePane(chart.primaryPaneIndex(), 1)],
+  ['Price at the bottom', () => chart.setPrimaryPaneIndex(chart.panes().length - 1)],
+]) {
+  const button = document.createElement('button');
+  button.textContent = label;
+  button.style.cssText = 'padding:5px 10px;border:1px solid #334155;border-radius:4px;background:#172033;color:#e2e8f0;cursor:pointer';
+  button.onpointerdown = (event) => event.stopPropagation();
+  button.onclick = () => { run(); show(); };
+  controls.appendChild(button);
+}
+controls.appendChild(slot);
+chart.setPrimaryPaneIndex(chart.panes().length - 1);
+show();
+return chart;`} />
+
 ## Typed study inputs
 
 Open the study inputs to edit a session and notes, select a watch instrument,

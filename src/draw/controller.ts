@@ -85,6 +85,12 @@ export interface DrawingChartHost {
    * pane the chart maps no price for, one collapsed to its header strip.
    */
   panes?(): readonly unknown[];
+  /**
+   * Optional. Slot of the price pane, the one pane whose drawings the magnet
+   * snaps to candle prices and a drawing link shares. It moves when a host
+   * puts the price pane below its studies; without it the price pane is slot 0.
+   */
+  primaryPaneIndex?(): number;
 }
 
 /** The pane-local price projection a chart pane carries, in media px. */
@@ -1060,7 +1066,7 @@ export class DrawingController {
   public async copy(target?: string | readonly string[] | null): Promise<boolean> {
     const list = this._targets(target);
     if (list.length === 0) return false;
-    const ok = await this._clipboard.write(list);
+    const ok = await this._clipboard.write(this._portable(list));
     if (ok) this._chart.emit('draw:copy', { drawings: list.map(cloneDrawing) });
     return ok;
   }
@@ -1074,7 +1080,7 @@ export class DrawingController {
   public async cut(target?: string | readonly string[] | null): Promise<boolean> {
     const list = this._targets(target).filter((d) => !pinned(d));
     if (list.length === 0) return false;
-    const ok = await this._clipboard.write(list);
+    const ok = await this._clipboard.write(this._portable(list));
     if (!ok) return false;
     // One undo step for the whole cut, and the drawings are re-read here
     // because the await above gave other code a chance to change the model.
@@ -1131,12 +1137,34 @@ export class DrawingController {
     return out;
   }
 
-  /** Fold a pane index from another chart onto a pane this one actually has. */
+  /** The slot this chart keeps its price pane in, read at each use because a host can move it. */
+  private _pricePane(): number {
+    return this._chart.primaryPaneIndex?.() ?? 0;
+  }
+
+  /**
+   * Drawings as the clipboard carries them: panes counted price pane first,
+   * the study panes after it in their order, the way a portable template
+   * counts them. A price pane at the top, where every build before the move
+   * kept it, is written exactly as before, and a drawing copied beside the
+   * candles pastes beside the candles on any chart in any arrangement.
+   */
+  private _portable(list: readonly Drawing[]): Drawing[] {
+    const price = this._pricePane();
+    return list.map((d) => ({ ...d, paneIndex: d.paneIndex === price ? 0 : d.paneIndex < price ? d.paneIndex + 1 : d.paneIndex }));
+  }
+
+  /**
+   * Fold a clipboard pane onto a pane this chart actually has: clamped to the
+   * pane count in clipboard order, so a study drawing from a taller stack
+   * lands on the last study pane rather than on the price pane, then put in
+   * this chart's own slots around its price pane.
+   */
   private _clampPane(paneIndex: number): number {
     const panes = this._chart.panes;
-    if (panes === undefined) return paneIndex;
-    const n = panes.call(this._chart).length;
-    return n === 0 ? 0 : Math.min(paneIndex, n - 1);
+    const n = panes === undefined ? paneIndex + 1 : panes.call(this._chart).length;
+    const slot = n === 0 ? 0 : Math.min(paneIndex, n - 1), price = this._pricePane();
+    return slot === 0 ? price : slot <= price ? slot - 1 : slot;
   }
 
   /** Nudge every anchor so a pasted copy is not hidden under its original. */
@@ -1698,7 +1726,7 @@ export class DrawingController {
    */
   private _snapPoint(point: DrawingPoint, paneIndex: number): DrawingPoint | null {
     const mode = this._opts.magnet;
-    if (mode === 'off' || paneIndex !== 0) return null;
+    if (mode === 'off' || paneIndex !== this._pricePane()) return null;
     const bar = this._lastBar;
     if (bar === null) return null;
     const values = [bar.open, bar.high, bar.low, bar.close];

@@ -31,6 +31,12 @@ export interface AlertChartHost {
    * nothing to round to, and inventing one would move a price somebody chose.
    */
   snapPrice?(paneIndex: number, price: number): number;
+  /**
+   * Slot of the price pane, where a price alert draws and where a drawing
+   * needs no input plot. It moves when a host puts the price pane below its
+   * studies. Optional; absent means slot 0.
+   */
+  primaryPaneIndex?(): number;
 }
 
 export type AlertCondition = 'crossing' | 'crossingUp' | 'crossingDown'

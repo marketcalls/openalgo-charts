@@ -87,12 +87,18 @@ function localPriceScale(descriptor: IndicatorDescriptor, whole: PriceScaleId | 
   return first ? plotPriceScale(first, whole, assignments) : whole ?? 'right';
 }
 
+/**
+ * `pricePane` is the slot of the chart's price pane, where an `overlay` plot or
+ * band draws. It is a slot, not zero: an on-chart study on a price pane moved
+ * below its studies has its own plots and its overlay plots on the same pane,
+ * and comparing its slot with zero would call that a band across two panes.
+ */
 function fillPriceScale(descriptor: IndicatorDescriptor, fill: IndicatorFillSpec, whole: PriceScaleId | null,
-  assignments: Readonly<Record<string, PriceScaleId>>, paneIndex: number): PriceScaleId | null {
+  assignments: Readonly<Record<string, PriceScaleId>>, paneIndex: number, pricePane = 0): PriceScaleId | null {
   const a = descriptor.plots.find(plot => plot.key === fill.between[0]);
   const b = descriptor.plots.find(plot => plot.key === fill.between[1]);
-  const pane = fill.overlay === true ? 0 : paneIndex;
-  if ((a && (a.overlay === true ? 0 : paneIndex) !== pane) || (b && (b.overlay === true ? 0 : paneIndex) !== pane)) return null;
+  const pane = fill.overlay === true ? pricePane : paneIndex;
+  if ((a && (a.overlay === true ? pricePane : paneIndex) !== pane) || (b && (b.overlay === true ? pricePane : paneIndex) !== pane)) return null;
   // Calculated fill columns without plot series follow the first local plot.
   const fallback = fill.overlay === true ? 'right' : localPriceScale(descriptor, whole, assignments);
   const scale = a ? plotPriceScale(a, whole, assignments) : fallback;
@@ -101,12 +107,12 @@ function fillPriceScale(descriptor: IndicatorDescriptor, fill: IndicatorFillSpec
 
 /** Internal preflight shared by construction and Chart restore before resources change. */
 export function validateIndicatorScaleAssignment(descriptor: IndicatorDescriptor, priceScaleId: PriceScaleId | undefined,
-  plotPriceScaleIds: Readonly<Record<string, PriceScaleId>> | undefined, paneIndex: number): void {
+  plotPriceScaleIds: Readonly<Record<string, PriceScaleId>> | undefined, paneIndex: number, pricePane = 0): void {
   if (priceScaleId !== undefined && !isPriceScaleId(priceScaleId)) throw new TypeError('Invalid indicator price scale');
   const assignments = parseIndicatorPlotPriceScales(descriptor, plotPriceScaleIds);
   // Omitted assignments retain the legacy descriptor-only fill behavior.
   if (priceScaleId === undefined && Object.keys(assignments).length === 0) return;
-  if ((descriptor.fills ?? []).some(fill => fillPriceScale(descriptor, fill, priceScaleId ?? null, assignments, paneIndex) === null)) {
+  if ((descriptor.fills ?? []).some(fill => fillPriceScale(descriptor, fill, priceScaleId ?? null, assignments, paneIndex, pricePane) === null)) {
     throw new RangeError('Indicator fill endpoints must share their pane and price scale');
   }
 }
@@ -249,6 +255,13 @@ export interface IndicatorHost {
   /** Index of a fresh pane for an indicator that wants its own. */
   nextPaneIndex(): number;
   /**
+   * Current slot of the chart's price pane, where an on-chart study and every
+   * `overlay` plot, band, table and price-anchored mark draws. Read at each
+   * use, since the price pane can be moved below the studies. Optional so a
+   * host predating it still satisfies this interface; absent means slot 0.
+   */
+  primaryPaneIndex?(): number;
+  /**
    * The chart's configured IANA zone. Optional so a host predating the option
    * still satisfies this interface; absent means the shipped default.
    *
@@ -293,8 +306,8 @@ export interface IndicatorHost {
    * Optional so a host predating it still satisfies this interface.
    *
    * Per pane, and the panes genuinely differ: a pane that does not quote the
-   * instrument has no tick to report. Pane 0 is the price pane, so it is the
-   * one to ask for the instrument's own step.
+   * instrument has no tick to report. The price pane (`primaryPaneIndex`) is
+   * the one to ask for the instrument's own step.
    */
   tickSize?(paneIndex: number): number | undefined;
   /**
@@ -496,7 +509,7 @@ export class IndicatorInstance implements IndicatorApi {
       this.paneIndex = paneIndex;
       this._ownPane = false;
     } else if (descriptor.placement === 'onchart') {
-      this.paneIndex = 0;
+      this.paneIndex = this._pricePane();
       this._ownPane = false;
     } else {
       this.paneIndex = host.nextPaneIndex();
@@ -504,7 +517,7 @@ export class IndicatorInstance implements IndicatorApi {
     }
 
     validateIndicatorScaleAssignment(descriptor, priceScaleId,
-      plotPriceScaleIds === undefined ? undefined : this._plotScaleOverrides, this.paneIndex);
+      plotPriceScaleIds === undefined ? undefined : this._plotScaleOverrides, this.paneIndex, this._pricePane());
 
     for (const plot of descriptor.plots) {
       const type = this._plotType(plot);
@@ -523,7 +536,7 @@ export class IndicatorInstance implements IndicatorApi {
       });
       this._fills.push(band);
       // A band may follow its plots onto the price pane; see `IndicatorFillSpec.overlay`.
-      host.addIndicatorFill(band, fill.overlay === true ? 0 : this.paneIndex);
+      host.addIndicatorFill(band, fill.overlay === true ? this._pricePane() : this.paneIndex);
       const scale = this._fillScale(fill, this._scaleOverride);
       if (scale !== null) host.bindIndicatorPrimitiveScale?.(band, scale);
     }
@@ -555,7 +568,16 @@ export class IndicatorInstance implements IndicatorApi {
    * put its study in a pane and its band on the candles.
    */
   private _plotPane(plot: IndicatorPlot): number {
-    return plot.overlay === true ? 0 : this.paneIndex;
+    return plot.overlay === true ? this._pricePane() : this.paneIndex;
+  }
+
+  /**
+   * The slot the chart's price pane holds right now. Asked each time, never
+   * kept: the price pane can be moved below the studies, and a resource made
+   * after the move has to land where it went.
+   */
+  private _pricePane(): number {
+    return this._host.primaryPaneIndex?.() ?? 0;
   }
 
   private _plotScale(plot: IndicatorPlot, override = this._scaleOverride, assignments = this._plotScaleOverrides): PriceScaleId {
@@ -568,7 +590,7 @@ export class IndicatorInstance implements IndicatorApi {
 
   private _fillScale(fill: IndicatorFillSpec, override: PriceScaleId | null, paneIndex = this.paneIndex,
     assignments = this._plotScaleOverrides): PriceScaleId | null {
-    return fillPriceScale(this._d, fill, override, assignments, paneIndex);
+    return fillPriceScale(this._d, fill, override, assignments, paneIndex, this._pricePane());
   }
 
   /**
@@ -608,22 +630,22 @@ export class IndicatorInstance implements IndicatorApi {
     return [groups.size > 0 ? local : items, groups];
   }
 
-  /** A price-pane target, or one following a plot that draws on the candles, stays on pane zero. */
+  /** A price-pane target, or one following a plot that draws on the candles, stays on the price pane. */
   private _overlayTarget(key: string | null): boolean {
     return key === null || this._d.plots.some(plot => plot.key === key && plot.overlay === true);
   }
 
   /**
    * Pane and scale of a targeted drawing layer. A price-pane shape is in the
-   * instrument's units, so it binds no scale and measures on the one pane zero
-   * quotes prices on, the candles' own (see `_syncDraws`): a fixed id would
-   * strand it when the instrument sits on another axis, and would pin that
-   * axis in place. It is read from the pane being drawn, never from the
+   * instrument's units, so it binds no scale and measures on the one scale the
+   * price pane quotes prices on, the candles' own (see `_syncDraws`): a fixed
+   * id would strand it when the instrument sits on another axis, and would pin
+   * that axis in place. It is read from the pane being drawn, never from the
    * candles' series, because the candles can live on another pane.
    */
   private _drawTarget(key: string | null, override = this._scaleOverride, assignments = this._plotScaleOverrides): [number, PriceScaleId | null] {
     const plot = this._d.plots.find(item => item.key === key);
-    return plot ? [this._plotPane(plot), this._plotScale(plot, override, assignments)] : [0, null];
+    return plot ? [this._plotPane(plot), this._plotScale(plot, override, assignments)] : [this._pricePane(), null];
   }
 
   public priceScaleId(): PriceScaleId | null { return this._scaleOverride; }
@@ -785,7 +807,7 @@ export class IndicatorInstance implements IndicatorApi {
     this.paneIndex += delta;
   }
 
-  /** Owned render resources, with explicit price overlays left on pane zero. */
+  /** Owned render resources, with explicit price overlays left on the price pane. */
   public renderResources(): { series: { api: SeriesApi; overlay: boolean }[]; primitives: { primitive: IPrimitive; overlay: boolean }[] } {
     const series = this._d.plots.flatMap(plot => {
       const api = this._series.get(plot.key);
@@ -933,7 +955,8 @@ export class IndicatorInstance implements IndicatorApi {
       ? this._d.markers({ bars, values: this._values, settings: this._descriptorSettings() })
       : [];
     const primary = this._host.primarySeries?.() ?? undefined;
-    const first = (this._d.markerAnchor === 'price' && this.paneIndex === 0 ? primary : undefined)
+    const onPrice = this.paneIndex === this._pricePane();
+    const first = (this._d.markerAnchor === 'price' && onPrice ? primary : undefined)
       ?? this._series.get(this._d.plots[0]?.key ?? '');
     const anchor = (key: string | null): SeriesApi | undefined => (key === null ? primary : this._series.get(key));
     // Marks sent to the series the study's own marks already anchor to join
@@ -942,7 +965,7 @@ export class IndicatorInstance implements IndicatorApi {
     // own layer takes the candle while the study is on the price pane, a mark
     // naming a plot while that plot is, so an overlay plot of a study in its
     // own pane keeps a layer of its own.
-    const [markers, groups] = this._route(all, key => anchor(key) === first && !(this.paneIndex && this._overlayTarget(key)));
+    const [markers, groups] = this._route(all, key => anchor(key) === first && !(!onPrice && this._overlayTarget(key)));
     // Check every mark before any layer changes, as the drawings do.
     if (groups.size > 0) new SeriesMarkers(0).setMarkers(all);
     let created = false;
@@ -956,7 +979,7 @@ export class IndicatorInstance implements IndicatorApi {
       // Resolve scales lazily so moving an axis keeps the same guarantee.
       this._markers = first.createMarkers(() => {
         const current = this._host.primarySeries?.();
-        return this.paneIndex === 0 && current != null && first.priceScale() === current.priceScale()
+        return this.paneIndex === this._pricePane() && current != null && first.priceScale() === current.priceScale()
           ? this._host.sourceBars() : [];
       });
     }
@@ -981,7 +1004,7 @@ export class IndicatorInstance implements IndicatorApi {
         created = true;
         this._markerLayers.set(key, entry = [series.createMarkers(plot && (() => {
           const current = this._host.primarySeries?.();
-          return this._plotPane(plot) === 0 && current != null && series.priceScale() === current.priceScale()
+          return this._plotPane(plot) === this._pricePane() && current != null && series.priceScale() === current.priceScale()
             ? this._host.sourceBars() : [];
         })), series]);
       }
@@ -1038,7 +1061,7 @@ export class IndicatorInstance implements IndicatorApi {
         entry = undefined;
       }
       if (entry === undefined) {
-        entry = { table: this._host.addIndicatorTable(overlay ? 0 : this.paneIndex), overlay };
+        entry = { table: this._host.addIndicatorTable(overlay ? this._pricePane() : this.paneIndex), overlay };
         this._tables.set(spec.id, entry);
       }
       if (spec.options !== undefined) entry.table.setOptions(spec.options);
@@ -1252,13 +1275,14 @@ export class IndicatorInstance implements IndicatorApi {
       interval,
       timezone,
       now,
-      // Pane 0's, not this indicator's own pane: `calc` runs on the
+      // The price pane's, not this indicator's own pane: `calc` runs on the
       // instrument's bars, so the step it sizes a range in is the instrument's,
       // whatever units the pane it draws in happens to read. An oscillator's
       // pane carries no tick at all (see `Chart._scalePatchFor`), so asking it
-      // would answer "nobody said" for every study off the price pane.
+      // would answer "nobody said" for every study off the price pane, and so
+      // would asking slot 0 once a study pane sits above the price pane.
       // 0 is the scale's "infer from the visible range" sentinel, not a tick.
-      tickSize: this._host.tickSize?.(0) || undefined,
+      tickSize: this._host.tickSize?.(this._pricePane()) || undefined,
     };
   }
 

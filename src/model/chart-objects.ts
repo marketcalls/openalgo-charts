@@ -33,6 +33,7 @@ export interface ChartObjectSnapshot {
 export interface ChartObjectDefinition {
   kind: ChartObjectKind;
   name: string;
+  /** Slot of the pane it belongs to; omitted means the price pane, wherever it sits. */
   paneIndex?: number;
   visible?: boolean;
   locked?: boolean;
@@ -239,6 +240,9 @@ export class ChartObjects {
   /** Pane targets include one new pane after the current stack. */
   public paneCount(): number { return this._chart.panes().length; }
 
+  /** The price pane's slot among the targets, so a list can name it wherever it sits. */
+  public primaryPaneIndex(): number { return this._chart.primaryPaneIndex(); }
+
   public canReorder(id: string, direction: -1 | 1): boolean {
     const row = this.get(id);
     if (!row?.capabilities.reorder || (direction !== -1 && direction !== 1)) return false;
@@ -318,7 +322,7 @@ export class ChartObjects {
         reorder: typeof actions.reorder === 'function', move: typeof actions.move === 'function',
       });
       const row: ChartObjectSnapshot = Object.freeze({
-        id, sourceId, kind: state.kind, name: state.name, paneIndex: state.paneIndex ?? 0,
+        id, sourceId, kind: state.kind, name: state.name, paneIndex: state.paneIndex ?? this._chart.primaryPaneIndex(),
         visible: state.visible !== false, locked: state.locked, groupId: state.groupId, selected: state.selected === true || this._selected === id,
         dataStatus: state.dataStatus ? Object.freeze({ ...state.dataStatus }) : undefined, capabilities,
       });

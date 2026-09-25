@@ -190,6 +190,10 @@ function render({ keepView = true, state } = {}) {
     // A chart-type switch builds a new chart; the zone the user picked is
     // the demo's to carry across, like activeIndicators.
     timezone: app.chartTimezone,
+    // The price pane can go below the studies from the right-click menu. Every
+    // part of this host that means the price pane asks primaryPaneIndex() or
+    // names no pane, which is what the option asks of a host before it is on.
+    movablePrimaryPane: true,
     ...chartMotionOptions(),
     ...decorations,
   });
@@ -209,7 +213,7 @@ function render({ keepView = true, state } = {}) {
   app.symbolLegend = new PaneLegend({ id: 'symbol', title: '', params: '', row: 0, actions: [],
     status: () => symbolStatus({ symbol: app.req.symbol, bars: app.chart.primaryBars(), timezone: app.chart.timezone() }),
   });
-  app.chart.addPrimitive(app.symbolLegend, 0);
+  app.chart.addPrimitive(app.symbolLegend);
 
   // Previous close, session high/low and the rest. Off the namespace, so a
   // dist/ built before the family shipped leaves this null and the price-axis
@@ -217,7 +221,7 @@ function render({ keepView = true, state } = {}) {
   app.priceLevels = null;
   if (PriceLevels) {
     app.priceLevels = new PriceLevels({ timezone: app.chartTimezone, levels: app.priceLevelState });
-    app.chart.addPrimitive(app.priceLevels, 0);
+    app.chart.addPrimitive(app.priceLevels);
   }
 
   const sel = el('ctype').value;

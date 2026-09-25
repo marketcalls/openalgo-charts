@@ -173,7 +173,7 @@ interface BracketState { symbol: string; side: OrderSide; entry: number; stop: n
 ```ts
 interface TradeHost { addPrimitive(p: IPrimitive): void; removePrimitive(p: IPrimitive): void }
 
-const tc = new TradeController(chart.tradeHost(0));  // any pane
+const tc = new TradeController(chart.tradeHost());  // the price pane; tradeHost(n) for another pane
 tc.reconcile(orders, positions);   // full snapshot; idempotent, safe on every update and reconnect
 tc.onLtp('RELIANCE', 2950);        // pushes into every bound primitive
 ```
@@ -203,7 +203,7 @@ Depth arrives through the feed's optional `subscribeDepth(req, onDepth)`, `OpenA
 
 ```ts
 const ladder = new DomLadder({ tickSize: 0.05, width: 110, maxRows: 60, groupBy: 1 });
-chart.tradeHost(0).addPrimitive(ladder);
+chart.tradeHost().addPrimitive(ladder);   // beside the candles, wherever the price pane sits
 feed.subscribeDepth({ symbol, exchange, interval }, (d) => ladder.setDepth(d));
 ```
 
@@ -236,7 +236,7 @@ const engine = new OrderEngine({
   gate: (req) => window.confirm(`${req.side} ${req.qty} ${req.symbol}?`),
   onValidationError: (reason) => setStatus(reason),
 });
-const controller = new TradeController(chart.tradeHost(0));
+const controller = new TradeController(chart.tradeHost());
 
 // Chart hit ids are 'order:<brokerId>'; the engine is addressed by clientId.
 const clientOf = new Map<string, string>();

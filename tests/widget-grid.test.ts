@@ -545,6 +545,25 @@ describe('chart grid workspaces', () => {
     expect(grid.cells().map(cell => [cell.widget.symbol(), cell.widget.interval()])).toEqual([['LEFT', '1m'], ['RIGHT', '5m']]);
   });
 
+  it('keeps every price pane on top unless the grid opts in, and then carries a moved one to another grid that did', () => {
+    const { grid: pinned } = makeGrid({ preset: '1x2' });
+    expect(pinned.cells().map(cell => cell.widget.chart.movablePrimaryPane())).toEqual([false, false]);
+    const { grid: source } = makeGrid({ preset: '1x2', movablePrimaryPane: true });
+    expect(source.cells().map(cell => cell.widget.chart.movablePrimaryPane())).toEqual([true, true]);
+    const chart = source.cells()[1].widget.chart;
+    chart.addIndicator('rsi');
+    expect(chart.setPrimaryPaneIndex(1)).toBe(true);
+    const payload = parseWorkspacePayload(JSON.stringify(source.getWorkspace()));
+    expect(payload.panes[1].chart).toMatchObject({ version: 2, primaryPane: 1 });
+    // A grid that did not opt in refuses the moved chart and keeps its own.
+    const refused = pinned.applyWorkspace(payload);
+    expect(refused.applied).toBe(false);
+    expect(refused.reason).toMatch(/movablePrimaryPane/);
+    const { grid: target } = makeGrid({ preset: '1x2', movablePrimaryPane: true });
+    expect(target.applyWorkspace(payload)).toEqual({ applied: true });
+    expect(target.cells().map(cell => cell.widget.chart.primaryPaneIndex())).toEqual([0, 1]);
+  });
+
   it('restores each chart drawing magnet and stay mode', () => {
     const { grid } = makeGrid({ preset: '1x2', rail: true });
     const payload = grid.getWorkspace();

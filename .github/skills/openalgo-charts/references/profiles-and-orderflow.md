@@ -12,7 +12,7 @@ import { computeMarketProfile, MarketProfile } from 'openalgo-charts/profile';
 
 `openalgo-charts/profile` is a separate entry point (`package.json` `exports["./profile"]`), not part of the base bundle. See [bundling-and-tiers](bundling-and-tiers.md).
 
-**Every profile ships as two halves: a pure compute function and a canvas primitive.** Nothing here is a series type, there is no `chart.addSeries('volumeProfile')`. Compute a result object, attach a primitive with `chart.addPrimitive(primitive, paneIndex = 0)`, detach with `chart.removePrimitive(primitive)`. See [primitives-and-plugins](primitives-and-plugins.md).
+**Every profile ships as two halves: a pure compute function and a canvas primitive.** Nothing here is a series type, there is no `chart.addSeries('volumeProfile')`. Compute a result object, attach a primitive with `chart.addPrimitive(primitive, paneIndex?)` (the price pane when none is named), detach with `chart.removePrimitive(primitive)`. See [primitives-and-plugins](primitives-and-plugins.md).
 
 **A pane needs a price series before a profile renders.** Every profile primitive maps time to x via `rc.dataLayer.timeToIndex(...)`; with no bars that returns `undefined` and `draw` bails silently.
 

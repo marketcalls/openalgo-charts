@@ -56,7 +56,7 @@ export function orderLine(o) {
     price: o.price, color: tradeColors().order, lineWidth: 1, dashed: true,
     id: `order:${o.id}`, cursor: 'ns-resize', extentFromRight: TRADE_EXTENT,
     leftLabel: `${o.side} ${o.qty} ${o.type}`, closeButton: true, // click the box to cancel
-  }, 0);
+  });
 }
 export function cancelOrder(id) { // id = "order:<n>"
   const o = app.orders.find((x) => `order:${x.id}` === id);
@@ -131,7 +131,7 @@ export function updatePositionLine() {
   app.posLine = app.chart.addPriceLine({
     price: round2(app.position.avgPrice), color: long ? tc.long : tc.short, lineWidth: 2, dashed: false,
     id: 'position', extentFromRight: TRADE_EXTENT, leftLabel: positionLabel(markPrice()), closeButton: true,
-  }, 0);
+  });
 }
 
 /**

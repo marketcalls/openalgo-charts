@@ -34,20 +34,54 @@ let ctxTime = null;        // the bar time a session mark anchors to
 let ctxIndicator = null;   // instance id when the pointer was over an indicator
 let ctxAlerts = [];
 let ctxOwner = null;
-let ctxPane = null;        // the pane row's action, when the pointer was over a lower pane
+let ctxPane = null;        // the pane row's action, when the pointer was over a study pane
+let ctxMoves = [];         // the pane's up and down rows, when there is another pane to swap with
 export const hideCtx = () => { ctxMenu.hidden = true; };
 
 /**
- * The pane row: fold a lower pane to its header strip, or open it again. The
+ * Where the price pane sits. It can be moved below the studies, so "the price
+ * pane" is asked of the chart rather than assumed to be the top one; an
+ * engine that predates the move always keeps it there.
+ */
+export const pricePane = (chart) => (typeof chart?.primaryPaneIndex === 'function' ? chart.primaryPaneIndex() : 0);
+
+/**
+ * The pane row: fold a study pane to its header strip, or open it again. The
  * strip keeps the pane's studies, drawings and height, so this is a view
- * choice, not an edit. Null over the price pane, which always stays open, and
- * on an engine that predates pane collapse.
+ * choice, not an edit. Null over the price pane, which always stays open in
+ * whatever slot it sits, and on an engine that predates pane collapse.
  */
 export function paneCollapseRow(chart, paneIndex) {
-  if (!(paneIndex > 0) || typeof chart?.paneCollapsed !== 'function') return null;
+  if (typeof chart?.paneCollapsed !== 'function' || !(paneIndex >= 0) || paneIndex === pricePane(chart)) return null;
   const folded = chart.paneCollapsed(paneIndex);
   return { label: folded ? 'Expand pane' : 'Collapse pane',
     onSelect: () => { chart.setPaneCollapsed(paneIndex, !folded); } };
+}
+
+/**
+ * The move rows: the pane under the pointer up or down one slot. Every pane
+ * moves, the price pane included, which is how a trader puts the price below
+ * the studies or back on top; this host builds its charts with
+ * `movablePrimaryPane` for that. A row at an edge stays in the menu, greyed,
+ * so the pair keeps its place, and so does one the chart would refuse because
+ * it keeps its price pane pinned on top. Empty on a single pane and on an
+ * engine that predates the move.
+ */
+export function paneMoveRows(chart, paneIndex) {
+  if (typeof chart?.movePane !== 'function' || typeof chart.primaryPaneIndex !== 'function') return [];
+  const count = chart.panes().length;
+  if (count < 2 || !(paneIndex >= 0 && paneIndex < count)) return [];
+  const price = chart.primaryPaneIndex();
+  const pinned = typeof chart.movablePrimaryPane === 'function' && !chart.movablePrimaryPane();
+  const row = (label, direction, edge, edgeReason) => {
+    const reason = edge ? edgeReason
+      : pinned && (paneIndex === price || paneIndex + direction === price) ? 'The price pane stays on top on this chart' : '';
+    return { label, disabled: reason !== '', reason, onSelect: () => { chart.movePane(paneIndex, direction); } };
+  };
+  return [
+    row('Move pane up', -1, paneIndex === 0, 'Already the top pane'),
+    row('Move pane down', 1, paneIndex === count - 1, 'Already the bottom pane'),
+  ];
 }
 
 /**
@@ -79,7 +113,11 @@ export function openContextMenu(e, pane = 1) {
       onSelect: () => { if (owner.current()) setVolumeShown(!volumeShown(2), 2); } });
     if (e.target?.kind === 'indicator') rows.push({ label: 'Study settings...',
       onSelect: () => openSettings(e.target.instanceId, owner) });
-    const paneRow = e.target?.kind === 'time-scale' ? null : paneCollapseRow(owner.chart, e.paneIndex);
+    const onAxis = e.target?.kind === 'time-scale';
+    for (const move of onAxis ? [] : paneMoveRows(owner.chart, e.paneIndex)) {
+      rows.push({ label: move.label, disabled: move.disabled, reason: move.reason, onSelect: () => { if (owner.current()) move.onSelect(); } });
+    }
+    const paneRow = onAxis ? null : paneCollapseRow(owner.chart, e.paneIndex);
     if (paneRow) rows.push({ label: paneRow.label, onSelect: () => { if (owner.current()) paneRow.onSelect(); } });
     if (rows.length) popupMenu({ getBoundingClientRect: () => ({ left: rect.left + e.point.x, bottom: rect.top + e.point.y }) }, rows, { role: 'menu' });
     return;
@@ -95,7 +133,7 @@ export function openContextMenu(e, pane = 1) {
   closeAxisMenu();
   // Off the plot (on a scale) there is no price, so the order rows would be
   // offering to trade at nothing.
-  const tradable = e.paneIndex === 0 && e.price != null && app.currentBars.length > 0;
+  const tradable = e.paneIndex === pricePane(app.chart) && e.price != null && app.currentBars.length > 0;
   ctxPrice = tradable ? round2(e.price) : 0;
   for (const b of ctxMenu.querySelectorAll('button[data-type]')) {
     b.hidden = !tradable;
@@ -157,10 +195,19 @@ export function openContextMenu(e, pane = 1) {
   }
 
   ctxPane = target.kind === 'time-scale' ? null : paneCollapseRow(app.chart, e.paneIndex);
+  ctxMoves = target.kind === 'time-scale' ? [] : paneMoveRows(app.chart, e.paneIndex);
   const rowPane = ctxMenu.querySelector('[data-act="panecollapse"]');
   rowPane.hidden = !ctxPane;
-  ctxMenu.querySelector('hr[data-sec="pane"]').hidden = !ctxPane;
   if (ctxPane) rowPane.textContent = ctxPane.label;
+  ['paneup', 'panedown'].forEach((act, i) => {
+    const row = ctxMenu.querySelector(`[data-act="${act}"]`);
+    if (!row) return;
+    const move = ctxMoves[i];
+    row.hidden = !move;
+    row.disabled = move?.disabled === true;
+    row.title = move?.reason || '';
+  });
+  ctxMenu.querySelector('hr[data-sec="pane"]').hidden = !ctxPane && ctxMoves.length === 0;
 
   // Volume is a fixture of a time-indexed chart only: a Renko brick or a
   // P&F column has no source bar to hang it off, so `render()` leaves the
@@ -184,8 +231,10 @@ export function openContextMenu(e, pane = 1) {
 // state the axis is not in. Nothing is hardcoded per axis: the same code
 // serves the price ladder, a left-hand scale, and an indicator pane's.
 // Which axis the menu (and the chords, which have no pointer) act on. The
-// price ladder of the main pane until a right-click names another.
-let axTarget = { paneIndex: 0, scaleId: 'right' };
+// price ladder of the price pane until a right-click names another; null
+// means that one, found where the price pane sits now, since it can move.
+let axTarget = { paneIndex: null, scaleId: 'right' };
+const axPane = () => axTarget.paneIndex ?? pricePane(app.chart);
 let axSubHalf = null;   // 'line' | 'label' while a level flyout is open
 
 const AX_TICK = '<svg viewBox="0 0 20 20"><path d="M4 10.5l4 4 8-9"/></svg>';
@@ -218,11 +267,11 @@ export const LEVEL_LABEL = {
 const levelKinds = () => PRICE_LEVEL_KINDS || Object.keys(LEVEL_LABEL);
 
 export const axisState = () => (app.chart && typeof app.chart.priceAxisState === 'function')
-  ? app.chart.priceAxisState(axTarget.paneIndex, axTarget.scaleId)
+  ? app.chart.priceAxisState(axPane(), axTarget.scaleId)
   : null;
 
-const axisPlacement = () => app.chart?.priceAxisPlacement?.(axTarget.paneIndex, axTarget.scaleId) ?? null;
-const axisColumns = side => (app.chart?.priceAxisLayout?.(axTarget.paneIndex) ?? [])
+const axisPlacement = () => app.chart?.priceAxisPlacement?.(axPane(), axTarget.scaleId) ?? null;
+const axisColumns = side => (app.chart?.priceAxisLayout?.(axPane()) ?? [])
   .filter(column => column.side === side).sort((a, b) => a.order - b.order);
 
 /**
@@ -303,7 +352,7 @@ function paintAxisMenu() {
   });
   const primaryScale = () => {
     const primary = app.chart?.primarySeries?.();
-    return primary != null && primary.priceScale() === app.chart.panes()[axTarget.paneIndex]?.scaleFor(axTarget.scaleId);
+    return primary != null && primary.priceScale() === app.chart.panes()[axPane()]?.scaleFor(axTarget.scaleId);
   };
   if (primaryScale() && typeof app.chart.setPriceOnlyAutoScale === 'function') add({
     label: 'Fit primary prices only', on: app.chart.priceOnlyAutoScale(),
@@ -530,7 +579,8 @@ export function closeAxisMenu() {
 export function openAxisMenu(e, target) {
   hideCtx();
   axTarget = {
-    paneIndex: e.paneIndex || 0,
+    // The price pane is kept as null, so the chords stay on it through a move.
+    paneIndex: typeof e.paneIndex === 'number' && e.paneIndex !== pricePane(app.chart) ? e.paneIndex : null,
     // An older dist/ classifies the strip but does not say which scale it
     // draws; the side's own scale is the right guess in that case.
     scaleId: target.scaleId !== undefined ? target.scaleId : (target.side || 'right'),
@@ -693,7 +743,7 @@ export function initMenus(a) {
     // them, which is why this is the one row that passes `force`.
     if (act === 'mark') {
       if (!app.draw || ctxTime === null) return;
-      addSessionMark(app.draw, { time: ctxTime, price: ctxPrice }, app.req.symbol);
+      addSessionMark(app.draw, { time: ctxTime, price: ctxPrice }, app.req.symbol, pricePane(app.chart));
       el('status').textContent = `marked ${fmt(ctxPrice)} for this session`;
       return;
     }
@@ -714,6 +764,7 @@ export function initMenus(a) {
     if (act === 'chartset') { openChartSettings(undefined, ctxOwner); return; }
     if (act === 'indset') { if (ctxIndicator) openSettings(ctxIndicator, ctxOwner); return; }
     if (act === 'panecollapse') { if (ctxOwner?.current()) ctxPane?.onSelect(); return; }
+    if (act === 'paneup' || act === 'panedown') { if (ctxOwner?.current()) ctxMoves[act === 'paneup' ? 0 : 1]?.onSelect(); return; }
     placeOrder(btn.getAttribute('data-side'), btn.getAttribute('data-type'), ctxPrice);
   });
 

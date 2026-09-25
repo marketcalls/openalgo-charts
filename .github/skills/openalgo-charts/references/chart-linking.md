@@ -130,7 +130,7 @@ It sits on the `'top'` z-order, which is the layer `Pane.paintTop` repaints for 
 
 **One group-wide re-entrancy guard**, not one per channel. Any member event arriving while the group is broadcasting is an echo of that broadcast by definition, since a human cannot pan two charts in one call stack. It is group-wide because a symbol change that reloads data can move a viewport, and that second-order echo is the same bug wearing a different hat.
 
-Members are dropped the moment their chart dies. `chart.destroy()` sets `isDestroyed`, emits `'destroy'` and the group prunes on the spot; a `LinkChart` that is not a `Chart` and reports neither is probed by pane count instead (pane 0 can never be removed by any other route). This matters beyond tidiness: `addPrimitive` on a destroyed chart would resurrect a pane.
+Members are dropped the moment their chart dies. `chart.destroy()` sets `isDestroyed`, emits `'destroy'` and the group prunes on the spot; a `LinkChart` that is not a `Chart` and reports neither is probed by pane count instead (the price pane can never be removed by any other route). This matters beyond tidiness: `addPrimitive` on a destroyed chart would resurrect a pane.
 
 ## What the group listens to
 
@@ -214,7 +214,10 @@ group.share(chartA, a.selection()); // explicit promotion of existing local draw
 Public exports: `DrawingLinkGroup`, `createDrawingLinkGroup`, `DrawingLinkOptions`,
 `DrawingLinkContext`, `DrawingLinkContextSource`, `DrawingLinkChart`. `DrawingLinkOptions.enabled` defaults to
 false. `DrawingLinkChart` is structural: `on`, optional `isDestroyed`, optional
-`getDataContext`. `DrawingLinkContext` has optional `symbol` and `exchange` strings;
+`getDataContext`, optional `primaryPaneIndex`. Only price-pane drawings cross, and each
+chart's price pane is its own slot (`primaryPaneIndex()`, 0 without the method): a
+drawing on the price pane at the bottom of one chart arrives on the price pane at the
+top of another, never on the study pane in the same slot. `DrawingLinkContext` has optional `symbol` and `exchange` strings;
 both must be known, nonblank and exactly equal before drawings can cross.
 
 | Method | Behavior |

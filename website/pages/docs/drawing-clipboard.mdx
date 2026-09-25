@@ -153,7 +153,7 @@ Field by field, before anything can reach the model:
 |---|---|
 | `tool` | Must be a **registered** drawing tool. An unknown id would throw inside the controller. |
 | `points` | At least one anchor; every `time` and `price` finite. A NaN anchor produces a drawing that can never be drawn or hit-tested again. |
-| `paneIndex` | A non-negative integer. Absent means pane 0; a bogus one is a rejection, because a drawing parked on a pane that does not exist is invisible and unfindable. |
+| `paneIndex` | A non-negative integer, counted with the price pane first (see below). Absent means pane 0, the price pane; a bogus one is a rejection, because a drawing parked on a pane that does not exist is invisible and unfindable. |
 | `locked`, `visible` | Booleans when present. |
 | `style` | Values survive only as a string, a boolean, a finite number, or a short array of finite numbers. `__proto__`, `constructor` and `prototype` are never copied. |
 | `version` | Older versions are accepted (every field this build reads is validated anyway); a **future** version is refused rather than half-understood. |
@@ -238,9 +238,17 @@ exactly what you want to be able to tell the user.
   which makes it a rigid *screen* translation: a shape keeps its proportions on a
   [logarithmic scale](/docs/scales-and-panes) instead of stretching. A host that does not
   implement those two methods gets the time half of the offset only.
-- **A pane the receiving chart does not have is folded onto one it does.** Adding a
-  primitive creates the pane it names, so without this a drawing copied out of an indicator
-  pane would conjure an empty pane in a single-pane chart.
+- **A drawing copied beside the candles pastes beside the candles.** The payload counts
+  panes with the price pane first and the study panes after it in order, whatever slot the
+  price pane held where the drawing was copied. A chart built with
+  [`movablePrimaryPane`](/docs/scales-and-panes#moving-the-price-pane-below-its-studies) can
+  keep its price pane below its studies, and a paste there, or on another chart that keeps it
+  on top, still lands on the price pane. On a chart with the price pane on top, which is every
+  chart without the option, the count is the chart's own slots, as it always was.
+- **A pane the receiving chart does not have is folded onto one it does**, counted the same
+  way, so a drawing from a taller stack lands on the last study pane, never on the price pane.
+  Adding a primitive creates the pane it names, so without this a drawing copied out of an
+  indicator pane would conjure an empty pane in a single-pane chart.
 - The last pasted drawing is **selected**, so a repeated paste walks a staircase rather than
   stacking in place.
 

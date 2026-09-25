@@ -31,6 +31,13 @@ export interface WorkspaceDocument extends DocumentMetadata, WorkspacePayload { 
 export interface IndicatorTemplatePlotBinding {
   instanceId: string; plotKey: string; paneIndex: number; scaleId: PriceScaleId;
 }
+/**
+ * Pane and scale relationships of a portable template. Pane 0 is always the
+ * price pane and the study panes follow in their chart order, whatever slot
+ * the price pane held on the chart that was captured: a template applies the
+ * same way to a chart that keeps its price pane at the top and to one that
+ * keeps it below its studies.
+ */
 export interface IndicatorTemplateLayout {
   panes: PaneState[]; plots: IndicatorTemplatePlotBinding[]; primaryScaleId?: PriceScaleId;
 }
@@ -223,8 +230,8 @@ export function parseIndicatorTemplatePayload(input: unknown): IndicatorTemplate
 
 function chartState(input: Json | undefined): WorkspaceChartState {
   const source = record(input, 'chart');
-  if (source.version !== 1) throw new WorkspaceDocumentError('Unsupported chart version');
-  const out: WorkspaceChartState = { version: 1 };
+  if (source.version !== 1 && source.version !== 2) throw new WorkspaceDocumentError('Unsupported chart version');
+  const out: WorkspaceChartState = { version: source.version === 2 ? 2 : 1 };
   if (source.timezone !== undefined) out.timezone = string(source.timezone, 'timezone', 100);
   for (const key of ['navigation', 'canvas', 'statusLine', 'watermark', 'trading', 'events', 'axisChrome'] as const) {
     if (source[key] !== undefined) Object.assign(out, { [key]: record(source[key], key) });
@@ -253,6 +260,13 @@ function chartState(input: Json | undefined): WorkspaceChartState {
     out.drawings = source.drawings;
   }
   if (source.panes !== undefined) out.panes = chartPanes(source.panes);
+  if (source.primaryPane !== undefined) {
+    // Only version 2 says where the price pane sits. A version 1 chart that
+    // claims a slot would be misread by every reader that trusts the version.
+    if (source.version !== 2) throw new WorkspaceDocumentError('A moved price pane needs chart version 2');
+    out.primaryPane = number(source.primaryPane, 'primaryPane', 0, 31, true);
+    if (!out.panes || out.primaryPane >= out.panes.length) throw new WorkspaceDocumentError('The price pane slot must name a saved pane');
+  }
   if (source.series !== undefined) out.series = list(source.series, 'series descriptors', 512).map(item => {
     const series = record(item, 'series');
     const scaleId = series.priceScaleId;

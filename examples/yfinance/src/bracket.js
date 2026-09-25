@@ -30,7 +30,7 @@ export function attachBracketLines() {
   if (!app.bracket) return;
   const tc = tradeColors();
   const pl = (price, color, id) => app.chart.addPriceLine(
-    { price, color, lineWidth: 1, dashed: true, id, cursor: 'ns-resize', extentFromRight: TRADE_EXTENT }, 0);
+    { price, color, lineWidth: 1, dashed: true, id, cursor: 'ns-resize', extentFromRight: TRADE_EXTENT });
   // The entry leg is a resting order like any other, so it takes the order
   // colour; the two exits take the take-profit and stop-loss colours.
   app.bLines = {
@@ -92,7 +92,7 @@ export function positionPills() {
   const lineLeftX = rect.left + plotW * (1 - TRADE_EXTENT);
   const at = { 'bk-tp': app.bracket.target, 'bk-entry': app.bracket.entry, 'bk-sl': app.bracket.stop };
   for (const id in at) {
-    const y = app.chart ? app.chart.priceToCoordinate(at[id], 0) : null;
+    const y = app.chart ? app.chart.priceToCoordinate(at[id]) : null;
     const node = el(id);
     if (y == null) { node.style.display = 'none'; continue; }
     node.style.display = '';
@@ -114,7 +114,7 @@ function dragify(id, which) {
   });
   node.addEventListener('pointermove', (e) => {
     if (!node._drag) return;
-    const p = app.chart && app.chart.coordinateToPrice(e.clientY - chartTop(), 0);
+    const p = app.chart && app.chart.coordinateToPrice(e.clientY - chartTop());
     if (p != null) setBracketPrice(which, p);
   });
   const end = (e) => { node._drag = false; try { node.releasePointerCapture(e.pointerId); } catch (_) {} };

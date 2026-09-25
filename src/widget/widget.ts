@@ -450,6 +450,10 @@ class WidgetImpl implements Widget {
     if (options.navigation?.defaultVisibleBars === undefined && options.navigation?.defaultBarSpacing === undefined) {
       chartOpts.navigation = { ...options.navigation, defaultBarSpacing: options.timeScale?.barSpacing ?? 8 };
     }
+    // `movablePrimaryPane` reaches the engine as the host gave it, off unless
+    // set. The widget's own chrome follows the price pane wherever it sits,
+    // but a host's code on `widget.chart` may still pass 0 for the price, and
+    // only the host knows whether it does.
     const reducedMotion = doc.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
     if (reducedMotion && chartOpts.animZoom === undefined) chartOpts.animZoom = false;
     if (reducedMotion && chartOpts.animAutoscale === undefined) chartOpts.animAutoscale = false;

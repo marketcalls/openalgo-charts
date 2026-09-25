@@ -341,14 +341,14 @@ The runtime creates the marker layer lazily, so an indicator without the hook co
 nothing. By default, `markerAnchor: 'plot'` binds it to the first plot. Set
 `markerAnchor: 'price'` on an overlay descriptor to measure `aboveBar` against the
 primary candle's high and `belowBar` against its low. The option applies to indicators
-on pane 0; a study on its own pane, or a chart without a primary series, uses the first
+on the price pane, in whatever slot it sits; a study on its own pane, or a chart without a primary series, uses the first
 plot instead. The marker follows the selected series' scale, including a moved axis,
 and rebinds when that series is replaced. To put some marks on the candles from a study
 in its own pane, or to measure them against a plot other than the first, give those
 marks a [target](#drawing-and-marker-targets).
 
 A missing or `null` first-plot value can use the instrument's bar at the same time
-when the indicator is on pane 0 and both series share the same price scale. A finite
+when the indicator is on the price pane and both series share the same price scale. A finite
 plot value still wins. Instrument prices are never substituted into an oscillator
 pane or a different scale. An unanchored bar-relative marker is skipped; `atPrice`,
 `paneTop` and `paneBottom` can position themselves without a plot value. Every marker
@@ -1595,7 +1595,7 @@ and put the message beside the study instead of in a console.
 | `calc` | `(bars, settings, store, ctx?) => IndicatorValues` | Full recompute. `ctx` is the optional [calculation context](#the-calculation-context). |
 | `calcTail` | `(bars, settings, fromIndex, previous, store, ctx?) => IndicatorValues \| null` | Optional incremental path. |
 | `markers` | `({ bars, values, settings }) => IndicatorMarker[]` | Optional bar-anchored signal markers, run after every `calc`. Shapes include `cross` and `xcross`, and `paneTop` / `paneBottom` pin a glyph to the plot edge (2.4.0). A mark may name a [target](#drawing-and-marker-targets): `overlay: true` for the candles, `plot` for another plot. |
-| `markerAnchor` | `'plot' \| 'price'` | Defaults to the first plot. `'price'` selects the primary series for an indicator on pane 0 when one exists. Applies to marks that name no target. |
+| `markerAnchor` | `'plot' \| 'price'` | Defaults to the first plot. `'price'` selects the primary series for an indicator on the price pane when one exists. Applies to marks that name no target. |
 | `table` | `({ bars, values, settings }) => \{ rows, options \} \| null` | Optional corner-pinned summary grid, run after every `calc`. |
 | `tables` | `({ bars, values, settings }) => IndicatorTableSpec[]` | Multiple grids with stable, unique nonempty `id` values, `rows`, optional `options` and optional `overlay`. Omitted IDs are removed. Takes precedence over `table`. |
 | `draws` | `({ bars, values, settings }) => IndicatorDrawing[]` | Optional free-standing shapes anchored to time and price, run after every `calc`. A `label` or `box` with a `tooltip` or an `id` (2.4.0) is hit-testable: clicks reach `subscribeClick` and the tooltip paints on hover. A shape may name a [target](#drawing-and-marker-targets): `overlay: true` for the price pane, `plot` for another plot's pane and scale. |

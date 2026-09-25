@@ -207,13 +207,15 @@ Keep it cheap: it runs on every `Full` invalidation, which includes every `serie
 Attachment:
 
 ```ts
-chart.addPrimitive(primitive, paneIndex = 0);
+// Every paneIndex below defaults to the price pane: slot 0, or wherever it sits
+// on a chart built with movablePrimaryPane. Omit it for price-pane furniture.
+chart.addPrimitive(primitive, paneIndex?);
 chart.removePrimitive(primitive);
 
-chart.addPriceLine({ price, color, lineWidth, dashed, id }, paneIndex = 0); // returns PriceLine
-chart.addEventMarkers(paneIndex = 0, { clustering: false });                // returns EventMarkers
+chart.addPriceLine({ price, color, lineWidth, dashed, id }, paneIndex?);    // returns PriceLine
+chart.addEventMarkers(paneIndex?, { clustering: false });                   // returns EventMarkers
 series.createMarkers();                                                     // returns SeriesMarkers, wired to that series
-chart.tradeHost(paneIndex = 0);                                             // { addPrimitive, removePrimitive } for the trade tier
+chart.tradeHost(paneIndex?);                                                // { addPrimitive, removePrimitive } for the trade tier
 ```
 
 `PaneLegend` fits its row inside the plot, including hover actions and hit areas.
@@ -275,11 +277,11 @@ Chart conveniences:
 
 | API | Contract |
 |---|---|
-| `setEvents(events, paneIndex = 0)` | Owns the event data and applies `setEventOptions` type filters. |
+| `setEvents(events, paneIndex = primaryPaneIndex())` | Owns the event data and applies `setEventOptions` type filters. |
 | `eventMarkers()` | Returns that chart-owned primitive, or null before data/options install it. |
 | `setEventMarkerOptions(options)` | Configures clustering on the chart-owned strip. |
 | `setEventGroups(groups)` / `setEventGroupVisible(id, visible)` | Configures its hierarchy and visibility. |
-| `addEventMarkers(paneIndex = 0, options = {})` | Creates a separately owned primitive; the host supplies its data and filters. |
+| `addEventMarkers(paneIndex = primaryPaneIndex(), options = {})` | Creates a separately owned primitive; the host supplies its data and filters. |
 
 For chart-owned markers, `chart.on('event:click', handler)` delivers `ChartEventClick`,
 which extends `EventMarkerDetails` with `point: { x, y }` and `paneIndex`. A custom
@@ -334,7 +336,7 @@ const levels = new PriceLevels({
   },
   timezone: 'America/New_York',
 });
-chart.addPrimitive(levels, 0);
+chart.addPrimitive(levels);   // the price pane, wherever it sits
 
 levels.setLevel('previousClose', { color: '#8b95a8', lineStyle: 'dashed' });
 levels.values().previousClose;      // number | null, as of the last frame
@@ -443,7 +445,7 @@ class SupplyZone implements IPrimitive {
   }
 }
 
-chart.addPrimitive(new SupplyZone(24100, 24250), 0);
+chart.addPrimitive(new SupplyZone(24100, 24250));   // the price pane
 chart.subscribeClick((id) => { if (id === 'supply-zone') openZoneEditor(); });
 ```
 
@@ -496,17 +498,22 @@ Related: [core-api](core-api.md) (`addPrimitive`, invalidation levels, the event
 ## Anchoring to the chart instead of a pane (1.6.0)
 
 ```ts
-chart.addPrimitive(mark, { anchor: 'chart-bottom' })   // or 'chart-top'
+chart.addPrimitive(mark, { anchor: 'chart-bottom' })   // or 'chart-top', or 'primary-pane'
 ```
 
 Pass a placement instead of a pane index and the engine re-homes the primitive whenever a
 pane is added, removed, moved, maximized or collapsed. Use it for anything that is chart furniture
 rather than pane furniture: a watermark, a corner clock, a brand mark. `'chart-bottom'`
 resolves to the lowest open pane, so a collapsed bottom pane, which draws only its legend
-row, hands the primitive to the pane above it.
+row, hands the primitive to the pane above it. `'chart-top'` is the top pane with a share of
+the chart. `'primary-pane'` follows the price pane to whatever slot it is moved to
+(`setPrimaryPaneIndex`), and the pane maximized over it while it is hidden: use it for
+furniture that describes the price, such as a symbol badge. The chart's own background
+text and study count use it. `addPrimitive(p)` with no second argument is a plain pane
+primitive on the price pane at the time of the call, and moves with that pane.
 
 Maximize is the reason this exists rather than a `paneAdded` listener. It HIDES the other
-panes, so a primitive pinned to pane 0 disappears with it instead of merely sitting in the
+panes, so a primitive pinned to the price pane disappears with it instead of merely sitting in the
 wrong place, and no amount of host bookkeeping fixes that from outside.
 
 `removePrimitive` also clears the anchor registration, so a removed primitive stays removed;

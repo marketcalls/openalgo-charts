@@ -42,7 +42,11 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
   const resolved = opts.objects ?? ctx.objects;
   if (resolved === undefined) throw new Error(widgetText(ctx, 'Objects panel requires an object model'));
   const objects = resolved;
-  const paneLabel = (row: ChartObjectSnapshot): string => widgetText(ctx, 'Pane {number}', { number: row.paneIndex + 1 });
+  // The price pane is named, not numbered: it can sit below its studies, and
+  // "Pane 3" would not tell a trader that is where the candles are.
+  const paneName = (pane: number): string => pane === objects.primaryPaneIndex()
+    ? widgetText(ctx, 'Price pane') : widgetText(ctx, 'Pane {number}', { number: pane + 1 });
+  const paneLabel = (row: ChartObjectSnapshot): string => paneName(row.paneIndex);
   const kindLabel = (row: ChartObjectSnapshot): string => widgetText(ctx, `schema.object.kind.${row.kind}`, {}, KINDS[row.kind]);
   const doc = ctx.document;
   let closed = false;
@@ -52,7 +56,7 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
   const content = el(doc, 'div', 'oac-objects-content');
   const stopPointer = (event: Event): void => event.stopPropagation();
   content.addEventListener('pointerdown', stopPointer);
-  const sections = new Map<number, { element: HTMLElement; rows: HTMLElement }>();
+  const sections = new Map<number, { element: HTMLElement; rows: HTMLElement; heading: HTMLElement }>();
   let draggedId: string | null = null;
   const text = (key: string, fallback: string, values: Record<string, string | number> = {}): string =>
     widgetText(ctx, `schema.ui.objects.${key}`, values, fallback);
@@ -251,14 +255,17 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
       }
       row.move.setAttribute('aria-label', text('movePane', 'Move {name} to pane', { name: item.name }));
       const total = objects.paneCount();
-      if (row.move.children.length !== total + 1) {
+      const names = Array.from({ length: total + 1 }, (_, pane) => pane === total ? text('newPane', 'New pane') : paneName(pane));
+      // Rebuilt when a name changes as well as the count: moving the price
+      // pane renames two targets without adding one.
+      if (row.move.children.length !== names.length || names.some((name, pane) => row.move!.children[pane]?.textContent !== name)) {
         row.move.replaceChildren();
-        for (let pane = 0; pane <= total; pane++) {
+        names.forEach((name, pane) => {
           const option = el(doc, 'option');
           option.value = String(pane);
-          option.textContent = pane === total ? text('newPane', 'New pane') : widgetText(ctx, 'Pane {number}', { number: pane + 1 });
-          row.move.appendChild(option);
-        }
+          option.textContent = name;
+          row.move!.appendChild(option);
+        });
       }
       row.move.value = String(item.paneIndex);
       if (row.actions.children[index] !== row.move) row.actions.insertBefore(row.move, row.actions.children[index] ?? null);
@@ -288,9 +295,7 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
       if (!section) {
         const element = el(doc, 'section', 'oac-objects__pane');
         element.dataset.paneIndex = String(pane);
-        element.setAttribute('aria-label', widgetText(ctx, 'Pane {number}', { number: pane + 1 }));
         const heading = el(doc, 'h3', 'oac-objects__pane-title');
-        heading.textContent = widgetText(ctx, 'Pane {number}', { number: pane + 1 });
         const children = el(doc, 'div');
         element.append(heading, children);
         element.addEventListener('dragover', event => { if (draggedId !== null && objects.get(draggedId)?.capabilities.move) event.preventDefault(); });
@@ -299,8 +304,14 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
           if (draggedId !== null && objects.get(draggedId)?.capabilities.move) moveTo(draggedId, pane);
           draggedId = null;
         });
-        section = { element, rows: children };
+        section = { element, rows: children, heading };
         sections.set(pane, section);
+      }
+      // Named on every paint: a section keeps its slot while the price pane moves in or out of it.
+      const name = paneName(pane);
+      if (section.heading.textContent !== name) {
+        section.heading.textContent = name;
+        section.element.setAttribute('aria-label', name);
       }
       if (list.children[index] !== section.element) list.insertBefore(section.element, list.children[index] ?? null);
     });

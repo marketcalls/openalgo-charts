@@ -100,7 +100,7 @@ export function attachComparison(spec, pane = 1) {
     // Rebuilding a chart restores its comparison mode too. Carry the mode it
     // had before comparing so removing the final source can still put it back.
     const key = pane === 2 ? 'cmpBaseMode2' : 'cmpBaseMode';
-    const scale = target.chart.panes()[0].priceScale;
+    const scale = target.chart.panes()[target.chart.primaryPaneIndex?.() ?? 0].priceScale;
     app[key] ||= scale.options.mode;
     scale.setOptions({ mode: app[key] });
   }
@@ -123,7 +123,7 @@ export function attachComparison(spec, pane = 1) {
       const time = runtimes.get(target.chart)?.readoutTime;
       setComparisonLegend(spec, time == null ? target.chart.primaryBars().at(-1) : { time });
     };
-    target.chart.addPrimitive(spec.legend, 0);
+    target.chart.addPrimitive(spec.legend);
     if (spec.hidden) spec.handle.series.applyOptions({ visible: false });
     spec.error = null;
     setCompareLegends(target.chart.primaryBars().at(-1), pane);

@@ -19,7 +19,7 @@ Ten kinds, one primitive:
 import { PriceLevels } from 'openalgo-charts';
 
 const levels = new PriceLevels({ timezone: 'Asia/Kolkata' });
-chart.addPrimitive(levels, 0);
+chart.addPrimitive(levels);   // the price pane, wherever it sits
 ```
 
 That is the whole setup. Previous close, session high and session low are on by default,

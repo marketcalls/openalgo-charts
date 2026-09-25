@@ -4,6 +4,95 @@ All notable changes to OpenAlgo Charts.
 
 ## Unreleased
 
+### Added
+
+- The price pane can move below its studies, on a chart that opts in with the
+  new `movablePrimaryPane` option. Moving it is opt-in in both the chart and
+  the widget: `createChart`, `createWidget` and `createChartGrid` all leave the
+  option off, and for a host that does not opt in nothing about the price pane
+  changes. It stays at slot 0 exactly as in 2.5.4: `movePane` refuses to move
+  or displace it (so the up control on the first study pane still does
+  nothing), `setPrimaryPaneIndex` returns false, `restoreState` refuses a
+  layout that moved it, and an explicit pane 0 still means the price. It is
+  opt-in because a host that passes an explicit 0 to mean the price pane (a
+  price or order line, `coordinateToPrice(y, 0)` pricing a right-click order,
+  a price alert check, `panes()[0]`) would otherwise read a study's units,
+  order prices included, the moment a user moved a study above the candles.
+  Before turning it on, drop those zeros or ask `chart.primaryPaneIndex()`, and
+  follow `paneMoved`; read the option back with `chart.movablePrimaryPane()`.
+- With the option on, the price pane is an identity rather than slot 0:
+  `chart.primaryPaneIndex()` reads the slot it holds, and
+  `chart.setPrimaryPaneIndex(index)` moves it there one `movePane` step at a
+  time, one `paneMoved` event per step. `movePane` moves the price pane like any
+  other pane, and a study pane can displace it. Everything that meant "the price
+  pane" follows it: `addSeries`, `addPriceLine`, `addEventMarkers`, `setEvents`,
+  `addPrimitive` and `tradeHost` with no pane; `priceToCoordinate`,
+  `coordinateToPrice`, `priceAxisState` and `priceAxisLayout` with no pane;
+  `priceScaleOptions()`; on-chart studies and every `overlay` plot, band, table,
+  price-anchored mark and the instrument tick a study's `calc` sees;
+  comparisons, whose handle `paneIndex` now follows its pane; price alerts and
+  drawing alerts; the drawing magnet; drawing copy and paste; a drawing link
+  between charts that keep their price panes in different slots; the magnet
+  crosshair, a scale-targeted pick and the `panUp` / `panDown` keys. The legend
+  offset, the study count and the background text sit on the price pane (the
+  new primitive anchor `'primary-pane'`); the time navigator and the brand mark
+  stay on the bottom open pane. The price pane is never removed and never
+  collapses, in any slot, so a chart always keeps one open pane; a study pane
+  moved above it folds, maximizes, prunes and carries its pane controls like
+  any other.
+- A moved price pane is saved. `getState()` writes version 2 with `primaryPane`
+  only when the price pane is not on top, and writes every other layout as
+  version 1, unchanged, so an older reader still opens it and refuses a moved
+  one rather than laying the price pane's settings on a study pane.
+  `CHART_STATE_VERSION` is now 2. A layout without `primaryPane` restores with
+  the price pane on top; a slot that names no saved pane, a `primaryPane` in a
+  version 1 state, and a moved slot on a chart without the option are refused
+  before anything is applied. Workspace documents accept a version 2 chart and
+  refuse `primaryPane` on version 1. Portable templates are written price pane
+  first, so they apply the same way whichever slot the price pane holds;
+  `planIndicatorTemplateState` keeps the destination's price pane in place and
+  returns `primaryPane` for the restore, and `planIndicatorTemplate` takes the
+  destination's price-pane slot as an optional sixth argument.
+- `createWidget` and `createChartGrid` take the option and hand it to their
+  charts as given, off unless the host passes `movablePrimaryPane: true`. Only
+  the host knows whether its own code on `widget.chart` still passes 0 for the
+  price, such as a volume histogram added with `paneIndex: 0`, so the widget
+  does not decide for it. The widget's right-click menu moves the pane under
+  the pointer up or down (`pane-up`, `pane-down`): study panes on every widget,
+  and the price pane as well on a widget that opted in. A row that has nowhere
+  to go is greyed, and so is a row that a pinned price pane refuses, with the
+  note "price pane stays on top". The Objects panel names the price pane in its
+  pane headings and its move targets wherever it sits
+  (`ChartObjects.primaryPaneIndex()`). The reference host opts in on both charts
+  of its main page and in its grid view, so a layout either one saves opens in
+  the other, and it offers the same rows on both right-click menus. The widget
+  and the reference host keep the collapse row off the price pane in every slot
+  and forward the price-pane slot when applying a template.
+
+### Changed
+
+- `CHART_STATE_VERSION` is 2, but `getState()` still writes 1 for a chart whose
+  price pane is on top. A host that checks a saved state against the constant
+  should refuse only a newer version (`version > CHART_STATE_VERSION`), as
+  `restoreState` does, not demand equality.
+- Drawings on the clipboard count their pane with the price pane first and the
+  study panes after it in order. On a chart that keeps its price pane on top,
+  which is every chart without the option, that is the slot it always was.
+
+### Fixed
+
+- A restore now hands the drawing tier its drawings before it prunes the study
+  panes it emptied, so a drawing kept through a template swap shifts with the
+  panes instead of recreating a pane at its old slot. The saved drawings a
+  draw tier reads when it loads later are shifted the same way, by every pane
+  removal or move before it arrives. A drawing on a study pane that the restore
+  prunes (the pane of a study not registered where the layout opens, say) is
+  dropped with that pane, where 2.5.4 recreated an empty pane at its old slot
+  to hold it. This applies whether or not the host opted in.
+- The widget's right-click menu offered Buy and Sell limit and stop rows over a
+  study pane, priced from that pane's scale: an RSI reading of 58.75 became a
+  limit price. A study pane now offers the market rows only.
+
 ### Calculations
 
 - ATR treats a missing or overflowing true range as a gap. It seeds from the

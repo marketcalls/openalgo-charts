@@ -731,6 +731,20 @@ describe('contextMenuEntries', () => {
     expect(ids(off).filter((i) => i.startsWith('order-'))).toEqual(['order-buy-market', 'order-sell-market']);
   });
 
+  it('prices order rows only over the price pane: a study pane reads its own units, not the instrument', () => {
+    const rig = makeRig();
+    // An oscillator in a pane of its own, reading around 50.
+    rig.chart.addSeries('line', { paneIndex: 1 }).setData(BARS.map((bar) => ({ time: bar.time, value: 50 + (bar.close % 10) })));
+    const orders: OrderRequest[] = [];
+    const study = contextMenuEntries(rig.ctx, event(rig, { kind: 'empty', id: null }, { paneIndex: 1, price: 58.75 }), { onOrder: (o) => orders.push(o) });
+    expect(ids(study).filter((i) => i.startsWith('order-'))).toEqual(['order-buy-market', 'order-sell-market']);
+    expect(items(study).some((i) => i.label.includes('58.75'))).toBe(false);
+    (items(study).find((i) => i.id === 'order-buy-market') as MenuItem).run?.();
+    expect(orders).toEqual([{ side: 'BUY', type: 'MARKET', price: null, paneIndex: 1 }]);
+    const price = contextMenuEntries(rig.ctx, event(rig, { kind: 'empty', id: null }, { paneIndex: 0 }), { onOrder: () => {} });
+    expect(ids(price)).toContain('order-buy-limit');
+  });
+
   it('acts on the drawing under the pointer: it becomes the selection and every action reaches the controller', () => {
     const rig = makeRig();
     const a = line(rig.draw);

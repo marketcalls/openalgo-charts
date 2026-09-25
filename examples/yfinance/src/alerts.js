@@ -67,16 +67,18 @@ export function alertContextEntries(app, event, pane = 1) {
   const add = (label, source, info = {}) => rows.push({ label, disabled: info.available === false,
     reason: info.reason, onSelect: () => current() && info.available !== false && ui.openEditor({ source }) });
   const target = event.target || { kind: 'empty' };
+  // The price pane can sit below the studies; its overlays and price alerts go with it.
+  const pricePane = typeof chart.primaryPaneIndex === 'function' ? chart.primaryPaneIndex() : 0;
   if (target.kind === 'drawing') {
     const id = target.id?.startsWith('draw:') ? target.id.slice(5).split('#')[0] : null;
     if (id && draw?.get(id)) add('Create drawing alert', { kind: 'drawing', drawingId: id }, draw.alertInfo(id));
   } else if (target.kind === 'indicator' && target.instanceId) {
     const instance = chart.indicators().find(item => item.id === target.instanceId);
     const plot = instance && getIndicator(instance.indicatorId).plots.find(item =>
-      (item.overlay ? 0 : instance.paneIndex) === event.paneIndex && (target.plotKey === undefined || item.key === target.plotKey));
+      (item.overlay ? pricePane : instance.paneIndex) === event.paneIndex && (target.plotKey === undefined || item.key === target.plotKey));
     if (instance && plot) add('Create study alert', { kind: 'indicator', instanceId: instance.id, plotKey: plot.key,
       value: instance.values()[plot.key]?.[event.index ?? chart.primaryBars().length - 1] ?? NaN });
-  } else if (event.paneIndex === 0 && event.price !== null && Number.isFinite(event.price)) {
+  } else if (event.paneIndex === pricePane && event.price !== null && Number.isFinite(event.price)) {
     add('Create price alert', { kind: 'price', price: event.price });
   }
   rows.push({ label: 'Alerts', onSelect: () => current() && ui.openList() });

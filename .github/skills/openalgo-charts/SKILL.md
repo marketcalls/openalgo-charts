@@ -272,7 +272,7 @@ draw.clipboard().lastError();
 
 // reference levels (a primitive: previous close, session high/low, bid/ask, ...)
 const levels = new PriceLevels({ levels: { previousClose: { line: true, label: true } } });
-chart.addPrimitive(levels, 0);
+chart.addPrimitive(levels);   // the price pane, wherever it sits
 levels.setLevel(kind, patch) / levels.setQuote(q) / levels.values() / levels.available(kind);
 computePriceLevels({ bars, anchorTime });   // the same numbers, pure, no canvas
 ```

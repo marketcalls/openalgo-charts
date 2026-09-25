@@ -95,7 +95,7 @@ chart.applyOptions({ crosshairMode: 'normal' }); // takes effect on the next poi
 
 `magnetSnapPrice(price, bar)` returns whichever of `bar.open/high/low/close` is nearest.
 
-**Magnet only snaps in the pane holding the first price series.** Volume and indicator panes are not price scales, so the snap is skipped there. `DrawingController`'s own `magnet` option is separate and snaps on pane 0 only.
+**Magnet only snaps in the pane holding the first price series.** Volume and indicator panes are not price scales, so the snap is skipped there. `DrawingController`'s own `magnet` option is separate and snaps on the price pane only, wherever it sits.
 
 **`CrosshairMode` is not exported by name.** Pass the string literals `'normal'` / `'magnet'`; the type is inlined into `dist/index.d.ts` but absent from the export list.
 
@@ -128,7 +128,7 @@ On by default. `chart.shortcuts` is the `ShortcutManager`, or `null` when disabl
 
 `ALT_PRESET` overlays three: `panLeftFast: Alt+ArrowLeft`, `panRightFast: Alt+ArrowRight`, `screenshot: Mod+Shift+KeyS`. Select it with `preset: 'alt'` or `setPreset('alt')`; user rebinds still win.
 
-**`panUp` and `panDown` always act on pane 0**, whatever pane the pointer is over.
+**`panUp` and `panDown` always act on the price pane**, in whatever slot it sits, whatever pane the pointer is over.
 
 ### Combos
 

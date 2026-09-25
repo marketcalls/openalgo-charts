@@ -10,6 +10,10 @@ Runtime exports:
 - `WORKSPACE_VERSION`: document schema version `1`.
 - `parseWorkspaceDocument`, `parseWorkspacePayload`: validate/detach independent
   panes, grid slots, focus and crosshair/viewport/symbol/interval sync settings.
+  A chart state is version 1, or version 2 with `primaryPane`, the slot of a
+  price pane moved below its studies; a `primaryPane` on version 1, or one that
+  names no saved pane, is refused. Restoring a moved one needs a chart built with
+  `movablePrimaryPane`; any other chart refuses it rather than misplace the panes.
   Optional layout `rowWeights`/`columnWeights` preserve unequal tracks: positive
   finite values up to 1,000, one per track. Missing lists mean equal tracks.
 - `parseIndicatorTemplate`, `parseIndicatorTemplatePayload`, `parseIndicatorStates`: retain duplicate instances,
@@ -20,8 +24,14 @@ Runtime exports:
 - `captureIndicatorTemplate(chart)`: capture studies, pane/scale configuration and
   effective plot bindings, including overlays and the actual primary scale. No bars
   or runtime formatters are stored. Save the complete payload to retain layout.
+  A template is written price pane first: its pane 0 is the price pane and the study
+  panes follow in chart order, whatever slot the price pane held, so a chart with its
+  price pane at the bottom captures the same portable document as one with it on top.
 - `planIndicatorTemplateState(chart, input, mode, options?)`: validate loaded
-  descriptors and return a detached `{ indicators, panes?, restoreOptions? }` plan. No mutation or
+  descriptors and return a detached `{ indicators, panes?, primaryPane?, restoreOptions? }` plan.
+  The plan is in the destination's own slots and keeps its price pane where it is;
+  when that is not slot 0 it lists the panes and carries `primaryPane`, which the
+  host must forward beside `panes` in a version 2 restore state. No mutation or
   data reload. Default `scalePolicy: 'copy'` gives non-primary main-pane scales fresh
   IDs while preserving source sharing; `'share'` reuses IDs and existing destination
   settings. Source primary bindings follow the destination primary scale. Positive
@@ -32,11 +42,11 @@ Runtime exports:
   Pass `plan.restoreOptions` as the second argument of `chart.restoreState` to
   retain runtime formatters on destination scales. Copied/replaced study scales
   receive descriptor formatting; no callback enters the portable document.
-- `planIndicatorTemplate(current, incoming, mode, available, nextPaneIndex)`:
+- `planIndicatorTemplate(current, incoming, mode, available, nextPaneIndex, primaryPaneIndex = 0)`:
   prepare detached studies before mutation. `replace` uses the incoming groups;
   `append` retains current identities and places incoming positive pane groups
-  after the current pane count. Overlays stay on pane zero; incoming instance IDs
-  are omitted. Repeated studies remain separate. Validate missing descriptors,
+  after the current pane count. Incoming overlays (pane 0) go to the price pane at
+  `primaryPaneIndex`; incoming instance IDs are omitted. Repeated studies remain separate. Validate missing descriptors,
   append overlap, the 256-study limit and pane indices 0 through 31 before apply.
 - `migrateWidgetWorkspace`: explicit single-widget version-1 migration; metadata
   is supplied by the host, bars and execution state are excluded.

@@ -672,7 +672,7 @@ import { PriceLevels, PRICE_LEVEL_KINDS,
          lastPriceLevelFromSeriesStyle, seriesStyleForLastPriceLevel } from 'openalgo-charts';
 
 const levels = new PriceLevels({ timezone: 'Asia/Kolkata' });
-chart.addPrimitive(levels, 0);
+chart.addPrimitive(levels);   // no pane: the price pane, wherever it sits
 
 /** Our own words, in the order the engine lists the kinds. */
 const LEVEL_LABEL = {

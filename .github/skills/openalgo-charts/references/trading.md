@@ -32,7 +32,7 @@ chart.addSeries('candlestick').setData(bars);
 chart.trading.syncState({ positions, orders, trades });
 ```
 
-- Its `PriceLine`s and marker primitive always land on **pane 0** (`new TradingController(this)` routes through `chart.addPrimitive`, whose `paneIndex` defaults to `0`).
+- Its `PriceLine`s and marker primitive always land on **the price pane** (`new TradingController(this)` routes through `chart.addPrimitive`, whose pane defaults to the price pane). That is pane 0, unless the chart was built with `movablePrimaryPane` and the price pane was moved below its studies; the lines follow it there.
 - `chart.tradeHost(paneIndex)` is the *other* host shape (`addPrimitive`/`removePrimitive` only) and is for the trade tier's `TradeController`, not for `chart.trading`.
 
 **Touching `chart.trading` steals `chart.subscribeClick` and `chart.subscribeDrag`.** Both are single-slot setters (`this._clickCb = cb`), and the `TradingController` constructor calls them. Register your own callbacks and the trading layer goes deaf; access `chart.trading` afterwards and your callbacks are dropped. Use `chart.on('click' | 'drag' | 'drag:end' | 'hover', cb)` (the multi-listener bus) for app-side handling alongside `chart.trading`.
@@ -222,7 +222,9 @@ Pattern from `examples/live/index.html` and `examples/yfinance/index.html`:
 
 ```ts
 chartEl.addEventListener('contextmenu', (e) => {
-  const price = chart.coordinateToPrice(e.clientY - chartEl.getBoundingClientRect().top, 0);
+  // No pane named: the price pane, wherever it sits. An explicit 0 is the top
+  // pane, which is a study's on a chart whose price pane was moved below it.
+  const price = chart.coordinateToPrice(e.clientY - chartEl.getBoundingClientRect().top);
   if (price == null) return;
   e.preventDefault();                       // suppress the chart's snapshot path + native menu
   ctxPrice = round(price);
@@ -232,7 +234,7 @@ chartEl.addEventListener('contextmenu', (e) => {
 window.addEventListener('click', () => hideMenu());
 ```
 
-`chart.coordinateToPrice(y, paneIndex)` takes a **container-relative** Y in media px and returns `null` for a missing pane or one collapsed to its header strip; `chart.priceToCoordinate(price, paneIndex)` is the inverse for positioning DOM panels over a line.
+`chart.coordinateToPrice(y, paneIndex)` takes a **container-relative** Y in media px and returns `null` for a missing pane or one collapsed to its header strip; `chart.priceToCoordinate(price, paneIndex)` is the inverse for positioning DOM panels over a line. Both default to the price pane. Offer order rows only when the right-click landed on it (`event.paneIndex === chart.primaryPaneIndex()` on the chart's `contextmenu` event): a price read off a study pane is in the study's units.
 
 ## Foot-guns
 
@@ -240,7 +242,7 @@ window.addEventListener('click', () => hideMenu());
 
 **`clear()` detaches the markers primitive.** The next `setTrades`/`addTrade` builds a fresh one, so any reference you held is dead.
 
-**Everything renders on pane 0.** There is no `paneIndex` on `chart.trading`. Drive `PriceLine` yourself via `chart.addPriceLine(opts, paneIndex)` for other panes.
+**Everything renders on the price pane**, pane 0 unless `movablePrimaryPane` let it move. There is no `paneIndex` on `chart.trading`. Drive `PriceLine` yourself via `chart.addPriceLine(opts, paneIndex)` for other panes; `addPriceLine(opts)` with no pane follows the price pane.
 
 **`chart.trading.off(event, cb)` needs the exact callback.** There is no remove-all form; keep the unsubscribe returned by `on`.
 

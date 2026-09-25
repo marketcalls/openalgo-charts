@@ -77,7 +77,7 @@ ps.setAutoScale(true);                     // hand it back to the data
 
 `chart.resetScale()` (also the navigator reset button and the default double-click action) re-enables autoscale and releases ratio locks on every created right, left and overlay scale, then restores the configured default view. `navigation.defaultVisibleBars: 0` fits all loaded bars; a positive count targets the newest N loaded bars plus four right-padding slots, within data and spacing limits.
 
-Chart-wide equivalents, for a settings dialog: `chart.setPriceScaleOptions(patch, scope = 'primary')` writes each pane's right scale; scope `'axes'` selects scales configured on a visible side, and `'all'` includes hidden scales. `chart.priceScaleOptions()` reads pane 0's right scale. `chart.setAutoScale(on)` updates every active visible axis across panes and releases those axes' ratio locks when enabled. It leaves hidden scales and their locks unchanged; `resetScale()` still resets every created scale. See [settings-and-menus](settings-and-menus.md).
+Chart-wide equivalents, for a settings dialog: `chart.setPriceScaleOptions(patch, scope = 'primary')` writes each pane's right scale; scope `'axes'` selects scales configured on a visible side, and `'all'` includes hidden scales. `chart.priceScaleOptions()` reads the price pane's right scale, in whatever slot it sits (`primaryPaneIndex()`). `chart.setAutoScale(on)` updates every active visible axis across panes and releases those axes' ratio locks when enabled. It leaves hidden scales and their locks unchanged; `resetScale()` still resets every created scale. See [settings-and-menus](settings-and-menus.md).
 
 ### Conversion and formatting
 
@@ -92,9 +92,10 @@ is the caller settling what that axis quotes, and is obeyed.
 
 Which panes quote it:
 
-- **Pane 0** does, from construction. A caller who configures nothing sees
-  byte-identical behaviour there, its left axis and its hidden overlay scale
-  included: the filter is per pane, not per scale.
+- **The price pane** (the chart's first pane, `primaryPaneIndex()`) does, from
+  construction, and keeps doing so when it is moved below its studies. A caller
+  who configures nothing sees byte-identical behaviour there, its left axis and
+  its hidden overlay scale included: the filter is per pane, not per scale.
 - **Any other pane** starts out a study's and holds its own units, until a host
   plots a price series on it (a second symbol on a pane of its own), which
   promotes it and hands it the tick it was not given.
@@ -323,7 +324,7 @@ validate complete assignments before allocating or replacing chart resources.
 
 Effective precedence is the per-plot override, the local whole-study override,
 the descriptor's `priceScaleId`, then `right`. An explicit `overlay: true` plot
-ignores the whole-study override, but its own override selects a scale in pane 0.
+ignores the whole-study override, but its own override selects a scale on the price pane.
 A successful `setPriceScale(id)` clears local plot overrides. `setPriceScale(null)`
 also clears the whole-study override, restoring local descriptor defaults.
 Both retain explicit price-overlay overrides; clear those individually with null.
@@ -331,7 +332,7 @@ Both retain explicit price-overlay overrides; clear those individually with null
 Fills follow their common endpoint scale. Levels, unbound price drawings and
 attached price primitives follow the first local plot, as does study-owned range
 intent. A drawing that names a `plot` follows that plot's scale, and a price-pane
-drawing (`overlay: true`) follows the scale pane 0 quotes prices on, the candles' own, without binding one. Plot markers,
+drawing (`overlay: true`) follows the scale the price pane quotes prices on, the candles' own, without binding one. Plot markers,
 including marker groups that name a plot, follow their series. Tables and background shading remain
 in screen coordinates. Handles, data, settings and provider attachments survive
 assignment changes; no calculation or alert evaluation is required.
@@ -425,7 +426,7 @@ Details in [interactions](interactions.md); what matters here is which gesture l
 | Drag the time axis strip (bottom pane, last `timeAxisHeight` px) | `setBarSpacing(start * exp(-dx * 0.005))`: left expands, right compresses; preserves the logical right edge | no |
 | Two-finger pinch | zoom time, pan time, `panByPixels` on the pinched pane | **yes** (price scale) |
 | Double-click | `chart.resetScale()` | no, restores autoscale everywhere |
-| `panUp` / `panDown` shortcuts | `panByPixels(±20)` on **pane 0 only** | **yes** |
+| `panUp` / `panDown` shortcuts | `panByPixels(±20)` on **the price pane only**, wherever it sits | **yes** |
 
 **Once a scale goes manual it stops tracking new data.** A live feed that keeps printing highs can run off the plot on that scale. Call `chart.setPriceAxisAutoFit(paneIndex, scaleId, true)` for the affected column or `chart.resetScale()` for all scales.
 
@@ -490,7 +491,7 @@ Since the ladder became denser in 1.8.5 this is no longer a rare event: rungs si
 
 ## Panes
 
-A pane is one stacked drawing region with its own scales and canvases. Reference a `paneIndex` in `addSeries` (or `addIndicator`) and every missing pane up to it is created: pane 0 with weight `1`, later panes with weight `0.32`.
+A pane is one stacked drawing region with its own scales and canvases. Reference a `paneIndex` in `addSeries` (or `addIndicator`) and every missing pane up to it is created: the first pane with weight `1`, later panes with weight `0.32`. Every `paneIndex` is a visual slot counted from the top.
 
 ```ts
 chart.addSeries('candlestick');                       // pane 0
@@ -504,34 +505,69 @@ Heights are **relative weights**, not pixels: pane height is `chartHeight * weig
 |---|---|---|
 | `chart.setPaneWeight(index, weight)` | `void` | Clamped to a minimum of `0.05`. Unknown index is a silent no-op. |
 | `chart.paneWeight(index)` | `number` | `0` for an unknown index. |
-| `chart.removePane(index)` | `boolean` | Removes its series, data rows and indicators. |
-| `chart.movePane(index, -1 \| 1)` | `boolean` | Swaps with the neighbour and re-appends the DOM in order. |
+| `chart.removePane(index)` | `boolean` | Removes its series, data rows and indicators. `false` for the price pane, in any slot. |
+| `chart.movePane(index, -1 \| 1)` | `boolean` | Swaps with the neighbour and re-appends the DOM in order. By default the price pane is pinned: a move that takes it off slot 0 or displaces it is refused. With `movablePrimaryPane` any pane moves, the price pane included. |
+| `chart.primaryPaneIndex()` | `number` | The slot the price pane holds now: always `0` without `movablePrimaryPane`, and `0` until something moves it with it. |
+| `chart.setPrimaryPaneIndex(index)` | `boolean` | Move the price pane to a slot, one `movePane` step at a time (one `paneMoved` per step). `false` for an unknown slot or the one it holds, and always `false` without `movablePrimaryPane`. |
+| `chart.movablePrimaryPane()` | `boolean` | Whether the chart was built with `movablePrimaryPane`. |
 | `chart.maximizePane(index)` | `boolean` | Toggle: one pane takes the whole chart and the rest are **hidden**, not shrunk. Stored weights are untouched, so un-maximizing restores the stack exactly. |
 | `chart.maximizedPane()` | `number \| null` | |
-| `chart.setPaneCollapsed(index, collapsed)` | `boolean` | Fold a lower pane to its header strip, or open it again. `false` for pane 0, an unknown index, a non-boolean, or no change. |
-| `chart.paneCollapsed(index)` | `boolean` | The pane's own setting, kept while it is maximized. Always `false` for pane 0. |
+| `chart.setPaneCollapsed(index, collapsed)` | `boolean` | Fold a study pane to its header strip, or open it again. `false` for the price pane in any slot, an unknown index, a non-boolean, or no change. |
+| `chart.paneCollapsed(index)` | `boolean` | The pane's own setting, kept while it is maximized. Always `false` for the price pane. |
 | `chart.panes()` | `readonly Pane[]` | Live array. |
 
 Each call emits an event: `paneRemoved`, `paneMoved`, `paneMaximized`, `paneCollapsed`, and `paneResized` after a divider drag.
 
-**Pane 0 is pinned.** `removePane(0)` and any `movePane` that would displace pane 0 return `false`, including `movePane(1, -1)`. Both also return `false` for an out-of-range index, so check the boolean rather than assuming success.
+**Pane 0 is pinned by default.** `removePane(0)` and any `movePane` that would displace pane 0 return `false`, including `movePane(1, -1)`, so the up control on the first study pane does nothing and an explicit pane `0` always means the price. Both also return `false` for an out-of-range index, so check the boolean rather than assuming success.
+
+### Moving the price pane (opt-in)
+
+`createChart(el, { movablePrimaryPane: true })` lets the price pane (primary pane) leave slot 0. It is the pane the chart is built with, and it holds the price series a host adds without naming a pane and the on-chart studies. With the option it can sit in any slot: `movePane(0, 1)`, `movePane(1, -1)` on the study below it (the study row's up control does exactly that), or `setPrimaryPaneIndex(panes().length - 1)` put it below its studies. `primaryPaneIndex()` says where it is now. The option is decided at construction. `createWidget` and `createChartGrid` take it too and hand it to their charts as given, off by default like the chart; the reference host opts in on every chart it builds.
+
+It is opt-in because the move changes what slot 0 means. A host that passes `0` for the price pane would, once a user put a study above the candles, place order and price lines on the study, price a right-click order in the study's units through `coordinateToPrice(y, 0)` and test price alerts against the wrong pane. Before turning it on:
+
+- **Drop every explicit `0` that means the price pane**, or pass `chart.primaryPaneIndex()` read at the moment of use. Omitting the pane is the simplest: every call listed below defaults to the price pane wherever it sits. `panes()[0]` is the top pane, not the price pane.
+- **Follow `paneMoved`.** Anything keyed by slot moves with it, including a DOM overlay drawn over the price pane: position it from `panes()[primaryPaneIndex()].element` after each move.
+- **Persist `primaryPane`.** A host that saves `getState()` through a field allowlist must keep `primaryPane` (and the version 2 it comes with), or a reload puts the price pane back on top.
+- **Forward `plan.primaryPane` when applying a template.** `planIndicatorTemplateState` returns the destination's price-pane slot beside `plan.panes`; restore them together in a version 2 state, and roll back with `getState().primaryPane`, or the restore returns the price pane to the top. `planIndicatorTemplate` takes the slot as its sixth argument.
+- **Structural hosts** (`IndicatorHost`, `DrawingChartHost`, `AlertChartHost`, `ComparisonChartHost`) have an optional `primaryPaneIndex()`; a custom host that omits it keeps slot-0 semantics.
+
+**Opting in.** A host that passes an explicit `0` for the price pane changes those calls first, then turns the option on. Omit the pane argument, which defaults to the price pane wherever it sits, or pass `chart.primaryPaneIndex()` read at the moment of use:
+
+```ts
+// Before: 0 means the price pane only while it is pinned on top.
+chart.addPriceLine({ price: 101.5, id: 'stop' }, 0);
+const price = chart.coordinateToPrice(y, 0);
+
+// After: name no pane, or ask where the price pane is now.
+chart.addPriceLine({ price: 101.5, id: 'stop' });
+const price = chart.coordinateToPrice(y, chart.primaryPaneIndex());
+```
+
+Then build with `createChart(el, { movablePrimaryPane: true })`, or pass the same option to `createWidget` or `createChartGrid`. A host that keeps even one such `0` (a volume histogram added with `paneIndex: 0` on `widget.chart`, say) leaves the option off, and nothing about its price pane changes.
+
+Everything that means "the price pane" follows it rather than slot 0: `addSeries`, `addPriceLine`, `addEventMarkers`, `setEvents`, `addPrimitive` and `tradeHost` with no pane, `priceToCoordinate` / `coordinateToPrice` / `priceAxisState` / `priceAxisLayout` with no pane, `priceScaleOptions()`, the `panUp` / `panDown` shortcuts, an `onchart` study and every `overlay` plot, band, table and price-anchored mark, comparisons, price alerts, the drawing magnet, drawing copy and paste (the clipboard counts panes price pane first, so a drawing copied beside the candles pastes beside the candles on any chart) and a drawing link. The legend offset, the `Indicators N` count and the chart's background text sit on it (anchor `'primary-pane'`); the time navigator and the brand mark stay on the bottom open pane, which is the price pane when it is at the bottom.
+
+It is never removed and never collapses, in any slot. A study pane moved above it, to slot 0, removes, folds and prunes like any other study pane, and its first study row carries the pane controls; the price pane's rows never do. Out-of-range moves return `false`, so check the boolean rather than assuming success.
+
+A moved price pane is saved: `getState()` writes version 2 with `primaryPane` (see [events-and-state](events-and-state.md)). A chart built without the option refuses to restore such a layout (`restoreState` returns `applied: false` with the reason) rather than laying the price pane's scales, studies and drawings on the study pane in slot 0.
 
 **Removing a pane re-indexes everything below it.** Indicators shift with their pane, but any `paneIndex` a host has cached is stale afterwards.
 
-Panes with no series left are pruned automatically: `removeIndicator` drops an emptied pane above index 0, and `restoreState` sweeps every empty pane backwards.
+Panes with no series left are pruned automatically: `removeIndicator` drops an emptied study pane in any slot, and `restoreState` sweeps every empty study pane backwards. The price pane is never pruned.
 
 ### Collapsing a pane
 
-`chart.setPaneCollapsed(index, true)` folds a lower pane to a strip one legend row tall (the row height plus a `6` px inset above and below, so `30` px at the default icon size). It is a view of the pane, not an edit to it:
+`chart.setPaneCollapsed(index, true)` folds a study pane to a strip one legend row tall (the row height plus a `6` px inset above and below, so `30` px at the default icon size). It is a view of the pane, not an edit to it:
 
 - Its series keep taking data and its studies keep recomputing.
 - Its drawings, scales, ratio locks and stored weight are untouched, so `setPaneCollapsed(index, false)` brings back exactly the height it had. `setPaneWeight` on a collapsed pane stores the weight for when it opens.
-- The strip shows one legend row and nothing else: the pane's first study row, whose buttons include the collapse control, even when the host added its own row to the pane first (that row returns above it once the pane opens). A pane with no study shows its first host row. Rows below the strip neither draw nor answer the pointer. Whichever study row is first on a lower pane carries the pane controls, open or folded: a row that becomes first because the study above it was removed (including by the close button on the strip) or moved gains them, a study added below a host row has them, and a row that stops being first loses them. Series, grid, price ladder, crosshair and every other primitive neither paint nor hit-test on it. `priceAxisLayout(index)` is empty, `click`, `crosshair:move` and `contextmenu` report `price: null` there, and `priceToCoordinate` / `coordinateToPrice` return `null` for the pane, so a drawing tool, a price alert, a pick or a host overlay cannot land on a pane nobody can see. Alerts on the pane's studies and drawings keep firing: the draw tier reads a drawing on a strip through the pane's own scale.
+- The strip shows one legend row and nothing else: the pane's first study row, whose buttons include the collapse control, even when the host added its own row to the pane first (that row returns above it once the pane opens). A pane with no study shows its first host row. Rows below the strip neither draw nor answer the pointer. Whichever study row is first on a study pane carries the pane controls, open or folded: a row that becomes first because the study above it was removed (including by the close button on the strip) or moved gains them, a study added below a host row has them, and a row that stops being first loses them. Series, grid, price ladder, crosshair and every other primitive neither paint nor hit-test on it. `priceAxisLayout(index)` is empty, `click`, `crosshair:move` and `contextmenu` report `price: null` there, and `priceToCoordinate` / `coordinateToPrice` return `null` for the pane, so a drawing tool, a price alert, a pick or a host overlay cannot land on a pane nobody can see. Alerts on the pane's studies and drawings keep firing: the draw tier reads a drawing on a strip through the pane's own scale.
 - The open panes share the rest of the height by weight. Strips taller than the whole chart shrink together rather than overflow it.
 
-Pane 0 never collapses. A collapsed bottom pane keeps the time axis under its strip, at the foot of the chart; the time navigator and chart-bottom furniture (the brand mark) move to the lowest open pane. Maximizing a collapsed pane shows it whole, and un-maximizing folds it again. Collapsing the maximized pane ends the maximize (`paneMaximized` with `null`). The fold follows its pane through `movePane` and through removals above it, and `getState` writes `collapsed: true` on it. A `restoreState` that lists panes or rebuilds studies opens every pane its layout does not fold, including a pane it does not list, so a study rebuilt onto an existing pane never opens inside a stale strip; a restore that touches neither leaves folds alone.
+The price pane never collapses, in whatever slot it sits, so a chart always keeps one open pane. A collapsed bottom pane keeps the time axis under its strip, at the foot of the chart; the time navigator and chart-bottom furniture (the brand mark) move to the lowest open pane. Maximizing a collapsed pane shows it whole, and un-maximizing folds it again. Collapsing the maximized pane ends the maximize (`paneMaximized` with `null`). The fold follows its pane through `movePane` and through removals above it, and `getState` writes `collapsed: true` on it. A `restoreState` that lists panes or rebuilds studies opens every pane its layout does not fold, including a pane it does not list, so a study rebuilt onto an existing pane never opens inside a stale strip; a restore that touches neither leaves folds alone.
 
-The first study row of a lower pane carries a `collapse` action (`PaneLegendAction`) between `down` and `maximize`, open or folded; its glyph is a header bar over a chevron that points up while the pane is open and down once it is folded (`PaneLegendOptions.collapsed`). This is separate from `setIndicatorLegendCollapsed`, which hides study legend rows behind a count and never changes a pane. With both on, a strip keeps its first study row, because its collapse control is the only way back on the canvas; the row folds behind the count again once the pane opens.
+The first study row of a study pane, above or below the price pane, carries a `collapse` action (`PaneLegendAction`) between `down` and `maximize`, open or folded; its glyph is a header bar over a chevron that points up while the pane is open and down once it is folded (`PaneLegendOptions.collapsed`). This is separate from `setIndicatorLegendCollapsed`, which hides study legend rows behind a count and never changes a pane. With both on, a strip keeps its first study row, because its collapse control is the only way back on the canvas; the row folds behind the count again once the pane opens.
 
 ### Divider dragging
 

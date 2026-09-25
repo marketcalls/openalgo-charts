@@ -96,7 +96,12 @@ describe('chart.getState / restoreState', () => {
     const chart = makeChart();
     chart.addSeries('candlestick', { style: { upColor: '#123456' } }).setData(bars(50));
     const state = chart.getState();
-    expect(state.version).toBe(CHART_STATE_VERSION);
+    // A chart with its price pane on top is written in the oldest shape that
+    // describes it, so every reader since the first opens it; version 2 is for
+    // a moved price pane only (see primary-pane-reorder.test.ts).
+    expect(state.version).toBe(1);
+    expect(CHART_STATE_VERSION).toBe(2);
+    expect(state).not.toHaveProperty('primaryPane');
     expect(() => JSON.parse(JSON.stringify(state))).not.toThrow();
     expect(state.series?.[0]).toMatchObject({ type: 'candlestick', paneIndex: 0, priceScaleId: 'right' });
     expect(state.series?.[0].style.upColor).toBe('#123456');

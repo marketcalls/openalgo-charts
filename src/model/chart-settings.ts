@@ -584,7 +584,7 @@ function axesControls(chart: Chart): Control[] {
     ),
     boolCtl(
       'scales.autoScale', 'Auto (fits data to screen)', 'Price scale', true,
-      (c) => c.panes()[0].priceScale.autoScale,
+      (c) => c.panes()[c.primaryPaneIndex()].priceScale.autoScale,
       (c, v) => c.setAutoScale(v),
     ),
     boolCtl(
