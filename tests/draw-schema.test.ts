@@ -20,6 +20,7 @@ import {
   type SettingsField, type SettingsSchema,
 } from '../src/draw/schema';
 import { RecordingContext } from './helpers/fake-ctx';
+import { projectAnchors } from '../src/draw/layer';
 import type { Drawing, DrawingPoint, DrawingTool, DrawContext, FibLevel } from '../src/draw/types';
 
 beforeAll(() => { registerBuiltinDrawingTools(); });
@@ -38,8 +39,6 @@ const RC = {
   })),
 };
 
-const toPt = (p: DrawingPoint) => ({ x: p.time / 6, y: 400 - p.price });
-
 // Away from the left edge, so "extend left" has somewhere to extend to.
 const ANCHORS: DrawingPoint[] = [
   { time: 300, price: 100 }, { time: 900, price: 300 }, { time: 1500, price: 200 },
@@ -56,6 +55,9 @@ function defaultDrawing(tool: DrawingTool): Drawing {
     style: { ...tool.defaultStyle },
   };
   if (tool.defaultText !== undefined) d.text = { ...tool.defaultText };
+  // Somewhere else on screen, so the anchor field has a position to move the
+  // tool to when it switches space.
+  if (tool.viewport === true) d.viewportPoints = points.map((_, i) => ({ x: 0.3 + 0.1 * i, y: 0.2 + 0.15 * i }));
   return d;
 }
 
@@ -85,7 +87,9 @@ function paint(tool: DrawingTool, d: Drawing): string {
   tool.draw({
     ctx: rec as unknown as CanvasRenderingContext2D,
     rc: RC as never,
-    pts: d.points.map(toPt),
+    // The layer's own projection, so a field read there (the space) is checked
+    // by what it paints like every other.
+    pts: projectAnchors(RC as never, d),
     drawing: d,
     style,
     selected: false,
@@ -175,7 +179,7 @@ describe('every built-in tool declares a settings schema', () => {
     for (const f of schema.fields) {
       // Present as a key even when unset, so a host can iterate the schema.
       expect(Object.prototype.hasOwnProperty.call(read, f.path), f.path).toBe(true);
-      expect(/^(style|text|props)\.[^.]+$|^(locked|visible|zIndex)$/.test(f.path), f.path).toBe(true);
+      expect(/^(style|text|props)\.[^.]+$|^(locked|visible|zIndex|space)$/.test(f.path), f.path).toBe(true);
       const sample = sampleFor(f);
       const next = { ...d, ...applyDrawingSettings(d, { [f.path]: sample }, schema) };
       expect(readDrawingSetting(next, f.path), f.path).toEqual(sample);

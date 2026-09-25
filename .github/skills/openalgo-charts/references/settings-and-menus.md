@@ -239,7 +239,7 @@ chart.on('contextmenu', (e) => {
 
 | Member | Returns | Notes |
 |---|---|---|
-| `priceAxisState(paneIndex = 0, scaleId = 'right')` | `PriceAxisState \| null` | Null for a pane that does not exist. |
+| `priceAxisState(paneIndex = primaryPaneIndex(), scaleId = 'right')` | `PriceAxisState \| null` | Null for a pane that does not exist. |
 | `setPriceAxisOptions(paneIndex, scaleId, patch)` | `void` | `Partial<PriceScaleOptions>`: mode, invert, margins, tick size. |
 | `setPriceAxisAutoFit(paneIndex, scaleId, on)` | `void` | Turning it on releases any ratio lock on that axis. |
 | `setPriceAxisLockRatio(paneIndex, scaleId, on)` | `boolean` | False when the lock could not be taken. |
@@ -264,9 +264,9 @@ A menu that also offers reference levels (previous close, session high and low) 
 | `setNavigationOptions(patch)` / `navigationOptions()` | Mouse/pen pan direction and the initial/reset visible-bar count. |
 | `setGridOptions(patch)` / `gridOptions()` | Grid alone. |
 | `setStatusLineOptions(patch)` / `statusLineOptions()` | Applied to every legend. |
-| `setPriceScaleOptions(patch, allScales = false)` / `priceScaleOptions()` | Defaults to the right scale of every pane; `allScales` includes left and overlay. Reads pane 0. |
+| `setPriceScaleOptions(patch, allScales = false)` / `priceScaleOptions()` | Defaults to the right scale of every pane; `allScales` includes left and overlay. Reads the price pane, pane 0 unless `movablePrimaryPane` let it move. |
 | `setAutoScale(on)` | Every pane at once. |
-| `setEvents(events, paneIndex = 0)` / `setEventOptions(patch)` / `eventOptions()` | The chart-owned corporate-action strip; `ChartEventOptions` filters `earnings`, `dividend`, `split`, `news`, each defaulting to on. |
+| `setEvents(events, paneIndex = primaryPaneIndex())` / `setEventOptions(patch)` / `eventOptions()` | The chart-owned corporate-action strip; `ChartEventOptions` filters `earnings`, `dividend`, `split`, `news`, each defaulting to on. |
 | `tradingSettings()` / `setTradingSettings(patch)` | Trading colours held on the chart, so reading them never instantiates the trade layer. |
 | `primarySeries()` / `primarySeriesInfo()` | `{ type, style }` for the Price tab. |
 | `setTimezone(zone)` / `timezone()` | IANA name behind the `time.timezone` control. |

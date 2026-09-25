@@ -163,10 +163,13 @@ invisible and unclickable.
 createChart(el, { legendOffset: { top: 40 } });   // clear a two-line overlay
 ```
 
-It follows whichever pane currently renders at that corner: normally pane 0,
-but maximizing a lower pane moves it there instead, so the offset moves with it.
-Other panes keep the default corner, since a short lower pane would have its
-legend, and its settings / close / move-pane buttons, pushed off it entirely.
+It follows the price pane, which is the top pane until a user moves it below
+its studies: a readout of the price belongs to the price pane, wherever it sits.
+Maximizing a study pane hides the price pane and puts the maximized one in that
+corner, so the offset moves with it. Other panes keep the default corner, since a
+short study pane would have its legend, and its settings / close / move-pane
+buttons, pushed off it entirely. A readout drawn as DOM over the price pane should
+follow `chart.panes()[chart.primaryPaneIndex()].element` after `paneMoved`.
 </Callout>
 
 Options passed to `createChart(container, options)`. All fields are optional; defaults are sensible for browser use.
@@ -1194,14 +1197,14 @@ Config for `OpenAlgoTradeFeed`. `defaultProduct` defaults to `'MIS'`.
 
 ```ts
 interface SupertrendPoint {
-  /** The Supertrend band value, or NaN during ATR warmup. */
+  /** The Supertrend band value, or NaN during ATR warmup and on a bar with no ATR or no close. */
   value: number;
   /** -1 = uptrend (bullish), +1 = downtrend (bearish). */
   direction: -1 | 1;
 }
 ```
 
-One element per bar in the array returned by `supertrend(bars, period, multiplier)`. `value` holds the Supertrend band level; it is `NaN` for warmup bars while ATR accumulates the required history. `direction` follows the OpenAlgo convention: `-1` means the band is below price and acting as support (uptrend, bullish); `+1` means it is above price and acting as resistance (downtrend, bearish).
+One element per bar in the array returned by `supertrend(bars, period, multiplier)`. `value` holds the Supertrend band level; it is `NaN` for warmup bars while ATR accumulates the required history, and on a bar with no ATR or no close, which leaves the bands and the direction as they were for the next complete bar. `direction` follows the OpenAlgo convention: `-1` means the band is below price and acting as support (uptrend, bullish); `+1` means it is above price and acting as resistance (downtrend, bearish).
 
 ```ts
 import type { SupertrendPoint } from 'openalgo-charts';

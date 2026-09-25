@@ -7,7 +7,7 @@ description: The host boundary, the base engine's data-to-model-to-render pipeli
 
 import ArchitectureDiagram from '../../components/ArchitectureDiagram'
 
-OpenAlgo Charts 2.5.4 is a browser charting engine with no runtime dependencies.
+OpenAlgo Charts 2.5.5 is a browser charting engine with no runtime dependencies.
 The diagram separates the host boundary, the base engine and eight optional
 tiers. You can build your own interface or use the widget as a packaged host.
 
@@ -137,19 +137,19 @@ tiers stay outside the base bundle.
 
 | Tier | Brotli | Contents |
 |---|--:|---|
-| `openalgo-charts` | 117.42 kB | Data/model/render engine, 13 chart types, panes and scales, grouped events, primitives, registries, alerts, replay, appearance linking, comparisons, interaction, chart state, CSV/SVG export, bar cache, trading overlay, feeds |
-| `openalgo-charts/indicators` | 36.27 kB | 105 built-ins, shared TA helpers, and the Tier-2 external-data contract |
-| `openalgo-charts/draw` | 42.53 kB | 87 drawing tools, Anchored VWAP, fixed-range Volume Profile, headless controller, drawing linking, clipboard, settings schema |
+| `openalgo-charts` | 119.15 kB | Data/model/render engine, 13 chart types, panes and scales, grouped events, primitives, registries, alerts, replay, appearance linking, comparisons, interaction, chart state, CSV/SVG export, bar cache, trading overlay, feeds |
+| `openalgo-charts/indicators` | 36.34 kB | 105 built-ins, shared TA helpers, and the Tier-2 external-data contract |
+| `openalgo-charts/draw` | 44.87 kB | 87 drawing tools, Anchored VWAP, fixed-range Volume Profile, headless controller, drawing linking, clipboard, settings schema |
 | `openalgo-charts/profile` | 14.96 kB | Volume Profile, Market Profile (TPO), Footprint, order flow |
 | `openalgo-charts/transform` | 4.50 kB | Heikin Ashi, Renko, Range, Line Break, Point and Figure, Kagi, symbol arithmetic |
-| `openalgo-charts/trade` | 8.01 kB | Order, position and bracket tools, DOM ladder |
-| `openalgo-charts/workspace` | 8.67 kB | Validated workspace and template documents, revisioned named catalogs, asynchronous storage and IndexedDB adapter |
+| `openalgo-charts/trade` | 16.64 kB | Order, position and bracket tools, DOM ladder |
+| `openalgo-charts/workspace` | 9.99 kB | Validated workspace and template documents, revisioned named catalogs, asynchronous storage and IndexedDB adapter |
 | `openalgo-charts/webgl` | 6.39 kB | WebGL2 series backend, composited into the pane's canvas, 2D fallback for the session on context loss |
-| `openalgo-charts/widget` | 71.33 kB | Packaged interface controls through `createWidget`: top bar, Data and Objects dock, rich symbol search, drawing rail, mobile controls, status line, dialogs, event details, right-click menu, keymap and persistence |
+| `openalgo-charts/widget` | 82.30 kB | Packaged interface controls through `createWidget`: top bar, Data and Objects dock, rich symbol search, drawing rail, mobile controls, status line, dialogs, event details, right-click menu, keymap and persistence |
 
-**310.09 kB Brotli** for every tier at once; a widget terminal with built-in
-indicators (base + draw + indicators + widget) is 267.55 kB. Figures are decimal
-kB from the 2.5.4 build, measured by `size-limit`. CI enforces the budgets and
+**335.15 kB Brotli** for every tier at once; a widget terminal with built-in
+indicators (base + draw + indicators + widget) is 282.67 kB. Figures are decimal
+kB from the 2.5.5 build, measured by `size-limit`. CI enforces the budgets and
 fails a build when a bundle exceeds its limit.
 
 The widget is an optional tier and a packaged host that drives the engine through

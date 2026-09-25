@@ -342,7 +342,7 @@ export class AlertController {
     if (source.kind === 'drawing') {
       const info = this._drawings?.alertInfo(source.drawingId);
       if (!info?.available) return { available: false, reason: info?.reason ?? 'Drawing provider is unavailable' };
-      if (info.paneIndex !== 0 && !source.input) return { available: false, reason: 'Select an input plot for this drawing pane' };
+      if (info.paneIndex !== this._pricePane() && !source.input) return { available: false, reason: 'Select an input plot for this drawing pane' };
       const bounds = this._drawingValue(record.alert, bars[bars.length - 1]?.time);
       return bounds ? { available: true, paneIndex: bounds.paneIndex }
         : { available: false, reason: 'Drawing level, time, input plot or condition is unavailable', paneIndex: info.paneIndex };
@@ -355,7 +355,7 @@ export class AlertController {
         : { available: false, reason: 'Plot value is unavailable', paneIndex: resolved.paneIndex };
     }
     if (source.kind === 'barCondition' && !getBarCondition(source.id)) return { available: false, reason: 'Bar condition is unavailable' };
-    return bars.length ? { available: true, paneIndex: 0 } : { available: false, reason: 'Source data is unavailable' };
+    return bars.length ? { available: true, paneIndex: this._pricePane() } : { available: false, reason: 'Source data is unavailable' };
   }
   public enable(id: string): Alert | undefined { return this.update(id, { state: 'armed' }); }
   public disable(id: string): Alert | undefined { return this.update(id, { state: 'disabled' }); }
@@ -379,6 +379,11 @@ export class AlertController {
     this._hovered = undefined;
     this._records.clear();
     owners.delete(this._chart);
+  }
+
+  /** The slot the chart keeps its price pane in now; it moves, so it is never kept. */
+  private _pricePane(): number {
+    return this._chart.primaryPaneIndex?.() ?? 0;
   }
 
   private _assertAlive(): void {
@@ -430,6 +435,9 @@ export class AlertController {
       } else if (source.kind === 'indicator' || source.kind === 'drawing') {
         this._seed(record);
         this._syncVisual(record);
+      } else if (source.kind === 'price') {
+        // Its line follows the price pane, which a move can put in another slot.
+        this._syncVisual(record);
       }
     }
   }
@@ -453,7 +461,7 @@ export class AlertController {
     let value: AlertDrawingValue | undefined;
     // A fixed price remains meaningful across timeframes; study and drawing values may not.
     if (source.kind === 'price' && sameInstrument(alert.scope, context)) {
-      value = { price: source.price, upperPrice: source.upperPrice, paneIndex: 0 };
+      value = { price: source.price, upperPrice: source.upperPrice, paneIndex: this._pricePane() };
     }
     if (matches) {
       if (source.kind === 'indicator') {
@@ -526,7 +534,7 @@ export class AlertController {
     const values = instance.values()[source.plotKey];
     const overlay = instance.indicatorId && hasIndicator(instance.indicatorId)
       && getIndicator(instance.indicatorId).plots.some(plot => plot.key === source.plotKey && plot.overlay);
-    return values ? { values, paneIndex: overlay ? 0 : instance.paneIndex } : { reason: 'Indicator plot is unavailable' };
+    return values ? { values, paneIndex: overlay ? this._pricePane() : instance.paneIndex } : { reason: 'Indicator plot is unavailable' };
   }
 
   private _reading(values: readonly (number | null)[] | undefined, index: number): number | undefined {
@@ -596,7 +604,7 @@ export class AlertController {
     const source = alert.source;
     if (source.kind !== 'drawing' || time === undefined) return undefined;
     const value = this._drawings?.valueAt(source.drawingId, time, source.level);
-    if (!value || (value.paneIndex !== 0 && !source.input)) return undefined;
+    if (!value || (value.paneIndex !== this._pricePane() && !source.input)) return undefined;
     if (source.input && this._plot(source.input).paneIndex !== value.paneIndex) return undefined;
     const band = alert.condition === 'enteringRange' || alert.condition === 'leavingRange';
     // A band has two boundaries: a crossing needs the trader to choose one explicitly.

@@ -60,3 +60,65 @@ synthetic cash, futures and crypto profiles, a shortened session and an OI pane.
 It sends no orders. See the repository's
 [full integration guide](https://github.com/marketcalls/openalgo-charts/blob/master/docs/instruments.md)
 for streaming-builder lifetime and source-transition details.
+
+## Price-dependent ticks
+
+An instrument whose tick changes with price declares `tickBands`, supplied by the host
+from its venue's rules. The library ships no schedule of its own.
+
+```ts
+import { Instrument } from 'openalgo-charts';
+import { orderConstraintsForInstrument, validatePrice } from 'openalgo-charts/trade';
+
+const banded = new Instrument({
+  symbol: 'BANDED', exchange: 'DEMO', timezone: 'Asia/Kolkata',
+  // Synthetic rules: 0.02 below 20 and 0.05 from 20.
+  tickBands: [{ tick: 0.02 }, { from: 20, tick: 0.05 }],
+  priceTick: 0.01, pricePrecision: 2, quantityStep: 1, intervals: ['1m', 'D'],
+  calendar: { sessions: ['0915-1530:23456'] },
+});
+// Typed TickSchedule | null: null for a constant-tick instrument.
+const ticks = banded.tickSchedule;
+if (ticks !== null) {
+  ticks.round(19.97);   // 19.98
+  ticks.round(20.03);   // 20.05
+  ticks.tickAt(20);     // 0.05
+}
+validatePrice(20.03, orderConstraintsForInstrument(banded)).price; // 20.05
+```
+
+The rules, each enforced when the instrument or `TickSchedule` is built:
+
+- The first band has no `from`. It covers every lower price, including zero and negative
+  prices. A floor such as "no negative prices" is a price limit, not a tick rule.
+- Every later band starts at its `from`, inclusive, and runs to the next band's `from`.
+  Bounds are strictly ascending, and an exact boundary takes the tick of the band that
+  starts there.
+- Valid prices are whole multiples of the band's tick, counted from zero. Every `from`
+  must be a multiple of the ticks on both sides of it, so the boundary is itself a valid
+  price and rounding never jumps over it.
+- Ticks are positive with at most 12 decimals; a schedule has 1 to 64 bands. Anything
+  else throws `Invalid tick schedule: ...` naming the offending band.
+
+`round(price)` returns the nearest valid price as an exact decimal, with a price written
+halfway between two valid prices rounding up, and NaN for a non-finite price.
+`step(price, n)` moves `n` whole ticks, changing tick as it crosses a boundary: up from a
+boundary uses the band that starts there, down from it the band below.
+
+`priceTick` stays the minimum move. With bands it must equal the schedule's `minMove`,
+the finest grid every band lies on: the smallest tick when ticks nest, and finer when
+they do not, because 20.05 is no multiple of 0.02. `applyTo` gives the price scale that
+`minMove`, so the axis prints every band and its own snap never moves a valid price.
+`pricePrecision` must represent it. A constant-tick instrument is unchanged: its
+metadata has no `tickBands`, `orderConstraintsForInstrument` returns the same three
+fields, and `instrument.tickSchedule` is null, so `priceTick` stays its one snapping
+rule everywhere. To validate orders, see
+[price-dependent ticks](/docs/trading#price-dependent-ticks).
+
+`applyTo` also hands the schedule to
+[`chart.trading`](/docs/trading-api#price-ticks-while-dragging), so dragged order and
+bracket lines snap in their band. It never builds the trading layer itself, which would
+take the host's drag subscription; a layer built later starts from the schedule.
+Applying a constant-tick instrument clears it, so after a symbol switch no drag snaps to
+the previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to
+override it, and pass the schedule as a `DomLadder`'s `tickSchedule` for a depth ladder.

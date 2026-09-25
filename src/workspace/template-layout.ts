@@ -8,7 +8,9 @@ import {
   type IndicatorTemplateInput, type IndicatorTemplateLayout, type IndicatorTemplatePayload, type IndicatorTemplatePlotBinding,
 } from './documents';
 import { choice, readJson, record, WorkspaceDocumentError } from './json';
-import { planIndicatorTemplate, remapTemplateIndicatorIds, type IndicatorTemplateMode } from './templates';
+import {
+  fromTemplatePane, planIndicatorTemplate, remapTemplateIndicatorIds, toTemplatePane, type IndicatorTemplateMode,
+} from './templates';
 
 export interface IndicatorTemplateApplyOptions {
   /** Copy isolates non-primary main-pane scales; share keeps existing destination settings. */
@@ -20,6 +22,13 @@ export interface IndicatorTemplateApplyOptions {
 export interface IndicatorTemplatePlan {
   indicators: IndicatorState[];
   panes?: PaneState[];
+  /**
+   * Slot of the price pane in `panes`, present only when the destination keeps
+   * its price pane below a study pane. Forward it beside `panes` as the
+   * restored state's `primaryPane` (a version 2 state), or the restore puts
+   * the price pane back at the top and lays its settings on a study pane.
+   */
+  primaryPane?: number;
   /** Forward as restoreState's second argument to retain destination runtime formatters. */
   restoreOptions?: ChartRestoreOptions;
 }
@@ -32,29 +41,50 @@ function scaleState(pane: PaneState, id: PriceScaleId): PriceScaleState | undefi
   return id === 'right' ? pane.priceScale : pane.scales?.[id];
 }
 
-function primaryId(chart: Chart, pane: PaneState): PriceScaleId | undefined {
+/** The scale id on the price pane, at chart slot `slot`, that the primary series maps to. */
+function primaryId(chart: Chart, slot: number, pane: PaneState): PriceScaleId | undefined {
   const primary = chart.primarySeries();
   if (!primary) return undefined;
   const target = primary.priceScale();
-  return scaleEntries(pane).find(([id]) => chart.panes()[0].scaleFor(id) === target)?.[0];
+  return scaleEntries(pane).find(([id]) => chart.panes()[slot].scaleFor(id) === target)?.[0];
 }
 
-/** Capture effective bindings and scale configuration, without data or runtime callbacks. */
+/** A chart's pane list in template order: the price pane first, the rest in their order. */
+function templateOrder<T>(items: readonly T[], primary: number): T[] {
+  return [items[primary], ...items.filter((_, index) => index !== primary)];
+}
+
+/** A template-order pane list back in chart order, the price pane at `primary`. */
+function chartOrder<T>(items: readonly T[], primary: number): T[] {
+  const out: T[] = [];
+  items.forEach((item, slot) => { out[fromTemplatePane(slot, primary)] = item; });
+  return out;
+}
+
+/**
+ * Capture effective bindings and scale configuration, without data or runtime
+ * callbacks. The template is written price pane first (see
+ * `IndicatorTemplateLayout`), so a chart whose price pane sits below its
+ * studies captures the same portable document as one whose price pane is on top.
+ */
 export function captureIndicatorTemplate(chart: Chart): IndicatorTemplatePayload {
-  const state = chart.getState(), panes = state.panes;
-  if (!panes?.length) throw new WorkspaceDocumentError('Cannot capture a destroyed chart');
+  const state = chart.getState(), visual = state.panes;
+  if (!visual?.length) throw new WorkspaceDocumentError('Cannot capture a destroyed chart');
+  const primary = chart.primaryPaneIndex(), panes = templateOrder(visual, primary);
   const plots: IndicatorTemplatePlotBinding[] = [];
   for (const instance of chart.indicators()) for (const plot of getIndicator(instance.indicatorId).plots) {
     const handle = instance.series(plot.key), scaleId = instance.plotPriceScaleId(plot.key);
     if (!handle || chart.seriesType(handle) === null || scaleId === null) {
       throw new WorkspaceDocumentError('Cannot capture a removed indicator plot');
     }
-    plots.push({ instanceId: instance.id, plotKey: plot.key, paneIndex: plot.overlay === true ? 0 : instance.paneIndex, scaleId });
+    plots.push({ instanceId: instance.id, plotKey: plot.key,
+      paneIndex: plot.overlay === true ? 0 : toTemplatePane(instance.paneIndex, primary), scaleId });
   }
   const layout: IndicatorTemplateLayout = { panes, plots };
-  const id = primaryId(chart, panes[0]);
+  const id = primaryId(chart, primary, panes[0]);
   if (id !== undefined) layout.primaryScaleId = id;
-  return parseIndicatorTemplatePayload({ indicators: state.indicators ?? [], layout });
+  const indicators = (state.indicators ?? []).map(study => ({ ...study, paneIndex: toTemplatePane(study.paneIndex, primary) }));
+  return parseIndicatorTemplatePayload({ indicators, layout });
 }
 
 function validateBindings(studies: readonly IndicatorState[], layout: IndicatorTemplateLayout): Map<string, IndicatorTemplatePlotBinding[]> {
@@ -105,13 +135,14 @@ function validateFills(descriptor: IndicatorDescriptor, study: IndicatorState, b
   }
 }
 
+/** Panes holding host series, in template slots. */
 function hostPanes(chart: Chart): Set<number> {
-  const counts = chart.panes().map(pane => pane.series().length);
+  const counts = chart.panes().map(pane => pane.series().length), primary = chart.primaryPaneIndex();
   for (const instance of chart.indicators()) for (const plot of getIndicator(instance.indicatorId).plots) {
     const handle = instance.series(plot.key);
-    if (handle && chart.seriesType(handle) !== null) counts[plot.overlay === true ? 0 : instance.paneIndex]--;
+    if (handle && chart.seriesType(handle) !== null) counts[plot.overlay === true ? primary : instance.paneIndex]--;
   }
-  return new Set(counts.flatMap((count, index) => count > 0 ? [index] : []));
+  return new Set(counts.flatMap((count, index) => count > 0 ? [toTemplatePane(index, primary)] : []));
 }
 
 function defaultScale(): PriceScaleState {
@@ -139,18 +170,57 @@ function clearOutgoingOwners(panes: PaneState[], outgoing: ReadonlySet<string>):
   }
 }
 
-/** Plan a detached patch. The host owns restore, cancellation and recovery. */
+/**
+ * Plan a detached patch. The host owns restore, cancellation and recovery.
+ *
+ * The plan is in the destination's own slots, and keeps its price pane where
+ * it is: a template's price pane is the destination's price pane, and its
+ * study panes take the slots around it in order. When that slot is not 0 the
+ * plan carries it as `primaryPane`, and lists the destination's panes.
+ */
 export function planIndicatorTemplateState(chart: Chart, incoming: IndicatorTemplateInput, mode: IndicatorTemplateMode,
   options: IndicatorTemplateApplyOptions = {}): IndicatorTemplatePlan {
   if (mode !== 'replace' && mode !== 'append') throw new WorkspaceDocumentError('Unsupported indicator template mode');
+  const primary = chart.primaryPaneIndex();
+  const plan = planTemplateOrder(chart, incoming, mode, options, primary);
+  if (primary === 0) return plan;
+  // Back to the chart's order. Only a chart whose price pane moved gets here, so
+  // a chart with its price pane on top receives exactly the plan it always did.
+  const out: IndicatorTemplatePlan = {
+    indicators: plan.indicators.map(study => ({ ...study, paneIndex: fromTemplatePane(study.paneIndex, primary) })),
+    panes: plan.panes ? chartOrder(plan.panes, primary) : listedPanes(chart, mode),
+    primaryPane: primary,
+  };
+  if (plan.restoreOptions) out.restoreOptions = { preserveScaleFormats: (plan.restoreOptions.preserveScaleFormats ?? [])
+    .map(selector => ({ ...selector, paneIndex: fromTemplatePane(selector.paneIndex, primary) })) };
+  return out;
+}
+
+/**
+ * The destination's own panes, for a template without a layout on a chart
+ * whose price pane moved: the price pane keeps its slot only if the panes above
+ * it are listed. Replace lets go of the outgoing studies' scale ranges, the way
+ * a layout plan does, so a new study that takes a slot does not inherit them.
+ */
+function listedPanes(chart: Chart, mode: IndicatorTemplateMode): PaneState[] {
+  const state = chart.getState(), panes = (state.panes ?? []).map(pane => parsePaneState(pane));
+  if (mode === 'replace') clearOutgoingOwners(panes, new Set((state.indicators ?? []).flatMap(study => study.instanceId ? [study.instanceId] : [])));
+  return panes;
+}
+
+/** The planner proper, run with the destination read in template order. */
+function planTemplateOrder(chart: Chart, incoming: IndicatorTemplateInput, mode: IndicatorTemplateMode,
+  options: IndicatorTemplateApplyOptions, primary: number): IndicatorTemplatePlan {
   const settings = record(readJson(options), 'template apply options');
   const policy = choice(settings.scalePolicy, 'scale policy', ['copy', 'share'] as const, 'copy');
   const preserve = choice(settings.rangePolicy, 'range policy', ['auto', 'preserve'] as const, 'auto') === 'preserve';
-  const incomingState = parseIndicatorTemplatePayload(incoming), current = chart.getState();
-  if (!current.panes?.length) throw new WorkspaceDocumentError('Cannot plan for a destroyed chart');
+  const incomingState = parseIndicatorTemplatePayload(incoming), live = chart.getState();
+  if (!live.panes?.length) throw new WorkspaceDocumentError('Cannot plan for a destroyed chart');
+  const current = { ...live, panes: templateOrder(live.panes, primary),
+    indicators: (live.indicators ?? []).map(study => ({ ...study, paneIndex: toTemplatePane(study.paneIndex, primary) })) };
   const available = new Set(registeredIndicators().map(item => item.id));
   if (!incomingState.layout) {
-    return { indicators: planIndicatorTemplate(current.indicators ?? [], incomingState.indicators, mode, available, current.panes.length) };
+    return { indicators: planIndicatorTemplate(current.indicators, incomingState.indicators, mode, available, current.panes.length) };
   }
   const layout = incomingState.layout, additions = incomingState.indicators, previous = parseIndicatorStates(current.indicators ?? []);
   const planned = mode === 'append' ? [...previous, ...additions] : additions;
@@ -163,7 +233,7 @@ export function planIndicatorTemplateState(chart: Chart, incoming: IndicatorTemp
     paneIndex === 0 || mode === 'append' || reservedPanes.has(paneIndex)
       ? scaleEntries(pane).map(([scaleId]) => ({ paneIndex, scaleId })) : []) };
   if (mode === 'append' && !additions.length) return { indicators: previous, restoreOptions };
-  const destinationPrimary = primaryId(chart, current.panes[0]);
+  const destinationPrimary = primaryId(chart, primary, current.panes[0]);
   const panes = current.panes.map(pane => parsePaneState(pane));
   if (mode === 'replace') clearOutgoingOwners(panes, new Set(previous.flatMap(study => study.instanceId ? [study.instanceId] : [])));
   const paneMap = new Map<number, number>([[0, 0]]);

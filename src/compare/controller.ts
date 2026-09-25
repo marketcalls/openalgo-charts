@@ -60,7 +60,7 @@ export interface ComparisonOptions {
   style?: SeriesStyle;
   /** Renderer for the comparison. Default 'line'. */
   type?: SeriesType;
-  /** Pane to draw on. Default 0, the price pane. */
+  /** Pane to draw on. Default: the price pane, wherever it sits (`Chart.primaryPaneIndex`). */
   paneIndex?: number;
 }
 
@@ -80,6 +80,7 @@ export interface ComparisonHandle {
    * directly leaves the pane rebased with nothing on it (use `remove`).
    */
   readonly series: SeriesApi;
+  /** The slot of the pane it draws on, read live: it follows that pane through a move. */
   readonly paneIndex: number;
   /** The hidden scale it maps to. Never the pane's own price axis. */
   priceScale(): PriceScale;
@@ -121,11 +122,17 @@ export interface ComparisonChartHost {
   on?(event: string, callback: (payload: unknown) => void): () => void;
   /** The shared logical axis locates visible primary bars even when another series adds times. */
   readonly dataLayer: { readonly length: number; indexToTime?(index: number): number | undefined };
+  /** Slot of the price pane, the default target. Absent means slot 0. */
+  primaryPaneIndex?(): number;
 }
 
-/** The primary mode is shared by a pane and restored after its last comparison. */
+/**
+ * The primary mode is shared by a pane and restored after its last comparison.
+ * Keyed by the pane itself rather than its slot: panes move, the price pane
+ * included, and a slot number kept here would name a different pane after one.
+ */
 interface PaneEntry {
-  readonly paneIndex: number;
+  readonly pane: ComparisonPane;
   /** The pane's own price axis; its mode is temporarily rebased. */
   readonly primary: PriceScale;
   readonly savedPrimaryMode: PriceScaleMode;
@@ -157,7 +164,7 @@ export class ComparisonController {
   private readonly _chart: ComparisonChartHost;
   private _mode: ComparisonMode;
   private _baseline: ComparisonBaseline;
-  private readonly _panes = new Map<number, PaneEntry>();
+  private readonly _panes = new Map<ComparisonPane, PaneEntry>();
   /** Insertion-ordered, and the handle is the key so `remove` is a lookup. */
   private readonly _items = new Map<ComparisonHandle, ItemState>();
   /** Axis length plus primary identity and boundaries avoid scanning history each frame. */
@@ -192,14 +199,18 @@ export class ComparisonController {
     if (this._chart.primarySeries() === null) {
       throw new Error('openalgo-charts: a comparison needs a primary series to align against');
     }
-    const paneIndex = options.paneIndex ?? 0;
+    const paneIndex = options.paneIndex ?? this._chart.primaryPaneIndex?.() ?? 0;
     const style: SeriesStyle = { ...options.style };
     if (style.color === undefined && options.color !== undefined) style.color = options.color;
-    const existing = this._panes.get(paneIndex);
+    const before = this._chart.panes()[paneIndex];
+    const existing = before === undefined ? undefined : this._panes.get(before);
     const scaleId = this._scaleIdFor(paneIndex);
     const series = this._chart.addSeries(options.type ?? 'line', { paneIndex, style, priceScaleId: scaleId });
-    const entry = existing ?? this._openPane(paneIndex);
+    // `addSeries` makes a pane that did not exist yet, so the pane is read after it.
+    const entry = existing ?? this._openPane(this._chart.panes()[paneIndex], paneIndex);
     entry.count++;
+    const chart = this._chart;
+    let slot = paneIndex;
 
     const state: ItemState = {
       series, entry, scale: series.priceScale(), savedScaleMode: series.priceScale().options.mode,
@@ -211,7 +222,13 @@ export class ComparisonController {
     const handle: ComparisonHandle = {
       symbol: options.symbol,
       series,
-      paneIndex,
+      // Live, so a comparison on the price pane still names it after the pane
+      // moves; the last slot it held once the pane is gone.
+      get paneIndex(): number {
+        const at = chart.panes().indexOf(entry.pane);
+        if (at >= 0) slot = at;
+        return slot;
+      },
       priceScale: () => state.scale,
       alignment: () => state.alignment,
       barAt: (time): Readonly<Bar> | null => {
@@ -293,9 +310,13 @@ export class ComparisonController {
 
   public get baseline(): ComparisonBaseline { return this._baseline; }
 
-  /** Shared baseline timestamp, or null for no overlap, no visible sources, or independent baselines. */
-  public baselineTime(paneIndex = 0): number | null {
-    const entry = this._panes.get(paneIndex);
+  /**
+   * Shared baseline timestamp, or null for no overlap, no visible sources, or
+   * independent baselines. Asks about the price pane unless a slot is named.
+   */
+  public baselineTime(paneIndex?: number): number | null {
+    const pane = this._chart.panes()[paneIndex ?? this._chart.primaryPaneIndex?.() ?? 0];
+    const entry = pane === undefined ? undefined : this._panes.get(pane);
     return this._baseline === 'common' && this._mode !== 'none' && entry && entry.primary.options.mode === entry.applied
       ? this._commonAnchor(entry, this._visiblePrimary())?.time ?? null : null;
   }
@@ -384,7 +405,7 @@ export class ComparisonController {
   private _scaleIdFor(paneIndex: number): PriceScaleId {
     const pane = this._chart.panes()[paneIndex];
     const used = (id: string): boolean => pane?.series().some(s => s.scaleId === id) ?? false;
-    if (!this._panes.has(paneIndex)) {
+    if (pane === undefined || !this._panes.has(pane)) {
       if (!used('')) return '';
       if (!used('left')) return 'left';
     }
@@ -393,10 +414,10 @@ export class ComparisonController {
     return id;
   }
 
-  private _openPane(paneIndex: number): PaneEntry {
-    const primary = this._chart.panes()[paneIndex].priceScale;
+  private _openPane(pane: ComparisonPane, paneIndex: number): PaneEntry {
+    const primary = pane.priceScale;
     const entry: PaneEntry = {
-      paneIndex,
+      pane,
       primary,
       savedPrimaryMode: primary.options.mode,
       applied: null,
@@ -410,7 +431,7 @@ export class ComparisonController {
       sync: { zOrder: () => 'bottom', draw: (): void => {}, afterAutoscale: (): void => { this.sync(); } },
       count: 0,
     };
-    this._panes.set(paneIndex, entry);
+    this._panes.set(pane, entry);
     this._applyMode(entry);
     this._chart.addPrimitive(entry.sync, paneIndex);
     return entry;
@@ -419,7 +440,7 @@ export class ComparisonController {
   private _closePane(entry: PaneEntry): void {
     this._restoreMode(entry);
     this._chart.removePrimitive(entry.sync);
-    this._panes.delete(entry.paneIndex);
+    this._panes.delete(entry.pane);
   }
 
   private _applyMode(entry: PaneEntry): void {
@@ -542,7 +563,7 @@ export class ComparisonController {
   }
 
   private _record(state: ItemState): ReturnType<ComparisonPane['series']>[number] | undefined {
-    return this._chart.panes()[state.entry.paneIndex]?.series().find(record => record.scaleId === state.scaleId);
+    return state.entry.pane.series().find(record => record.scaleId === state.scaleId);
   }
 
   private _visible(state: ItemState): boolean { return this._record(state)?.style?.visible !== false; }

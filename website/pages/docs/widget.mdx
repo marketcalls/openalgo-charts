@@ -12,7 +12,7 @@ import { Callout } from 'nextra/components'
 with a top bar (symbol, interval, chart type, theme, settings, indicators, objects, alerts), a drawing rail
 down the left, a status line, the dialogs behind each of those buttons, keyboard shortcuts
 with a `?` panel that lists them, and optional persistence of the layout. It is one of nine
-loadable tiers (**71.33 kB** Brotli in 2.5.4) and the only tier that supplies
+loadable tiers (**82.30 kB** Brotli in 2.5.5) and the only tier that supplies
 application controls.
 
 The drawing rail includes Anchored VWAP and fixed-range Volume Profile. They use
@@ -91,6 +91,11 @@ named group to show, hide, lock, or remove them together. See [Objects](/docs/ob
 
 Set `panels: false` to retain the standalone Objects popup and omit Data from
 the toolbar. This affects the widget chrome only.
+
+From 2.5.5, the same panel can also hold a **Watchlist** and a **News** reader when
+you pass `watchlist: { store, quotes }` and `news: { feed }`. Each appears only when
+its source is supplied; `widget.openWatchlist()` and `widget.openNews()` open them.
+See [Watchlists & News](/docs/watchlists-and-news).
 
 ## Symbol search and direct typing
 
@@ -361,7 +366,10 @@ passes through to `createChart` unchanged.
 | `symbolSearch` | `(query) => SymbolMatch[] \| Promise<SymbolMatch[]>` | Called as the user types in the symbol box; the results open as a menu under it. |
 | `lookbackBars` | `number` | Bars per load. Default 500. |
 | `now` | `() => number` | The clock for the load window and the capture filename. Default `Date.now`. |
+| `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). `price` is the pointer's price, not snapped to the instrument's tick or tick schedule: round it, for example with `validatePrice`, before sending. Without it the menu draws no trade rows. Limit and stop rows appear only over the price pane, where the pointer's price is the instrument's; a study pane offers the market rows alone. |
+| `movablePrimaryPane` | `boolean` | Off by default, as in the engine. Pass `true` to let a trader move the price pane below the studies; all of the widget's chrome follows it. Leave it off while your own code drives `widget.chart` with an explicit pane `0` for the price, or drop those zeros first. `createChartGrid` hands it to every chart it builds. See [Opting in](/docs/scales-and-panes#opting-in). |
 | `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). Without it the menu draws no trade rows. |
+| `account` | `AccountStateSource` | The selected account's equity and margin in the status line, with a menu to switch account, usually a trade-tier `AccountManager`. A source whose provider declares no accounts shows disabled with the reason; omitted shows nothing. It reads and switches accounts only. See [Accounts and advanced orders](/docs/trading-accounts). |
 | `styleNonce` | `string` | The host's CSP nonce for the shared widget and dialog stylesheet. See [Content Security Policy](#content-security-policy). |
 
 The chrome switches (`rail`, `topbar`, `statusline`, `indicators`) default to on, so a
@@ -373,8 +381,13 @@ A control exists only where the engine has something behind it. Every dialog is 
 from a schema the engine already ships: chart settings from `chartSettingsSchema`,
 indicator settings from the descriptor, drawing properties from `drawingSettingsSchema`,
 so a field appears only when the renderer reads it. The right-click menu draws its order
-rows only when `onOrder` is given, and offers **Collapse pane** or **Expand pane** only
-over a lower pane, since the price pane always stays open.
+rows only when `onOrder` is given, offers **Move pane up** and **Move pane down** over any
+pane when there are two or more, the price pane included (greyed at the top or bottom, and
+greyed with a note on a widget built without `movablePrimaryPane`, where the price pane
+stays on top), and offers **Collapse pane** or **Expand pane** only over a study pane, since
+the price pane always stays open in whatever slot it sits. Moving the price pane below its
+studies is saved with the layout and reported as a `layout` event with reason `paneMoved`.
+The Objects panel names it **Price pane** in its headings and move targets, wherever it sits.
 </Callout>
 
 ## Live history and reconnect recovery
@@ -555,13 +568,13 @@ widget: a tier loaded beside it would import its own second engine. See
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.5.4 build, decimal
+Budgets from `.size-limit.json` and measurements from the 2.5.5 build, decimal
 Brotli kB, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 71.34 kB | 71.33 kB |
-| Widget terminal | base + draw + indicators + widget | 267.56 kB | 267.55 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 82.31 kB | 82.30 kB |
+| Widget terminal | base + draw + indicators + widget | 282.67 kB | 282.67 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.

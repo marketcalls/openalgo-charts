@@ -369,8 +369,9 @@ export function renderToolbar() {
     } });
   });
   bar.appendChild(ind);
-  for (const panel of ['data', 'objects']) {
-    const control = tbtn(panel === 'data' ? 'Data' : 'Objects', panel === 'data' ? 'Data window' : 'Chart objects');
+  const PANELS = { data: ['Data', 'Data window'], objects: ['Objects', 'Chart objects'], watchlist: ['Watchlist', 'Watchlists and quotes'], news: ['News', 'News for this symbol'] };
+  for (const [panel, [label, title]] of Object.entries(PANELS)) {
+    const control = tbtn(label, title);
     control.setAttribute('aria-pressed', String(app['inspection' + pane]?.dock.state().panel === panel));
     control.addEventListener('click', () => toggleInspection(pane, panel));
     bar.appendChild(control);
@@ -495,6 +496,15 @@ export function renderToolbar() {
   sell.classList.add('tbtn--sell');
   sell.addEventListener('click', () => { if (pane === 1 && currentTarget(target)) el('sell').click(); });
   bar.appendChild(sell);
+  // The sandbox broker: the trade tier's account, preview and native close
+  // contract against a simulated provider, beside the page's own simulation.
+  const account = tbtn('<span>Account</span>', 'Sandbox broker account',
+    pane === 2 ? 'The sandbox broker trades chart 1' : 'figures, preview, durations, native close and reverse');
+  account.id = 'account';
+  account.disabled = pane === 2;
+  account.setAttribute('aria-haspopup', 'dialog');
+  account.addEventListener('click', () => { if (pane === 1 && currentTarget(target)) app.openAccount?.(account); });
+  bar.appendChild(account);
 
   bar.appendChild(divider());
   bar.appendChild(iconBtn('gear', 'Chart settings (or right-click the chart)', () => openChartSettings(undefined, target)));

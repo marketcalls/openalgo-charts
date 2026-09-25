@@ -81,7 +81,10 @@ armed execution state do not belong in portable workspaces.
 `parseIndicatorTemplatePayload` and
 `parseIndicatorStates` validate and detach input. Unsupported versions and
 malformed documents reject before application. Document parsers accept JSON
-text. Unknown custom study IDs are preserved so an import does not silently
+text. A chart snapshot is version 1, or version 2 when it records `primaryPane`, the
+slot of a price pane moved below its studies; a version 1 snapshot that claims a slot,
+or a slot that names no saved pane, is refused rather than laid onto a study pane. Only a
+chart built with `movablePrimaryPane` restores a moved one; any other chart refuses it. Unknown custom study IDs are preserved so an import does not silently
 discard another installation's configuration; the applying host checks that
 those studies are available.
 
@@ -139,7 +142,7 @@ export function studyPlan(chart: Chart, incoming: IndicatorTemplateInput, mode: 
 ```
 
 Pass the plan's `restoreOptions` to `chart.restoreState(state, plan.restoreOptions)`
-when applying its `indicators` and `panes`. This retains the runtime number
+when applying its `indicators` and `panes`, and its `primaryPane` when it has one. This retains the runtime number
 formatter on existing destination scales; copied scales use their incoming
 study formats. Formatter functions never enter the saved template.
 
@@ -155,6 +158,18 @@ host fixed bands remain. Choose `'preserve'` to retain saved manual views and ra
 references. These options do not overwrite the destination's primary or existing
 shared scale view.
 
+A template is written price pane first. Its pane 0 is the price pane and the study panes
+follow in chart order, whatever slot the price pane held on the chart it was captured from,
+so a chart that keeps its price pane below its studies captures the same portable document
+as one that keeps it on top. The plan is in the destination's own slots and keeps its price
+pane where it is: the template's study panes take the slots around it in order. When the
+destination's price pane is not in slot 0 the plan lists the panes and carries
+`primaryPane`; restore it in a version 2 state
+(`{ version: 2, indicators, panes, primaryPane, drawings, alerts }`), or the restore puts
+the price pane back on top and lays its settings on a study pane. The drawings you keep are
+in the same slots, and if the restore then prunes a study pane it emptied above the price
+pane, the drawings shift with the panes.
+
 Append retains current identities and creates new positive pane groups. Replace
 reuses study-only slots while reserving panes containing host series. Pane weights
 retain their ratio to the main pane. Fresh incoming identities are assigned, and
@@ -165,7 +180,8 @@ remain tied to their original studies.
 each `IndicatorTemplatePlotBinding` records an instance, exact plot key, pane and
 scale. `parseIndicatorTemplatePayload` validates and detaches either input form.
 The existing `planIndicatorTemplate` array API and documents without layout retain
-legacy behavior. Saving an array over a layout-bearing template removes its layout.
+legacy behavior; its optional sixth argument names the destination's price-pane slot,
+where incoming overlays go. Saving an array over a layout-bearing template removes its layout.
 
 Apply to the chart captured when the template controls opened, and check ownership
 again after asynchronous work. If using `restoreState`, include the current

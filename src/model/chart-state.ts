@@ -16,8 +16,17 @@ import type { PriceScaleMode } from '../scale/price-scale';
 import type { AlertsDocument } from '../alerts/types';
 import type { PriceAxisPlacement } from './price-axis-layout';
 
-/** Bumped when the shape changes incompatibly; `restoreState` ignores unknown versions. */
-export const CHART_STATE_VERSION = 1;
+/**
+ * The newest state version this build reads and writes. Bumped when the shape
+ * changes incompatibly; `restoreState` ignores unknown versions.
+ *
+ * Version 2 adds `primaryPane`. `getState` writes it only for a chart whose
+ * price pane has moved from the top, and writes every other state as version
+ * 1, unchanged, so a reader from before the move still opens it. A reader
+ * that predates version 2 refuses a moved layout instead of laying the price
+ * pane's scales, studies and drawings onto the study pane in slot 0.
+ */
+export const CHART_STATE_VERSION = 2;
 
 export interface PriceScaleState {
   marginTop: number;
@@ -47,7 +56,10 @@ export interface PaneState {
   priceScale: PriceScaleState;
   /** Secondary scales only; the right scale remains in priceScale for older readers. */
   scales?: Partial<Record<PriceScaleId, PriceScaleState>>;
-  /** Folded to its header strip. Omission restores the pane open; pane 0 is always open. */
+  /**
+   * Folded to its header strip. Omission restores the pane open; the primary
+   * price pane (see `ChartState.primaryPane`) is always open, whatever it says.
+   */
   collapsed?: boolean;
 }
 
@@ -172,6 +184,15 @@ export interface ChartState {
   /** Collapse only study legend rows. Omission preserves the current preference. */
   indicatorLegendCollapsed?: boolean;
   panes?: PaneState[];
+  /**
+   * Slot in `panes` of the primary price pane, present only when it is not the
+   * first (version 2). Every `paneIndex` in the state, of a pane, a series, a
+   * study or a drawing, is a visual slot counted from the top, so this says
+   * which of them is the price pane. Omitted with `panes` present means slot
+   * 0, the only place a price pane could be before it could move. Needs
+   * `panes`, and must name one of them.
+   */
+  primaryPane?: number;
   /** Informational: `restoreState` does not recreate these (it has no data). */
   series?: SeriesState[];
   indicators?: IndicatorState[];

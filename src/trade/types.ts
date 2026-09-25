@@ -36,6 +36,8 @@ export interface Position {
   /** Net signed quantity: positive = long, negative = short, 0 = flat. */
   netQty: number;
   avgPrice: number;
+  /** The account holding it, when the provider says. `AccountManager.positions()` drops a row naming another account. */
+  accountId?: string;
 }
 
 /** A working order is one still live in the book (not terminal). */

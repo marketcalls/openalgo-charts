@@ -199,7 +199,7 @@ bn.remove();
 | `color` | `string` | none | Shorthand; `style.color` wins if both are given. |
 | `style` | `SeriesStyle` | `{}` | Merged over the chart type's defaults. |
 | `type` | `SeriesType` | `'line'` | Any registered series type. |
-| `paneIndex` | `number` | `0` | The price pane by default. |
+| `paneIndex` | `number` | the price pane | The price pane by default, wherever it sits. A handle's `paneIndex` is read live, so it follows its pane through a move. |
 
 `ComparisonHandle`: `symbol`, `series`, `paneIndex`, `priceScale()`, `alignment()`, `barAt(time)`, `setBars(bars)`, `remove()`, `list()`.
 

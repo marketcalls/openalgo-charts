@@ -244,19 +244,149 @@ untouched and neither side can collapse.
 |---|---|
 | `chart.setPaneWeight(index, weight)` | Set a pane's relative height. |
 | `chart.paneWeight(index)` | Read it back. |
-| `chart.movePane(index, -1 \| 1)` | Move a pane one slot up or down. |
+| `chart.movePane(index, -1 \| 1)` | Move a pane one slot up or down. The price pane stays pinned on top unless the chart was built with `movablePrimaryPane`. |
+| `chart.primaryPaneIndex()` | The slot the price pane holds now: always `0` without `movablePrimaryPane`. |
+| `chart.setPrimaryPaneIndex(index)` | Move the price pane to a slot, for example below its studies. Returns `false` without `movablePrimaryPane`. |
+| `chart.movablePrimaryPane()` | Whether the chart was built with `movablePrimaryPane`. |
 | `chart.maximizePane(index)` | Give one pane the whole chart and hide the rest; call again to restore. |
 | `chart.maximizedPane()` | The maximized pane index, or `null`. |
-| `chart.setPaneCollapsed(index, collapsed)` | Fold a lower pane to its header strip, or open it again. |
-| `chart.paneCollapsed(index)` | Whether a pane is folded. Always `false` for pane 0. |
+| `chart.setPaneCollapsed(index, collapsed)` | Fold a study pane to its header strip, or open it again. |
+| `chart.paneCollapsed(index)` | Whether a pane is folded. Always `false` for the price pane. |
 | `chart.removePane(index)` | Remove a pane with its series and indicators. |
 
 <Callout type="info">
-**Pane 0 is pinned.** It owns the primary price series and the shared price context, so
-`removePane(0)` and any `movePane` that would displace it return `false` rather than
-silently doing something surprising. Removing a pane re-indexes the panes below it, and the
-indicators living there move with them.
+**Pane 0 is pinned by default.** It owns the primary price series and the shared price
+context, so `removePane(0)` and any `movePane` that would displace it return `false` rather
+than silently doing something surprising, and an explicit pane `0` always means the price. A
+chart built with `movablePrimaryPane` lets the price pane move (below), but it is still never
+removed, in any slot. A move off either end returns `false` too. Removing a pane re-indexes
+the panes below it, and the indicators living there move with them.
 </Callout>
+
+### Moving the price pane below its studies
+
+A user who reads the studies first can put the price at the bottom, on a chart that opts in.
+The price pane is then an identity, not a slot: it is the pane the chart is built with,
+wherever it sits.
+
+```ts
+const chart = createChart(el, { movablePrimaryPane: true });
+chart.addSeries('candlestick').setData(bars);
+const rsi = chart.addIndicator('rsi');
+const macd = chart.addIndicator('macd');
+chart.setPrimaryPaneIndex(chart.panes().length - 1); // RSI, MACD, then the price
+chart.primaryPaneIndex();                            // 2
+chart.movePane(2, -1);                               // or step it up one slot
+```
+
+`setPrimaryPaneIndex` walks it there one `movePane` at a time, so every step is an ordinary
+`paneMoved` event and anything that follows panes by that event, drawings and alerts included,
+follows the price pane too. Any study pane can also displace it with `movePane`, which is what
+the up control on the first study pane's legend row does.
+
+<Callout type="warning">
+**`movablePrimaryPane` is off by default, and it is a promise the host makes.** Without it the
+price pane stays at slot 0 exactly as it always has: `movePane` refuses to move or displace it,
+the study row's up control does nothing there, `setPrimaryPaneIndex` returns `false`, and
+`restoreState` refuses a layout that moved it. Turn it on only once nothing in the host passes
+`0` to mean the price pane. Otherwise, the moment a user moves a study above the candles, an
+order line lands on the study, `coordinateToPrice(y, 0)` prices a right-click order in RSI
+units, and a price alert is checked against the wrong pane. Before turning it on:
+
+- Drop every explicit `0` that means the price pane, or pass `chart.primaryPaneIndex()` read
+  at the moment of use; `panes()[0]` is the top pane, not the price pane.
+- Position a DOM overlay over the price pane from `panes()[chart.primaryPaneIndex()].element`,
+  and again after every `paneMoved`.
+- Keep `primaryPane` (and its version 2) if you save `getState()` through a field allowlist.
+- Forward `plan.primaryPane` beside `plan.panes` when you apply a template plan, and roll back
+  with `getState().primaryPane`.
+
+The [widget](/docs/widget) and `createChartGrid` leave the option off as well; see
+[Opting in](#opting-in).
+</Callout>
+
+#### Opting in
+
+A host that passes an explicit `0` for the price pane changes those calls first, then turns
+the option on. Omit the pane argument, which defaults to the price pane wherever it sits, or
+pass `chart.primaryPaneIndex()` read at the moment of use:
+
+```ts
+// Before: 0 means the price pane only while it is pinned on top.
+chart.addPriceLine({ price: 101.5, id: 'stop' }, 0);
+const price = chart.coordinateToPrice(y, 0);
+
+// After: name no pane, or ask where the price pane is now.
+chart.addPriceLine({ price: 101.5, id: 'stop' });
+const price = chart.coordinateToPrice(y, chart.primaryPaneIndex());
+```
+
+Then build the chart with `createChart(el, { movablePrimaryPane: true })`. `createWidget` and
+`createChartGrid` take the same option and hand it to their charts as given, off unless you
+pass it, so a widget host whose own code on `widget.chart` still passes `0` (a volume histogram
+added with `paneIndex: 0`, say) keeps working unchanged. Pass `movablePrimaryPane: true` once
+that code names no pane; the widget's own chrome already follows the price pane.
+
+Everything that means "the price pane" follows it rather than slot 0:
+
+- `addSeries`, `addPriceLine`, `addEventMarkers`, `setEvents`, `addPrimitive` and
+  `tradeHost` with no pane, and `priceToCoordinate`, `coordinateToPrice`, `priceAxisState` and
+  `priceAxisLayout` with no pane. Order lines and a DOM overlay positioned with these stay beside
+  the candles. A host that passes `0` to mean the price pane should drop the argument or pass
+  `chart.primaryPaneIndex()`.
+- On-chart studies, every `overlay` plot, band, table and price-anchored mark, the instrument
+  tick a study's `calc` sees, comparisons, price alerts, the drawing magnet, a drawing link
+  between two charts (each chart's price pane is its own slot), the magnet crosshair, the
+  `panUp` / `panDown` keys, `priceScaleOptions()`, and drawing copy and paste (a drawing
+  copied beside the candles pastes beside the candles on any chart, in any arrangement).
+- The legend offset, the **Indicators N** count and the background text sit on the price pane.
+  The time navigator and the brand mark stay on the bottom open pane, which is the price pane
+  once it is at the bottom.
+
+It stays open and cannot be removed in any slot. A study pane moved above it, to slot 0, folds,
+maximizes, prunes and carries its pane controls like any other study pane. A moved price pane
+is saved as `primaryPane` in a version 2 state (see [State](/docs/state)), and a template
+captured from it is written price pane first, so it applies the same way to a chart whose price
+pane is on top.
+
+<RunnableExample height={470} caption="The buttons move only the price pane. The studies, their scales and the drawing on the candles move with their panes." code={`el.style.display = 'flex';
+el.style.flexDirection = 'column';
+const controls = document.createElement('div');
+controls.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 64px 8px 8px';
+el.appendChild(controls);
+const host = document.createElement('div');
+host.style.cssText = 'flex:1;min-height:0;width:100%';
+el.appendChild(host);
+const chart = lib.createChart(host, { movablePrimaryPane: true });
+const bars = lib.generateBars(1700000000, 180, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addSeries('line', { paneIndex: 1, style: { color: '#e0b020' } }).setData(lib.rsiSeries(bars, 14));
+chart.addPriceLine({ price: 70, color: '#ef5350', lineWidth: 1, dashed: true, id: 'r70' }, 1);
+chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id: 'r30' }, 1);
+chart.addSeries('histogram', { paneIndex: 2 })
+  .setData(bars.map(b => ({ time: b.time, value: b.volume, close: b.volume })));
+chart.addPriceLine({ price: bars[bars.length - 1].close, color: '#4f8cff', lineWidth: 1, id: 'last' });
+chart.timeScale.fitContent(bars.length);
+const say = document.createElement('span');
+say.style.cssText = 'align-self:center;color:#94a3b8;font:12px system-ui, sans-serif';
+const render = () => { say.textContent = 'Price pane in slot ' + chart.primaryPaneIndex(); };
+for (const [label, run] of [
+  ['Price on top', () => chart.setPrimaryPaneIndex(0)],
+  ['Move price up', () => chart.movePane(chart.primaryPaneIndex(), -1)],
+  ['Move price down', () => chart.movePane(chart.primaryPaneIndex(), 1)],
+  ['Price at the bottom', () => chart.setPrimaryPaneIndex(chart.panes().length - 1)],
+]) {
+  const button = document.createElement('button');
+  button.textContent = label;
+  button.style.cssText = 'padding:5px 10px;border:1px solid #334155;border-radius:4px;background:#172033;color:#e2e8f0;cursor:pointer';
+  button.onpointerdown = (event) => event.stopPropagation();
+  button.onclick = () => { run(); render(); };
+  controls.appendChild(button);
+}
+controls.appendChild(say);
+chart.setPrimaryPaneIndex(2);
+render();
+return chart;`} />
 
 <Callout type="info">
 **Maximizing hides the other panes, it does not shrink them.** They lay out at zero
@@ -274,7 +404,7 @@ Events: `paneResized`, `paneMoved`, `paneMaximized`, `paneCollapsed`, `paneRemov
 
 ### Collapsing a pane
 
-A lower pane can fold to a strip one legend row tall and open again later. Nothing in it
+A study pane can fold to a strip one legend row tall and open again later. Nothing in it
 is lost: its series keep taking data, its studies keep recomputing, and its drawings,
 scales and stored weight are untouched, so it opens at exactly the height it had. The
 open panes share the rest of the chart by weight.
@@ -297,7 +427,8 @@ tool, a price alert or a host overlay cannot land on a pane nobody can see. Aler
 pane's studies and drawings keep firing while it is folded.
 
 <Callout type="info">
-**Pane 0 always stays open**, the way it always stays in place. Collapsing the bottom
+**The price pane always stays open**, in whatever slot it sits, so a chart always keeps one
+open pane. A study pane at the top folds like any other. Collapsing the bottom
 pane keeps the time axis at the foot of the chart, under its strip; the navigator and
 the brand mark move up to the lowest open pane. Maximizing a collapsed pane shows it
 whole and folds it again on restore, and collapsing the maximized pane ends the
@@ -359,7 +490,7 @@ removing one closes the gap.
 import { PaneLegend } from 'openalgo-charts';
 
 const symbol = new PaneLegend({ id: 'symbol', title: 'AAPL', params: '1D · NSE', actions: [] });
-chart.addPrimitive(symbol, 0);
+chart.addPrimitive(symbol);   // no pane: the price pane, wherever it sits
 
 symbol.setValues([
   { label: 'O', text: '322.04', color: '#26a69a' },
@@ -737,7 +868,7 @@ import { DEFAULT_PRICE_SCALE_OPTIONS } from 'openalgo-charts';
 |---|---|---|---|
 | `marginTop` | `number` | `0.1` | Fraction of the pane height kept empty above the highest visible value. `0.1` keeps a 10 % gap at the top. |
 | `marginBottom` | `number` | `0.1` | Fraction of the pane height kept empty below the lowest visible value. |
-| `minMove` | `number` | `0` | Instrument tick size, for example `0.05` for a 5-paise step. `0` means precision is inferred from the visible range automatically. |
+| `minMove` | `number` | `0` | Instrument tick size, for example `0.05` for a 5-paise step. `0` means precision is inferred from the visible range automatically. For a [price-dependent tick](/docs/instruments#price-dependent-ticks), use the schedule's `minMove`. |
 | `mode` | `PriceScaleMode` | `'linear'` | Price-to-pixel coordinate transform: `'linear'`, `'logarithmic'`, `'percentage'`, or `'indexed-to-100'`. See below. |
 | `inverted` | `boolean` | `false` | Flips the Y axis so prices increase downward, useful for spread or inverted-chart views. |
 
@@ -889,8 +1020,8 @@ const ts = chart.timeScale;              // TimeScale instance
 ts.setBarSpacing(12);
 ts.setRightOffset(8);
 
-// Price scale is per-pane; pane 0 is the main price pane
-const ps = chart.panes()[0].priceScale; // PriceScale instance
+// Price scale is per-pane; the price pane sits at primaryPaneIndex(), 0 until moved
+const ps = chart.panes()[chart.primaryPaneIndex()].priceScale; // PriceScale instance
 ps.setPriceFormatter((p) => p.toFixed(3));
 ps.setAutoScale(true);                   // re-enable autoscale after a manual axis drag
 ps.setBaseline(prevClose);               // what percentage / indexed-to-100 quote against

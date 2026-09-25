@@ -79,9 +79,13 @@ export interface PrimitiveHost {
  * badge belongs to the CHART: it should sit at an edge of the whole stack, and
  * follow that edge as indicator panes come and go. `chart-bottom` is the common
  * case, and it also survives maximize, which hides the other panes entirely and
- * would otherwise take a pane-0 watermark with it.
+ * would otherwise take a price-pane watermark with it.
+ *
+ * `primary-pane` is the third kind: furniture that describes the price, such
+ * as a symbol badge, follows the primary price pane to whatever slot it is
+ * moved to, and the pane maximized over it while it is hidden.
  */
-export type PrimitiveAnchor = 'chart-top' | 'chart-bottom';
+export type PrimitiveAnchor = 'chart-top' | 'chart-bottom' | 'primary-pane';
 
 /** Passed to `addPrimitive` instead of a pane index to anchor to the chart. */
 export interface PrimitivePlacement {

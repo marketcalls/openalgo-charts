@@ -74,7 +74,10 @@ expiry and cooldown, defaulting to Date.now()/1000. One timer follows the next
 armed expiry, including on an idle feed. Disabled and once-triggered records do
 not keep an expiry timer. Destruction cancels it.
 `AlertChartHost` is the structural chart interface, allowing a host integration
-without a nominal dependency on a specific bundled Chart class.
+without a nominal dependency on a specific bundled Chart class. Its optional
+`primaryPaneIndex()` names the price pane's slot: price alerts draw there, a study
+alert on an `overlay` plot reports it, and a drawing on it needs no input plot.
+Without it the price pane is slot 0.
 
 ## Finished alert lines
 

@@ -683,6 +683,45 @@ body[data-fullscreen-pane="2"] #chart2 { left: 42px; }
   line-height: 1; cursor: pointer; padding: 2px 5px; border-radius: 4px; }
 .cmp-row .cmp-del:hover { background: var(--elev-3); color: var(--danger-tx); }
 
+/* ── sandbox broker panel ───────────────────────────────────── */
+/* Opened in the chart's overlay layer, so the widget tokens and control
+   styles (inputs, .oac-btn, scrollbars) already apply; these rules only lay
+   the panel out. */
+.acct-panel { width: min(430px, calc(100vw - 24px)); overflow: auto; padding-bottom: 8px; }
+.acct-panel > * { flex: none; }
+.acct-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--oac-bd-soft); font-weight: 650; color: var(--oac-tx-strong); }
+.acct-x { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: var(--oac-faint); font-size: 18px; line-height: 1; cursor: pointer; }
+.acct-x:hover { color: var(--oac-tx); background: var(--oac-elev-2); }
+.acct-summary { padding: 9px 12px 0; }
+.acct-summary .oac-account { flex-wrap: wrap; row-gap: 5px; font-size: 11.5px; white-space: normal; }
+.acct-note { margin: 6px 12px 0; color: var(--oac-faint); font-size: 11px; line-height: 1.4; }
+.acct-group { margin: 10px 12px 5px; color: var(--oac-faint); font-size: 10px; font-weight: 700;
+  letter-spacing: .8px; text-transform: uppercase; }
+.acct-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 12px 6px; }
+.acct-field { display: inline-flex; align-items: center; gap: 5px; color: var(--oac-mut); font-size: 12px; }
+.acct-field[hidden] { display: none; }
+.acct-panel .acct-num { width: 76px; height: 26px; }
+.acct-expiry { height: 26px; padding: 0 6px; border: 1px solid var(--oac-bd); border-radius: var(--oac-radius);
+  background: var(--oac-elev); color: var(--oac-tx); color-scheme: inherit; font: inherit; font-size: 12px; }
+.acct-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--oac-bd-soft); border-radius: 7px; }
+.acct-panel .acct-seg .oac-btn { height: 24px; padding: 0 9px; }
+.acct-panel .acct-row > .oac-btn { height: 28px; }
+.acct-panel .acct-row > .oac-btn:not(.oac-btn--primary) { border-color: var(--oac-bd); background: var(--oac-elev); }
+.acct-panel .acct-row > .oac-btn:not(.oac-btn--primary):hover:not(:disabled) { border-color: var(--oac-bd-hover); }
+.acct-actions { justify-content: flex-end; }
+.acct-panel .oac-btn:disabled { cursor: not-allowed; }
+.acct-preview, .acct-position { margin: 0 12px 6px; min-height: 16px; color: var(--oac-mut); font-size: 12px;
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.acct-position { color: var(--oac-tx); }
+.acct-msg { flex: 1 1 180px; min-width: 0; margin: 0; color: var(--oac-mut); font-size: 12px; overflow-wrap: anywhere; }
+.acct-preview.is-error, .acct-msg.is-error { color: var(--oac-danger); }
+.acct-fills { margin: 0 12px 8px; padding: 0; list-style: none; color: var(--oac-tx); font-size: 12px;
+  font-variant-numeric: tabular-nums; }
+.acct-fills li { padding: 2px 0; }
+.acct-fills .acct-empty { color: var(--oac-faint); }
+
 /* ── chart settings dialog ──────────────────────────────────── */
 /* Tabs down the left, controls on the right: the layout chartSettingsSchema()
    describes. The rows themselves are the .set-row widgets the indicator

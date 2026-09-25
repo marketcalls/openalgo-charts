@@ -47,7 +47,7 @@ import 'openalgo-charts/indicators'; // side effect: registers all 105 built-ins
 
 ## The 105 built-ins
 
-`onchart` overlays the price pane (pane 0); `pane` claims a fresh pane. Defaults shown are the descriptor's declared `input.default`.
+`onchart` overlays the price pane (slot 0 unless the host moved it; `chart.primaryPaneIndex()`); `pane` claims a fresh pane. Defaults shown are the descriptor's declared `input.default`.
 
 **Colour inputs are omitted from these tables on purpose.** Every descriptor declares its own colour keys (`color`, `upColor`, `macdColor`, `bandColor`, ...), and the only safe way to read one is `plotStyleKeys(plot).color`. Hand-composing `` `${plotKey}:color` `` is the single most common way to write an indicator patch that is silently ignored. See the settings model below.
 
@@ -191,6 +191,7 @@ Notes that bite:
   A nonfinite extreme invalidates that period until the next existing session or
   calendar boundary. A complete later period recovers. Only the period's final
   close is used; the schedule, display controls and pivot formulas are unchanged.
+- **A missing input costs a running study only the bars it covers, with the exceptions named here.** `atr` keeps its average across a missing or overflowing true range and resumes from it, and so do `keltner-channel`, `chandelier-exit`, `chande-kroll-stop`, `median` and `halftrend`, which read it; a leading or seed-window gap moves the first reading later. A true range reads the previous close, so a missing close costs the ATR the next bar, not its own. `supertrend` is absent on a bar with no ATR or no close and leaves its bands, direction and last accepted close unchanged, so no flip is ever decided on a missing value. `volatility-stop` is the exception: its ATR resumes, but a bar with no true range restarts the stop at the source, as its reference definition does, and a missing source restarts it after the gap, so its level and sometimes its side differ from complete data for some bars. `vwap` leaves a bar with a missing price or a NaN or infinite volume absent without touching its totals, and `twap` skips a missing price and divides by the bars it counted; both still restart on a missing bar that opens an anchor period. An undefined volume is still a bar that traded nothing. `obv` and `adl` read a NaN or infinite volume as nothing traded, so the bar prints the carried total. `adl` leaves a bar missing its high, low or close, or whose span or term overflows, absent with the total unchanged. `obv` adds nothing on a bar with a missing close or on the bar after it, which compares with it, and prints the carried total on both. `parabolic-sar` steps over a bar missing its high, low or close with its stop, trend and acceleration unchanged, seeds from the first two complete bars and clamps against the two complete bars before each step. `tema` is `3 * ema1 - 3 * ema2 + ema3` added left to right, absent when a term is absent or the sum is not finite.
 - `select` inputs carry their own `options`. The recurring ones: `maType` on `cci`/`obv`/`relative-volatility-index` is `None | SMA | SMA + Bollinger Bands | EMA | SMMA (RMA) | WMA | VWMA`; `ma1Type`..`ma4Type` on `ma-ribbon` drop the first two; `oscType`/`sigType` on `ppo`/`pvo` are `EMA | SMA`; `bandsStyle` on `keltner-channel` is `Average True Range | True Range | Range`; `calcMode` on `vwap` is `stdev | percent`. `mode` on `hull-suite` is `Hma | Thma | Ehma`. Its labels (HMA / THMA / EHMA) are not its values, as is also true of `anchor` on `vwap` and `twap`, `calcMode` on `vwap` and `pivotMode` on `cpr`: store `option.value`, render `option.label`, and never round-trip the label back into settings.
 - `vwap` defaults to `source: 'hlc3'`, not `'close'`. **Its `session` anchor is the trading session read back from the bar gaps** (`sessionStartFlags`), not a calendar day: see [Trading sessions](#trading-sessions) below. The coarser anchors (`week`, `month`, `quarter`, `year`) are calendar boundaries tested on the chart's `timezone` (default `Asia/Kolkata`) and compared at session opens, so a Friday session that ends after midnight in that zone is not split. `anchor` accepts `session | week | month | quarter | year | continuous`. It also declares six band plots (`upper1`/`lower1` .. `upper3`/`lower3`) with only band 1 shown by default. `twap` has the shorter `session | continuous`, with the same gap-read session.
 - The other calendar-anchored built-ins follow the same rule: `cpr`'s Daily frame comes from the bar gaps while its Weekly and Monthly frames are calendar boundaries in the chart's zone, and `seasonality` attributes a bar's close to the month it closed in **in that zone**, which is why the last ninety minutes of a 30 April New York session count as April on `America/New_York` and as May on the IST default.
@@ -219,7 +220,7 @@ addIndicator(
 ): IndicatorApi
 ```
 
-`options.paneIndex` overrides placement entirely: a `pane` indicator can be dropped onto pane 0, or a second indicator onto an existing pane. An instance that did **not** create its own pane never applies `range()`; a shared pane belongs to whoever created it.
+`options.paneIndex` overrides placement entirely: a `pane` indicator can be dropped onto the price pane, or a second indicator onto an existing pane. An instance that did **not** create its own pane never applies `range()`; a shared pane belongs to whoever created it.
 
 ```ts
 const macd = chart.addIndicator('macd', { fastPeriod: 8 });
@@ -532,11 +533,11 @@ A plot cannot express this: a plot is a column of prices drawn as a line or a hi
 - Six built-ins use it: `halftrend` (Buy/Sell plates at flips, suppressed by `showLabels: false`), `williams-fractals` (up/down triangles at pivots), `rsi-divergence` (Bull / H Bull / Bear / H Bear plates at pivots), `alphatrend` (BUY/SELL plates at crossovers, suppressed by `showsignalsk: false`), `wavetrend` (circles at band crossings plus R / H divergence plates), `consolidation-breakout` (a `triangleUp` below the bar that breaks the range up, a `triangleDown` above the one that breaks it down, suppressed by `markbreakout: false`).
 - Returning `[]` clears the layer. That is how a `showLabels`-style boolean input turns markers off without a rebuild.
 - The layer is created lazily on the **first plot's** series by default (`markerAnchor: 'plot'`), so a no-marker indicator costs no extra primitive.
-- `markerAnchor: 'price'` selects the primary series for an indicator on pane 0. `aboveBar` uses its high, `belowBar` its low and `inBar` its body midpoint. A study on another pane or a chart without a primary series falls back to the first plot. The layer follows its series' own scale and is recreated when that selected series changes.
-- Missing or NaN plot values use the instrument bar at the same time only when the indicator is on pane 0 and its marker series shares the primary series' price scale. Finite plot points retain precedence. Own-pane oscillators and independent scales never receive instrument-price fallback; without an anchor their bar-relative marker is skipped.
+- `markerAnchor: 'price'` selects the primary series for an indicator on the price pane, in whatever slot it sits. `aboveBar` uses its high, `belowBar` its low and `inBar` its body midpoint. A study on another pane or a chart without a primary series falls back to the first plot. The layer follows its series' own scale and is recreated when that selected series changes.
+- Missing or NaN plot values use the instrument bar at the same time only when the indicator is on the price pane and its marker series shares the primary series' price scale. Finite plot points retain precedence. Own-pane oscillators and independent scales never receive instrument-price fallback; without an anchor their bar-relative marker is skipped.
 - `series.createMarkers(fallbackBars)` and `new SeriesMarkers(seriesId, fallbackBars, priceScale)` accept optional callbacks. `fallbackBars` returns current `readonly Bar[]`; the optional constructor `priceScale` returns the current `PriceScale`. Series-created layers supply that scale callback automatically, including after an axis move. Missing shared-axis times are skipped even when a fallback bar exists. `atPrice`, `paneTop` and `paneBottom` do not require a series bar.
 - **Markers are a separate primitive from the plots.** `setVisible(false)` hides both because the runtime re-runs the hook with an empty result, but a plot-level style patch does not touch them.
-- **Marker groups.** A marker can name an `IndicatorOutputTarget`: `overlay: true` anchors it to the instrument's candles on the price pane (so `belowBar` sits under the low) even from a study in its own pane, and `plot: key` anchors it to that declared plot's series, pane and scale. Each target is its own `SeriesMarkers` layer created on that series: it follows the series through `setPlotPriceScales`, `setPriceScale` and `moveIndicator` (a price-pane group stays on pane 0), is cleared while the study is hidden and refilled in place when shown, is released when a visible pass returns nothing for it, and goes with the study or its pane. A target that resolves to the series the study's own marks anchor to (`overlay: true` from an on-price study with `markerAnchor: 'price'`, or `plot` naming the first plot) is not a separate layer: those marks join the study's own layer in the order returned, so marks at one bar stack, and they split out again if a move changes that anchor. A `plot` group fills a missing or NaN value from the instrument bar whenever that plot is on pane 0 and shares the primary series' price scale, whether or not it is the first plot, so marks naming an `overlay` first plot of a study in its own pane keep a layer of their own: the study's own marks there never take the instrument bar. A study's layers stack as: its own marks, its marker groups, its own shapes, its drawing targets, each kind's targets in target order (price pane, then plots in declaration order), which is also the order a pass creates them in. A group created after the first pass (a target returned again, or for the first time) is restacked through the host's `resourcesChanged`, called from inside the pass: during that call every instance reports its targeted layers alone, so the host puts the targeted layers on each pane back in study order, each study's in the order above, and moves nothing else. The runtime republishes no study's bar colours during that call, since study order has not changed. A study's own layer created on a later pass is never restacked, and neither is anything of a study that names no target, even when another study routes on the same pass: it stays where it landed, exactly as before targets. Marks with no target keep `markerAnchor` and the first plot byte for byte. An overlay group waits for a primary series. An unknown plot, or `plot` together with `overlay: true`, throws before any marker layer changes, and so does an invalid style on any mark: `addIndicator` throws, and a later pass publishes an error status while every marker layer keeps the last good pass. The rest of the pass is not rolled back: a pass syncs plots and fills, markers, the table, drawings, then background, bar colours, levels and alerts, so outputs before the failing one stay applied and those after it wait for the next good pass. Marks in groups on different series (the candles and a plot, or two plots) do not stack against each other at a shared bar: each is measured against a different value.
+- **Marker groups.** A marker can name an `IndicatorOutputTarget`: `overlay: true` anchors it to the instrument's candles on the price pane (so `belowBar` sits under the low) even from a study in its own pane, and `plot: key` anchors it to that declared plot's series, pane and scale. Each target is its own `SeriesMarkers` layer created on that series: it follows the series through `setPlotPriceScales`, `setPriceScale` and `moveIndicator` (a price-pane group stays on the price pane), is cleared while the study is hidden and refilled in place when shown, is released when a visible pass returns nothing for it, and goes with the study or its pane. A target that resolves to the series the study's own marks anchor to (`overlay: true` from an on-price study with `markerAnchor: 'price'`, or `plot` naming the first plot) is not a separate layer: those marks join the study's own layer in the order returned, so marks at one bar stack, and they split out again if a move changes that anchor. A `plot` group fills a missing or NaN value from the instrument bar whenever that plot is on the price pane and shares the primary series' price scale, whether or not it is the first plot, so marks naming an `overlay` first plot of a study in its own pane keep a layer of their own: the study's own marks there never take the instrument bar. A study's layers stack as: its own marks, its marker groups, its own shapes, its drawing targets, each kind's targets in target order (price pane, then plots in declaration order), which is also the order a pass creates them in. A group created after the first pass (a target returned again, or for the first time) is restacked through the host's `resourcesChanged`, called from inside the pass: during that call every instance reports its targeted layers alone, so the host puts the targeted layers on each pane back in study order, each study's in the order above, and moves nothing else. The runtime republishes no study's bar colours during that call, since study order has not changed. A study's own layer created on a later pass is never restacked, and neither is anything of a study that names no target, even when another study routes on the same pass: it stays where it landed, exactly as before targets. Marks with no target keep `markerAnchor` and the first plot byte for byte. An overlay group waits for a primary series. An unknown plot, or `plot` together with `overlay: true`, throws before any marker layer changes, and so does an invalid style on any mark: `addIndicator` throws, and a later pass publishes an error status while every marker layer keeps the last good pass. The rest of the pass is not rolled back: a pass syncs plots and fills, markers, the table, drawings, then background, bar colours, levels and alerts, so outputs before the failing one stay applied and those after it wait for the next good pass. Marks in groups on different series (the candles and a plot, or two plots) do not stack against each other at a shared bar: each is measured against a different value.
 
 ```ts
 markers: ({ bars, values }) => crossings(values.momentum).map(i => ({
@@ -966,12 +967,13 @@ mutate or leak, and a symbol change cannot strand a drawing.
 Every `IndicatorDrawing` also accepts the `IndicatorOutputTarget` fields. With neither set the shape
 stays in the study's own layer on its first local plot's scale, exactly as before.
 
-- `overlay: true` draws the shape on pane 0 in the instrument's units, measured on the scale that
-  pane quotes prices on (`PrimitiveRenderContext.readoutPriceScale`: its first visible price series,
-  the candles, on whichever axis or overlay scale that is). It is read from pane 0 itself, so a host
-  that puts its candles on another pane gets pane 0's own scale, never a scale from another pane. The layer binds no scale, so it
+- `overlay: true` draws the shape on the price pane (in whatever slot it sits) in the instrument's
+  units, measured on the scale that pane quotes prices on (`PrimitiveRenderContext.readoutPriceScale`:
+  its first visible price series, the candles, on whichever axis or overlay scale that is). It is read
+  from the price pane itself, so a host that puts its candles on another pane gets the price pane's own
+  scale, never a scale from another pane. The layer binds no scale, so it
   never reserves an axis column and never stops `movePriceAxis` or `setSeriesPriceScale` from moving
-  the candles; the shape goes with them. It stays on pane 0 through `moveIndicator` and ignores
+  the candles; the shape goes with them. It stays on the price pane through `moveIndicator` and ignores
   whole-study scale moves.
 - `plot: key` draws it on that declared plot's pane and effective scale (per-plot assignment, then
   whole-study override, then descriptor, then `right`), and rebinds it when `setPlotPriceScales` or
@@ -1620,11 +1622,11 @@ import { ema, emaSeries, rsi, rsiSeries, atr, trueRange, supertrend, supertrendS
 | `rsi` | `(values, period = 14) => number[]` | Wilder. `NaN` for indices `< period`. |
 | `rsiSeries` | `(bars, period = 14) => Bar[]` | as above, plottable. |
 | `trueRange` | `(high, low, close) => number[]` | none; `tr[0] = high[0] - low[0]`. |
-| `atr` | `(high, low, close, period = 14) => number[]` | Wilder. First value at index `period - 1`. |
-| `supertrend` | `(bars, period = 10, multiplier = 3) => SupertrendPoint[]` | `{ value, direction }`; `value` is `NaN` during ATR warmup. `direction` `-1` = uptrend, `+1` = downtrend. |
+| `atr` | `(high, low, close, period = 14) => number[]` | Wilder. Seeds from the first `period` consecutive finite true ranges, so on complete data the first value is at index `period - 1`. A missing or overflowing true range is a `NaN` slot that keeps the average, and the next finite one resumes from it. A running overflow stays `NaN`; a fractional period gives only `NaN`. Finite complete-data values match `openalgo.atr` bit for bit. |
+| `supertrend` | `(bars, period = 10, multiplier = 3) => SupertrendPoint[]` | `{ value, direction }`; `value` is `NaN` during ATR warmup and on a bar with no ATR or no close, which leaves the bands, direction and last accepted close as they were. `direction` `-1` = uptrend, `+1` = downtrend. |
 | `supertrendSeries` | `(bars, period, multiplier) => { up: Bar[]; down: Bar[] }` | inactive leg carries `NaN` so the line breaks at flips. |
 
-The tier exports the pure helpers from `src/indicators/calc.ts`, including `sma`, `wma`, `rma`, `stdev`, `highest`, `lowest`, `nulls`, `connorsStreak`, `rollingSum`, `correlation`, `pivotHigh`, `pivotLow`, `barsSince` and `valueWhen`. Read each signature before composing it; these helpers do not all return the same shape. `nulls` converts `NaN` to `null` for a plot column. Default scalar `sma` sums each finite current window independently, so expired gaps or overflow cannot poison later windows.
+The tier exports the pure helpers from `src/indicators/calc.ts`, including `sma`, `wma`, `rma`, `stdev`, `highest`, `lowest`, `nulls`, `connorsStreak`, `rollingSum`, `correlation`, `pivotHigh`, `pivotLow`, `barsSince` and `valueWhen`. Read each signature before composing it; these helpers do not all return the same shape. `nulls` converts `NaN` to `null` for a plot column. Default scalar `sma` sums each finite current window independently, so expired gaps or overflow cannot poison later windows. `correlation` takes two passes over each window, oldest first, finishing both means before any deviation, so it keeps its precision at high price levels where a single-pass sum of squares cancels; a window with a missing value or an overflowing step is `NaN`, and so is a flat window whose deviations are all exactly zero (three bars of 5). A flat window whose mean is inexact reads what the arithmetic gives, as in the companion scripting language: three bars of 0.1 average to slightly more than 0.1, so the reading is exactly 0 against a bar index (Trend Strength Index) and within rounding of 0 against another series. Do not treat a finite `correlation` as proof that a window moved.
 
 The tier also exports every descriptor by name in SCREAMING_SNAKE form (`RSI`, `MACD`, `HALFTREND`, ...), the per-family arrays (`OVERLAY_INDICATORS`, `OSCILLATOR_INDICATORS`, `VOLATILITY_INDICATORS`, `FLOW_INDICATORS`, `ADAPTIVE_INDICATORS`, `AVERAGE_INDICATORS`, `STRENGTH_INDICATORS`, `INDEX_INDICATORS`, `RANGE_INDICATORS`, `SIGNAL_INDICATORS`), and the flat `BUILTIN_INDICATORS`. Read `BUILTIN_INDICATORS` rather than hard-coding a list of ids.
 
@@ -1745,6 +1747,49 @@ of history; skip mode holds the last finite extreme. Crossings require two adjac
 finite pairs by default; skip mode compares the current pair with the latest jointly
 finite pair. Rising and falling exclude the current bar from their history window.
 All predicates return false when the current observation is missing.
+
+## Numerical contract with the companion scripting language
+
+The built-ins are compared cell by cell with the companion scripting language.
+Thirteen differences are documented choices that stay as they are; the website
+indicators page (Numerical contract) and `docs/reference-coverage/numerical-audit.md`
+state each one with the studies and cells it affects. What a downstream author
+needs from them:
+
+- **Extremes skip a missing bar (K1).** `highest`, `lowest`, `highestBars` and
+  `lowestBars` without options report the extreme of the present bars. Pass
+  `{ missing: 'propagate' }` when a window with a gap must have no reading.
+- **No volume is no trade (K2).** Every built-in reads an `undefined` volume as
+  zero traded, and money-flow studies count a missing price as no flow.
+- **CCI reads 0 on a flat window (K3)**, and only there: a window holding a
+  missing bar or an overflowing deviation has no reading.
+- **One bar early (K4):** Supertrend on its ATR seed bar, PVT on bar 0 and
+  Choppiness from its first high-low range.
+- **Last-bit only (K5, K6, K7):** host `Math.exp` and `Math.log` in ALMA,
+  Choppiness and Fisher; percent Historical Volatility and per-bar scaled Ease
+  of Movement; the one-step Aroon Oscillator.
+- **Parabolic SAR (K8)** clamps its stop to the previous two bars and includes
+  the reversal bar; the language stop is the unclamped recurrence.
+- **Overflow (K9)** near 1.8e308 follows IEEE infinities; **negative zero (K10)**
+  can appear in Chop Zone and Net Volume, so compare with `=== 0`.
+- **Klinger (K11)** skips a bar with a `NaN` volume and reads `undefined` as
+  zero.
+- **RVI warmup (K12).** The Relative Volatility Index's two averages restart
+  after every missing value until the standard deviation has its first reading,
+  as they always have, so complete data reads unchanged at every Length. After
+  that a missing close is held across. The language also holds a seed made
+  inside the warmup, so above Length 16 its first reading can come earlier.
+- **PVO signal (K13)** restarts after a stretch where the slow volume average
+  is exactly 0 (the SMA oscillator over a window with no volume); the language
+  would hold it.
+
+A `NaN` volume has no single rule yet. It reads as zero (like `undefined`) in
+Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index,
+Net Volume, VWMA, MA Ribbon's VWMA lines, NVI, PVI, PVT, PVO, OBV (with its
+smoothing and bands) and A/D; and as a missing bar that the study recovers from
+in Volume, MFI, Klinger, AlphaTrend, the VWMA smoothing of CCI and RVI, and
+VWAP with its bands, whose running totals leave that bar out. Map missing or
+unparseable feed volume to `undefined` before it reaches the chart.
 
 ## Grouped descriptor exports
 

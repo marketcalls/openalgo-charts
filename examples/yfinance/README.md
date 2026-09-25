@@ -164,6 +164,22 @@ request's `Accept-Encoding` lists `gzip` with a non-zero quality; every JSON
 response carries `Vary: Accept-Encoding`. A history body goes to about a
 quarter of its size on the wire.
 
+**Quotes and news.** Two more endpoints feed the Watchlist and News panels, and only
+with `--fixture`. This server has no live quote or news source, so without the flag
+both answer 501 `not_available` rather than making a quote up from the last bar.
+
+```
+GET /api/quotes?symbols=AAPL,RELIANCE.NS          (at most 50, each passing the symbol rule)
+GET /api/news?symbol=AAPL&limit=20&cursor=<the previous page's nextCursor>
+```
+
+A quote is `{ symbol, exchange: "", last, previousClose, bid, ask, volume, time }`; an
+instrument the source does not know is left out of the answer, never answered with
+zeros. A news page is `{ items: [{ id, headline, source, time, summary, url? }],
+nextCursor }`, newest first, with `nextCursor` null on the last page. Both are
+`no-store`. A bad `limit` (1 to 50) is 400 `bad_limit`, a cursor that is not one of
+this server's is 400 `bad_cursor`.
+
 **Log line.** One line per request on stderr, `time client method path status
 bytes ms`, so a slow symbol or a 4xx storm is visible without a debugger.
 `--quiet` turns it off.
@@ -206,12 +222,31 @@ without breaking a network:
 The case does not matter (`fail` works too). Every other symbol that passes
 the validation rule gets bars.
 
+One more symbol, `BANDED`, is an instrument with a price-dependent tick
+schedule. Its bars move around 100 and every price lies on a 0.01 grid below
+100 and a 0.05 grid from 100, the synthetic rules `src/ticks.js` hands the
+library as host-supplied metadata. Neither the server nor the library treats
+these rules as a default for anything else.
+
+Quotes and news are deterministic too. A quote is the fixture level at its own
+two-second step, not the close of the last bar, with the previous weekday's
+session close as its reference. News arrives on a per-symbol schedule, about three
+stories in five 90-minute slots, 60 slots deep; the cursor names a slot, so older
+pages do not move with the clock. One headline template carries `<b>` markup and a
+`javascript:` link on purpose: the reader must show the first as text and refuse
+the second. `FAIL` and `BUSY` answer news with their errors and `EMPTY` with an
+empty page; all three are left out of quote answers.
+
 `python server.py --self-test` starts a fixture server on a free port in the
 process and checks the contract above: the bar shape and grid, determinism
 across two server instances, every validation and error path, that a bug in
 the source is a 500 with no traceback in the body, the cache and gzip
 headers, static serving, the log line, and that shutdown returns promptly and
-frees the port.
+frees the port. It also checks the quote and news endpoints: unknown symbols left
+out, quotes that are a pure function of symbol and step and differ from the last
+bar's close, news pages that follow the cursor to the end without repeats or
+clumped headlines, the markup and script-link item, validation, and the 501 answer
+without `--fixture`.
 
 ## Layout
 
@@ -243,6 +278,8 @@ examples/yfinance/
     volume.js         volume visibility and the symbol legend row
     bracket.js        the bracket panel: entry, target and stop pills
     orders.js         resting orders, market fills, the net position, trade state
+    ticks.js          host instrument metadata with a tick schedule: snapping and the tick in force
+    account.js        the sandbox broker: account figures and selection, preview, durations, native close, reverse and brackets
     indicators.js     the indicator picker and the generated settings form
     indicator-input-controls.js typed field validation, symbol search and chart picking
     indicator-source.js the opt-in sample and chart-owned read-only source dialog
@@ -255,7 +292,7 @@ examples/yfinance/
     split.js          the linked second chart and its divider
     link.js           the link-group switches
     clipboard.js      the drawing clipboard and its chords
-    menus.js          the right-click menu (including Collapse pane), the price-axis menu, the popup menu
+    menus.js          the right-click menu (including Move pane up/down and Collapse pane), the price-axis menu, the popup menu
     session-marks.js  host-owned price marks: read-only, never saved, not listed
     toolbar.js        the shell bar, chart types, chart-only full screen
     rail.js           the drawing rail: groups, pins, magnet, stay mode, selection controls, keyboard
@@ -270,7 +307,7 @@ examples/yfinance/
     workspace-host.js  reference chart ownership, pending guards and transition wiring
     workspace-catalog.js  named saves, revision conflicts, autosave ownership and storage recovery
     workspaces.js     named-layout dialog, startup selection, autosave and portable files
-    grid.js           the grid view's start-up: presets, links, import and export
+    grid.js           the grid view's start-up: presets, links, import and export, panels
     grid-view.js      the grid view's feed adapter, layout hand-off and document helpers
   tests/              vitest specs for the modules that can run without a browser
   vitest.config.ts    the config those specs run under (see Tests)
@@ -317,6 +354,11 @@ chart is a complete widget with its own top bar, loading status and retry.
   preset copies the active chart's period to the charts it adds. The grid writes
   the periods back into its saved layout and exports. No older history is paged,
   since the server answers by period.
+- Each chart's top bar opens the Watchlist and News panels in its own dock, through
+  the widget's `watchlist` and `news` options, which the grid passes to every chart.
+  They share the main page's list store, one quote poll for every visible row and
+  the same `/api/news` source; choosing a row charts it in that chart, and the symbol
+  link carries it to the others when it is on.
 - Import accepts a portable workspace document or payload whose charts use those
   intervals (`1wk` from the main page opens as `1w`) and periods the server knows.
   It is validated in full, then applied all at once; on failure nothing on screen
@@ -445,15 +487,17 @@ exists to show one engine surface carrying real use, not just being present.
 | `volume.js` | Volume rides an overlay price scale (`priceScaleId: ''`) inside the price pane, pinned to the bottom fifth, so the right-hand axis stays a clean price ladder. It hides and shows from the legend eye and the right-click menu, and the choice survives a reload and a chart-type switch. |
 | `status.js`, `axis-chrome.js`, `timezone.js` | The status line, the clock and the countdown are fed by the host: venue, session hours by IANA zone (never a fixed offset), and long names. The chart zone is a runtime setting the demo carries across a rebuild. |
 | `orders.js`, `bracket.js` | Chart trading: right-click for single orders, Buy and Sell brackets with OCO target and stop, drag any line to re-price it, and per-symbol trade state that survives a symbol switch. |
+| `ticks.js` | Price-dependent ticks supplied by the host. Load `BANDED` in fixture mode: it trades around 100 with a 0.01 tick below 100 and a 0.05 tick from 100 (synthetic rules, not any venue's). Right-click prices, dragged order lines, market fills and every bracket leg snap to the band they land in, the status line names the tick in force, and a bracket exit stays one tick of its own band from the entry as it crosses the boundary. The rules are `InstrumentMetadata` with `tickBands`, validated by `Instrument` before anything snaps to them, and the price axis takes the instrument's `priceTick`, the grid both bands lie on. Every other symbol keeps two-decimal order prices. |
+| `account.js` | The Account button opens a sandbox broker: the trade tier's `OrderEngine` and `AccountManager` against a `FakeBroker` with account ledgers, in analyzer mode. The widget tier's account summary shows the selected account's equity and margin and switches account; a live account the provider also offers is never listed. Place stays disabled until that exact ticket is previewed, durations (DAY, IOC, GTC, GTD with an expiry) and leverage are sent only because the provider declares them, and Close, Close part, Reverse and Place bracket are the provider's own commands, never an opposite order. Drop connection marks the figures stale; Reconnect reads the provider's order history for every account the panel has written to and settles every write from it (a lost answer by the token the provider echoes, a write the history never mentions released), so the legs of a bracket whose entry has filled stay live orders, before reading the account again. These orders are separate from the page's own simulated orders. |
 | `replay.js`, `replay-timing.js` | One replay transport drives the captured chart or all captured charts from a shared availability clock. Scope controls appear in the picker and transport. Finer history uses separate request slots and each chart's captured instrument, interval and timezone. Cancellation discards late responses; exit restores data and viewports. A coarse candle appears only when complete, or forms from a contiguous prefix of finer observations. Missing finer history has a visible completed-candle fallback. |
 | `compare.js`, `split.js`, `link.js` | Each selected chart owns its comparison symbols, scale mode, hidden rows and history requests. Each source has an independent scale, rebased at the first visible timestamp shared by all visible sources. Missing overlap shows "No common starting bar" and draws gaps. Replay readouts withhold forming comparison closes. The dialog retains its owner across focus changes; changing or closing a chart cancels stale loads. Source failures remain visible with Retry. The linked second chart has independent switches for crosshair, viewport, symbol and interval. Interval sync is off by default. |
 | `drawing.js`, `rail.js`, `rail-flyout.js` | The 2.0 drawing model from the host's side: the controller, the tool picker built from `BUILTIN_DRAWING_TOOLS` with the tier's own icon sprite and cursors, keyboard chords from `drawingShortcuts()`, and a rail whose flyouts and tooltips are host chrome built from the shipped glyphs. The toolbar's Del, Clear, Undo and Redo are off whenever pressing them would do nothing: Del and Clear leave read-only drawings alone, and Undo and Redo follow the controller's `canUndo()` and `canRedo()`. |
-| `properties.js` | The floating properties bar is generated from `drawingSettingsSchema`, which declares only the fields a tool's `draw` reads: a field in the schema is a control with something behind it, a field absent from it is a control not shown. With several drawings selected it edits the fields their schemas share, as one undo entry. A read-only selection shows "Read-only" and a Duplicate button instead of controls the controller would refuse. |
+| `properties.js` | The floating properties bar is generated from `drawingSettingsSchema`, which declares only the fields a tool's `draw` reads: a field in the schema is a control with something behind it, a field absent from it is a control not shown. With several drawings selected it edits the fields their schemas share, as one undo entry. A read-only selection shows "Read-only" and a Duplicate button instead of controls the controller would refuse. For text, rectangle, ellipse and table the schema's `space` field becomes a pin toggle: pinned, the drawing keeps its place on screen through pan and zoom and scales with the chart, and unpinning puts it back on the bars under it. The bar and the inline text editor place themselves by `draw.screenPoints(id)`, since a pinned drawing has no time and price to map. |
 | `session-marks.js` | Drawing policies from the host's side. **Mark ... for This Session** in the right-click menu places a dashed price line with `policy: { editable: false, persistent: false, listed: false }`. Select it to read it, copy it, duplicate it into your own drawing or raise an alert from it; it cannot be dragged, nudged, restyled, cut or deleted, undo does not remove it, it is left out of saved layouts and it is absent from the Objects dock. The host keeps the marks per symbol for the life of the page and puts them back, with their ids, after every chart-type switch, reload and layout restore. **Clear Session Marks** removes them with `removeMany(ids, { force: true })`, the one call in the host that overrides the policy. |
 | `clipboard.js` | One in-memory clipboard shared by both charts' controllers, so copy here and paste there works even when the browser refuses the OS clipboard; the OS read is bounded so a paste never hangs on a permission popup. |
 | `level-editor.js` | A ladder tool's levels (retracement, extension, channel, fan, time zones, the Gann pair) edited one row each: enable, ratio, colour, label, add, remove, reset. Every edit is one undo entry through the controller. |
 | `text-editor.js` | Inline text editing over the painted text, sized by the same rules the text tool paints with, with every pointer and key event stopped at the box so the chart under it does not pan. |
-| `menus.js`, `toolbar.js`, `hover.js` | Host chrome to the standard in `CLAUDE.md`: styled scrollbars, no native form controls on a dark panel, real tooltips that flip inside the window, and dialog furniture in one arrangement. The right-click menu over a lower pane offers **Collapse pane** and **Expand pane** (`chart.setPaneCollapsed`), on either chart of a split. |
+| `menus.js`, `toolbar.js`, `hover.js` | Host chrome to the standard in `CLAUDE.md`: styled scrollbars, no native form controls on a dark panel, real tooltips that flip inside the window, and dialog furniture in one arrangement. The right-click menu offers **Move pane up** and **Move pane down** over any pane (`chart.movePane`, the price pane included) and **Collapse pane** and **Expand pane** over a study pane (`chart.setPaneCollapsed`), on either chart of a split. |
 | `snapshot.js` | `chart.takeScreenshot()` saved as a PNG or copied to the clipboard, with chart branding, an enabled watermark and the replay mark in the image because they are on the canvas. |
 | `pane-target.js` | Captures the selected chart and request for host actions. A menu cannot act on a rebuilt chart or changed instrument, and asynchronous image export retains its original filename. |
 | `persist.js` | A versioned layout document with migrations, quarantine instead of deletion, memory-only degradation when storage refuses a write, and export and import as a file. An imported file, here or in the Layouts dialog, loses every drawing `policy`: a policy is a host's restriction on its own drawings, and one arriving in a shared file would plant a drawing no control here could remove. See the next section. |
@@ -465,6 +509,7 @@ exists to show one engine surface carrying real use, not just being present.
 | `chart-data-controls.js` | Capture a study checklist and visible time bounds, validate custom UTC bounds, and choose source or display alignment before download. |
 | `alerts.js` | The Alerts toolbar button opens the focused chart's lifecycle list and source editor. Price, study plots, supported drawing levels and registered candle conditions use the same controls as the packaged widget. Local notices display fired events; the demo does not send notifications or orders for an alert. |
 | `timeline.js` | The Events menu enables labelled sample events, clustering and group visibility. Click a marker to read its details. These are demonstration events, not a company calendar feed. |
+| `market-panels.js` | The Watchlist and News buttons open the widget's panels in each chart's dock. Named lists live in IndexedDB through the workspace tier's `WatchlistRepository`, one store for both charts, with a first list on a first visit. Quotes come from `/api/quotes` only, through one shared poll for every visible row's stream; a failed poll reports the stream as reconnecting, so the rows go stale until the next good answer. An arithmetic symbol has no quote and shows `n/a`. The watchlist sort sits in `localStorage` under the `yfinance-panels` namespace, so it survives the dock rebuild every symbol load causes. News pages come from `/api/news` with the server's cursor. Without `--fixture` the endpoints answer 501. The first 501 is the page's only quote request: from then on the quote source answers every snapshot and poll with that error itself, each row shows `n/a`, and the status line reads "Quotes disconnected." with no claim about values shown. The news panel shows the server's message. |
 
 ### Analysis and linking in 2.5.2
 
@@ -685,7 +730,8 @@ A 1.x page used `oa-charts-layout`; that key is upgraded, moved, and removed on 
 
 **Schema version.** The document carries `schema: 2` (`LAYOUT_SCHEMA` in
 `src/persist.js`). Inside it ride two versions the demo does not own: the
-engine's `version` (`CHART_STATE_VERSION`, what `chart.getState()` produced)
+engine's `version` (what `chart.getState()` produced: 1, or 2 when the price pane
+was moved below its studies; `CHART_STATE_VERSION` is the newest this engine reads)
 and, under `drawings`, the draw tier's document with its own `version`
 (`DRAWING_STATE_VERSION`). The demo's number says what shape the wrapper is;
 the engine's numbers say what shape the parts are.
@@ -842,3 +888,26 @@ The price pane is never offered the row, and collapsing the bottom pane leaves
 the time axis at the foot of the chart. The choice is per chart and survives
 reloads and named-workspace restoration. This is not the compact study legend
 above, which hides legend rows and leaves every pane open.
+
+### The price pane below the studies
+
+Right-click the price pane and choose **Move pane down** (or a study pane and
+**Move pane up**) to read the studies first and the price last. The candles
+take their volume, the symbol row, the moving averages drawn on them, order and
+bracket lines, price alerts, session marks and drawings with them; the price
+ladder chords, the order menu and the price alert row follow the price pane
+wherever it sits (`chart.primaryPaneIndex()`), and so does a template applied
+to the chart. The price pane never folds, in any slot. The arrangement is per
+chart and survives a chart-type switch, reloads and named-workspace restoration
+(it is saved as a version 2 chart state). A drawing copied beside the candles
+pastes beside the candles on either chart, wherever each keeps its price pane.
+
+The engine keeps the price pane pinned on top unless a chart is built with
+`movablePrimaryPane: true`, which both of this host's charts are (`main.js`,
+`split.js`), and so is every chart of its grid view (`grid.js`); the widget
+leaves the option off unless a host passes it. That option is a promise that
+nothing in the host passes pane `0` to mean the price pane: this host names no
+pane or asks `primaryPaneIndex()` for its order and price lines, volume,
+legends, price levels, replay marks, session marks, alert and order rows and
+axis chords, keeps `primaryPane` in its named-workspace allowlist, and forwards
+`plan.primaryPane` when it applies a template.

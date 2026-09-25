@@ -2,6 +2,371 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.5.5
+
+2026-09-26
+
+### Added
+
+- The price pane can move below its studies, on a chart that opts in with the
+  new `movablePrimaryPane` option. Moving it is opt-in in both the chart and
+  the widget: `createChart`, `createWidget` and `createChartGrid` all leave the
+  option off, and for a host that does not opt in nothing about the price pane
+  changes. It stays at slot 0 exactly as in 2.5.4: `movePane` refuses to move
+  or displace it (so the up control on the first study pane still does
+  nothing), `setPrimaryPaneIndex` returns false, `restoreState` refuses a
+  layout that moved it, and an explicit pane 0 still means the price. It is
+  opt-in because a host that passes an explicit 0 to mean the price pane (a
+  price or order line, `coordinateToPrice(y, 0)` pricing a right-click order,
+  a price alert check, `panes()[0]`) would otherwise read a study's units,
+  order prices included, the moment a user moved a study above the candles.
+  Before turning it on, drop those zeros or ask `chart.primaryPaneIndex()`, and
+  follow `paneMoved`; read the option back with `chart.movablePrimaryPane()`.
+- With the option on, the price pane is an identity rather than slot 0:
+  `chart.primaryPaneIndex()` reads the slot it holds, and
+  `chart.setPrimaryPaneIndex(index)` moves it there one `movePane` step at a
+  time, one `paneMoved` event per step. `movePane` moves the price pane like any
+  other pane, and a study pane can displace it. Everything that meant "the price
+  pane" follows it: `addSeries`, `addPriceLine`, `addEventMarkers`, `setEvents`,
+  `addPrimitive` and `tradeHost` with no pane; `priceToCoordinate`,
+  `coordinateToPrice`, `priceAxisState` and `priceAxisLayout` with no pane;
+  `priceScaleOptions()`; on-chart studies and every `overlay` plot, band, table,
+  price-anchored mark and the instrument tick a study's `calc` sees;
+  comparisons, whose handle `paneIndex` now follows its pane; price alerts and
+  drawing alerts; the drawing magnet; drawing copy and paste; a drawing link
+  between charts that keep their price panes in different slots; the magnet
+  crosshair, a scale-targeted pick and the `panUp` / `panDown` keys. The legend
+  offset, the study count and the background text sit on the price pane (the
+  new primitive anchor `'primary-pane'`); the time navigator and the brand mark
+  stay on the bottom open pane. The price pane is never removed and never
+  collapses, in any slot, so a chart always keeps one open pane; a study pane
+  moved above it folds, maximizes, prunes and carries its pane controls like
+  any other.
+- A moved price pane is saved. `getState()` writes version 2 with `primaryPane`
+  only when the price pane is not on top, and writes every other layout as
+  version 1, unchanged, so an older reader still opens it and refuses a moved
+  one rather than laying the price pane's settings on a study pane.
+  `CHART_STATE_VERSION` is now 2. A layout without `primaryPane` restores with
+  the price pane on top; a slot that names no saved pane, a `primaryPane` in a
+  version 1 state, and a moved slot on a chart without the option are refused
+  before anything is applied. Workspace documents accept a version 2 chart and
+  refuse `primaryPane` on version 1. Portable templates are written price pane
+  first, so they apply the same way whichever slot the price pane holds;
+  `planIndicatorTemplateState` keeps the destination's price pane in place and
+  returns `primaryPane` for the restore, and `planIndicatorTemplate` takes the
+  destination's price-pane slot as an optional sixth argument.
+- `createWidget` and `createChartGrid` take the option and hand it to their
+  charts as given, off unless the host passes `movablePrimaryPane: true`. Only
+  the host knows whether its own code on `widget.chart` still passes 0 for the
+  price, such as a volume histogram added with `paneIndex: 0`, so the widget
+  does not decide for it. The widget's right-click menu moves the pane under
+  the pointer up or down (`pane-up`, `pane-down`): study panes on every widget,
+  and the price pane as well on a widget that opted in. A row that has nowhere
+  to go is greyed, and so is a row that a pinned price pane refuses, with the
+  note "price pane stays on top". The Objects panel names the price pane in its
+  pane headings and its move targets wherever it sits
+  (`ChartObjects.primaryPaneIndex()`). The reference host opts in on both charts
+  of its main page and in its grid view, so a layout either one saves opens in
+  the other, and it offers the same rows on both right-click menus. The widget
+  and the reference host keep the collapse row off the price pane in every slot
+  and forward the price-pane slot when applying a template.
+- Price-dependent tick schedules. `TickSchedule` validates an ordered list of
+  `TickBand`s: the first band covers every lower price, zero and negative prices
+  included, each later band starts at its inclusive `from`, and every boundary must
+  be a multiple of the ticks on both sides, so a boundary is itself a valid price.
+  Invalid bands throw `Invalid tick schedule: ...` naming the band. `round` returns
+  the nearest valid price as an exact decimal (a written halfway price rounds up),
+  `tickAt` gives the upper band's tick at an exact boundary, `step` moves whole ticks
+  across boundaries, and `minMove` is the common grid of every band.
+  `InstrumentMetadata.tickBands` carries a host-supplied schedule; `priceTick` must
+  then equal its `minMove`, which `applyTo` gives the price scale, and
+  `instrument.tickSchedule` is the validated schedule (null for a constant tick, which
+  keeps its one `priceTick` rule). `OrderConstraints.tickSchedule` makes
+  `validatePrice`, `OrderEngine.placeOrder` and `OrderEngine.requestModify` snap each
+  price in its own band before checking price limits, and
+  `orderConstraintsForInstrument` fills it from `tickBands`.
+  `chart.trading.setTickSchedule` snaps dragged order and bracket lines and the
+  `newPrice` their modify events carry; it refuses anything but a `TickSchedule` or
+  null. `applyTo` hands the trading layer the instrument's schedule, including a layer
+  built later, and a constant-tick instrument clears the previous one on a symbol
+  switch. `DomLadder` takes a `tickSchedule` option and `buildRows` a schedule in place
+  of the tick size, so a ladder across a boundary shows the prices each band allows
+  and groups whole ticks of that band (a fractional `groupBy` rounds down). Without a
+  schedule every path is unchanged: constant `tickSize` snapping and ladder rows, the
+  same constraints object for a constant-tick instrument, and raw pointer prices from
+  `chart.trading`. No venue's schedule ships as a default. The reference host's
+  fixture server adds a synthetic `BANDED` instrument (0.01 below 100, 0.05 from 100),
+  described as instrument metadata, whose right-click orders, dragged order lines,
+  market fills and bracket legs snap in the band they land in.
+- Drawings pinned to the screen. A drawing's `space` is `'data'` (time and price,
+  the default, never written out) or `'viewport'`, whose anchors are
+  `viewportPoints`: `{ x, y }` fractions of the plot of the pane that holds the
+  drawing, from its left edge to its right edge and from the top of the pane to
+  the bottom of its plot. Pan and zoom leave a pinned drawing where it is, a chart
+  resize keeps it in proportion, and it paints and hit-tests at any device pixel
+  ratio. It is edited natively (body drag, handle drag, nudge, undo) and follows
+  its pane through a move, a separator drag and a collapse. Its whole box, not only
+  its anchors, is kept on the plot at every edge, through every gesture, at any
+  device pixel ratio and after a resize, so a note or a table laid out from one
+  corner, or a box or an ellipse with its label above it, can always be seen and
+  grabbed; a custom tool that paints beyond its anchors declares the new
+  `DrawingTool.bounds`. Pinning a drawing that is off the
+  plot, or larger than it, brings it onto the plot, and the magnet does not pull
+  while a pinned drawing is placed. Text, rectangle, ellipse and table declare the
+  new `DrawingTool.viewport` flag; tools that print prices, point at a bar or
+  compute from bars stay in data space. `draw.update(id, { space })` converts at
+  the view on screen as one undo step, `setTool(id, { space: 'viewport' })`
+  places a pinned drawing, `activeToolSpace()` reports the armed space and
+  `screenPoints(id)` gives any drawing's anchors in container px for host
+  overlays. `update` returns false when a change of space cannot be made (a pane
+  folded or hidden), and the widget's Anchor row and the reference host's pin
+  toggle say why. `draw:tool` carries
+  `space: 'viewport'` while a tool is armed for the viewport. The settings schema offers the choice as `SPACE_FIELD` over
+  `SPACE_OPTIONS`, so the widget's drawing properties show an Anchor row and the
+  reference host's properties bar a pin toggle, both only for those four tools;
+  the widget and reference host text editors open over a pinned note. Saves stay
+  version 2 and a layout with no pinned drawing is byte for byte unchanged; the
+  clipboard carries the fractions, so a paste lands at the same place on a chart
+  of any size. Drawing links never share a pinned drawing, and pinning a shared
+  one takes it out of the link on that chart only; undoing the pin joins it
+  again. New types: `DrawingSpace`,
+  `ViewportPoint`, `DrawingPlacementOptions`.
+- Named watchlists. `WatchlistRepository` in `openalgo-charts/workspace` keeps named
+  symbol lists keyed by the exact symbol and exchange pair, so one ticker on two
+  venues is two entries and nothing is case-folded. Lists are created, renamed,
+  duplicated, removed and reordered through queued, revision-checked writes: each
+  change applies to the catalog as stored, a position-based change can name the
+  revision it was computed from, and a write that loses a race across tabs raises
+  `WatchlistConflictError` without replacing anything. `createIndexedDbWatchlistStorage`
+  commits in one IndexedDB transaction, `createMemoryWatchlistStorage` serves tests
+  and previews, and corrupt storage is reported rather than overwritten. The panel
+  takes the narrower `WatchlistStore` contract (the repository without
+  `duplicateList`), which a server-backed store can implement directly.
+- Optional quote and news contracts beside `DataFeed`: `QuoteFeed` (snapshots and
+  per-instrument streams with `connecting`, `live`, `reconnecting` and `disconnected`
+  states) and `NewsFeed` (cursor pages of plain-text items). They are types only in
+  the base entry. A quote comes only from a `QuoteFeed`, never from a bar's close.
+- Watchlist and News panels in the widget's panel dock, beside Data and Objects, with
+  top bar and mobile More entries, shown only when the host supplies `watchlist` or
+  `news`. Watchlist rows update live, subscribe only while on screen, and release
+  their streams on a list switch, a hidden page, closing the panel and `destroy`.
+  Sorting by symbol, last, change or percent change is stable, sinks unknown values,
+  holds row order while the pointer or focus is on the rows and outlives a panel
+  switch. Alt+Arrow moves save one at a time. Quotes held through a reconnect, or past
+  `staleAfterMs` for a snapshot-only source, are shown as stale, with one timer for
+  the next row to age and none once nothing can, and a reconnect refetches snapshots.
+  In the widget a row names the upper-cased instrument `setSymbol` charts, through the
+  panel's `normalize` option. The news reader follows the chart instrument,
+  pages older items by the provider cursor, drops repeats, reports empty, error and
+  stale states, cancels on a switch, and opens only http and https links with
+  `noopener` and `noreferrer`; provider text is never rendered as markup. The
+  DOM-free `QuoteBoard` and `NewsReader`, `mountWatchlistPanel`, `mountNewsPanel`,
+  `safeNewsUrl` and `quoteChange` are exported for custom hosts, and
+  `widget.openWatchlist()` and `widget.openNews()` open the panels.
+- The yfinance reference host shows both panels in its dock and in every chart of its
+  grid view, with lists in IndexedDB and the watchlist sort in `localStorage`.
+  Its server's `--fixture` mode answers `/api/quotes` and `/api/news`
+  deterministically, including an unknown instrument, a markup headline and a script
+  link for the reader to refuse; without `--fixture` both answer 501, since the
+  server has no live quote or news source, and the page asks for quotes once.
+- Account state in the trade tier. `AccountManager` lists a provider's accounts
+  for one mode, loads the selected account's balance, equity, margin used and
+  available, P&L and leverage, follows its stream, and reads its positions,
+  executions and order history, dropping and counting rows that name another
+  account (a position names one through the new optional `Position.accountId`
+  when the provider stamps it). Switching accounts aborts the old account's
+  requests and stream, so a late answer is never shown under the new name; a
+  pushed reading older than the one on screen, a snapshot from the other
+  ledger, and a non-finite figure are all refused. A dropped connection keeps
+  the last figures marked stale until `reconnect()`. It never writes.
+- Declared newer operations. `TradingFeatures` (`accounts`, `executions`,
+  `orderHistory`, `preview`, `durations`, `leverage`, `close`, `partialClose`,
+  `reverse`, `brackets`) on `OrderFeed.features`, checked with
+  `checkTradingFeature`. Unlike the place, modify and cancel flags, an omitted
+  feature is unsupported, and every refusal names the feature.
+- `PlaceRequest.account`, `duration` (`DAY`, `IOC`, `FOK`, `GTC`, `GTD`),
+  `expiresAt` and `leverage`, checked before and after confirmation and never
+  dropped on the way to the wire. With `selectedAccount`, the engine stamps the
+  selected account on each order, refuses one naming another account, and
+  sends nothing when the account changes while the user is confirming; an order
+  already in flight keeps its account. Given the account view itself
+  (`selectedAccount: accounts`), it also refuses a selection from the other
+  ledger, so a sandbox engine never stamps a live account on an order.
+- `OrderEngine.previewOrder`: the provider's estimated value, margin and
+  refusal reason for an order, without claiming its token or placing it.
+- Provider-native `closePosition` (whole or partial), `reversePosition` and
+  `placeBracket`, each with its own idempotency token, its own feature and
+  `confirmCommand` approval when not armed. An opposite order is never sent in
+  place of a close. A close or reverse without a known outcome holds the
+  position against another, whether or not either names the exchange;
+  `onBrokerOrder` settles a write whose answer was lost through the client
+  token the broker echoes, `releaseAmbiguous` frees one the host has shown
+  never arrived, and a feed error marked `rejected: true` (`isBrokerRejection`)
+  settles as the broker's refusal. A bracket gives each
+  leg its own client token (`legClientTokens`), and `onBrokerOrder` adopts a
+  leg by that token or by its entry and role (`parentId`, `role`), so a bracket
+  whose answer was lost still has legs that can be cancelled and filled. A leg
+  that names an entry not yet bound (a history listed newest first, or legs
+  streamed before the entry's id comes back) is held until the entry binds, so
+  the broker's rows can arrive in any order.
+- `FakeBroker({ accounts })` simulates all of it: per-account ledgers filled at
+  a mark price, preview, `IOC`/`FOK` cancellation, `GTD` expiry, leverage
+  limits, native close, reverse and linked bracket legs, server-side refusals
+  (including a cancel or modify of an order that has already filled), and
+  hooks to hold, fail or lose any answer and drop the connection. A call
+  made while the connection is down fails as never sent (a pre-flight
+  failure), so the engine blocks it rather than holding it ambiguous; one
+  already out when it drops fails like a lost answer. Without `accounts` it
+  is otherwise unchanged and declares none of it.
+- Widget account summary. The `account` option shows the selected account,
+  an Analyzer tag for the sandbox ledger, equity and margin in the status line,
+  with a menu to switch; a source whose provider declares no accounts renders
+  disabled with the reason. `mountAccountSummary` and `ACCOUNT_SUMMARY_CSS`
+  are exported for custom hosts.
+- The reference host's Account button opens a sandbox broker panel: account
+  switching, preview-gated placement with durations and leverage, native close,
+  partial close, reverse and brackets, executions, and a dropped connection
+  whose Reconnect settles every write the panel sent from the order history of
+  every account it has written to, as the sandbox example on the examples page
+  does, so the legs of a filled bracket stay live across any number of
+  reconnects.
+
+### Changed
+
+- `CHART_STATE_VERSION` is 2, but `getState()` still writes 1 for a chart whose
+  price pane is on top. A host that checks a saved state against the constant
+  should refuse only a newer version (`version > CHART_STATE_VERSION`), as
+  `restoreState` does, not demand equality.
+- Drawings on the clipboard count their pane with the price pane first and the
+  study panes after it in order. On a chart that keeps its price pane on top,
+  which is every chart without the option, that is the slot it always was.
+- `OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and
+  `leverage` before any network call: OpenAlgo's placeorder has no such fields
+  and one key is one account.
+
+### Fixed
+
+- A restore now hands the drawing tier its drawings before it prunes the study
+  panes it emptied, so a drawing kept through a template swap shifts with the
+  panes instead of recreating a pane at its old slot. The saved drawings a
+  draw tier reads when it loads later are shifted the same way, by every pane
+  removal or move before it arrives. A drawing on a study pane that the restore
+  prunes (the pane of a study not registered where the layout opens, say) is
+  dropped with that pane, where 2.5.4 recreated an empty pane at its old slot
+  to hold it. This applies whether or not the host opted in.
+- The widget's right-click menu offered Buy and Sell limit and stop rows over a
+  study pane, priced from that pane's scale: an RSI reading of 58.75 became a
+  limit price. A study pane now offers the market rows only.
+- `onBrokerUpdate` on a row the client had written off as `AMBIGUOUS` (a lost
+  answer reads `rejected`, a row a reconnect snapshot missed reads `stale`) now
+  takes the broker's status. An order the broker reports working is live
+  again, so it can be modified and cancelled, and it is no longer pruned as if
+  it had settled. A row the broker reports as pending counts as accepted.
+
+### Calculations
+
+- ATR treats a missing or overflowing true range as a gap. It seeds from the
+  first `period` consecutive finite true ranges, keeps its average across a gap
+  and resumes from it. A missing high or low now costs the ATR its own bar, and
+  a missing close the next bar, whose true range reads it, instead of every
+  later bar. A running overflow stays unavailable rather than restarting.
+  Finite results on complete data are unchanged bit for bit, as is the public
+  signature, which keeps the parity with the OpenAlgo atr function. Keltner
+  Channels, Chandelier Exit, Chande Kroll Stop, Median, HalfTrend and
+  Volatility Stop inherit the correction. Volatility Stop no longer falls back
+  to the unmultiplied true range for the rest of the history after one gap,
+  though a bar with no true range still restarts its stop at the source, as its
+  reference definition does.
+- `supertrend` and the Supertrend study leave a bar with no ATR or no close
+  absent, with the bands, the direction and the last accepted close unchanged.
+  A missing close has a finite ATR on its own bar, and comparing it as NaN
+  always flipped the trend; with the ATR now resuming, the flipped bands would
+  have carried into every later bar. The band step reads the last accepted
+  close, so a skipped bar's close cannot reset a band either.
+- VWAP leaves a bar with a missing price, or a NaN or infinite volume, absent and
+  its running totals untouched. One such bar no longer blanks the line and all
+  six bands until the next anchor restart, which on the continuous anchor was
+  never. An undefined volume still counts as nothing traded, and an anchor
+  restart on a missing bar still happens.
+- TWAP skips a missing or nonfinite price and divides by the bars it counted, so
+  a gap costs its own reading rather than the rest of the session.
+- On-Balance Volume and Accumulation/Distribution read a NaN or infinite volume
+  as nothing traded, as the money-flow studies already did, instead of losing
+  the running total for the rest of the history. OBV's VWMA smoothing weights
+  with the same volume.
+- Accumulation/Distribution leaves a bar missing its high, low or close, or
+  whose span or term overflows, absent with the total unchanged. A missing
+  close with a finite range blanked the line for the rest of the history, and a
+  missing high or low passed for a doji and printed the carried total.
+- Parabolic SAR steps over a bar missing its high, low or close and leaves the
+  stop, trend and acceleration as they were. It seeds from the first two
+  complete bars and clamps against the two complete bars before each step. The
+  clamp and reversal conventions are unchanged.
+- TEMA adds `3 * ema1 - 3 * ema2 + ema3` left to right instead of regrouping it
+  as `3 * (ema1 - ema2) + ema3`. Readings change only in their last digits, and a
+  bar whose terms overflow is absent rather than finite by cancellation.
+- CCI has no reading on a window that holds a missing high, low or close, or
+  whose mean deviation overflows. It used to print 0 there for a whole window's
+  worth of bars, and the CCI-based average and its bands smoothed those invented
+  zeros. A genuinely flat window still reads 0.
+- Stochastic %K multiplies by 100 before dividing by the window range, the order
+  the definition fixes, so a reading can move in its last bit and %D follows. A
+  window whose range overflows has no reading instead of a flat 0, and neither
+  does one whose scaled distance overflows (above about 1.8e306).
+- Fisher Transform restarts both recursions on the bar after a missing midpoint,
+  as its documented rule says. The missing value used to enter the recursion and
+  leave the study blank for the rest of the history.
+- Relative Volatility Index and Mass Index hold their exponential averages across
+  a missing bar and resume on the next present one, instead of reseeding and
+  blanking the study for another 14 (RVI) or 9 (Mass Index) bars. The RVI's EMA
+  smoothing option follows the same rule. Inside the RVI's deviation warmup its
+  averages still restart as before, so complete data reads exactly as in 2.5.4
+  at every Length.
+- NVI and PVI hold their index across a missing close, as they already did after
+  a zero previous close, instead of losing the index and its average for the
+  rest of the history. Complete data is unchanged.
+- True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator multiply
+  the smoothed change by 100 before dividing, which can move readings in the last
+  bit. Above about 1.8e306 that product overflows and the bar is a gap, as in the
+  companion scripting language, where the former order still printed a reading.
+- Trend Strength Index and the exported `correlation` helper finish both window
+  means before forming any deviation, taking two passes oldest first. The former
+  single-pass sums cancelled at ordinary price levels: at 1e5 with 0.01 moves the
+  reading was about one percent off, and at 1e9 it had no value.
+- On a window of identical closes, Trend Strength Index and `correlation` read
+  what the arithmetic gives, as the companion scripting language does, so
+  availability there can differ from 2.5.4 in either direction. The window has
+  no reading when its deviations are all exactly zero, which happens when the
+  mean comes out exact: fourteen bars of 5, or of 0.1, where 2.5.4 printed
+  -1.2e-8. When the mean is inexact, as for three bars of 0.1 or fourteen of
+  2.01, the deviations are a few units in the last place and Trend Strength
+  reads exactly 0, where 2.5.4 printed nothing or its own residue (2.8e-8 for
+  fourteen bars of 2.01). Against a second series other than the bar index,
+  `correlation` reads within rounding of 0 there.
+
+On complete data ATR and the studies built on it, Supertrend, VWAP, TWAP,
+OBV, Accumulation/Distribution, Parabolic SAR, CCI, Fisher Transform, RVI,
+Mass Index, NVI and PVI read exactly as in 2.5.4. TEMA, Stochastic, True
+Strength Index and the SMI Ergodic pair can move in their last digit, and Trend
+Strength Index and `correlation` move where the former single pass cancelled.
+No public signature changed.
+
+### Documentation
+
+- The indicators page has a Numerical contract section: the thirteen documented
+  differences from the companion scripting language (missing observations in
+  extremes, missing volume, flat CCI windows, first-bar conventions, host
+  logarithms, units, the Aroon Oscillator, Parabolic SAR, overflow, signed zero,
+  Klinger, the RVI warmup and the PVO signal after a stretch with no volume),
+  and how each built-in treats a NaN volume.
+
+Saved layouts, drawings and workspace documents from 2.5.4 load unchanged.
+Moving the price pane is off unless a host opts in with `movablePrimaryPane`,
+and a host that does not opt in sees no change to pane 0. The quote, news,
+account and tick-schedule contracts are optional: a feed or broker that does
+not declare them keeps working as before. No runtime dependencies or package
+tiers were added.
+
 ## 2.5.4
 
 2026-09-25

@@ -144,7 +144,27 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // when measured alone; their controllers, panels and grid chrome stay in the
 // optional tiers. The merged 2.5.4 build measures 74.43 KiB (76220 bytes);
 // allow 74.44 KiB.
-const LIMIT_BYTES = 74.44 * 1024;
+// The price pane is an identity rather than slot 0, so a chart that opts in
+// (movablePrimaryPane) can move it below its studies: the defaults that name
+// it, the restore slot and its validation, the option's pin on every move, the
+// legend corner, the remove and collapse guards, the study, alert and
+// comparison lookups, and the saved drawings kept in step with pane moves for
+// a draw tier that loads later. Measured 74.43 to 74.97 KiB (76220 to 76771
+// bytes, 0.54 KiB), with the base bundle 117.42 to 118.01 kB; the pane menus
+// stay in the widget and template remapping in the workspace tier. Allow
+// 74.98 KiB.
+// A drag on `chart.trading` can now snap its order and bracket lines to the
+// instrument's tick schedule: the controller's setter and the two rounded
+// drag prices ship with every chart, since `chart.trading` does. The schedule
+// class itself only rides in by type and is shaken out here. Measured 76220 to
+// 76287 bytes (74.43 to 74.50 KiB). The setter's refusal of a band list and
+// the hand-off that seeds a layer built after Instrument.applyTo take it to
+// 76306 bytes (74.52 KiB); allow 74.52 KiB.
+// Together in 2.5.5, the movable price pane, the tick-schedule drag rounding and
+// the indicator gap recovery measure 75.07 KiB (76874 bytes); allow 75.08 KiB.
+// Watchlists, news, account state and viewport drawings live in the optional
+// tiers; the widget check below keeps the panels out of this import.
+const LIMIT_BYTES = 75.08 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

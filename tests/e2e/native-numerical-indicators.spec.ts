@@ -342,3 +342,379 @@ test('Seasonality paints finite completed-month cells and omits unavailable chan
   expect(errors).toEqual([]);
   await page.screenshot({ path: info.outputPath('seasonality-finite-table.png') });
 });
+
+// Open, high, low, close and volume rows; NaN marks what the feed did not send.
+// Bar 2 of GAP_ROWS has no high, the numerical audit's ATR hole.
+const GAP_ROWS = [
+  [9, 10, 8, 9, 1], [9, 12, 9, 11, 1], [11, NaN, 10, 11, 1],
+  [11, 14, 11, 13, 1], [13, 13, 10, 11, 1], [11, 12, 10, 12, 1],
+];
+
+test('ATR and Supertrend resume after a missing high and never bridge it', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const result = await page.evaluate(async (rows) => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData(rows.map(([open, high, low, close, volume], i) => ({
+      time: 1700000000 + i * 60, open, high, low, close, volume,
+    })));
+    const study = chart.addIndicator('atr', { period: 2, color: '#ff9900' });
+    const trend = chart.addIndicator('supertrend', { period: 2, multiplier: 1, downColor: '#00c8ff' });
+    window.__numeric.study = study;
+    const plot = study.series('atr')!;
+    plot.applyOptions({ lineWidth: 3 });
+    plot.priceScale().setAutoScale(false);
+    plot.priceScale().setPriceRange({ min: 2, max: 3.25 });
+    source.priceScale().setAutoScale(false);
+    source.priceScale().setPriceRange({ min: 8, max: 15 });
+    chart.setPaneWeight(study.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 6 });
+    await paint();
+    const band = trend.series('down')!;
+    return {
+      atr: study.values().atr, down: trend.values().down,
+      resumed: ink(plot, study.paneIndex, 3.5, (2.75 + 2.875) / 2),
+      bridged: ink(plot, study.paneIndex, 2, (2.5 + 2.75) / 2),
+      band: ink(band, 0, 4.5, 13, [0, 200, 255]),
+    };
+  }, GAP_ROWS);
+  expect(result.atr).toEqual([null, 2.5, null, 2.75, 2.875, 2.4375]);
+  expect(result.down).toEqual([null, 13, null, 13, 13, 13]);
+  expect(result.resumed).toBeGreaterThan(1);
+  expect(result.bridged).toBe(0);
+  expect(result.band).toBeGreaterThan(1);
+  await page.screenshot({ path: info.outputPath('atr-gap-recovery.png') });
+
+  // A forming bar that arrives without its high is a gap of its own, and the
+  // complete bar that replaces it restores the reading.
+  const forming = await page.evaluate(async () => {
+    const { source, study, paint, ink } = window.__numeric;
+    source.update({ time: 1700000000 + 5 * 60, open: 11, high: NaN, low: 10, close: 12, volume: 1 });
+    await paint();
+    const gap = { values: study!.values().atr, line: ink(study!.series('atr')!, study!.paneIndex, 4.5, (2.875 + 2.4375) / 2) };
+    source.update({ time: 1700000000 + 5 * 60, open: 11, high: 12, low: 10, close: 12, volume: 1 });
+    await paint();
+    return { gap, values: study!.values().atr, line: ink(study!.series('atr')!, study!.paneIndex, 4.5, (2.875 + 2.4375) / 2) };
+  });
+  expect(forming.gap.values[5]).toBeNull();
+  expect(forming.gap.line).toBe(0);
+  expect(forming.values).toEqual(result.atr);
+  expect(forming.line).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+});
+
+test('VWAP and its band continue past a bar with a NaN volume', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const result = await page.evaluate(async () => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData([
+      [10, 11, 9, 10, 100], [10, 12, 10, 11, NaN], [11, 13, 11, 12, 100], [12, 13, 11, 12, 200],
+    ].map(([open, high, low, close, volume], i) => ({ time: 1700000000 + i * 60, open, high, low, close, volume })));
+    const study = chart.addIndicator('vwap', { anchor: 'continuous', color: '#ff9900', band1Color: '#00c8ff' });
+    const line = study.series('vwap')!;
+    line.applyOptions({ lineWidth: 3 });
+    study.series('upper1')!.applyOptions({ lineWidth: 3 });
+    source.priceScale().setAutoScale(false);
+    source.priceScale().setPriceRange({ min: 9, max: 13 });
+    chart.setVisibleLogicalRange({ from: -1, to: 4 });
+    await paint();
+    return {
+      values: study.values(),
+      resumed: ink(line, 0, 2.5, 11.25),
+      bridged: ink(line, 0, 1, 10.5),
+      band: ink(study.series('upper1')!, 0, 2.5, (12 + 11.5 + Math.sqrt(0.75)) / 2, [0, 200, 255]),
+    };
+  });
+  expect(result.values.vwap).toEqual([10, null, 11, 11.5]);
+  expect(result.values.upper1).toEqual([10, null, 12, 11.5 + Math.sqrt(0.75)]);
+  expect(result.resumed).toBeGreaterThan(1);
+  expect(result.bridged).toBe(0);
+  expect(result.band).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('vwap-nan-volume.png') });
+});
+
+test('Parabolic SAR and OBV keep drawing after an incomplete bar', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const result = await page.evaluate(async () => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData([
+      [10, 11, 9, 10, 100], [10, 12, 10, 11, NaN], [11, 13, NaN, 12, 100],
+      [12, 14, 12, 13, 100], [13, 15, 13, 14, 100], [14, 16, 14, 15, 100],
+    ].map(([open, high, low, close, volume], i) => ({ time: 1700000000 + i * 60, open, high, low, close, volume })));
+    const sar = chart.addIndicator('parabolic-sar', { color: '#ff9900' });
+    const obv = chart.addIndicator('obv', { color: '#00c8ff' });
+    const dots = sar.series('sar')!;
+    dots.applyOptions({ markerRadius: 4 });
+    source.priceScale().setAutoScale(false);
+    source.priceScale().setPriceRange({ min: 8, max: 17 });
+    const total = obv.series('obv')!;
+    total.applyOptions({ lineWidth: 3 });
+    total.priceScale().setAutoScale(false);
+    total.priceScale().setPriceRange({ min: -50, max: 450 });
+    chart.setPaneWeight(obv.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 6 });
+    await paint();
+    const values = sar.values().sar;
+    return {
+      sar: values, obv: obv.values().obv,
+      lateDot: ink(dots, 0, 5, values[5]!),
+      holeDot: ink(dots, 0, 2, 9),
+      obvLine: ink(total, obv.paneIndex, 4.5, 350, [0, 200, 255]),
+    };
+  });
+  expect(result.sar[2]).toBeNull();
+  expect(result.sar.slice(3).every(value => value !== null)).toBe(true);
+  expect(result.obv).toEqual([0, 0, 100, 200, 300, 400]);
+  expect(result.lateDot).toBeGreaterThan(3);
+  expect(result.holeDot).toBe(0);
+  expect(result.obvLine).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('psar-obv-incomplete-bar.png') });
+});
+
+test('Supertrend holds its side and A/D keeps drawing across a missing close', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const result = await page.evaluate(async () => {
+    const { chart, source, paint, ink } = window.__numeric;
+    // A steady fall. Every true range is 2, so the ATR is 2 and the upper band sits
+    // at close + 2.5. Bar 6 has no close: bar 7's true range reads it and has no
+    // ATR, and every close sits a quarter of the range from the low, so each
+    // complete bar moves A/D by -50.
+    source.setData(Array.from({ length: 10 }, (_, i) => {
+      const c = 20 - 0.5 * i;
+      return { time: 1700000000 + i * 60, open: c, high: c + 1.5, low: c - 0.5, close: i === 6 ? NaN : c, volume: 100 };
+    }));
+    const trend = chart.addIndicator('supertrend', { period: 3, multiplier: 1, upColor: '#ff9900', downColor: '#00c8ff' });
+    const flow = chart.addIndicator('adl', { color: '#ff9900' });
+    trend.series('down')!.applyOptions({ lineWidth: 3 });
+    const line = flow.series('adl')!;
+    line.applyOptions({ lineWidth: 3 });
+    line.priceScale().setAutoScale(false);
+    line.priceScale().setPriceRange({ min: -500, max: 0 });
+    source.priceScale().setAutoScale(false);
+    source.priceScale().setPriceRange({ min: 12, max: 23 });
+    chart.setPaneWeight(flow.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 10 });
+    await paint();
+    const down = trend.series('down')!;
+    const up = trend.series('up')!;
+    return {
+      values: trend.values(), adl: flow.values().adl,
+      resumed: ink(down, 0, 8.5, 18.25, [0, 200, 255]),
+      bridged: ink(down, 0, 6.5, 19.25, [0, 200, 255]),
+      // Where the flipped support line of the NaN comparison used to run.
+      flipped: ink(up, 0, 8.5, 14.5, [255, 153, 0]),
+      flowResumed: ink(line, flow.paneIndex, 7.5, -375),
+      flowBridged: ink(line, flow.paneIndex, 6, -325),
+    };
+  });
+  expect(result.values.down).toEqual([null, null, 21.5, 21, 20.5, 20, null, null, 18.5, 18]);
+  expect(result.values.up).toEqual(Array(10).fill(null));
+  expect(result.adl).toEqual([-50, -100, -150, -200, -250, -300, null, -350, -400, -450]);
+  expect(result.resumed).toBeGreaterThan(1);
+  expect(result.bridged).toBe(0);
+  expect(result.flipped).toBe(0);
+  expect(result.flowResumed).toBeGreaterThan(1);
+  expect(result.flowBridged).toBe(0);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('supertrend-adl-missing-close.png') });
+});
+
+type Row = readonly [number, number, number, number];
+const rowsToBars = (rows: readonly Row[]) => rows.map(([open, high, low, close], i) => ({
+  time: 1700000000 + i * 60, open, high, low, close, volume: 1,
+}));
+
+test('CCI leaves the window holding a missing high unpainted instead of drawing 0', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const bars = rowsToBars([
+    [10, 11, 9, 10], [10, 12, 10, 11], [11, NaN, 10, 12], [12, 13, 11, 12],
+    [12, 14, 12, 13], [13, 15, 12, 14], [14, 16, 13, 15],
+  ]);
+  const result = await page.evaluate(async (data) => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData(data);
+    const study = chart.addIndicator('cci', { period: 3, maType: 'None', color: '#ff9900' });
+    const plot = study.series('cci')!;
+    plot.applyOptions({ lineWidth: 3 });
+    plot.priceScale().setAutoScale(false);
+    plot.priceScale().setPriceRange({ min: -20, max: 120 });
+    chart.setPaneWeight(study.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 7 });
+    await paint();
+    return { values: study.values().cci, recovered: ink(plot, study.paneIndex, 5.5, 93.75),
+      zero: ink(plot, study.paneIndex, 3, 0) };
+  }, bars);
+  expect(result.values).toEqual([null, null, null, null, null, 87.50000000000006, 100.0000000000001]);
+  expect(result.recovered).toBeGreaterThan(1);
+  expect(result.zero).toBe(0);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('cci-missing-window.png') });
+});
+
+test('Fisher Transform paints again on the bars after a missing midpoint', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const bars = rowsToBars([
+    [10, 11, 9, 10], [10, 12, 10, 11], [11, 13, 10, 12], [12, NaN, 11, 12],
+    [12, 14, 12, 13], [13, 15, 12, 14], [14, 16, 13, 15],
+  ]);
+  const result = await page.evaluate(async (data) => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData(data);
+    const study = chart.addIndicator('fisher-transform', { length: 2, fisherColor: '#ff9900', triggerColor: '#00ffff' });
+    const plot = study.series('fisher')!;
+    plot.applyOptions({ lineWidth: 3 });
+    plot.priceScale().setAutoScale(false);
+    plot.priceScale().setPriceRange({ min: -1, max: 1.2 });
+    chart.setPaneWeight(study.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 7 });
+    await paint();
+    const values = study.values().fisher;
+    return { values, recovered: ink(plot, study.paneIndex, 5.5, (values[5]! + values[6]!) / 2) };
+  }, bars);
+  expect(result.values).toEqual([
+    null, 0.34282825441539394, 0.7913738721291064, null,
+    -0.34282825441539394, -0.06208054853744893, 0.39614103556792124,
+  ]);
+  expect(result.recovered).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('fisher-missing-midpoint.png') });
+});
+
+test('RVI and Mass Index resume on the bar after a gap instead of reseeding', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const rvi = rowsToBars(Array.from({ length: 40 }, (_, i): Row => {
+    if (i === 20) return [NaN, NaN, NaN, NaN];
+    const c = 100 + ((i * 7) % 5) - ((i * 3) % 4);
+    return [c, c + 1, c - 1, c];
+  }));
+  const first = await page.evaluate(async (data) => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData(data);
+    const study = chart.addIndicator('relative-volatility-index', { length: 2, maType: 'None', color: '#ff9900' });
+    window.__numeric.study = study;
+    const plot = study.series('rvi')!;
+    plot.applyOptions({ lineWidth: 3 });
+    plot.priceScale().setAutoScale(false);
+    plot.priceScale().setPriceRange({ min: 30, max: 75 });
+    chart.setPaneWeight(study.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: 15, to: 30 });
+    await paint();
+    const values = study.values().rvi;
+    return { values, resumed: ink(plot, study.paneIndex, 22.5, (values[22]! + values[23]!) / 2) };
+  }, rvi);
+  expect(first.values.slice(19, 24)).toEqual([54.149295689517594, null, null, 61.120663786150075, 54.720663337316736]);
+  expect(first.resumed).toBeGreaterThan(1);
+  await page.screenshot({ path: info.outputPath('rvi-gap-resume.png') });
+
+  const mass = rowsToBars(Array.from({ length: 45 }, (_, i): Row => {
+    const c = 100 + (i % 4);
+    return i === 25 ? [101, NaN, 99, 101] : [c, c + 1 + (i % 3), c - 1, c];
+  }));
+  const second = await page.evaluate(async (data) => {
+    const { chart, source, study, paint, ink } = window.__numeric;
+    study!.remove();
+    source.setData(data);
+    const mi = chart.addIndicator('mass-index', { length: 3, color: '#ff9900' });
+    const plot = mi.series('mi')!;
+    plot.applyOptions({ lineWidth: 3 });
+    plot.priceScale().setAutoScale(false);
+    plot.priceScale().setPriceRange({ min: 2.98, max: 3.01 });
+    chart.setPaneWeight(mi.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: 20, to: 40 });
+    await paint();
+    const values = mi.values().mi;
+    return { values, resumed: ink(plot, mi.paneIndex, 28.5, (values[28]! + values[29]!) / 2) };
+  }, mass);
+  expect(second.values.slice(24, 30)).toEqual([
+    3.013616226598646, null, null, null, 2.9934105582882236, 2.9968084394205077,
+  ]);
+  expect(second.resumed).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('mass-index-gap-resume.png') });
+});
+
+test('Trend Strength Index paints a reading at a price level of one billion', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  // Offsets 0, 1, 3, 2, 4, 5 from 1e9: every 4-bar window correlates 0.8 with
+  // its bar index (deviations of 1.5 and 0.5 give cross 4 over squares 5).
+  const bars = rowsToBars([0, 1, 3, 2, 4, 5].map((d): Row => {
+    const c = 1e9 + d;
+    return [c, c, c, c];
+  }));
+  const result = await page.evaluate(async (data) => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData(data);
+    const study = chart.addIndicator('trend-strength-index', { length: 4, color: '#ff9900' });
+    const plot = study.series('tsi')!;
+    plot.applyOptions({ lineWidth: 3 });
+    chart.setPaneWeight(study.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 6 });
+    await paint();
+    return { values: study.values().tsi, line: ink(plot, study.paneIndex, 4.5, 0.8) };
+  }, bars);
+  expect(result.values.slice(0, 3)).toEqual([null, null, null]);
+  for (const value of result.values.slice(3)) expect(value!).toBeCloseTo(0.8, 12);
+  expect(result.line).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('trend-strength-large-level.png') });
+});
+
+test('NVI and its average paint on through a bar with no close', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  // Volume falls on every bar, so every bar qualifies for NVI. Bar 2 has no
+  // close: the index holds there and on bar 3, then compounds 132/120.
+  const closes = [100, 110, NaN, 120, 132, 145.2, 159.72, 175.692];
+  const bars = closes.map((close, i) => ({
+    time: 1700000000 + i * 60, open: close, high: close, low: close, close, volume: 80 - 10 * i,
+  }));
+  const result = await page.evaluate(async (data) => {
+    const { chart, source, paint, ink } = window.__numeric;
+    source.setData(data);
+    const study = chart.addIndicator('nvi', { maLength: 2, color: '#ff9900', emaColor: '#00ffff' });
+    const line = study.series('nvi')!;
+    const average = study.series('ema')!;
+    line.applyOptions({ lineWidth: 3 });
+    average.applyOptions({ lineWidth: 3 });
+    line.priceScale().setAutoScale(false);
+    line.priceScale().setPriceRange({ min: 950, max: 1800 });
+    chart.setPaneWeight(study.paneIndex, 1.5);
+    chart.setVisibleLogicalRange({ from: -1, to: 8 });
+    await paint();
+    const values = study.values();
+    const nvi = values.nvi as number[];
+    const ema = values.ema as number[];
+    return {
+      nvi, ema,
+      held: ink(line, study.paneIndex, 2.5, 1100),
+      resumed: ink(line, study.paneIndex, 4.5, (nvi[4] + nvi[5]) / 2),
+      averageResumed: ink(average, study.paneIndex, 4.5, (ema[4] + ema[5]) / 2, [0, 255, 255]),
+    };
+  }, bars);
+  expect(result.nvi.slice(0, 5)).toEqual([1000, 1100, 1100, 1100, (110 / 100) * (132 / 120) * 1000]);
+  expect(result.nvi.every(v => v !== null)).toBe(true);
+  expect(result.ema.slice(1).every(v => v !== null)).toBe(true);
+  expect(result.held).toBeGreaterThan(1);
+  expect(result.resumed).toBeGreaterThan(1);
+  expect(result.averageResumed).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: info.outputPath('nvi-missing-close.png') });
+});

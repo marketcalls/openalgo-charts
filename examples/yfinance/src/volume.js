@@ -92,18 +92,18 @@ export function attachVolume(pane = 1, enabled = true) {
   app['volumeReadings' + suffix] = new Map();
   if (!enabled) return;
   const histogram = chart.addSeries('histogram', {
-    paneIndex: 0, priceScaleId: '', priceFormat: { type: 'volume' },
+    priceScaleId: '', priceFormat: { type: 'volume' },
     style: { color: '#33415e', base: 0, priceLineVisible: false, lastValueVisible: false },
   });
   histogram.priceScale().setOptions({ marginTop: 0.82, marginBottom: 0 });
   app['volume' + suffix] = histogram;
   app['volumeMA' + suffix] = chart.addSeries('line', {
-    paneIndex: 0, priceScaleId: '', priceFormat: { type: 'volume' },
+    priceScaleId: '', priceFormat: { type: 'volume' },
     style: { priceLineVisible: false, lastValueVisible: false },
   });
   const legend = new PaneLegend({ id: 'volume', title: 'Vol', actions: ['hide'] });
   app['volLegend' + suffix] = legend;
-  chart.addPrimitive(legend, 0);
+  chart.addPrimitive(legend);
   chart.subscribeClick(id => { if (id === 'volume::hide') setVolumeShown(!volumeShown(pane), pane); });
   chart.on('data:update', change => {
     if (app['chart' + suffix] === chart) refreshVolume(pane, change);

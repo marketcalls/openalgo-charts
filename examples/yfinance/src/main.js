@@ -10,7 +10,7 @@ import { createChart, PaneLegend } from '/dist/openalgo-charts.mjs';
 // imported by the modules that call into them; the indicators tier is only
 // ever registered, so it is imported here.
 import '/dist/openalgo-charts.indicators.mjs';
-import { el, fmt, round2, initShell, chartTheme, chartMotionOptions, setChartState, toast } from './ui.js';
+import { el, initShell, chartTheme, chartMotionOptions, setChartState, toast } from './ui.js';
 import { initHover } from './hover.js';
 import { fillIntervalSelect, clampPeriod } from './intervals.js';
 import { initFeed, fetchBars, fetchNote, feedErrorState } from './feed.js';
@@ -22,9 +22,11 @@ import { initAxisChrome, applyAxisChrome, applyStatusLineChoice, applyTradeChoic
 import { initVolume, attachVolume, refreshVolume, setVolumeShown, setLegend, applyVolumeSettings } from './volume.js';
 import {
   initOrders, saveState, restoreState, cancelOrder, attachOrderLines, removeAllOrders,
-  updatePositionLine, restyleTradeChrome, clearPosition, executionAllowed,
+  updatePositionLine, restyleTradeChrome, clearPosition, executionAllowed, repriceOrder,
 } from './orders.js';
+import { tickScheduleFor, axisMinMove } from './ticks.js';
 import { initBracket, attachBracketLines, setBracketPrice, updateBracket, removeBracket } from './bracket.js';
+import { initAccount } from './account.js';
 import { initIndicators, fillIndicatorPicker, renderIndicatorChips, openSettings, rememberIndicators } from './indicators.js';
 import { chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
 import { bindIndicatorSource, initIndicatorSource } from './indicator-source.js';
@@ -121,6 +123,9 @@ const app = {
   volLegend: null,
   bracket: null,         // { side, entry, target, stop, qty }
   bLines: null,          // { entry, tp, sl } price-line primitives on the current chart
+  // The loaded symbol's tick schedule, when the host holds one (see ticks.js).
+  // Null means two-decimal order prices, which is every symbol but one.
+  ticks: null,
   // { symbol, color, bars, handle, legend, byTime, hidden }. The spec survives
   // a chart rebuild and a saved layout; the handle and legend do not.
   comparisons: [],
@@ -190,6 +195,10 @@ function render({ keepView = true, state } = {}) {
     // A chart-type switch builds a new chart; the zone the user picked is
     // the demo's to carry across, like activeIndicators.
     timezone: app.chartTimezone,
+    // The price pane can go below the studies from the right-click menu. Every
+    // part of this host that means the price pane asks primaryPaneIndex() or
+    // names no pane, which is what the option asks of a host before it is on.
+    movablePrimaryPane: true,
     ...chartMotionOptions(),
     ...decorations,
   });
@@ -209,7 +218,7 @@ function render({ keepView = true, state } = {}) {
   app.symbolLegend = new PaneLegend({ id: 'symbol', title: '', params: '', row: 0, actions: [],
     status: () => symbolStatus({ symbol: app.req.symbol, bars: app.chart.primaryBars(), timezone: app.chart.timezone() }),
   });
-  app.chart.addPrimitive(app.symbolLegend, 0);
+  app.chart.addPrimitive(app.symbolLegend);
 
   // Previous close, session high/low and the rest. Off the namespace, so a
   // dist/ built before the family shipped leaves this null and the price-axis
@@ -217,7 +226,7 @@ function render({ keepView = true, state } = {}) {
   app.priceLevels = null;
   if (PriceLevels) {
     app.priceLevels = new PriceLevels({ timezone: app.chartTimezone, levels: app.priceLevelState });
-    app.chart.addPrimitive(app.priceLevels, 0);
+    app.chart.addPrimitive(app.priceLevels);
   }
 
   const sel = el('ctype').value;
@@ -247,7 +256,12 @@ function render({ keepView = true, state } = {}) {
   // yfinance carries no tick size, so this demo picks one by market and says
   // so plainly. A real host reads it from its own instrument master, the way
   // OpenAlgo reads tick_size out of its symbol table, rather than guessing.
-  app.chart.setPriceScaleOptions({ minMove: tickFor(app.req.symbol) });
+  //
+  // A symbol the host holds metadata for gives the axis its price tick, which
+  // with a tick schedule is the grid every band lies on: every price it can
+  // trade at is on it, whichever band that price is in.
+  app.ticks = tickScheduleFor(app.req.symbol);
+  app.chart.setPriceScaleOptions({ minMove: axisMinMove(app.req.symbol, tickFor(app.req.symbol)) });
   attachVolume(1, !isTransform || sel === 't:heikin-ashi');
   if (!isTransform) {
     app.markersApi = app.price.createMarkers();
@@ -291,10 +305,7 @@ function render({ keepView = true, state } = {}) {
   app.chart.subscribeDrag((externalId, p) => {
     if (!executionAllowed()) return;
     if (externalId.startsWith('bk-')) { setBracketPrice(externalId.slice(3), p); return; }
-    if (externalId.startsWith('order:')) {
-      const o = app.orders.find((x) => `order:${x.id}` === externalId);
-      if (o && o.line) { o.price = round2(p); o.line.setPrice(o.price); el('status').textContent = `${o.side} ${o.type} order -> ${fmt(o.price)}`; saveState(); }
-    }
+    if (externalId.startsWith('order:')) repriceOrder(externalId, p);
   });
   // Click the cancel box on a line: cancel that order, or close the position.
   app.chart.subscribeClick((id) => {
@@ -514,6 +525,7 @@ initFeed(app);
 initVolume(app);
 initOrders(app);
 initBracket(app);
+initAccount(app);
 initIndicators(app);
 initIndicatorSource();
 initRoutedStudy();

@@ -80,12 +80,14 @@ export function measurer(font, size) {
  * box's top-left, its size, and the typesetting it used. `fallback` is what
  * the tool prints for an empty value (the text tool says "Text"), because
  * that is the frame actually on screen. Null when an anchor is off the pane.
+ * `at` is the anchor in the same container px when the caller has it: a note
+ * pinned to the screen has no time and price the chart could map.
  */
-export function textFrame(chart, d, measure, fallback = 'Text') {
+export function textFrame(chart, d, measure, fallback = 'Text', at = null) {
   const p = d.points && d.points[0];
-  if (!p) return null;
-  const x = chart.timeToCoordinate(p.time);
-  const y = chart.priceToCoordinate(p.price, d.paneIndex);
+  const anchor = at || (p ? { x: chart.timeToCoordinate(p.time), y: chart.priceToCoordinate(p.price, d.paneIndex) } : null);
+  if (!anchor) return null;
+  const { x, y } = anchor;
   if (!Number.isFinite(x) || y === null || !Number.isFinite(y)) return null;
   const t = d.text || { value: '' };
   const size = t.fontSize === undefined ? TEXT_SIZE : t.fontSize;
@@ -138,7 +140,10 @@ export function openTextEditor({ app, id, host, chartEl, fallback = 'Text', onDo
   const size = t.fontSize === undefined ? TEXT_SIZE : t.fontSize;
   const font = fontOf(t, size);
   const measure = measurer(font, size);
-  const frame = textFrame(app.chart, d, measure, fallback);
+  // The controller places a pinned note; a note on time and price the chart does.
+  const pinned = d.space === 'viewport' && typeof app.draw.screenPoints === 'function' ? app.draw.screenPoints(id) : null;
+  if (d.space === 'viewport' && !pinned) return null;
+  const frame = textFrame(app.chart, d, measure, fallback, pinned ? pinned[0] : null);
   if (!frame) return null;
 
   // Chart coordinates are relative to the chart container; the box lives in

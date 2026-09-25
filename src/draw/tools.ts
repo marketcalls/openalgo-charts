@@ -29,7 +29,7 @@ import {
   type SettingsField, type SettingsSchema,
   LINE_FIELDS, FILL_FIELDS, TEXT_FIELDS, LEVEL_FIELDS, EXTEND_FIELDS, FONT_FIELDS,
   SHAPE_TEXT_FIELDS, PLATE_TEXT_FIELDS,
-  COLOR_FIELD, LINE_WIDTH_FIELD, LINE_STYLE_FIELD, SHOW_LABELS_FIELD, TEXT_VALUE_FIELD,
+  COLOR_FIELD, LINE_WIDTH_FIELD, LINE_STYLE_FIELD, SHOW_LABELS_FIELD, TEXT_VALUE_FIELD, SPACE_FIELD,
   composeSettings,
 } from './schema';
 import {
@@ -59,6 +59,11 @@ export function getDrawingTool(id: string): DrawingTool {
 
 export function hasDrawingTool(id: string): boolean {
   return registry.has(id);
+}
+
+/** Whether a registered tool can be anchored to the viewport (`DrawingTool.viewport`). */
+export function viewportDrawingTool(id: string): boolean {
+  return registry.get(id)?.viewport === true;
 }
 
 export function registeredDrawingTools(): DrawingTool[] {
@@ -591,10 +596,18 @@ export const CROSS_LINE: DrawingTool = {
 /** What every labelled shape declares: outline, fill, and the attached label. */
 const SHAPE_SETTINGS: SettingsSchema = composeSettings([LINE_FIELDS, FILL_FIELDS, SHAPE_TEXT_FIELDS]);
 
+/**
+ * A labelled shape that can also be pinned to the screen. Only the box and the
+ * ellipse: their outline, fill and label come from the anchors alone, where a
+ * channel or a triangle is drawn to price action and means nothing once the
+ * bars pan away from it.
+ */
+const PINNABLE_SHAPE_SETTINGS: SettingsSchema = composeSettings([SHAPE_SETTINGS.fields, SPACE_FIELD]);
+
 export const RECTANGLE: DrawingTool = {
-  id: 'rectangle', name: 'Rectangle', points: 2,
+  id: 'rectangle', name: 'Rectangle', points: 2, viewport: true,
   defaultStyle: { fill: true },
-  settings: SHAPE_SETTINGS,
+  settings: PINNABLE_SHAPE_SETTINGS,
   draw: (c) => {
     const r = rectOf(c.pts[0], c.pts[1]);
     withFill(c, () => c.ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0));
@@ -604,12 +617,13 @@ export const RECTANGLE: DrawingTool = {
     shapeLabel(c, r);
   },
   distance: (x, y, h) => distToRect(x, y, h.pts[0], h.pts[1], h.drawing.style.fill === true),
+  bounds: shapeBounds('left', 'top'),
 };
 
 export const ELLIPSE: DrawingTool = {
-  id: 'ellipse', name: 'Ellipse', points: 2,
+  id: 'ellipse', name: 'Ellipse', points: 2, viewport: true,
   defaultStyle: { fill: true },
-  settings: SHAPE_SETTINGS,
+  settings: PINNABLE_SHAPE_SETTINGS,
   draw: (c) => {
     const r = rectOf(c.pts[0], c.pts[1]);
     const cx = (r.x0 + r.x1) / 2;
@@ -630,6 +644,7 @@ export const ELLIPSE: DrawingTool = {
     shapeLabel(c, r, 'center', 'middle');
   },
   distance: (x, y, h) => distToEllipse(x, y, h.pts[0], h.pts[1], h.drawing.style.fill === true),
+  bounds: shapeBounds('center', 'middle'),
 };
 
 export const PARALLEL_CHANNEL: DrawingTool = {
@@ -1082,52 +1097,85 @@ function textBox(
  */
 function shapeLabel(
   c: DrawContext,
-  r: { x0: number; y0: number; x1: number; y1: number },
-  align: 'left' | 'center' | 'right' = 'left',
-  valign: 'top' | 'middle' | 'bottom' = 'top',
+  r: Box,
+  align: LabelAlign = 'left',
+  valign: LabelValign = 'top',
 ): void {
   const { ctx, rc, style } = c;
   const t = textOf(c.drawing);
   if (t.value === '') return;
-  const d = rc.dpr;
-  const size = (t.fontSize ?? TEXT_SIZE) * d;
-  const pad = 6 * d;
   ctx.save();
   ctx.setLineDash([]);
-  ctx.font = fontOf(t, size);
+  const at = labelLayout(ctx, t, r, rc.dpr, align, valign);
   ctx.fillStyle = t.color ?? style.color;
   ctx.textBaseline = 'top';
-
-  // A shape's label wraps to the shape, not to a width of its own.
-  const lines = textLines(ctx, t, t.value, Math.max(20 * d, r.x1 - r.x0 - pad * 2));
-  const lineHeight = size * LINE_GAP;
-  const blockH = lines.length * lineHeight;
-
-  const a = t.align ?? align;
-  ctx.textAlign = a;
-  const tx = a === 'center' ? (r.x0 + r.x1) / 2 : a === 'right' ? r.x1 - pad : r.x0 + pad;
-
-  // `outside` lifts the block clear of the shape so it never sits on the outline.
-  let ty: number;
-  if (t.position === 'outside') {
-    ty = r.y0 - blockH - pad;
-  } else {
-    const v = t.valign ?? valign;
-    ty = v === 'middle' ? (r.y0 + r.y1 - blockH) / 2
-      : v === 'bottom' ? r.y1 - blockH - pad
-      : r.y0 + pad;
-  }
-  for (const line of lines) {
-    ctx.fillText(line, tx, ty);
-    ty += lineHeight;
+  ctx.textAlign = at.align;
+  let ty = at.y;
+  for (const line of at.lines) {
+    ctx.fillText(line, at.x, ty);
+    ty += at.lineHeight;
   }
   ctx.restore();
 }
 
+type Box = { x0: number; y0: number; x1: number; y1: number };
+type LabelAlign = 'left' | 'center' | 'right';
+type LabelValign = 'top' | 'middle' | 'bottom';
+
+/**
+ * Where a shape's label goes in `r`: its lines, the x they align on and the
+ * block's top, in the px of `r` at ratio `d`. Painting and `shapeBounds` both
+ * read it, so the box a pinned shape keeps on screen is the label it paints.
+ * With no context it measures nothing and wraps nothing.
+ */
+function labelLayout(
+  ctx: CanvasRenderingContext2D | null, t: DrawingText, r: Box, d: number, align: LabelAlign, valign: LabelValign,
+): { lines: string[]; align: LabelAlign; x: number; y: number; lineHeight: number; height: number } {
+  const size = (t.fontSize ?? TEXT_SIZE) * d;
+  const pad = 6 * d;
+  // A shape's label wraps to the shape, not to a width of its own.
+  if (ctx !== null) ctx.font = fontOf(t, size);
+  const lines = ctx === null ? t.value.split('\n') : textLines(ctx, t, t.value, Math.max(20 * d, r.x1 - r.x0 - pad * 2));
+  const lineHeight = size * LINE_GAP;
+  const height = lines.length * lineHeight;
+  const a = t.align ?? align;
+  const x = a === 'center' ? (r.x0 + r.x1) / 2 : a === 'right' ? r.x1 - pad : r.x0 + pad;
+  // `outside` lifts the block clear of the shape so it never sits on the outline.
+  const v = t.valign ?? valign;
+  const y = t.position === 'outside' ? r.y0 - height - pad
+    : v === 'middle' ? (r.y0 + r.y1 - height) / 2
+    : v === 'bottom' ? r.y1 - height - pad
+    : r.y0 + pad;
+  return { lines, align: a, x, y, lineHeight, height };
+}
+
+/**
+ * A two-anchor shape's box with its label in it. An `outside` label sits above
+ * the shape and a long one runs past its sides, so a shape pinned to the
+ * screen with only its outline kept on the plot could lose its label off the
+ * top edge.
+ */
+function shapeBounds(align: LabelAlign, valign: LabelValign): NonNullable<DrawingTool['bounds']> {
+  return (pts, drawing) => {
+    const r = rectOf(pts[0], pts[1]);
+    const t = textOf(drawing);
+    if (t.value === '') return r;
+    const probe = measureContext();
+    const at = labelLayout(probe, t, r, 1, align, valign);
+    let w = 0;
+    for (const l of at.lines) w = Math.max(w, probe === null ? l.length * (t.fontSize ?? TEXT_SIZE) * 0.6 : probe.measureText(l).width);
+    const x0 = at.align === 'center' ? at.x - w / 2 : at.align === 'right' ? at.x - w : at.x;
+    return { x0: Math.min(r.x0, x0), y0: Math.min(r.y0, at.y), x1: Math.max(r.x1, x0 + w), y1: Math.max(r.y1, at.y + at.height) };
+  };
+}
+
 export const TEXT: DrawingTool = {
-  id: 'text', name: 'Text', points: 1,
+  // A box of text measured from its own anchor, so it is the note that can be
+  // pinned to the screen. The pinned annotations (note, balloon, signpost)
+  // point at a bar, which a fixed place on screen would contradict.
+  id: 'text', name: 'Text', points: 1, viewport: true,
   defaultText: { value: 'Text', fontSize: TEXT_SIZE },
-  settings: composeSettings([TEXT_FIELDS], { textIsContent: true }),
+  settings: composeSettings([TEXT_FIELDS, SPACE_FIELD], { textIsContent: true }),
   draw: (c) => {
     const { ctx, rc, style } = c;
     const d = rc.dpr;
@@ -1175,22 +1223,30 @@ export const TEXT: DrawingTool = {
     ctx.restore();
   },
   distance: (x, y, h) => {
-    // Measure with a throwaway 2D context so the hit box matches what is drawn
-    // (wrapping and font metrics decide the real size, not a character count).
-    const t = textOf(h.drawing);
-    const value = contentOf(h.drawing, 'Text');
-    const size = t.fontSize ?? TEXT_SIZE;
-    const p = h.pts[0];
-    const probe = measureContext();
-    const box = probe === null
-      ? { width: value.length * size * 0.6 + 10, height: size * LINE_GAP + 10 }
-      : textBox(probe, t, value, 1);
-    const v = t.valign ?? 'top';
-    const top = v === 'middle' ? p.y - box.height / 2 : v === 'bottom' ? p.y - box.height : p.y;
-    return x >= p.x - 3 && x <= p.x + box.width + 3
-      && y >= top - 3 && y <= top + box.height + 3 ? 0 : null;
+    const r = textRect(h.pts[0], h.drawing);
+    return x >= r.x0 - 3 && x <= r.x1 + 3 && y >= r.y0 - 3 && y <= r.y1 + 3 ? 0 : null;
   },
+  // The box it is grabbed by is the box a pinned note keeps on screen.
+  bounds: (pts, drawing) => textRect(pts[0], drawing),
 };
+
+/**
+ * The text tool's box in media px from its anchor. Measured with a throwaway
+ * 2D context so it matches what is drawn (wrapping and font metrics decide the
+ * real size, not a character count).
+ */
+function textRect(p: ScreenPoint, drawing: Drawing): { x0: number; y0: number; x1: number; y1: number } {
+  const t = textOf(drawing);
+  const value = contentOf(drawing, 'Text');
+  const size = t.fontSize ?? TEXT_SIZE;
+  const probe = measureContext();
+  const box = probe === null
+    ? { width: value.length * size * 0.6 + 10, height: size * LINE_GAP + 10 }
+    : textBox(probe, t, value, 1);
+  const v = t.valign ?? 'top';
+  const top = v === 'middle' ? p.y - box.height / 2 : v === 'bottom' ? p.y - box.height : p.y;
+  return { x0: p.x, y0: top, x1: p.x + box.width, y1: top + box.height };
+}
 
 /** A 1x1 offscreen context used only for text measurement. Cached. */
 let _probe: CanvasRenderingContext2D | null | undefined;
@@ -1989,7 +2045,9 @@ function tableWidths(ctx: CanvasRenderingContext2D | null, text: DrawingText, ro
  * because a table on a chart is nearly always labelled.
  */
 export const TABLE: DrawingTool = {
-  id: 'table', name: 'Table', points: 1,
+  // Laid out from its top-left anchor alone, so a table of levels can stay in
+  // a corner of the pane while the chart pans under it.
+  id: 'table', name: 'Table', points: 1, viewport: true,
   defaultText: { value: 'Level|Price\nEntry|-\nStop|-', fontSize: TABLE_SIZE },
   settings: composeSettings([
     COLOR_FIELD,
@@ -2000,6 +2058,7 @@ export const TABLE: DrawingTool = {
     { path: 'text.backgroundOpacity', label: 'Background opacity', kind: 'opacity', min: 0, max: 1, step: 0.01, group: 'text' },
     { path: 'text.border', label: 'Border', kind: 'boolean', group: 'text' },
     { path: 'text.borderColor', label: 'Border color', kind: 'color', group: 'text' },
+    SPACE_FIELD,
   ], { textIsContent: true }),
   draw: (c) => {
     const d = c.rc.dpr;
@@ -2064,13 +2123,19 @@ export const TABLE: DrawingTool = {
     c.ctx.restore();
   },
   distance: (x, y, h) => {
-    const p = h.pts[0];
-    const rows = tableRows(h.drawing);
-    const size = h.drawing.text?.fontSize ?? TABLE_SIZE;
-    const width = tableWidths(measureContext(), textOf(h.drawing), rows, 1).reduce((sum, w) => sum + w, 0);
-    return insidePlate(x, y, p.x, p.y, width, size * 1.7 * rows.length);
+    const r = tableRect(h.pts[0], h.drawing);
+    return insidePlate(x, y, r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
   },
+  bounds: (pts, drawing) => tableRect(pts[0], drawing),
 };
+
+/** The table's grid in media px from its top-left anchor, laid out as it is drawn. */
+function tableRect(p: ScreenPoint, drawing: Drawing): { x0: number; y0: number; x1: number; y1: number } {
+  const rows = tableRows(drawing);
+  const size = drawing.text?.fontSize ?? TABLE_SIZE;
+  const width = tableWidths(measureContext(), textOf(drawing), rows, 1).reduce((sum, w) => sum + w, 0);
+  return { x0: p.x, y0: p.y, x1: p.x + width, y1: p.y + size * 1.7 * rows.length };
+}
 
 /** Rows of cells from the pipe-and-newline encoding. Always at least one cell. */
 function tableRows(d: Drawing): string[][] {

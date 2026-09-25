@@ -243,8 +243,11 @@ export type { Bar, LinePoint, Whitespace, SeriesDataItem, UTCSeconds, OriginalTi
 export { isWhitespace, toBar } from './model/bar';
 
 export type { DataFeed, TradeFeed, BarsRequest, BarsPageRequest, BarsPage, BarSubscriptionOptions, LiveBarMeta, MarketDepth, DepthLevel, OrderSide, OrderType, PlaceOrder, UnsubscribeFn } from './feed/types';
+export type { InstrumentKey, QuoteSnapshot, QuoteRequest, QuoteStreamStatus, QuoteStreamHandlers, QuoteFeed, NewsRequest, NewsItem, NewsPage, NewsFeed } from './feed/types';
 export { Instrument } from './feed/instrument';
 export type { InstrumentMetadata, InstrumentCalendar, InstrumentSession } from './feed/instrument';
+export { TickSchedule } from './feed/tick-schedule';
+export type { TickBand } from './feed/tick-schedule';
 export { checkTradingCapability, assertTradingCapability, TradingCapabilityError } from './feed/trading-capabilities';
 export type { TradingOperation, TradingCapabilities, TradingCapabilityRequest, TradingCapabilitySource, TradingCapabilityResult } from './feed/trading-capabilities';
 export { HistoryRequestPool, sharedHistoryRequests } from './feed/request-pool';

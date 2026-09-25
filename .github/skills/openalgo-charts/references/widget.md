@@ -173,6 +173,8 @@ the status line and download resources are released after handoff or failure.
 |---|---|---|
 | `mountStatusline(ctx, host, opts?)` | function | Symbol, interval, O H L C, change, volume, the hovered bar's time, bar count, timezone; a transient message slot. Returns a `StatuslineHandle` (`setSymbol`, `setMessage`, `destroy`). |
 | `priceDigits(chart)` | function | Decimals for the readout: the pane's own precision floored at `MIN_PRICE_DIGITS`. |
+| `mountAccountSummary(ctx, host, { source, locale? })` | function | Account summary: the selected account (a menu switches it), an Analyzer tag for the sandbox ledger, equity, margin used and available, and a Stale or error state. `source` is an `AccountStateSource`, usually the trade tier's `AccountManager`. Read-only apart from switching; it has no order controls. An `unsupported` source renders disabled (`aria-disabled`, class `is-disabled`) with the provider's reason visible. Mounted before `.oac-statusline__tz` when the host has one. In a narrow status line (a container query on the row) the hover time yields first, then margin used, equity and available drop out, and below 860 px the summary moves beside the title so the account and its tag are never the part that is clipped; the picker's tooltip keeps the figures. Returns an `AccountSummaryHandle` (`el`, `refresh`, `destroy`). |
+| `ACCOUNT_SUMMARY_CSS` | const | The summary's rules, part of `WIDGET_COMPONENT_CSS`. |
 | `MIN_PRICE_DIGITS` | const `2` | |
 | `mountToasts(host, doc?)` | function | The toast stack. Returns a `Toaster` (`toast(message, kind?)`, `destroy`). |
 | `TOAST_MS` | const | `{ info: 4000, success: 3500, error: 0 }`; 0 stays until dismissed. |
@@ -191,7 +193,7 @@ the status line and download resources are released after handoff or failure.
 | `OBJECTS_PANEL_CSS` | const | Object list rules, included in the widget stylesheet; custom hosts append it alongside `WIDGET_CSS` and `DIALOG_CSS`. |
 | `WIDGET_STYLE_ID` | const `'oac-widget-css'` | Id of the injected `<style>`, one per document. |
 | `injectWidgetStyles(doc, extra?, nonce?)` | function | Inject or fill an empty sheet once per document; `extra` is appended when filling it. Assigns the nonce before filling/insertion, preserves an existing nonce and leaves populated host CSS untouched. |
-| `StatuslineOptions`, `StatuslineHandle`, `Toaster`, `ToastHandle`, `ToastKind`, `ToastOptions`, `WidgetThemeName`, `WidgetTokens`, `Rgba` | types | |
+| `AccountSummaryOptions`, `AccountSummaryHandle`, `StatuslineOptions`, `StatuslineHandle`, `Toaster`, `ToastHandle`, `ToastKind`, `ToastOptions`, `WidgetThemeName`, `WidgetTokens`, `Rgba` | types | |
 
 ### Dialogs and forms (`dialogs/`, `form.ts`)
 
@@ -205,7 +207,7 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 | `mountDrawingProperties(ctx, anchor?, { ids?, onClose? })` | function | The selected drawings' fields, from `drawingSettingsSchema`. |
 | `mountLevelEditor(ctx, anchor?, { ids? })` | function | Per-level ratio, colour and visibility for the fib and gann tools. |
 | `mountTextEditor(ctx, anchor?, { id?, onDone? })` | function | In-place editing laid over the painted text. Returns a `TextEditorHandle` with `commit()` and `cancel()`; an outside press commits, Escape cancels. |
-| `mountContextMenu(ctx, anchor?, { event?, hooks? })` | function | The right-click menu for the chart's `contextmenu` payload: trade rows when `onOrder` is given, drawing actions on a drawing, scale modes on a price axis, `Collapse pane` or `Expand pane` (row id `pane-collapse`) over a lower pane, paste, fit, indicators, settings. A collapse is saved with the layout and emitted as a `layout` event with reason `paneCollapsed`. |
+| `mountContextMenu(ctx, anchor?, { event?, hooks? })` | function | The right-click menu for the chart's `contextmenu` payload: trade rows when `onOrder` is given (limit and stop rows only over the price pane, where the pointer's price is the instrument's; a study pane offers the market rows alone), drawing actions on a drawing, scale modes on a price axis, `Move pane up` and `Move pane down` (row ids `pane-up`, `pane-down`, greyed at an edge, and greyed with the note "price pane stays on top" where a chart built without `movablePrimaryPane` would refuse the swap) over any pane when there are two or more, the price pane included, `Collapse pane` or `Expand pane` (row id `pane-collapse`) over a study pane in any slot, paste, fit, indicators, settings. A menu raised from a button names no pane and has no pane rows. A move or a collapse is saved with the layout and emitted as a `layout` event with reason `paneMoved` or `paneCollapsed`. |
 | `mountAlertEditor(ctx, anchor?, opts?: AlertEditorOptions)` | function | Draft editor seeded by `source` or editing `alertId`. Save validates source identities, finite bounds and expiry in the labelled chart timezone. Cancel never arms an alert. |
 | `mountAlertsPanel(ctx, anchor?, opts?: AlertsPanelOptions)` | function | Live alert list with lifecycle, scope, timing, availability, last delivery, edit, enable/disable and delete. Both options types accept `onClose`. |
 | `attachContextMenu(ctx, hooks?)` | function | Subscribe to the chart's `contextmenu`, `preventDefault`, mount the menu. Returns the unsubscriber. `createWidget` does this itself. |
@@ -218,7 +220,7 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 | `IndicatorInputControlsOptions`, `IndicatorInputControlsHandle` | types | Native typed-field host actions. |
 | `SettingsDialogOptions`, `IndicatorPickerOptions`, `IndicatorSettingsOptions`, `IndicatorSettingsTab`, `DrawingPropertiesOptions`, `LevelEditorOptions`, `TextEditorOptions`, `TextEditorHandle`, `ContextMenuHooks`, `ContextMenuOptions`, `MenuEntry`, `MenuItem`, `OrderRequest`, `PanelHandle`, `FormControl`, `FormKind`, `FormOptions`, `FormHandle` | types | |
 
-`OrderRequest` is `{ side: 'BUY' | 'SELL'; type: 'MARKET' | 'LIMIT' | 'SL'; price: number | null; paneIndex: number }`; `price` is null for a market order.
+`OrderRequest` is `{ side: 'BUY' | 'SELL'; type: 'MARKET' | 'LIMIT' | 'SL'; price: number | null; paneIndex: number }`; `price` is null for a market order. Otherwise it is the pointer's price, not snapped to the instrument's tick or `TickSchedule` (the widget knows neither), so round it, for example with `validatePrice`, before sending.
 
 `FormKind` includes `symbol`, `session`, `multiline`, `price` and `timestamp`.
 `FormHandle.validate()` checks drafts and `setError(key, message)` reports a
@@ -280,6 +282,8 @@ Color swatches stay compact. Theme overrides should target these tokens.
 | `lookbackBars` | `number` | `DEFAULT_LOOKBACK_BARS` | Bars per load. |
 | `now` | `() => number` | `Date.now` | Clock for the load window and the capture filename. |
 | `onOrder` | `(order: OrderRequest) => void` | none | Order entry from the right-click menu. Without it the menu draws no trade rows. |
+| `movablePrimaryPane` | `boolean` | `false`, as in the engine | Pass `true` to let a trader move the price pane below its studies; the widget's own chrome (pane menu, status line, alerts, Objects panel) follows it wherever it sits. Leave it off while host code drives `widget.chart` with an explicit pane `0` for the price, or drop those zeros first. `createChartGrid` hands it to every chart it builds. See [scales-and-panes](scales-and-panes.md#moving-the-price-pane-opt-in). |
+| `account` | `AccountStateSource` | none | Account summary in the status line (see `mountAccountSummary`). Omitted shows nothing; a source whose provider declares no accounts shows disabled with the reason. Hidden with the status line (`statusline: false`, and the compact mobile controls, which hide the status line). It only reads and switches accounts. |
 | `styleNonce` | `string` | none | Response CSP nonce for the shared widget and dialog stylesheet. Style-attribute policy remains the host's responsibility. |
 | `keyboardRoute` | `() => boolean \| undefined` | none | For hosts with several widgets: false silences this widget's chords and chart shortcuts, true sends them here, undefined keeps the usual rule (pointer or focus, or always for a `shortcuts` scope of `global`). Applies to a `ShortcutManager` instance too, shared or not. The chart grid sets it per cell. |
 
@@ -358,7 +362,8 @@ const panel = mountObjectsPanel(widget.context, openButton, {
 panel.close();
 ```
 
-Search matches name, kind and pane labels (displayed starting at 1). Live updates
+Search matches name, kind and pane labels (displayed starting at 1, with the price
+pane named **Price pane** in any slot, in the section headings and the move targets alike). Live updates
 preserve search and action-button focus. Rows show visibility, drawing lock and
 selection, and external-indicator data status. Only supported actions appear; an
 action returning `false` or throwing reports through the existing toast. No primary
@@ -719,3 +724,73 @@ const report = grid.applyWorkspace(parseWorkspacePayload(fileText)); // { applie
   and BSE) reaches the followers.
 - Below `compactWidth` only the active cell shows, with a tab strip to switch; splitters
   hide. `CHART_GRID_CSS` is part of `WIDGET_COMPONENT_CSS`.
+
+## Watchlist and news panels (2.5.5)
+
+Two optional sources for the panel dock, beside Data and Objects. A tab (and the top bar
+and mobile More entries) appears only when its source is supplied, and each needs
+`panels` on. Sources: `src/widget/watchlist-panel.ts`, `news-panel.ts`, `quote-board.ts`,
+`news-reader.ts`.
+
+```ts
+import { createWidget } from 'openalgo-charts/widget';
+import { WatchlistRepository, createIndexedDbWatchlistStorage } from 'openalgo-charts/workspace';
+
+const widget = createWidget('#chart', {
+  feed, symbol: 'INFY', exchange: 'NSE',
+  watchlist: { store: new WatchlistRepository(createIndexedDbWatchlistStorage(indexedDB), 'account-7'), quotes },
+  news: { feed: newsFeed, pageSize: 20 },
+});
+widget.openWatchlist(); // false without a watchlist source, with panels off, or after destroy
+widget.openNews();
+```
+
+- `WidgetOptions.watchlist` (`WidgetWatchlistOptions`): `store` (a `WatchlistStore`,
+  usually `WatchlistRepository`), `quotes?` (`QuoteFeed`), `staleAfterMs?` (default
+  60000), `pollMs?` (snapshot-only sources, default 15000, 0 off), `formatPrice?(value,
+  instrument)`. Choosing a row calls `setSymbol(symbol, exchange)`, and the widget
+  supplies the panel's `normalize` as setSymbol's upper-casing, so a lower-case entry is
+  the chart's own row and never a second copy of it. `WidgetOptions.news`
+  (`WidgetNewsOptions`): `feed`, `pageSize?` (20), `staleAfterMs?` (300000), `maxItems?` (500).
+- `PanelDockId` adds `'watchlist'` and `'news'`; `PanelDockOptions` takes optional
+  `watchlist(host)` and `news(host)` factories. `sanitizePanelDockState` keeps both ids;
+  restoring one on a dock without that source leaves it closed.
+- `mountWatchlistPanel(ctx, host, WatchlistPanelOptions)` returns a `WatchlistPanelHandle`
+  (`el`, `initialFocus`, `reload()`, `destroy()`), for a custom host's dock as the
+  reference host does. A table of the active list: symbol, last, change and percent
+  change from the provider's `previousClose`. List select, New, Rename and Delete (inline
+  forms, confirm before delete), an Add input (the host's `symbolSearch` when there is
+  one; typed text is uppercased and saved on the chart's exchange), and "Add {symbol}"
+  for the chart's instrument. `normalize?(instrument)` maps an entry to the instrument
+  the host charts for it (default unchanged): adds are saved in that form, an add
+  matching a listed entry that way is refused as already listed, and the current-row
+  marker and "Add {symbol}" compare through it. Remove per row; Alt+ArrowUp/Down
+  reorders in list order with the revision it was computed from, one move at a time so
+  a held key lands every step; ArrowUp/Down moves between rows.
+- Rows take prices only from `quotes`. Without it every row is `unavailable` and shows
+  `n/a`. Row `data-state` is a `QuoteRowStatus`: `loading`, `live`, `delayed`,
+  `snapshot`, `stale`, `unavailable`, `error`; the status line reads the
+  `QuoteBoardStatus`, and warns that values are stale only when one is on screen. The
+  board holds one timer, for the next visible snapshot to age past `staleAfterMs`; a
+  row behind a live stream never ages, so an idle board holds none. Only rows an `IntersectionObserver` reports on screen hold a
+  stream; a list switch, a hidden page, closing or switching the panel, and `destroy`
+  release them. Sorting by header (`WatchlistSort`, `WatchlistSortKey`: `list`, `symbol`,
+  `last`, `change`, `percent`; a third click returns to list order) is stable, sinks
+  unknowns in both directions, and holds row order while the pointer or focus is in the
+  rows. The sort is read from and written to `ctx.storage` (`watchlist-sort`), and kept
+  per store in memory as well, so it outlives a panel switch when that storage keeps
+  nothing. Conflicts show "The watchlists changed in another session" and reload the store.
+- `mountNewsPanel(ctx, host, NewsPanelOptions)` returns a `NewsPanelHandle` (`el`,
+  `initialFocus`, `refresh()`, `destroy()`). It follows the chart's `data:context`
+  instrument (an interval change is the same instrument), cancels the previous request
+  on a switch, and lists headline, source and time in the chart's timezone. A detail
+  view shows the summary and "Open article" only for `safeNewsUrl(url)`: absolute http or
+  https without credentials, opened with `rel="noopener noreferrer"` and
+  `referrerpolicy="no-referrer"`. All provider text is set as text.
+- DOM-free controllers, exported for custom hosts: `QuoteBoard` (`setVisible`, `row`,
+  `status`, `error`, `subscribed`, `destroy`; `QuoteBoardOptions`, `QuoteRow`) and
+  `NewsReader` (`setInstrument`, `refresh`, `loadMore`, `snapshot`, `destroy`;
+  `NewsReaderOptions`, `NewsSnapshot` with `refreshFailed`, `NewsStatus`: `idle`,
+  `loading`, `ready`, `empty`, `error`). `quoteChange(quote)` returns
+  `{ change, percent }` or null without a positive `previousClose`.
+- `WATCHLIST_PANEL_CSS` and `NEWS_PANEL_CSS` are part of `WIDGET_COMPONENT_CSS`.

@@ -39,7 +39,7 @@
  *    `isDestroyed` and emits `'destroy'`, so a member is released the moment it
  *    dies rather than at the next channel event. A `LinkChart` that is not a
  *    `Chart` may report neither, so members are also probed by pane count
- *    before every use (pane 0 can never be removed by any other route) and
+ *    before every use (the price pane can never be removed by any other route) and
  *    dropped on the spot, which matters because `addPrimitive` on a destroyed
  *    chart would resurrect a pane.
  *
@@ -142,8 +142,8 @@ interface Member {
  *
  * `isDestroyed` when the member reports it, because a flag the chart sets
  * itself cannot be wrong. The pane-count probe stays as the fallback for a host
- * whose `LinkChart` is not a `Chart`: pane 0 can never be removed by any other
- * route, so an empty pane list still means destruction there.
+ * whose `LinkChart` is not a `Chart`: the price pane, in whatever slot, can never
+ * be removed by any other route, so an empty pane list still means destruction there.
  */
 function alive(chart: LinkChart): boolean {
   if (chart.isDestroyed === true) return false;

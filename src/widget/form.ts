@@ -532,18 +532,22 @@ export interface AnchorChart {
  * anchor of the selection, or a little way in from the corner when no anchor
  * is on screen. Chart coordinates are container-relative, and the container
  * sits to the right of the rail, so its offset inside the root is added.
+ * `screenOf` places a drawing the chart's time and price maps cannot, one
+ * pinned to the viewport; the controller's `screenPoints` is the one to pass.
  */
 export function selectionPoint(
-  root: HTMLElement, chart: AnchorChart, drawings: ReadonlyArray<{ paneIndex: number; points: ReadonlyArray<{ time: number; price: number }> }>,
+  root: HTMLElement, chart: AnchorChart,
+  drawings: ReadonlyArray<{ id?: string; paneIndex: number; points: ReadonlyArray<{ time: number; price: number }> }>,
+  screenOf?: (id: string) => ReadonlyArray<{ x: number; y: number }> | null,
 ): { x: number; y: number } {
   const container = chart.panes()[0]?.element.parentElement ?? null;
   const off = container === null ? { left: 0, top: 0 } : boxInRoot(root, container);
   let x0 = Infinity;
   let y1 = -Infinity;
   for (const d of drawings) {
-    for (const p of d.points) {
-      const cx = chart.timeToCoordinate(p.time);
-      const cy = chart.priceToCoordinate(p.price, d.paneIndex);
+    const known = screenOf !== undefined && d.id !== undefined ? screenOf(d.id) : null;
+    const at = known ?? d.points.map((p) => ({ x: chart.timeToCoordinate(p.time), y: chart.priceToCoordinate(p.price, d.paneIndex) }));
+    for (const { x: cx, y: cy } of at) {
       if (!Number.isFinite(cx) || cy === null || !Number.isFinite(cy)) continue;
       x0 = Math.min(x0, cx);
       y1 = Math.max(y1, cy);
@@ -1001,6 +1005,9 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         if (errors.has(b.key)) continue;
         if (!(b.key in values)) continue;
         b.write(values[b.key]);
+        // What the control shows now is what it last reported: a value the
+        // model refused and wrote back over must be choosable again.
+        if (last.has(b.key)) last.set(b.key, b.read());
       }
     },
     values: () => {

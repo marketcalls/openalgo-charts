@@ -136,6 +136,12 @@ export function mountDrawingProperties(ctx: WidgetContext, anchor?: HTMLElement,
       if (Object.keys(p).length > 0) patches.push({ id: d.id, patch: p });
     }
     if (patches.length > 0) draw.updateMany(patches);
+    // The controller converts nothing on a pane that is folded or hidden
+    // behind a maximized one; the row reads the model back, so say why it
+    // did not move.
+    if (typeof patch.space === 'string' && live.some((d) => (draw.get(d.id)?.space ?? 'data') !== patch.space)) {
+      ctx.toast(widgetText(ctx, "The anchor changes only while the drawing's pane is on screen"), 'info');
+    }
   }
 
   const frame = dialogFrame(doc, { translate: ctx.translate, title: titleOf(), className: 'oac-props', onClose: () => handle.close() });
@@ -281,7 +287,7 @@ export function mountDrawingProperties(ctx: WidgetContext, anchor?: HTMLElement,
     { ...(anchor === undefined ? { placement: 'below' as const, dismissOnOutside: true } : { anchor, placement: 'below' as const }), onClose: cleanup },
     cleanup,
   );
-  if (anchor === undefined) placePanel(ctx.root, frame.el, { point: selectionPoint(ctx.root, chart, live) });
+  if (anchor === undefined) placePanel(ctx.root, frame.el, { point: selectionPoint(ctx.root, chart, live, (id) => draw.screenPoints(id)) });
   const handle: PanelHandle = {
     el: frame.el,
     isOpen: session.isOpen,

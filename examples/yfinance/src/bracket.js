@@ -1,5 +1,6 @@
 import * as engine from '/dist/openalgo-charts.mjs';
-import { el, fmt, round2, rupee } from './ui.js';
+import { el, fmt, rupee } from './ui.js';
+import { snapPrice } from './ticks.js';
 import { saveState, tradeColors, TRADE_EXTENT, removeAllOrders, clearPosition, executionAllowed } from './orders.js';
 
 let app;
@@ -10,12 +11,12 @@ const chartTop = () => el('chart').getBoundingClientRect().top;
 export function makeBracket(side) {
   if (!executionAllowed()) return;
   if (!app.currentBars.length) return;
-  const entry = round2(app.currentBars[app.currentBars.length - 1].close);
+  const entry = snapPrice(app.ticks, app.currentBars[app.currentBars.length - 1].close);
   const qty = Math.max(1, Number(el('qty').value) || 1);
   app.bracket = {
     side, entry, qty,
-    target: round2(side === 'BUY' ? entry * 1.012 : entry * 0.988),
-    stop: round2(side === 'BUY' ? entry * 0.99 : entry * 1.01),
+    target: snapPrice(app.ticks, side === 'BUY' ? entry * 1.012 : entry * 0.988),
+    stop: snapPrice(app.ticks, side === 'BUY' ? entry * 0.99 : entry * 1.01),
   };
   attachBracketLines();
   el('bracket').hidden = false;
@@ -30,7 +31,7 @@ export function attachBracketLines() {
   if (!app.bracket) return;
   const tc = tradeColors();
   const pl = (price, color, id) => app.chart.addPriceLine(
-    { price, color, lineWidth: 1, dashed: true, id, cursor: 'ns-resize', extentFromRight: TRADE_EXTENT }, 0);
+    { price, color, lineWidth: 1, dashed: true, id, cursor: 'ns-resize', extentFromRight: TRADE_EXTENT });
   // The entry leg is a resting order like any other, so it takes the order
   // colour; the two exits take the take-profit and stop-loss colours.
   app.bLines = {
@@ -45,15 +46,25 @@ export function attachBracketLines() {
 export function setBracketPrice(which, raw) {
   if (!executionAllowed()) return;
   if (!app.bracket) return;
-  const p = round2(raw);
+  const ticks = app.ticks;
+  const p = snapPrice(ticks, raw);
   const buy = app.bracket.side === 'BUY';
+  // One tick either side of the entry. On a scheduled instrument that is the
+  // tick of the band each side falls in, so the bound changes at a boundary.
+  const above = () => (ticks ? ticks.step(app.bracket.entry, 1) : app.bracket.entry + 0.01);
+  const below = () => (ticks ? ticks.step(app.bracket.entry, -1) : app.bracket.entry - 0.01);
   if (which === 'entry') {
     const d = p - app.bracket.entry;
-    app.bracket.entry = p; app.bracket.target = round2(app.bracket.target + d); app.bracket.stop = round2(app.bracket.stop + d);
+    app.bracket.entry = p; app.bracket.target = snapPrice(ticks, app.bracket.target + d); app.bracket.stop = snapPrice(ticks, app.bracket.stop + d);
+    // Each leg snaps in its own band, which can close a gap the shift kept.
+    if (ticks) {
+      app.bracket.target = buy ? Math.max(app.bracket.target, above()) : Math.min(app.bracket.target, below());
+      app.bracket.stop = buy ? Math.min(app.bracket.stop, below()) : Math.max(app.bracket.stop, above());
+    }
   } else if (which === 'tp') {
-    app.bracket.target = buy ? Math.max(p, app.bracket.entry + 0.01) : Math.min(p, app.bracket.entry - 0.01);
+    app.bracket.target = buy ? Math.max(p, above()) : Math.min(p, below());
   } else {
-    app.bracket.stop = buy ? Math.min(p, app.bracket.entry - 0.01) : Math.max(p, app.bracket.entry + 0.01);
+    app.bracket.stop = buy ? Math.min(p, below()) : Math.max(p, above());
   }
   updateBracket();
   saveState();
@@ -92,7 +103,7 @@ export function positionPills() {
   const lineLeftX = rect.left + plotW * (1 - TRADE_EXTENT);
   const at = { 'bk-tp': app.bracket.target, 'bk-entry': app.bracket.entry, 'bk-sl': app.bracket.stop };
   for (const id in at) {
-    const y = app.chart ? app.chart.priceToCoordinate(at[id], 0) : null;
+    const y = app.chart ? app.chart.priceToCoordinate(at[id]) : null;
     const node = el(id);
     if (y == null) { node.style.display = 'none'; continue; }
     node.style.display = '';
@@ -114,7 +125,7 @@ function dragify(id, which) {
   });
   node.addEventListener('pointermove', (e) => {
     if (!node._drag) return;
-    const p = app.chart && app.chart.coordinateToPrice(e.clientY - chartTop(), 0);
+    const p = app.chart && app.chart.coordinateToPrice(e.clientY - chartTop());
     if (p != null) setBracketPrice(which, p);
   });
   const end = (e) => { node._drag = false; try { node.releasePointerCapture(e.pointerId); } catch (_) {} };

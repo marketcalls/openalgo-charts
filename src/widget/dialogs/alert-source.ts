@@ -10,8 +10,10 @@ const kinds: Choice[] = [
   { value: 'drawing', label: 'Drawing level' }, { value: 'barCondition', label: 'Candle condition' },
 ];
 const select = (key: string, label: string, options: Choice[]): FormControl => ({ key, label, kind: 'select', options });
+/** The price pane's slot now: a study's overlay plots draw there, wherever it sits. */
+const pricePane = (ctx: WidgetContext): number => ctx.chart.primaryPaneIndex();
 const plots = (ctx: WidgetContext, instance: IndicatorApi | undefined, pane?: number): Choice[] => instance
-  ? getIndicator(instance.indicatorId).plots.filter(plot => pane === undefined || (plot.overlay ? 0 : instance.paneIndex) === pane)
+  ? getIndicator(instance.indicatorId).plots.filter(plot => pane === undefined || (plot.overlay ? pricePane(ctx) : instance.paneIndex) === pane)
     .map(plot => ({ value: plot.key, label: widgetText(ctx, `schema.indicator.${instance.indicatorId}.plot.${plot.key}`, {}, plot.title) })) : [];
 
 /** Resolve stable identities without replacing a removed selection with another object. */
@@ -62,7 +64,7 @@ export function alertSourceFields(ctx: WidgetContext, draft: Record<string, unkn
     controls.push(select('drawingId', widgetText(ctx, 'Drawing'), choices), select('level', widgetText(ctx, 'Level'), levels));
     const compatible = instances.filter(item => plots(ctx, item, info.paneIndex).length > 0);
     const inputs = studies(compatible);
-    if (info.paneIndex === 0) inputs.unshift({ value: '', label: widgetText(ctx, 'Price') });
+    if (info.paneIndex === pricePane(ctx)) inputs.unshift({ value: '', label: widgetText(ctx, 'Price') });
     const inputInstanceId = choose('inputInstanceId', inputs);
     controls.push(select('inputInstanceId', widgetText(ctx, 'Compare with'), inputs));
     const instance = compatible.find(item => item.id === inputInstanceId);
@@ -76,7 +78,7 @@ export function alertSourceFields(ctx: WidgetContext, draft: Record<string, unkn
     const reason = !info.available ? info.reason
       : !levels.some(item => item.value === level) ? widgetText(ctx, 'Drawing level is unavailable')
         : input ? !plots(ctx, instance, info.paneIndex).some(plot => plot.value === input.plotKey) ? widgetText(ctx, 'Select an input plot on the drawing pane') : undefined
-          : info.paneIndex !== 0 ? widgetText(ctx, 'Select an input plot on the drawing pane') : undefined;
+          : info.paneIndex !== pricePane(ctx) ? widgetText(ctx, 'Select an input plot on the drawing pane') : undefined;
     return { source: { kind, drawingId, level, ...(input ? { input } : {}) }, controls, reason };
   }
   if (!('price' in draft)) draft.price = bars[at]?.close;

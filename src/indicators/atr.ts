@@ -22,7 +22,12 @@ export function trueRange(
   return tr;
 }
 
-/** Wilder ATR. First value (SMA of the first `period` TRs) lands at index period-1; earlier slots NaN. */
+/**
+ * Wilder ATR. The first value is the SMA of the first `period` consecutive
+ * finite true ranges, so on complete data it lands at index period-1. A missing
+ * or overflowing true range leaves its own slot NaN and keeps the average, and
+ * the next finite one carries on from it: a gap costs only the bars it covers.
+ */
 export function atr(
   high: readonly number[],
   low: readonly number[],
@@ -33,14 +38,24 @@ export function atr(
   const tr = trueRange(high, low, close);
   const n = tr.length;
   const out = new Array<number>(n).fill(NaN);
-  if (n < period) return out;
-  let sum = 0;
-  for (let i = 0; i < period; i++) sum += tr[i];
-  let a = sum / period;
-  out[period - 1] = a;
-  for (let i = period; i < n; i++) {
-    a = (a * (period - 1) + tr[i]) / period;
-    out[i] = a;
+  if (n < period || !Number.isInteger(period)) return out;
+  // NaN until seeded. A running overflow stays committed as Infinity, so it is
+  // never mistaken for an unseeded average and restarted from a fresh window.
+  let a = NaN;
+  let run = 0;
+  for (let i = 0; i < n; i++) {
+    const t = tr[i];
+    if (!Number.isFinite(t)) { run = 0; continue; }
+    run++;
+    if (!Number.isNaN(a)) a = (a * (period - 1) + t) / period;
+    else if (run >= period) {
+      // Summed oldest first, as the complete-data seed always was, and afresh
+      // each time: a seed that overflowed retries once its window moves on.
+      let sum = 0;
+      for (let j = i - period + 1; j <= i; j++) sum += tr[j];
+      if (Number.isFinite(sum / period)) a = sum / period;
+    }
+    if (Number.isFinite(a)) out[i] = a;
   }
   return out;
 }

@@ -17,6 +17,11 @@ through a small `OrderFeed` interface (`place` / `modify` / `cancel`) - the Open
 Try the [simulated live depth ladder](/docs/depth-of-market) to explore bid/ask
 quantities, configurable price grouping and different book depths.
 
+Account selection and figures, order preview, durations and leverage, and a provider's
+own close, partial close, reverse and brackets are covered in
+[Accounts and advanced orders](/docs/trading-accounts). Each is declared by the provider
+and refused when it is not.
+
 [Trader alerts](/docs/alerts) use the base-tier `AlertController`. Their draggable
 thresholds and `alert:triggered` notifications do not place or modify broker orders.
 Keep alert delivery separate from the trading write path.
@@ -215,7 +220,10 @@ chart.subscribeDrag(
 );
 ```
 
-`orderLines`, `clientId` and `restoreOrderPreview` belong to the host. The last
+`orderLines`, `clientId` and `restoreOrderPreview` belong to the host. The preview
+above shows the raw pointer price; with a tick schedule in the engine's constraints,
+preview `ticks.round(price)` with that same schedule instead, which is the price
+`requestModify` will send. The last
 restores the broker-confirmed level after cancellation. `requestModify` can
 send immediately and rate-limits subsequent requests; it is not a visual-preview
 API. `commitModify` flushes any queued patch. Call them only when the host has
@@ -329,6 +337,28 @@ const subset = visibleRows(rows, priceToY, plotHeight, rowHeight, maxRows);
 ```
 
 `DEFAULT_DOM_LADDER_OPTIONS` is `{ tickSize: 0.05, width: 96, groupBy: 1, maxRows: 60, rowHeight: 14 }`.
+
+### A ladder across a tick boundary
+
+For an instrument whose tick changes with price, pass its schedule as `tickSchedule`
+(or to `buildRows` in place of the tick size). Each row is then a price its own band
+allows, so a click always offers a tradable price, and `groupBy` counts ticks of the
+band a row is in. A group stops at a boundary rather than label a row with a price
+the next band forbids. With a schedule, `groupBy` counts whole ticks, a fraction rounding
+down (2.5 groups by 2), so every row stays a tradable price. Without a schedule, rows
+step by `tickSize * groupBy` exactly as before, a fractional `groupBy` included.
+
+```ts
+import { TickSchedule } from 'openalgo-charts';
+import { DomLadder, buildRows } from 'openalgo-charts/trade';
+
+// Synthetic rules for illustration: 0.01 below 100 and 0.05 from 100.
+const ticks = new TickSchedule([{ tick: 0.01 }, { from: 100, tick: 0.05 }]);
+const ladder = new DomLadder({ tickSize: ticks.minMove, tickSchedule: ticks });
+
+buildRows(depth, ticks);     // row prices ... 99.97, 99.98, 99.99, 100, 100.05, 100.1 ...
+buildRows(depth, ticks, 5);  // row prices ... 99.9, 99.95, 100, 100.25, 100.5 ...
+```
 
 ## P&L and risk math
 
@@ -444,6 +474,38 @@ validateOrder(2950, 2000, c)
 `ValidationResult` always has `.ok`. When `false` it also has `.reason`;
 when `true` it also has `.price` (the tick-snapped value).
 
+### Price-dependent ticks
+
+Some instruments change tick with price. Pass the schedule as `tickSchedule` and it
+decides every snap; `tickSize` is then read only by older code, so give it the
+schedule's `minMove`. Without `tickSchedule`, or with it null, snapping is exactly the
+constant `tickSize` path above.
+
+```ts
+import { TickSchedule } from 'openalgo-charts';
+import { validatePrice, type OrderConstraints } from 'openalgo-charts/trade';
+
+// Synthetic rules for illustration. Real schedules come from your venue's metadata.
+const ticks = new TickSchedule([{ tick: 0.01 }, { from: 10, tick: 0.05 }, { from: 100, tick: 0.1 }]);
+const c: OrderConstraints = { tickSize: ticks.minMove, tickSchedule: ticks, priceBand: { lower: 9.97, upper: 10.04 } };
+
+validatePrice(9.994, c)  // { ok: true, price: 9.99 }   the 0.01 band
+validatePrice(9.996, c)  // { ok: true, price: 10 }     rounds onto the boundary
+validatePrice(10.02, c)  // { ok: true, price: 10 }
+validatePrice(10.03, c)  // { ok: false, code: 'PRICE_OUT_OF_BAND', reason: 'price 10.05 outside band 9.97 to 10.04' }
+```
+
+The snapped price is an exact decimal and the nearer valid price, however many ticks the
+price is from zero, and a price written exactly halfway between two valid prices rounds
+up. Price limits are checked after snapping, as with a constant tick,
+so a price inside the limits as typed can still be refused. Zero and negative prices use
+the first band; a floor belongs in `priceBand`. `OrderEngine` applies the schedule to
+typed prices and triggers in `placeOrder` and to dragged levels in `requestModify`,
+including the trigger a stop-limit carries across a boundary. A band list passed in
+place of a `TickSchedule` throws, because an unvalidated list would round nothing.
+[Instrument metadata](/docs/instruments#price-dependent-ticks) has the band rules, and
+`orderConstraintsForInstrument` fills `tickSchedule` from an instrument's `tickBands`.
+
 ## TradeController and TradeHost
 
 `TradeController` reconciles order and position snapshots into on-chart
@@ -541,7 +603,9 @@ bracket.update({ ...state, target: 3050 }); // adjust TP
 
 `FakeBroker` is a deterministic in-memory broker that implements `OrderFeed`.
 Use it to exercise `OrderEngine` and `TradeController` without a network
-connection.
+connection. Constructed with `accounts`, it also simulates account ledgers,
+preview, durations and native position commands; see
+[Accounts and advanced orders](/docs/trading-accounts#fakebroker).
 
 ```ts
 import { FakeBroker, OrderEngine, TradeController } from 'openalgo-charts/trade';
