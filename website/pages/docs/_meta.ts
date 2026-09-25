@@ -40,6 +40,7 @@ export default {
   'crosshair-and-legend': 'Crosshair & Legend',
   state: 'Chart State',
   workspaces: 'Workspaces & Templates',
+  'watchlists-and-news': 'Watchlists & News',
   'chart-data-export': 'Chart Data & CSV Export',
   interactions: 'Interactions & A11y',
   'keyboard-shortcuts': 'Keyboard Shortcuts',

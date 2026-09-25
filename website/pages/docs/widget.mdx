@@ -92,6 +92,11 @@ named group to show, hide, lock, or remove them together. See [Objects](/docs/ob
 Set `panels: false` to retain the standalone Objects popup and omit Data from
 the toolbar. This affects the widget chrome only.
 
+Unreleased: the same panel can also hold a **Watchlist** and a **News** reader when
+you pass `watchlist: { store, quotes }` and `news: { feed }`. Each appears only when
+its source is supplied; `widget.openWatchlist()` and `widget.openNews()` open them.
+See [Watchlists & News](/docs/watchlists-and-news).
+
 ## Symbol search and direct typing
 
 `symbolSearch(query)` remains a host-supplied lookup. Existing results with

@@ -105,3 +105,52 @@ they cause rejection to avoid silently changing routing data. Other payload data
 must survive JSON without losing symbols, accessors or extra array properties.
 Arbitrary free text is not secret-scanned.
 Do not execute imported text or assume namespace names provide authorization.
+
+## Named watchlists (unreleased)
+
+DOM-free named symbol lists in the same tier and with the same storage discipline as
+workspaces. Source of truth: `src/workspace/watchlists.ts`.
+
+```ts
+import { WatchlistRepository, createIndexedDbWatchlistStorage } from 'openalgo-charts/workspace';
+
+const lists = new WatchlistRepository(createIndexedDbWatchlistStorage(indexedDB), 'account-7');
+const tech = await lists.createList('Tech', [{ symbol: 'INFY', exchange: 'NSE' }]);
+await lists.addEntry(tech.id, { symbol: 'RELIANCE', exchange: 'BSE' });
+await lists.setActiveList(tech.id);
+```
+
+- Identity is the exact `{ symbol, exchange }` pair (`InstrumentKey` from the base entry):
+  never case-folded or parsed, so one ticker on NSE and BSE is two entries.
+  `watchlistKey(entry)` is that identity as one string (JSON of the pair, so a separator
+  inside a symbol cannot make two instruments collide). An exact repeat in one list is
+  rejected; up to 100 lists per namespace and 500 entries per list.
+- `WatchlistRepository(storage, namespace, { now?, id? })`: `load`, `createList(name, entries?)`,
+  `renameList`, `duplicateList`, `removeList` (clears `activeListId` when it pointed there),
+  `setActiveList(id | null)`, `addEntry(id, entry, { index? })`, `removeEntry`,
+  `moveEntry(id, entry, index)`, and `subscribe(listener)`, called with a detached copy
+  after every change this repository commits. It implements the `WatchlistStore`
+  contract, which is what the widget's panel takes: every member above except
+  `duplicateList`, which the panel never calls. A host with server-side lists can
+  implement `WatchlistStore` itself. Its `subscribe` listeners must run before the
+  change's own promise resolves, as the repository's do: the panel computes a queued
+  move (a held Alt+Arrow) from the catalog they deliver.
+- Writes are queued and each one is applied to the catalog as stored at that moment, so a
+  change made in another session survives. Every mutation takes
+  `WatchlistOperationOptions` (`signal`, `expectedRevision`): pass the revision a
+  position-based edit was computed from and the change is refused with
+  `WatchlistConflictError` if the catalog moved. A storage write that loses a race is the
+  same error; reload and retry. Nothing is written for a refused or invalid change.
+- `parseWatchlistCatalog` validates the whole catalog (`version` 1, `revision`, `lists`,
+  `activeListId`) before any mutation; corrupt storage raises `WorkspaceDocumentError`
+  and is never replaced.
+- Storage: `WatchlistStorage.write(namespace, catalog, expectedRevision, options?)` must
+  compare and write atomically, like `WorkspaceStorage`. `createIndexedDbWatchlistStorage(factory,
+  name = 'openalgo-chart-watchlists')` does it in one IndexedDB transaction across tabs
+  (`IndexedDbWatchlistStorage`, with `close()`; the shared shape is `IndexedDbCatalogStorage`).
+  `createMemoryWatchlistStorage(seed?)` is revision-checked memory for tests, previews
+  and hosts without IndexedDB; nothing outlives the page.
+
+Types: `Watchlist`, `WatchlistEntry`, `WatchlistCatalog`, `WatchlistStorage`, `WatchlistStore`,
+`WatchlistOperationOptions`, `WatchlistRepositoryOptions`, `IndexedDbWatchlistStorage`,
+`IndexedDbCatalogStorage`.

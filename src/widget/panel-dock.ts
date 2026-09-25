@@ -2,12 +2,16 @@ import type { WidgetContext } from './context';
 import { button, el } from './form';
 import { widgetText } from './localization';
 
-export type PanelDockId = 'data' | 'objects';
+export type PanelDockId = 'data' | 'objects' | 'watchlist' | 'news';
 export interface PanelDockState { panel: PanelDockId | null; width: number }
 export interface PanelDockContent { initialFocus?: HTMLElement; destroy(): void }
 export interface PanelDockOptions {
   data(host: HTMLElement): PanelDockContent;
   objects(host: HTMLElement): PanelDockContent;
+  /** Named symbol lists. Its tab appears only when this is supplied. */
+  watchlist?(host: HTMLElement): PanelDockContent;
+  /** The chart instrument's news. Its tab appears only when this is supplied. */
+  news?(host: HTMLElement): PanelDockContent;
   state?: unknown;
   onChange?(state: PanelDockState): void;
 }
@@ -21,12 +25,14 @@ export interface PanelDockHandle {
   destroy(): void;
 }
 const MIN_WIDTH = 240, MAX_WIDTH = 480, DEFAULT_WIDTH = 300;
+const PANELS: readonly PanelDockId[] = ['data', 'objects', 'watchlist', 'news'];
+const LABELS: Record<PanelDockId, string> = { data: 'Data', objects: 'Objects', watchlist: 'Watchlist', news: 'News' };
 
 /** Older documents have no dock; malformed preferences cannot hide the plot. */
 export function sanitizePanelDockState(raw: unknown): PanelDockState {
   const state = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
   return {
-    panel: state.panel === 'data' || state.panel === 'objects' ? state.panel : null,
+    panel: PANELS.includes(state.panel as PanelDockId) ? state.panel as PanelDockId : null,
     width: typeof state.width === 'number' && Number.isFinite(state.width)
       ? Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, state.width))) : DEFAULT_WIDTH,
   };
@@ -46,11 +52,13 @@ export function mountPanelDock(ctx: WidgetContext, stage: HTMLElement, opts: Pan
   const header = el(doc, 'div', 'oac-panel-dock__header');
   const tabs = el(doc, 'div', 'oac-panel-dock__tabs');
   tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', text('panels', 'Information panels'));
-  const data = button(doc, { label: text('data', 'Data'), onClick: () => open('data') });
-  const objects = button(doc, { label: text('objects', 'Objects'), onClick: () => open('objects') });
+  // A source the host did not supply has no tab: an empty panel is a control with nothing behind it.
+  const available = PANELS.filter(id => typeof opts[id] === 'function');
+  const tabButtons = new Map(available.map(id => [id, button(doc, { label: text(id, LABELS[id]), onClick: () => open(id) })]));
+  const pressTabs = (active: PanelDockId | null): void => { for (const [id, tab] of tabButtons) tab.setAttribute('aria-pressed', String(id === active)); };
   const closeButton = button(doc, { label: text('close', 'Close'), onClick: () => close() });
   closeButton.classList.add('oac-panel-dock__close');
-  tabs.append(data, objects); header.append(tabs, closeButton);
+  tabs.append(...tabButtons.values()); header.append(tabs, closeButton);
   const body = el(doc, 'div', 'oac-panel-dock__body');
   panel.append(grip, header, body); stage.appendChild(panel);
   const state = sanitizePanelDockState(opts.state);
@@ -105,7 +113,7 @@ export function mountPanelDock(ctx: WidgetContext, stage: HTMLElement, opts: Pan
     detachOverlay();
     current?.destroy(); current = null; body.textContent = ''; panel.hidden = true;
     stage.appendChild(panel);
-    data.setAttribute('aria-pressed', 'false'); objects.setAttribute('aria-pressed', 'false');
+    pressTabs(null);
     const focused = doc.activeElement;
     if (restoreFocus?.isConnected && (focused === null || focused === doc.body || panel.contains(focused))) restoreFocus.focus();
     restoreFocus = null;
@@ -113,13 +121,14 @@ export function mountPanelDock(ctx: WidgetContext, stage: HTMLElement, opts: Pan
   }
   function open(id: PanelDockId, focus = true): void {
     if (destroyed) return;
-    if (id !== 'data' && id !== 'objects') return;
+    const mount = opts[id];
+    if (!available.includes(id) || mount === undefined) return;
     if (state.panel === id && current !== null) { if (focus) (current.initialFocus ?? closeButton).focus(); return; }
     if (state.panel === null || current === null) restoreFocus = doc.activeElement as HTMLElement | null;
     current?.destroy(); body.textContent = '';
     state.panel = id; panel.hidden = false;
-    data.setAttribute('aria-pressed', String(id === 'data')); objects.setAttribute('aria-pressed', String(id === 'objects'));
-    current = opts[id](body);
+    pressTabs(id);
+    current = mount(body);
     place(focus); announce();
   }
   const onKey = (event: KeyboardEvent): void => {
@@ -159,7 +168,8 @@ export function mountPanelDock(ctx: WidgetContext, stage: HTMLElement, opts: Pan
   return {
     el: panel, open, close, toggle: id => { if (state.panel === id) close(); else open(id); },
     state: () => ({ ...state }),
-    restore: raw => { const next = sanitizePanelDockState(raw); resize(next.width); if (next.panel === null) close(); else open(next.panel, false); },
+    // A saved panel whose source this dock lacks restores as closed, never as whatever was open.
+    restore: raw => { const next = sanitizePanelDockState(raw); resize(next.width); if (next.panel === null || !available.includes(next.panel)) close(); else open(next.panel, false); },
     destroy: () => {
       if (destroyed) return; close(); destroyed = true; observer?.disconnect(); win?.removeEventListener?.('resize', onResize);
       panel.removeEventListener('keydown', onKey); grip.removeEventListener('pointerdown', onDown);
@@ -172,7 +182,8 @@ export function mountPanelDock(ctx: WidgetContext, stage: HTMLElement, opts: Pan
 export const PANEL_DOCK_CSS = `
 .oac-widget .oac-panel-dock { position: relative; flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--oac-panel); border-left: 1px solid var(--oac-bd); }
 .oac-widget .oac-panel-dock__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--oac-bd-soft); flex: none; }
-.oac-widget .oac-panel-dock__tabs { display: flex; gap: 3px; }
+.oac-widget .oac-panel-dock__tabs { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.oac-widget .oac-panel-dock__tabs .oac-btn, .oac-widget .oac-panel-dock__close { padding: 0 6px; }
 .oac-widget .oac-panel-dock__tabs .oac-btn { border-color: transparent; background: transparent; }
 .oac-widget .oac-panel-dock__tabs .oac-btn[aria-pressed="true"] { background: var(--oac-elev); color: var(--oac-tx); border-color: var(--oac-bd); }
 .oac-widget .oac-panel-dock__close { color: var(--oac-mut); }

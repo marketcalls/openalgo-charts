@@ -255,6 +255,62 @@ before commit without changing storage. Do not acknowledge cancellation after
 committing a write. A remote adapter needs an explicit transactional cancellation
 protocol to provide this guarantee; aborting only its HTTP response is insufficient.
 
+## Named watchlists
+
+The same tier keeps named symbol lists with the same storage discipline as the
+workspace catalog. It is DOM-free; the widget tier's Watchlist panel, or a host's own
+view, reads it. This is unreleased on the main branch.
+
+```ts
+import {
+  WatchlistRepository, WatchlistConflictError, createIndexedDbWatchlistStorage, watchlistKey,
+} from 'openalgo-charts/workspace';
+
+const lists = new WatchlistRepository(createIndexedDbWatchlistStorage(window.indexedDB), 'user-42');
+const tech = await lists.createList('Tech', [{ symbol: 'INFY', exchange: 'NSE' }]);
+await lists.addEntry(tech.id, { symbol: 'RELIANCE', exchange: 'BSE' });
+await lists.setActiveList(tech.id);
+const off = lists.subscribe(catalog => render(catalog));
+
+// A move is computed from a position, so it carries the revision it was computed from.
+const { revision } = await lists.load();
+try {
+  await lists.moveEntry(tech.id, { symbol: 'RELIANCE', exchange: 'BSE' }, 0, { expectedRevision: revision });
+} catch (error) {
+  if (error instanceof WatchlistConflictError) render(await lists.load());
+}
+```
+
+An entry is the exact `{ symbol, exchange }` pair (`InstrumentKey` from the base
+entry). Neither part is parsed or case-folded, so one ticker on NSE and BSE is two
+entries. `watchlistKey(entry)` is that identity as one string: JSON of the pair, so a
+separator inside a symbol cannot make two instruments collide. An exact repeat in one
+list is refused. A namespace holds up to 100 lists and a list up to 500 entries.
+
+`WatchlistRepository(storage, namespace, { now?, id? })` supports `load`,
+`createList(name, entries?)`, `renameList`, `duplicateList`, `removeList` (which clears
+`activeListId` when it pointed there), `setActiveList(id | null)`,
+`addEntry(id, entry, { index? })`, `removeEntry`, `moveEntry(id, entry, index)` and
+`subscribe(listener)`. Writes are queued like the workspace repository's, and each
+change is applied to the catalog as stored at that moment, so an edit made in another
+tab survives. Every mutation takes `WatchlistOperationOptions` (`signal`,
+`expectedRevision`); a stale revision, or a storage write that loses a race, rejects
+with `WatchlistConflictError` and writes nothing. `parseWatchlistCatalog` validates a
+whole catalog before any mutation, and corrupt storage raises `WorkspaceDocumentError`
+and is never replaced.
+
+`createIndexedDbWatchlistStorage(indexedDB, databaseName?)` compares and writes in one
+IndexedDB transaction across tabs, as the workspace adapter does, and has `close()`.
+`createMemoryWatchlistStorage(seed?)` is revision-checked memory for tests, previews
+and hosts without IndexedDB. A server adapter implements `WatchlistStorage`, with the
+same atomic compare-and-write rule as `WorkspaceStorage` above.
+
+The widget's panel takes a `WatchlistStore`: the repository's members without
+`duplicateList`, which the panel never calls. A host with server-side lists can
+implement that contract directly. Its `subscribe` listeners must run after a change
+commits and before that change's promise resolves, as the repository's do: the panel
+computes a queued move, such as a held Alt+ArrowDown, from the catalog they deliver.
+
 ## Migration and restoration
 
 `migrateWidgetWorkspace(widgetState, { id, name, now })` converts the existing

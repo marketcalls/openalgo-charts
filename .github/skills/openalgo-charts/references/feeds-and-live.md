@@ -470,3 +470,31 @@ back to bounded memory. A failed durable delete is suppressed per instance and
 may remain visible to another process. Direct cache calls are not coalesced;
 use the pool/controller. `MarketDepth.timeSec` preserves valid exchange timestamps;
 Depth frames with only book quantities do not supply executed-trade volume.
+
+## Quote and news contracts (unreleased)
+
+Optional provider contracts, types only in the base entry (no runtime bytes), for the
+widget's watchlist and news panels or a host's own. They are separate from `DataFeed`:
+a quote comes only from a `QuoteFeed`, never from a bar's close, and a host without one
+shows no price.
+
+- `InstrumentKey`: `{ symbol, exchange }`, both opaque and compared exactly.
+- `QuoteSnapshot extends InstrumentKey`: `last`, optional `previousClose` (the reference
+  for change figures), `bid`, `ask`, `volume`, `time` (exchange UTC seconds) and
+  `delayed`. An absent field is unknown, never zero.
+- `QuoteFeed.getQuotes({ instruments, signal })` returns snapshots; an instrument left
+  out of the answer is unknown. Optional `subscribeQuotes(instruments, { onQuote,
+  onStatus })` returns an `UnsubscribeFn`. `QuoteStreamStatus` is `'connecting' | 'live'
+  | 'reconnecting' | 'disconnected'`; quotes held while a stream is not live are stale,
+  and a consumer refetches snapshots when it becomes live again. The first quote a
+  stream delivers counts as evidence it is live when the provider reports no status.
+  The widget subscribes one instrument per call so it can release exactly the rows that
+  scroll away; a provider multiplexes them over its own connection.
+- `NewsFeed.getNews({ symbol, exchange, cursor?, limit, signal })` returns a `NewsPage`
+  `{ items, nextCursor? }`, newest first; `nextCursor` absent or null means no older page.
+  `NewsItem`: `id` (stable, used to drop repeats across pages), `headline`, `source?`,
+  `time` (UTC seconds), `summary?`, `url?`. Every text field is plain text; a consumer
+  never renders it as markup and opens only http and https links.
+
+Types: `InstrumentKey`, `QuoteSnapshot`, `QuoteRequest`, `QuoteStreamStatus`,
+`QuoteStreamHandlers`, `QuoteFeed`, `NewsRequest`, `NewsItem`, `NewsPage`, `NewsFeed`.

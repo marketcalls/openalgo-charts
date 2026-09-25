@@ -369,8 +369,9 @@ export function renderToolbar() {
     } });
   });
   bar.appendChild(ind);
-  for (const panel of ['data', 'objects']) {
-    const control = tbtn(panel === 'data' ? 'Data' : 'Objects', panel === 'data' ? 'Data window' : 'Chart objects');
+  const PANELS = { data: ['Data', 'Data window'], objects: ['Objects', 'Chart objects'], watchlist: ['Watchlist', 'Watchlists and quotes'], news: ['News', 'News for this symbol'] };
+  for (const [panel, [label, title]] of Object.entries(PANELS)) {
+    const control = tbtn(label, title);
     control.setAttribute('aria-pressed', String(app['inspection' + pane]?.dock.state().panel === panel));
     control.addEventListener('click', () => toggleInspection(pane, panel));
     bar.appendChild(control);

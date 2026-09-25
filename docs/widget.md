@@ -109,6 +109,64 @@ Dialogs fit the actual widget container, including a 350px pane on a wide page.
 Tabs adapt to a horizontal row, fields wrap and content scrolls inside the dialog
 while its actions remain reachable.
 
+## Watchlist and news panels
+
+The panel dock can carry two more panels beside Data and Objects: a Watchlist of
+named lists with quote rows, and a News reader for the chart's instrument. Each is
+optional, and its tab, top bar button and mobile More entry appear only when the host
+supplies its source. Both need `panels` on. This is unreleased on the main branch.
+
+```ts
+import { createWidget } from 'openalgo-charts/widget';
+import { WatchlistRepository, createIndexedDbWatchlistStorage } from 'openalgo-charts/workspace';
+
+const widget = createWidget('#chart', {
+  feed, symbol: 'INFY', exchange: 'NSE',
+  watchlist: { store: new WatchlistRepository(createIndexedDbWatchlistStorage(indexedDB), 'user-42'), quotes },
+  news: { feed: newsFeed, pageSize: 20 },
+});
+widget.openWatchlist(); // false without a watchlist source, with panels off, or after destroy()
+widget.openNews();
+```
+
+- **Prices come only from a `QuoteFeed`.** `quotes.getQuotes({ instruments, signal })`
+  answers snapshots, and the optional `subscribeQuotes(instruments, { onQuote,
+  onStatus })` streams them. The panel never reads the chart's bars: without a quote
+  source every row shows its symbol and `n/a`. Change figures come from the provider's
+  `previousClose`.
+- **Only rows on screen hold a stream.** Rows subscribe one instrument per call as
+  they scroll into view and release as they leave; a list switch, a hidden page,
+  closing or switching the panel and `destroy()` release them all.
+- **Stale is shown, and costs nothing while it lasts.** A quote held while its stream
+  reconnects or disconnects, or a snapshot older than `staleAfterMs` (60 seconds), is
+  shown muted as stale. The panel waits only for the next row that can still age into
+  stale, so a quiet board holds no timer. A source without `subscribeQuotes` is polled
+  every `pollMs` (15 seconds; 0 turns it off) while rows are visible.
+- **Rows name what the widget charts.** Choosing a row calls `setSymbol(symbol,
+  exchange)`, which upper-cases the symbol, so the widget compares and saves entries in
+  that form: a lower-case entry is the chart's own row, and its upper-case twin is
+  refused as already listed.
+- **Sorting holds still, and survives.** Sort by symbol, last, change or percent change
+  from the headers; a third click returns to list order. The sort outlives a panel
+  switch, and with `persist` it is saved with the widget's other preferences. While
+  the pointer or focus is on the rows, prices update in place
+  but rows do not move. Alt+ArrowUp and Alt+ArrowDown reorder a row in list order, one
+  saved move at a time.
+- **News is text.** The `NewsFeed` answers `getNews({ symbol, exchange, cursor, limit,
+  signal })` with `{ items, nextCursor }`. The reader follows the chart's instrument,
+  cancels on a switch, drops repeats across pages and shows every provider string as
+  text. It links an article only for `safeNewsUrl(url)`: absolute http or https
+  without credentials, opened with `rel="noopener noreferrer"`.
+
+A host with its own chrome can mount the same panels into `mountPanelDock` with
+`mountWatchlistPanel(ctx, host, options)` and `mountNewsPanel(ctx, host, options)`;
+the watchlist then takes `onSelect` and an optional `normalize(instrument)` for its
+host's own naming. `WATCHLIST_PANEL_CSS` and `NEWS_PANEL_CSS` are part of the widget
+stylesheet. The DOM-free `QuoteBoard` and `NewsReader` controllers, and
+`quoteChange(quote)`, serve a host that draws its own view. The yfinance reference host
+mounts the panels in both of its pages. See
+[workspaces](./workspaces.md#named-watchlists) for the lists themselves.
+
 ## Mobile controls and navigation
 
 Since 2.1.8, `mobile: 'auto'` selects compact controls when the widget container is at
@@ -156,6 +214,8 @@ to `createChart` unchanged.
 | `lookbackBars` | `number` | Bars per load. Default 500. |
 | `now` | `() => number` | The clock for the load window and the capture filename. Default `Date.now`. |
 | `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). Without it the menu draws no trade rows. |
+| `watchlist` | `WidgetWatchlistOptions` | A docked Watchlist: `store` (a `WatchlistStore`), `quotes?` (a `QuoteFeed`), `staleAfterMs?`, `pollMs?`, `formatPrice?`. See [Watchlist and news panels](#watchlist-and-news-panels). |
+| `news` | `WidgetNewsOptions` | A docked News reader: `feed` (a `NewsFeed`), `pageSize?`, `staleAfterMs?`, `maxItems?`. |
 
 The chrome switches (`rail`, `topbar`, `statusline`, `indicators`) default to on, so a
 bare `createWidget(el)` is the full terminal. `persist` defaults to off: nothing is

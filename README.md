@@ -501,10 +501,10 @@ Enforced in CI by [`size-limit`](./.size-limit.json). Nothing is excluded, becau
 | Transform tier | 6 kB | 4.50 kB |
 | Profile tier | 15 kB | 14.96 kB |
 | WebGL2 tier | 7 kB | 6.39 kB |
-| Widget tier | 71.34 kB | 71.33 kB |
-| Widget terminal (base + draw + indicators + widget) | 267.56 kB | 267.55 kB |
-| Workspace tier | 8.75 kB | 8.67 kB |
-| **Everything** | 310.09 kB | 310.09 kB |
+| Widget tier | 80.37 kB | 80.36 kB |
+| Widget terminal (base + draw + indicators + widget) | 276.58 kB | 276.58 kB |
+| Workspace tier | 9.62 kB | 9.62 kB |
+| **Everything** | 320.06 kB | 320.06 kB |
 
 ## Documentation
 
