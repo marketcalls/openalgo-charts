@@ -332,6 +332,20 @@ const shiftOf = (p: PointerFacts & { shiftKey?: boolean }): boolean =>
 /** `v` held to `0..size`: a pixel on a plot of that size. */
 const within = (v: number, size: number): number => (v < 0 ? 0 : v > size ? size : v);
 
+/**
+ * Anchors on one axis, from `a0..a1`, cut so the box `b0..b1` they carry fits
+ * a plot of `size`: held inside the room the box leaves them, so a label
+ * above a box stays above it on the plot, or on the plot when the box adds
+ * more than the plot has.
+ */
+const cutInto = (b0: number, b1: number, a0: number, a1: number, size: number) => {
+  const lead = Math.max(0, a0 - b0);
+  const trail = Math.max(0, b1 - a1);
+  return (v: number): number => (b1 - b0 <= size ? v
+    : lead + trail < size ? Math.min(Math.max(v, lead), size - trail)
+    : within(v, size));
+};
+
 /** The pointer kind behind a payload; anything unnamed is a mouse. */
 const pointerKindOf = (p: PointerFacts): DrawingPointerKind =>
   p.pointerType === 'touch' || p.pointerType === 'pen' ? p.pointerType : 'mouse';
@@ -1998,8 +2012,13 @@ export class DrawingController {
       const at = this._gesturePlot(p, d.paneIndex);
       const frame = this._plotFrame(d.paneIndex);
       if (handle >= 0 && handle < anchors.length && at !== null && frame !== null) {
-        const placed = placeViewportAnchors(d, anchors, frame.width, frame.height);
-        placed[handle] = { x: within(at.x, frame.width), y: within(at.y, frame.height) };
+        const { width, height } = frame;
+        const placed = placeViewportAnchors(d, anchors, width, height);
+        placed[handle] = { x: within(at.x, width), y: within(at.y, height) };
+        // Where the box reaches an edge before the handle does (a label above
+        // a box), the handle stops short instead of pushing the other corners
+        // away from the edge it was dragged to.
+        placed[handle] = placeViewportAnchors(d, placed.map((q) => ({ x: q.x / width, y: q.y / height })), width, height)[handle];
         d.viewportPoints = this._pinPlot(d, placed, frame);
       }
     } else if (handle >= 0 && handle < d.points.length) {
@@ -2178,13 +2197,11 @@ export class DrawingController {
       if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
       px.push({ x, y });
     }
-    const box = (hasDrawingTool(d.tool) ? getDrawingTool(d.tool).bounds?.(px, d) : undefined) ?? boundsOf(px);
-    const cutX = box.x1 - box.x0 > frame.width;
-    const cutY = box.y1 - box.y0 > frame.height;
-    return this._pinPlot(d, px.map((p) => ({
-      x: cutX ? within(p.x, frame.width) : p.x,
-      y: cutY ? within(p.y, frame.height) : p.y,
-    })), frame);
+    const own = boundsOf(px);
+    const box = (hasDrawingTool(d.tool) ? getDrawingTool(d.tool).bounds?.(px, d) : undefined) ?? own;
+    const cutX = cutInto(box.x0, box.x1, own.x0, own.x1, frame.width);
+    const cutY = cutInto(box.y0, box.y1, own.y0, own.y1, frame.height);
+    return this._pinPlot(d, px.map((p) => ({ x: cutX(p.x), y: cutY(p.y) })), frame);
   }
 
   /**

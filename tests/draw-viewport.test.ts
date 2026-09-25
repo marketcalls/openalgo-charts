@@ -452,6 +452,96 @@ describe('keeping a pinned drawing on screen', () => {
   });
 });
 
+describe('a pinned box with its label outside', () => {
+  // A 14 px label (the shape default) is one line of 14 * 1.35 px, lifted 6 px
+  // clear of the outline: the shape's top sits this far below the label's.
+  const LIFT = 14 * 1.35 + 6;
+  const labelled = (draw: DrawingController, tool: string, at = [{ x: 0.3, y: 0.4 }, { x: 0.5, y: 0.6 }]): Drawing => draw.add({
+    tool, paneIndex: 0, style: { color: '#ff00ff' }, points: [], space: 'viewport', viewportPoints: at,
+    text: { value: 'Outside label', position: 'outside', color: '#ffd400' },
+  });
+  /** The label's [x, y] as painted, and the shape's top edge, in device px. */
+  const painted = (rec: RecordingContext) => {
+    const label = rec.ops.find(op => op.type === 'fillText' && op.text === 'Outside label')?.args;
+    const rect = strokeOf(rec, '#ff00ff');
+    const ellipse = rec.ops.find(op => op.type === 'ellipse')?.args;
+    expect(label).toBeDefined();
+    return { label: label!, top: rect !== undefined ? rect[1] : ellipse![1] - ellipse![3] };
+  };
+  const tools = ['rectangle', 'ellipse'];
+
+  it.each(tools)('keeps the label of a %s at the top edge on the plot, where a host put it and where a drag took it', (tool) => {
+    const { draw, dragBy, hit, paint, size } = mount();
+    const { w, h } = size();
+    const parked = labelled(draw, tool, [{ x: 0.3, y: 0 }, { x: 0.5, y: 0.2 }]);
+    for (const dpr of [1, 2]) {
+      const at = painted(paint(0, dpr));
+      expect(at.label[1]).toBeGreaterThanOrEqual(0);
+      expect(at.top).toBeCloseTo(LIFT * dpr, 6);
+    }
+    expectOnPlot(hit, parked.id, w, h);
+    draw.remove(parked.id);
+    const thrown = labelled(draw, tool);
+    const start = expectOnPlot(hit, thrown.id, w, h);
+    dragBy((start.x0 + start.x1) / 2, (start.y0 + start.y1) / 2, 0, -3000);
+    for (const dpr of [1, 2]) {
+      const at = painted(paint(0, dpr));
+      expect(at.label[1]).toBeGreaterThanOrEqual(0);
+      expect(at.label[1]).toBeLessThan(1);
+      expect(at.top).toBeCloseTo(LIFT * dpr, 6);
+    }
+    expectOnPlot(hit, thrown.id, w, h);
+  });
+
+  it.each(tools)('stops the top handle of a %s below its label at the top edge, and leaves the other corner where it was', (tool) => {
+    const { draw, dragBy, paint, size } = mount();
+    const { h } = size();
+    const d = labelled(draw, tool);
+    draw.select(d.id);
+    const [corner] = draw.screenPoints(d.id)!;
+    dragBy(corner.x, corner.y, 0, -3000);
+    const [a, b] = draw.get(d.id)!.viewportPoints!;
+    close([a.x, a.y, b.x, b.y], [0.3, LIFT / h, 0.5, 0.6], 9);
+    expect(painted(paint()).label[1]).toBeCloseTo(0, 6);
+  });
+
+  it('keeps a label that runs past the sides of a narrow box on the plot at the right edge', () => {
+    const { draw, paint, size } = mount();
+    const { w } = size();
+    const value = 'A label much wider than its box';
+    draw.add({ tool: 'rectangle', paneIndex: 0, style: { color: '#ff00ff' }, points: [], space: 'viewport',
+      viewportPoints: [{ x: 0.97, y: 0.4 }, { x: 1, y: 0.5 }], text: { value } });
+    for (const dpr of [1, 2]) {
+      const rec = paint(0, dpr);
+      const label = rec.ops.find(op => op.type === 'fillText' && op.text === value)!;
+      // The recording context measures 6 px a character.
+      expect(label.args[0] + value.length * 6 * dpr).toBeLessThanOrEqual(w * dpr);
+      expect(strokeOf(rec, '#ff00ff')![0]).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('pins a labelled box taller than the plot with its label and both handles on screen', () => {
+    const { chart, draw, hit, paint, size } = mount();
+    const scale = chart.panes()[0].priceScale;
+    scale.setAutoScale(false);
+    scale.setPriceRange({ min: 90, max: 110 });
+    const r = draw.add({ tool: 'rectangle', paneIndex: 0, style: { color: '#ff00ff' },
+      points: [{ time: bars[40].time, price: 130 }, { time: bars[60].time, price: 70 }],
+      text: { value: 'Outside label', position: 'outside', color: '#ffd400' } });
+    expect(draw.update(r.id, { space: 'viewport' })).toBe(true);
+    const { w, h } = size();
+    const at = painted(paint());
+    expect(at.label[1]).toBeGreaterThanOrEqual(0);
+    expect(at.top).toBeCloseTo(LIFT, 6);
+    draw.select(r.id);
+    draw.screenPoints(r.id)!.forEach((p, i) => {
+      expect(p.y).toBeLessThanOrEqual(h);
+      expect(hit(p.x, p.y)?.externalId).toBe(`draw:${r.id}#${i}`);
+    });
+    expectOnPlot(hit, r.id, w, h);
+  });
+});
+
 describe('placing a pinned drawing', () => {
   it('lands where it is clicked with the magnet on, and shows no magnet ring on the way', () => {
     const { draw, click, move, paint, size } = mount();

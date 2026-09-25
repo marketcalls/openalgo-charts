@@ -617,6 +617,7 @@ export const RECTANGLE: DrawingTool = {
     shapeLabel(c, r);
   },
   distance: (x, y, h) => distToRect(x, y, h.pts[0], h.pts[1], h.drawing.style.fill === true),
+  bounds: shapeBounds('left', 'top'),
 };
 
 export const ELLIPSE: DrawingTool = {
@@ -643,6 +644,7 @@ export const ELLIPSE: DrawingTool = {
     shapeLabel(c, r, 'center', 'middle');
   },
   distance: (x, y, h) => distToEllipse(x, y, h.pts[0], h.pts[1], h.drawing.style.fill === true),
+  bounds: shapeBounds('center', 'middle'),
 };
 
 export const PARALLEL_CHANNEL: DrawingTool = {
@@ -1095,46 +1097,76 @@ function textBox(
  */
 function shapeLabel(
   c: DrawContext,
-  r: { x0: number; y0: number; x1: number; y1: number },
-  align: 'left' | 'center' | 'right' = 'left',
-  valign: 'top' | 'middle' | 'bottom' = 'top',
+  r: Box,
+  align: LabelAlign = 'left',
+  valign: LabelValign = 'top',
 ): void {
   const { ctx, rc, style } = c;
   const t = textOf(c.drawing);
   if (t.value === '') return;
-  const d = rc.dpr;
-  const size = (t.fontSize ?? TEXT_SIZE) * d;
-  const pad = 6 * d;
   ctx.save();
   ctx.setLineDash([]);
-  ctx.font = fontOf(t, size);
+  const at = labelLayout(ctx, t, r, rc.dpr, align, valign);
   ctx.fillStyle = t.color ?? style.color;
   ctx.textBaseline = 'top';
-
-  // A shape's label wraps to the shape, not to a width of its own.
-  const lines = textLines(ctx, t, t.value, Math.max(20 * d, r.x1 - r.x0 - pad * 2));
-  const lineHeight = size * LINE_GAP;
-  const blockH = lines.length * lineHeight;
-
-  const a = t.align ?? align;
-  ctx.textAlign = a;
-  const tx = a === 'center' ? (r.x0 + r.x1) / 2 : a === 'right' ? r.x1 - pad : r.x0 + pad;
-
-  // `outside` lifts the block clear of the shape so it never sits on the outline.
-  let ty: number;
-  if (t.position === 'outside') {
-    ty = r.y0 - blockH - pad;
-  } else {
-    const v = t.valign ?? valign;
-    ty = v === 'middle' ? (r.y0 + r.y1 - blockH) / 2
-      : v === 'bottom' ? r.y1 - blockH - pad
-      : r.y0 + pad;
-  }
-  for (const line of lines) {
-    ctx.fillText(line, tx, ty);
-    ty += lineHeight;
+  ctx.textAlign = at.align;
+  let ty = at.y;
+  for (const line of at.lines) {
+    ctx.fillText(line, at.x, ty);
+    ty += at.lineHeight;
   }
   ctx.restore();
+}
+
+type Box = { x0: number; y0: number; x1: number; y1: number };
+type LabelAlign = 'left' | 'center' | 'right';
+type LabelValign = 'top' | 'middle' | 'bottom';
+
+/**
+ * Where a shape's label goes in `r`: its lines, the x they align on and the
+ * block's top, in the px of `r` at ratio `d`. Painting and `shapeBounds` both
+ * read it, so the box a pinned shape keeps on screen is the label it paints.
+ * With no context it measures nothing and wraps nothing.
+ */
+function labelLayout(
+  ctx: CanvasRenderingContext2D | null, t: DrawingText, r: Box, d: number, align: LabelAlign, valign: LabelValign,
+): { lines: string[]; align: LabelAlign; x: number; y: number; lineHeight: number; height: number } {
+  const size = (t.fontSize ?? TEXT_SIZE) * d;
+  const pad = 6 * d;
+  // A shape's label wraps to the shape, not to a width of its own.
+  if (ctx !== null) ctx.font = fontOf(t, size);
+  const lines = ctx === null ? t.value.split('\n') : textLines(ctx, t, t.value, Math.max(20 * d, r.x1 - r.x0 - pad * 2));
+  const lineHeight = size * LINE_GAP;
+  const height = lines.length * lineHeight;
+  const a = t.align ?? align;
+  const x = a === 'center' ? (r.x0 + r.x1) / 2 : a === 'right' ? r.x1 - pad : r.x0 + pad;
+  // `outside` lifts the block clear of the shape so it never sits on the outline.
+  const v = t.valign ?? valign;
+  const y = t.position === 'outside' ? r.y0 - height - pad
+    : v === 'middle' ? (r.y0 + r.y1 - height) / 2
+    : v === 'bottom' ? r.y1 - height - pad
+    : r.y0 + pad;
+  return { lines, align: a, x, y, lineHeight, height };
+}
+
+/**
+ * A two-anchor shape's box with its label in it. An `outside` label sits above
+ * the shape and a long one runs past its sides, so a shape pinned to the
+ * screen with only its outline kept on the plot could lose its label off the
+ * top edge.
+ */
+function shapeBounds(align: LabelAlign, valign: LabelValign): NonNullable<DrawingTool['bounds']> {
+  return (pts, drawing) => {
+    const r = rectOf(pts[0], pts[1]);
+    const t = textOf(drawing);
+    if (t.value === '') return r;
+    const probe = measureContext();
+    const at = labelLayout(probe, t, r, 1, align, valign);
+    let w = 0;
+    for (const l of at.lines) w = Math.max(w, probe === null ? l.length * (t.fontSize ?? TEXT_SIZE) * 0.6 : probe.measureText(l).width);
+    const x0 = at.align === 'center' ? at.x - w / 2 : at.align === 'right' ? at.x - w : at.x;
+    return { x0: Math.min(r.x0, x0), y0: Math.min(r.y0, at.y), x1: Math.max(r.x1, x0 + w), y1: Math.max(r.y1, at.y + at.height) };
+  };
 }
 
 export const TEXT: DrawingTool = {

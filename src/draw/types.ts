@@ -374,8 +374,10 @@ export interface DrawingTool {
    * can be seen and grabbed at every edge and after the chart resizes, and no
    * drag, nudge or handle can take it out. Declare it on a `viewport` tool
    * that paints beyond its anchors, as the text note and the table do from
-   * their one corner; without it the box is the anchors' own bounds, which is
-   * right for a rectangle.
+   * their one corner, and the rectangle and the ellipse do for a label above
+   * them or wider than they are; without it the box is the anchors' own
+   * bounds. A handle dragged toward an edge the box reaches first stops short
+   * of it, so the other anchors stay where they are.
    */
   bounds?(pts: readonly ScreenPoint[], drawing: Drawing): { x0: number; y0: number; x1: number; y1: number };
   /**
