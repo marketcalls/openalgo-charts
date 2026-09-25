@@ -339,6 +339,52 @@ describe('explicit close, partial close and reverse', () => {
   });
 });
 
+describe('a dropped connection', () => {
+  it('blocks what is sent while it is down, so nothing is held ambiguous and the same token goes out later', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    await engine.placeOrder(market({ qty: 50, clientToken: 'open' }));
+    broker.disconnect();
+    const close = await engine.closePosition({ symbol: 'SYN', qty: 20, clientToken: 'down' });
+    expect(close).toMatchObject({ ok: false, kind: 'close', intent: 'BLOCKED' });
+    expect(close.reason).not.toContain('may have reached the broker');
+    expect(await engine.reversePosition({ symbol: 'SYN', clientToken: 'down-flip' })).toMatchObject({ ok: false, intent: 'BLOCKED' });
+    expect(await engine.placeOrder(market({ clientToken: 'down-buy' }))).toMatchObject({ ok: false, intent: 'BLOCKED' });
+    expect(await engine.placeBracket({ ...market({ clientToken: 'down-br' }), stopLoss: 95, takeProfit: 110 })).toMatchObject({ ok: false, intent: 'BLOCKED' });
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 50, avgPrice: 100 }]);
+    broker.reconnect();
+    expect(await engine.closePosition({ symbol: 'SYN', qty: 20, clientToken: 'down' })).toMatchObject({ ok: true, intent: 'SETTLED' });
+    expect(await engine.reversePosition({ symbol: 'SYN', clientToken: 'down-flip' })).toMatchObject({ ok: true });
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: -30, avgPrice: 100 }]);
+  });
+
+  it('leaves a modify or cancel sent while it is down where the order was', async () => {
+    const errors: string[] = [];
+    const { accounts, engine, broker } = setup({ engine: { minModifyIntervalMs: 0, onValidationError: reason => errors.push(reason) } });
+    await accounts.refresh();
+    await engine.placeOrder({ ...market({ clientToken: 'rest' }), type: 'LIMIT', price: 90 });
+    broker.disconnect();
+    await engine.cancelOrder('rest');
+    engine.requestModify('rest', 91);
+    await new Promise(done => setTimeout(done, 0));
+    expect([engine.state('rest'), engine.intentState('rest'), engine.brokerStatus('rest')]).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+    expect(errors).toHaveLength(2);
+    expect(broker.orders().find(order => order.status === 'working')).toMatchObject({ price: 90 });
+  });
+
+  it('keeps a call already out when it drops ambiguous, because a client cannot tell that from a lost answer', async () => {
+    const { accounts, engine, broker, hold } = setup();
+    await accounts.refresh();
+    await engine.placeOrder(market({ qty: 50 }));
+    const slow = hold('close', 'SBX-1');
+    const pending = engine.closePosition({ symbol: 'SYN', qty: 20, clientToken: 'out' });
+    broker.disconnect();
+    slow.resolve();
+    expect(await pending).toMatchObject({ ok: false, intent: 'AMBIGUOUS' });
+    expect(broker.accountPositions('SBX-1')).toEqual([{ symbol: 'SYN', netQty: 50, avgPrice: 100 }]);
+  });
+});
+
 describe('an ambiguous write the broker later reports', () => {
   const resting = (clientToken: string): PlaceRequest => ({ ...market({ clientToken }), type: 'LIMIT', price: 90 });
 

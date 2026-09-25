@@ -206,7 +206,10 @@ unmarketable `IOC` or `FOK` order at once, lapses a `GTD` order at its expiry, a
 bracket legs itself. It refuses the way a server would: an unknown account, the other
 ledger, an undeclared feature, missing margin or a close larger than the position. Test
 hooks hold (`latency`), fail or lose (`failNext`) any answer, drop the connection
-(`disconnect`, `reconnect`) and mute the order stream (`muteOrderUpdates`).
+(`disconnect`, `reconnect`) and mute the order stream (`muteOrderUpdates`). While the
+connection is down a call never leaves, and fails as a pre-flight failure, so the engine
+blocks it and frees its token; a call already out when it drops is not applied and fails
+the way a lost answer does.
 
 Constructed without `accounts`, it is the original book simulator and declares none of
 this, so the engine refuses every operation on this page against it.

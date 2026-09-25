@@ -233,7 +233,7 @@ Deterministic in-memory `OrderFeed` for tests and offline demos. Members: `onBoo
 - reports balance, equity, margin used and available (margin is `|netQty| x avgPrice / leverage`), pushing snapshots to `subscribeAccount` on every change and mark;
 - cancels an unmarketable `IOC`/`FOK` limit at once, lapses a `GTD` order at its expiry, and links bracket legs itself (an entry fill starts them, a leg fill cancels its sibling), echoing on each leg the token in `legClientTokens`;
 - refuses like a server, with an error marked `rejected: true` (`isBrokerRejection`): unknown account, the other ledger's account (`mode` mismatch), an undeclared feature, no mark, missing margin, leverage above `maxLeverage`, a close larger than the position;
-- test hooks: `latency(operation, accountId)` holds any answer, `failNext(operation, 'reject' | 'timeout' | 'lost-response', reason?)` (`FakeBrokerOperation`, `FakeBrokerFailure`), `disconnect()` / `reconnect()` (streams get `onError`), `onOrderUpdate(cb)` the order stream with `FakeOrderInfo` (`accountId`, `clientToken`, `command`), and `muteOrderUpdates(true)` for a silent stream.
+- test hooks: `latency(operation, accountId)` holds any answer, `failNext(operation, 'reject' | 'timeout' | 'lost-response', reason?)` (`FakeBrokerOperation`, `FakeBrokerFailure`), `disconnect()` / `reconnect()` (streams get `onError`; a call made while down fails pre-flight, `isPreflightFailure`, so the engine blocks it and frees its token, while one already out fails without applying, as a lost answer would), `onOrderUpdate(cb)` the order stream with `FakeOrderInfo` (`accountId`, `clientToken`, `command`), and `muteOrderUpdates(true)` for a silent stream.
 
 ## Accounts, preview, durations and position commands
 

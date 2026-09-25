@@ -41,8 +41,11 @@ All notable changes to OpenAlgo Charts.
 - `FakeBroker({ accounts })` simulates all of it: per-account ledgers filled at
   a mark price, preview, `IOC`/`FOK` cancellation, `GTD` expiry, leverage
   limits, native close, reverse and linked bracket legs, server-side refusals,
-  and hooks to hold, fail or lose any answer and drop the connection. Without
-  `accounts` it is unchanged and declares none of it.
+  and hooks to hold, fail or lose any answer and drop the connection. A call
+  made while the connection is down fails as never sent (a pre-flight
+  failure), so the engine blocks it rather than holding it ambiguous; one
+  already out when it drops fails like a lost answer. Without `accounts` it
+  is otherwise unchanged and declares none of it.
 - Widget account summary. The `account` option shows the selected account,
   an Analyzer tag for the sandbox ledger, equity and margin in the status line,
   with a menu to switch; a source whose provider declares no accounts renders

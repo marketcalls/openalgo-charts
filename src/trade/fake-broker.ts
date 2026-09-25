@@ -16,12 +16,18 @@
  * to support, or margin it does not have. Test hooks can hold, fail or lose the
  * answer to any call, and drop the connection, so the client's handling of each
  * is testable against the same ledger the reference host uses.
+ *
+ * A dropped connection fails each call the way a client's own transport would:
+ * one made while it is down never leaves, and says so with a pre-flight marker,
+ * so the engine blocks it and frees its token. One already out when it drops
+ * is not applied and fails with a plain error, which is all a client would see
+ * of a lost answer too; only the broker's book can settle that one.
  */
 import type { Order, OrderSide, Position } from './types';
 import type { MarketDepth } from '../feed/types';
 import type {
   BracketOrderRequest, BracketReceipt, BrokerRejection, ClosePositionRequest, CommandReceipt, OrderFeed, OrderPreview,
-  PlaceRequest, ReversePositionRequest, TradeMode,
+  PlaceRequest, PreflightFailure, ReversePositionRequest, TradeMode,
 } from './order-engine';
 import type { AccountFeed, AccountHistoryQuery, AccountSnapshot, Execution, OrderHistoryEntry, TradingAccount } from './account';
 import { checkTradingFeature, ORDER_DURATIONS, type OrderDuration, type TradingFeature, type TradingFeatures, type TradingFeatureSource } from './features';
@@ -78,6 +84,11 @@ const ALL_FEATURES: TradingFeatures = {
 /** A refusal the simulated server makes after reading the request. */
 function refusal(message: string): Error & BrokerRejection {
   return Object.assign(new Error(`FakeBroker: ${message}`), { rejected: true } as const);
+}
+
+/** A call made while the connection is down: it never left, so nothing it asked for can be live. */
+function offline(): Error & PreflightFailure {
+  return Object.assign(new Error('FakeBroker: disconnected; nothing was sent'), { preflight: true } as const);
 }
 
 const article = (mode: TradeMode): string => (mode === 'analyzer' ? 'an' : 'a');
@@ -208,7 +219,11 @@ export class FakeBroker implements OrderFeed, AccountFeed {
     this._failures.push({ operation, failure, reason });
   }
 
-  /** Drop the connection: every call fails without applying, and account streams report the loss. */
+  /**
+   * Drop the connection. Every call fails without applying: one made while it
+   * is down as never sent (`isPreflightFailure`), one already out with a plain
+   * error. Account streams report the loss.
+   */
   public disconnect(): void {
     this._connected = false;
     for (const ledger of this._ledgers.values()) {
@@ -226,6 +241,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   // ── OrderFeed (write path simulation) ──────────────────────────────────
 
   public async place(req: PlaceRequest & { mode: TradeMode }): Promise<{ orderId: string }> {
+    this._online();
     if (this.rejectNextPlace !== null) {
       const reason = this.rejectNextPlace;
       this.rejectNextPlace = null;
@@ -261,6 +277,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public async modify(orderId: string, patch: { price?: number; triggerPrice?: number; qty?: number }): Promise<void> {
+    this._online();
     const meta = this._meta.get(orderId);
     const lose = meta === undefined ? false : await this._enter('modify', meta.accountId);
     const o = this._orders.find((x) => x.id === orderId);
@@ -275,6 +292,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public async cancel(orderId: string): Promise<void> {
+    this._online();
     const meta = this._meta.get(orderId);
     const lose = meta === undefined ? false : await this._enter('cancel', meta.accountId);
     const o = this._orders.find((x) => x.id === orderId);
@@ -326,6 +344,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public async previewOrder(req: PlaceRequest & { mode: TradeMode }): Promise<OrderPreview> {
+    this._online();
     if (!this._accountMode) throw new Error('FakeBroker: order preview needs accounts');
     this._require('preview', req);
     const ledger = this._ledgerFor(req.account, req.mode);
@@ -348,6 +367,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public async closePosition(req: ClosePositionRequest & { mode: TradeMode }): Promise<CommandReceipt> {
+    this._online();
     if (!this._accountMode) throw refusal('closing a position needs accounts');
     this._require(req.qty === undefined ? 'close' : 'partialClose', req);
     const ledger = this._ledgerFor(req.account, req.mode);
@@ -363,6 +383,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public async reversePosition(req: ReversePositionRequest & { mode: TradeMode }): Promise<CommandReceipt> {
+    this._online();
     if (!this._accountMode) throw refusal('reversing a position needs accounts');
     this._require('reverse', req);
     const ledger = this._ledgerFor(req.account, req.mode);
@@ -380,6 +401,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public async placeBracket(req: BracketOrderRequest & { mode: TradeMode; legClientTokens?: { stopLoss: string; takeProfit: string } }): Promise<BracketReceipt> {
+    this._online();
     if (!this._accountMode) throw refusal('bracket placement needs accounts');
     this._require('brackets', req);
     const ledger = this._ledgerFor(req.account, req.mode);
@@ -418,6 +440,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   // ── AccountFeed (read path simulation) ─────────────────────────────────
 
   public async listAccounts(_signal?: AbortSignal): Promise<readonly TradingAccount[]> {
+    this._online();
     if (!this._accountMode) return [];
     await this._enter('accounts', undefined);
     return [...this._ledgers.values()].map(({ seed }) => ({
@@ -426,6 +449,7 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public async getAccountSnapshot(accountId: string, _signal?: AbortSignal): Promise<AccountSnapshot> {
+    this._online();
     const ledger = this._account(accountId);
     await this._enter('snapshot', accountId);
     this._sweep();
@@ -433,14 +457,15 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public subscribeAccount(accountId: string, onSnapshot: (s: AccountSnapshot) => void, onError?: (e: unknown) => void): () => void {
+    this._online();
     const ledger = this._account(accountId);
-    if (!this._connected) throw new Error('FakeBroker: disconnected');
     const entry = { onSnapshot, onError };
     ledger.subscribers.add(entry);
     return () => { ledger.subscribers.delete(entry); };
   }
 
   public async getAccountPositions(accountId: string, _signal?: AbortSignal): Promise<readonly Position[]> {
+    this._online();
     this._account(accountId);
     await this._enter('positions', accountId);
     this._sweep();
@@ -448,12 +473,14 @@ export class FakeBroker implements OrderFeed, AccountFeed {
   }
 
   public async getExecutions(query: AccountHistoryQuery, _signal?: AbortSignal): Promise<readonly Execution[]> {
+    this._online();
     const ledger = this._account(query.accountId);
     await this._enter('executions', query.accountId);
     return this._window([...ledger.executions].reverse(), row => row.symbol, row => row.time, query).map(row => ({ ...row }));
   }
 
   public async getOrderHistory(query: AccountHistoryQuery, _signal?: AbortSignal): Promise<readonly OrderHistoryEntry[]> {
+    this._online();
     this._account(query.accountId);
     await this._enter('history', query.accountId);
     this._sweep();
@@ -497,10 +524,16 @@ export class FakeBroker implements OrderFeed, AccountFeed {
     for (const s of [...ledger.subscribers]) s.onSnapshot({ ...snapshot });
   }
 
+  /** A call made while the connection is down never leaves the client. */
+  private _online(): void {
+    if (!this._connected) throw offline();
+  }
+
   /** Latency, then the connection, then any queued failure. True: apply, then lose the answer. */
   private async _enter(operation: FakeBrokerOperation, accountId: string | undefined): Promise<boolean> {
     if (this._latency !== undefined) await this._latency(operation, accountId);
-    if (!this._connected) throw new Error('FakeBroker: disconnected');
+    // Out before the drop: not applied, and the client only sees the answer go missing.
+    if (!this._connected) throw new Error('FakeBroker: the connection dropped before the answer');
     const i = this._failures.findIndex(f => f.operation === operation);
     if (i < 0) return false;
     const [failure] = this._failures.splice(i, 1);

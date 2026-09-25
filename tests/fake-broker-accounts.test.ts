@@ -10,6 +10,15 @@ const SEEDS: FakeAccountSeed[] = [
 ];
 
 describe('FakeBroker without accounts', () => {
+  it('honours a dropped connection as well, failing each write as never sent', async () => {
+    const broker = new FakeBroker();
+    broker.disconnect();
+    await expect(broker.place({ symbol: 'S', side: 'BUY', type: 'LIMIT', price: 1, qty: 5, mode: 'live' })).rejects.toMatchObject({ preflight: true });
+    expect(broker.orders()).toEqual([]);
+    broker.reconnect();
+    expect(await broker.place({ symbol: 'S', side: 'BUY', type: 'LIMIT', price: 1, qty: 5, mode: 'live' })).toEqual({ orderId: 'B1' });
+  });
+
   it('keeps the original book simulation and declares none of the newer operations', async () => {
     const broker = new FakeBroker();
     expect(broker.features).toBeUndefined();
@@ -83,8 +92,20 @@ describe('FakeBroker account ledgers', () => {
     broker.subscribeAccount('A', () => {}, error => errors.push(error));
     broker.disconnect();
     expect(errors).toHaveLength(1);
-    await expect(broker.place({ symbol: 'S', side: 'BUY', type: 'MARKET', qty: 1, mode: 'analyzer' })).rejects.toThrow('disconnected');
-    await expect(broker.getAccountSnapshot('A', signal())).rejects.toThrow('disconnected');
+    // Nothing leaves while the connection is down, so each call says it was never sent,
+    // before any refusal a server could only make once the request reached it.
+    const never = { preflight: true, message: expect.stringContaining('disconnected') };
+    await expect(broker.place({ symbol: 'S', side: 'BUY', type: 'MARKET', qty: 1, mode: 'analyzer' })).rejects.toMatchObject(never);
+    await expect(broker.place({ symbol: 'S', side: 'BUY', type: 'MARKET', qty: 1, mode: 'analyzer', account: 'NONE' })).rejects.toMatchObject(never);
+    await expect(broker.closePosition({ symbol: 'S', mode: 'analyzer' })).rejects.toMatchObject(never);
+    await expect(broker.reversePosition({ symbol: 'S', mode: 'analyzer' })).rejects.toMatchObject(never);
+    await expect(broker.placeBracket({ symbol: 'S', side: 'BUY', type: 'MARKET', qty: 1, stopLoss: 90, takeProfit: 110, mode: 'analyzer' })).rejects.toMatchObject(never);
+    await expect(broker.previewOrder({ symbol: 'S', side: 'BUY', type: 'MARKET', qty: 1, mode: 'analyzer' })).rejects.toMatchObject(never);
+    await expect(broker.modify('B1', { price: 1 })).rejects.toMatchObject(never);
+    await expect(broker.cancel('B1')).rejects.toMatchObject(never);
+    await expect(broker.getAccountSnapshot('A', signal())).rejects.toMatchObject(never);
+    await expect(broker.getOrderHistory({ accountId: 'A' }, signal())).rejects.toMatchObject(never);
+    expect(() => broker.subscribeAccount('A', () => {})).toThrow('disconnected');
     expect(broker.accountPositions('A')).toEqual([]);
     broker.reconnect();
     await broker.place({ symbol: 'S', side: 'BUY', type: 'MARKET', qty: 1, mode: 'analyzer' });
