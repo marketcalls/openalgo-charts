@@ -339,7 +339,9 @@ For an instrument whose tick changes with price, pass its schedule as `tickSched
 (or to `buildRows` in place of the tick size). Each row is then a price its own band
 allows, so a click always offers a tradable price, and `groupBy` counts ticks of the
 band a row is in. A group stops at a boundary rather than label a row with a price
-the next band forbids. Without a schedule, rows step by `tickSize` exactly as before.
+the next band forbids. With a schedule, `groupBy` counts whole ticks, a fraction rounding
+down (2.5 groups by 2), so every row stays a tradable price. Without a schedule, rows
+step by `tickSize * groupBy` exactly as before, a fractional `groupBy` included.
 
 ```ts
 import { TickSchedule } from 'openalgo-charts';

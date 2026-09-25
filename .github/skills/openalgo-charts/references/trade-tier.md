@@ -203,7 +203,7 @@ interface DomLadderOptions { tickSize: number; tickSchedule?: TickSchedule | nul
 const DEFAULT_DOM_LADDER_OPTIONS = { tickSize: 0.05, width: 96, groupBy: 1, maxRows: 60, rowHeight: 14 };
 ```
 
-A right-docked depth strip drawn on the overlay (`zOrder: 'top'`), price-aligned to the pane's price scale. With `tickSchedule` (an instrument whose tick changes with price) every row is a price its own band allows and `groupBy` counts ticks of that band, so a ladder across a boundary changes step there and `tickSize` is unused. A band list in its place throws a `TypeError` at construction. Input is one method: `setDepth(depth: MarketDepth)`, called on every book update. `tier()` returns the current `LadderTier`. Rows hit-test as `ladder-bid:<price>` / `ladder-ask:<price>` with a `pointer` cursor, route them to a place-order flow.
+A right-docked depth strip drawn on the overlay (`zOrder: 'top'`), price-aligned to the pane's price scale. With `tickSchedule` (an instrument whose tick changes with price) every row is a price its own band allows and `groupBy` counts whole ticks of that band (a fraction rounds down, so 2.5 groups by 2, where the constant path would make rows 2.5 ticks apart and off the tick grid), so a ladder across a boundary changes step there and `tickSize` is unused. A band list in its place throws a `TypeError` at construction. Input is one method: `setDepth(depth: MarketDepth)`, called on every book update. `tier()` returns the current `LadderTier`. Rows hit-test as `ladder-bid:<price>` / `ladder-ask:<price>` with a `pointer` cursor, route them to a place-order flow.
 
 `MarketDepth` (from `src/feed/types.ts`) is `{ bids: DepthLevel[]; asks: DepthLevel[]; ltp: number; ltq?: number }` with `DepthLevel = { price: number; qty: number; orders?: number }`. Length is whatever the broker streams, **5 to 200 levels**.
 
@@ -212,7 +212,7 @@ Pure helpers, exported for custom rendering and tests:
 | Function | Signature | Notes |
 |---|---|---|
 | `ladderCapability` | `(depth) => LadderTier` | `0` levels -> `'none'`; `<= 5` -> `'compact'`; else `'deep'` |
-| `buildRows` | `(depth, tickSize: number \| TickSchedule, groupBy = 1) => LadderRow[]` | Merges bids+asks into `{ price, bidQty, askQty }`, bucketed to `tickSize * groupBy`, sorted high->low. Total qty is preserved across aggregation. With a `TickSchedule`, each level lands on its band's nearest valid price and a group spans `groupBy` ticks of that band, never labelled past a boundary |
+| `buildRows` | `(depth, tickSize: number \| TickSchedule, groupBy = 1) => LadderRow[]` | Merges bids+asks into `{ price, bidQty, askQty }`, bucketed to `tickSize * groupBy`, sorted high->low. Total qty is preserved across aggregation. With a `TickSchedule` (any non-null object takes this path; a number or numeric string keeps the constant one), each level lands on its band's nearest valid price and a group spans `groupBy` whole ticks of that band, a fraction rounding down, never labelled past a boundary |
 | `visibleRows` | `(rows, priceToY, plotHeight, rowHeight, maxRows) => LadderRow[]` | Culls off-screen rows (±1 row), then keeps the `maxRows` nearest the vertical centre, re-sorted high->low |
 
 Depth arrives through the feed's optional `subscribeDepth(req, onDepth)`, `OpenAlgoLiveDataFeed` implements it over WS mode `'Depth'`.

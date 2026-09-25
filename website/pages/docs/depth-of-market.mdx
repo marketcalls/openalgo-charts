@@ -207,7 +207,10 @@ sides of a boundary: 0.05 folds the cent levels below it into rows the book does
 have, and 0.01 above it offers rows the venue forbids. Pass the instrument's
 `TickSchedule` instead, as `tickSchedule` or to `buildRows` in place of the tick size.
 Every row is then a price its own band allows, and `groupBy` counts ticks of that band,
-stopping at a boundary rather than labelling a row past it.
+stopping at a boundary rather than labelling a row past it. With a schedule, `groupBy`
+counts whole ticks: a fraction rounds down, so 2.5 groups two ticks into each row. The
+constant path multiplies instead, so there 2.5 makes rows 2.5 ticks apart, between
+the prices the instrument trades at.
 
 ```ts
 import { TickSchedule } from 'openalgo-charts';

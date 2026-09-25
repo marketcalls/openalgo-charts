@@ -169,6 +169,16 @@ describe('buildRows with a tick schedule', () => {
     expect(buildRows({ ltp: 100.2, bids: [], asks: [level(100.2, 2)] }, above, 5)).toEqual([{ price: 100.1, bidQty: 0, askQty: 2 }]);
   });
 
+  it('counts whole ticks when a schedule groups rows', () => {
+    // A fractional group would label rows between the prices a band allows, so
+    // the schedule path rounds groupBy down where the constant path multiplies.
+    const book = deepStraddle();
+    expect(buildRows(book, BANDED, 2.5)).toEqual(buildRows(book, BANDED, 2));
+    for (const groupBy of [0, 0.5, 1.9]) expect(buildRows(book, BANDED, groupBy)).toEqual(buildRows(book, BANDED, 1));
+    for (const row of buildRows(book, BANDED, 2.5)) expect(onGrid(row.price, row.price < 100 ? 0.02 : 0.1)).toBe(true);
+    expect(buildRows(book, 0.05, 2.5).some(row => !onGrid(row.price, 0.05))).toBe(true);
+  });
+
   it('keeps the constant tick path exactly as it was', () => {
     for (const groupBy of [1, 5, 2.5, 0]) {
       for (const book of [depth(200), straddle(), deepStraddle()]) {

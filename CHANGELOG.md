@@ -27,13 +27,13 @@ All notable changes to OpenAlgo Charts.
   built later, and a constant-tick instrument clears the previous one on a symbol
   switch. `DomLadder` takes a `tickSchedule` option and `buildRows` a schedule in place
   of the tick size, so a ladder across a boundary shows the prices each band allows
-  and groups ticks of that band. Without a schedule every path is unchanged: constant
-  `tickSize` snapping and ladder rows, the same constraints object for a constant-tick
-  instrument, and raw pointer prices from `chart.trading`. No venue's schedule ships
-  as a default. The reference host's fixture server adds a synthetic `BANDED`
-  instrument (0.01 below 100, 0.05 from 100), described as instrument metadata,
-  whose right-click orders, dragged order lines, market fills and bracket legs snap
-  in the band they land in.
+  and groups whole ticks of that band (a fractional `groupBy` rounds down). Without a
+  schedule every path is unchanged: constant `tickSize` snapping and ladder rows, the
+  same constraints object for a constant-tick instrument, and raw pointer prices from
+  `chart.trading`. No venue's schedule ships as a default. The reference host's
+  fixture server adds a synthetic `BANDED` instrument (0.01 below 100, 0.05 from 100),
+  described as instrument metadata, whose right-click orders, dragged order lines,
+  market fills and bracket legs snap in the band they land in.
 
 ## 2.5.4
 

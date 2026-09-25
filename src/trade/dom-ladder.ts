@@ -67,6 +67,9 @@ function scheduleBucket(ticks: TickSchedule, n: number): (p: number) => number {
  * Pass a `TickSchedule` in place of the tick size for an instrument whose tick
  * changes with price: each row is then a price its band allows, and a group
  * spans `groupBy` ticks of that band, so the step changes at a boundary.
+ * There `groupBy` counts whole ticks, a fraction rounding down (2.5 groups by
+ * 2), because a fractional group would label rows between the prices a band
+ * allows. The constant path multiplies `tickSize * groupBy` as it always has.
  */
 export function buildRows(depth: MarketDepth, tickSize: number | TickSchedule, groupBy = 1): LadderRow[] {
   let bucket: (p: number) => number;
@@ -120,13 +123,17 @@ export interface DomLadderOptions {
   tickSize: number;
   /**
    * Price-dependent ticks. When set, every row is a price the instrument can
-   * trade at in its own band, `groupBy` counts ticks of that band, and
-   * `tickSize` is unused. Absent or null, rows step by `tickSize`.
+   * trade at in its own band, `groupBy` counts whole ticks of that band (a
+   * fraction rounds down), and `tickSize` is unused. Absent or null, rows step
+   * by `tickSize`.
    */
   tickSchedule?: TickSchedule | null;
   /** Strip width in media px. */
   width: number;
-  /** Group every N ticks into one row (deep-book aggregation). */
+  /**
+   * Group every N ticks into one row (deep-book aggregation). With a
+   * `tickSchedule`, N is whole ticks of each band: 2.5 groups by 2.
+   */
   groupBy: number;
   /** Max rows drawn per frame (virtualization cap). */
   maxRows: number;
