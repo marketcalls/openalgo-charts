@@ -115,6 +115,8 @@ const GLYPH = {
   order: 'M2 10h7v4H2zM7 2h7v7H7z',
   behind: 'M3 12h10M8 2v8M5 7l3 3 3-3',
   above: 'M3 4h10M8 14V6M5 9l3-3 3 3',
+  // A pushpin: the drawing is fixed to the screen.
+  pin: 'M6 2h4M7 2v4L5 9h6L9 6V2M8 9v5',
 };
 const XMLNS = 'http://www.w3.org/2000/svg';
 const glyph = (id, stroke = 1.5) =>
@@ -296,9 +298,11 @@ export function mountPropertiesBar(app, anchorEl) {
     const o = chartOffset();
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const d of live) {
-      for (const p of d.points) {
-        const cx = chart.timeToCoordinate(p.time);
-        const cy = chart.priceToCoordinate(p.price, d.paneIndex);
+      // The controller knows where a drawing pinned to the screen is; the
+      // chart can only map the time and price of one that is not.
+      const pinned = d.space === 'viewport' && typeof app.draw.screenPoints === 'function' ? app.draw.screenPoints(d.id) : null;
+      const at = pinned || d.points.map((p) => ({ x: chart.timeToCoordinate(p.time), y: chart.priceToCoordinate(p.price, d.paneIndex) }));
+      for (const { x: cx, y: cy } of at) {
         if (!Number.isFinite(cx) || cy === null || !Number.isFinite(cy)) continue;
         x0 = Math.min(x0, cx + o.x); x1 = Math.max(x1, cx + o.x);
         y0 = Math.min(y0, cy + o.y); y1 = Math.max(y1, cy + o.y);
@@ -809,6 +813,27 @@ export function mountPropertiesBar(app, anchorEl) {
       b.dataset.pop = 'text';
       b.addEventListener('click', (e) => { e.stopPropagation(); togglePop(b, (p) => fieldRows(textFields, p)); });
       const paint = () => { b.classList.toggle('is-on', !!values()['text.value']); };
+      paint();
+      syncers.push(paint);
+    }
+
+    // Pinned to the screen or following the bars: one toggle, since the
+    // schema offers the two spaces and nothing between them. Writing the
+    // space converts the anchors at the view on screen, so the drawing stays
+    // exactly where it is and only stops following the chart.
+    const spaceF = take('space');
+    if (spaceF) {
+      const pin = button(glyph('pin'), () => ({
+        title: values().space === 'viewport' ? 'Pinned to the screen' : 'Pin to the screen',
+        sub: values().space === 'viewport' ? 'Click to follow the bars again' : 'Stays put when the chart pans or zooms',
+        side: 'top',
+      }), () => apply({ space: values().space === 'viewport' ? 'data' : 'viewport' }));
+      pin.dataset.path = 'space';
+      const paint = () => {
+        const on = values().space === 'viewport';
+        pin.classList.toggle('is-on', on);
+        pin.setAttribute('aria-pressed', String(on));
+      };
       paint();
       syncers.push(paint);
     }
