@@ -107,6 +107,14 @@ they do not, because 20.05 is no multiple of 0.02. `applyTo` gives the price sca
 `minMove`, so the axis prints every band and its own snap never moves a valid price.
 `pricePrecision` must represent it. A constant-tick instrument is unchanged: its
 metadata has no `tickBands`, `orderConstraintsForInstrument` returns the same three
-fields, and `instrument.tickSchedule` is a one-band schedule. To snap chart drags, pass
-the schedule to [`chart.trading.setTickSchedule`](/docs/trading-api#price-ticks-while-dragging);
-to validate orders, see [price-dependent ticks](/docs/trading#price-dependent-ticks).
+fields, and `instrument.tickSchedule` is null, so `priceTick` stays its one snapping
+rule everywhere. To validate orders, see
+[price-dependent ticks](/docs/trading#price-dependent-ticks).
+
+`applyTo` also hands the schedule to
+[`chart.trading`](/docs/trading-api#price-ticks-while-dragging), so dragged order and
+bracket lines snap in their band. It never builds the trading layer itself, which would
+take the host's drag subscription; a layer built later starts from the schedule.
+Applying a constant-tick instrument clears it, so after a symbol switch no drag snaps to
+the previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to
+override it, and pass the schedule as a `DomLadder`'s `tickSchedule` for a depth ladder.

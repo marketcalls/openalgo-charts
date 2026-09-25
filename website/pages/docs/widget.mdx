@@ -361,7 +361,7 @@ passes through to `createChart` unchanged.
 | `symbolSearch` | `(query) => SymbolMatch[] \| Promise<SymbolMatch[]>` | Called as the user types in the symbol box; the results open as a menu under it. |
 | `lookbackBars` | `number` | Bars per load. Default 500. |
 | `now` | `() => number` | The clock for the load window and the capture filename. Default `Date.now`. |
-| `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). Without it the menu draws no trade rows. |
+| `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). `price` is the pointer's price, not snapped to the instrument's tick or tick schedule: round it, for example with `validatePrice`, before sending. Without it the menu draws no trade rows. |
 | `styleNonce` | `string` | The host's CSP nonce for the shared widget and dialog stylesheet. See [Content Security Policy](#content-security-policy). |
 
 The chrome switches (`rail`, `topbar`, `statusline`, `indicators`) default to on, so a

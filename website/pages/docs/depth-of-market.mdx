@@ -200,6 +200,28 @@ const rows = buildRows(depth, 0.05, 10);
 // [{ price, bidQty, askQty }, ...], sorted high to low.
 ```
 
+## Price-dependent ticks
+
+When the instrument's tick changes with price, one constant step cannot serve both
+sides of a boundary: 0.05 folds the cent levels below it into rows the book does not
+have, and 0.01 above it offers rows the venue forbids. Pass the instrument's
+`TickSchedule` instead, as `tickSchedule` or to `buildRows` in place of the tick size.
+Every row is then a price its own band allows, and `groupBy` counts ticks of that band,
+stopping at a boundary rather than labelling a row past it.
+
+```ts
+import { TickSchedule } from 'openalgo-charts';
+import { DomLadder, buildRows } from 'openalgo-charts/trade';
+
+// Synthetic rules for illustration: 0.01 below 100 and 0.05 from 100.
+const ticks = new TickSchedule([{ tick: 0.01 }, { from: 100, tick: 0.05 }]);
+const bandedLadder = new DomLadder({ tickSize: ticks.minMove, tickSchedule: ticks, groupBy: 1 });
+const bandedRows = buildRows(depth, ticks, 5); // 0.05 rows below 100, 0.25 rows from 100
+```
+
+An `Instrument` with `tickBands` carries the same schedule as `instrument.tickSchedule`;
+see [Instrument metadata](/docs/instruments#price-dependent-ticks).
+
 ## Rendering and data limits
 
 The attached `DomLadder` primitive is docked inside the chart's right edge and aligns quantities to its

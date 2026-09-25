@@ -93,12 +93,19 @@ const banded = new Instrument({ ...metadata, priceTick: 0.01,
 banded.tickSchedule.round(20.03); // 20.05, an exact decimal
 ```
 
-`instrument.tickSchedule` is the validated `TickSchedule` (one band for a constant
-tick): `round` gives the nearest valid price, a written halfway price rounding up;
-`tickAt` gives the tick in force, the upper band's at an exact boundary; `step` moves
-whole ticks across boundaries. With bands, `priceTick` must equal the schedule's
-`minMove`, the common grid of every band, and `applyTo` sets that as the price scale's
-`minMove`. `orderConstraintsForInstrument` adds `tickSchedule` to the constraints, so
+`instrument.tickSchedule` is the validated `TickSchedule`: `round` gives the nearest
+valid price, a written halfway price rounding up; `tickAt` gives the tick in force,
+the upper band's at an exact boundary; `step` moves whole ticks across boundaries.
+It is null for a constant tick, which keeps one snapping rule, `priceTick`, on every
+path. With bands, `priceTick` must equal the schedule's `minMove`, the common grid of
+every band, and `applyTo` sets that as the price scale's `minMove`.
+`orderConstraintsForInstrument` adds `tickSchedule` to the constraints, so
 `validatePrice`, `OrderEngine.placeOrder` and `OrderEngine.requestModify` snap on the
-band each price lands in and check price limits after snapping. For chart drags, pass
-the same schedule to `chart.trading.setTickSchedule`.
+band each price lands in and check price limits after snapping.
+
+`applyTo` also hands the same schedule to `chart.trading`, so dragged order and
+bracket lines snap to it. It does not build the trading layer (that would take the
+host's drag subscription); a layer built later starts from it. Applying a
+constant-tick instrument clears it, so after a symbol switch no drag snaps to the
+previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to
+override it. For a depth ladder, pass the schedule as `DomLadder`'s `tickSchedule`.

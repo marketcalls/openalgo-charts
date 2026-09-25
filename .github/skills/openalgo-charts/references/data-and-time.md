@@ -7,10 +7,13 @@ an `InstrumentSession` (UTC open/close and local opening date), and `applyTo` ap
 timezone, tick, primary price formatting and source context after source guards.
 Date exceptions replace weekly sessions; overnight windows belong to their opening
 date. Crypto can use `0000-0000`. Optional `tickBands` (`TickBand[]`) declare a
-price-dependent tick; `instrument.tickSchedule` is the validated `TickSchedule`
-(one band for a constant tick). With bands, `priceTick` must equal the schedule's
-`minMove`, the common grid of every band, and that is the `minMove` `applyTo` gives
-the price scale. See [instrument rules](../../../../docs/instruments.md)
+price-dependent tick; `instrument.tickSchedule` is the validated `TickSchedule`,
+or null for a constant tick (one rule, `priceTick`, everywhere). With bands,
+`priceTick` must equal the schedule's `minMove`, the common grid of every band, and
+that is the `minMove` `applyTo` gives the price scale. `applyTo` also hands the
+schedule to `chart.trading` (a layer built later starts from it, and a constant-tick
+instrument clears it on a symbol switch); call `chart.trading.setTickSchedule` after
+`applyTo` to override. See [instrument rules](../../../../docs/instruments.md)
 for breaks, DST, validation, quantity units and safe host source transitions.
 
 `OpenAlgoConfig.hasOpenInterest(request)` optionally supplies instrument
