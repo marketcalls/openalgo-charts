@@ -108,3 +108,42 @@ test('the sandbox broker refuses a duration it cannot take and switches account 
   await expect(panel).toBeHidden();
   expect(errors).toEqual([]);
 });
+
+test('a bracket placed from the panel keeps its legs live across two drops and reconnects', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.locator('#account').click();
+  const panel = page.locator('#acctpanel');
+  const summary = panel.locator('.oac-account');
+  await expect(summary).toHaveAttribute('data-status', 'ready');
+  await panel.locator('#acct-bracket').click();
+  await expect(panel.locator('.acct-msg')).toHaveText('Bracket placed: stop and target are linked by the provider');
+  await expect(panel.locator('.acct-position')).toContainText('Long 10 @');
+
+  // The engine the panel drives, read through the same module instance.
+  const rows = () => page.evaluate(async () => {
+    const path = '/examples/yfinance/src/account.js';
+    const { engine } = (await import(path)).accountDesk();
+    const legs = engine.bracketLegs('c1') ?? {};
+    const row = (id: string | undefined) => id === undefined ? null : [engine.state(id), engine.intentState(id), engine.brokerStatus(id)];
+    return { kind: engine.orderKind('c1'), entry: row('c1'), stop: row(legs.stopLoss), target: row(legs.takeProfit) };
+  });
+  expect(await rows()).toEqual({
+    kind: 'bracket', entry: ['filled', 'SETTLED', 'filled'],
+    stop: ['working', 'ACKNOWLEDGED', 'working'], target: ['working', 'ACKNOWLEDGED', 'working'],
+  });
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await panel.locator('#acct-connection').click();
+    await expect(summary).toHaveAttribute('data-status', 'stale');
+    await panel.locator('#acct-connection').click();
+    await expect(panel.locator('.acct-msg')).toHaveText('Reconnected to the simulated provider');
+    await expect(summary).toHaveAttribute('data-status', 'ready');
+    expect(await rows()).toEqual({
+      kind: 'bracket', entry: ['filled', 'SETTLED', 'filled'],
+      stop: ['working', 'ACKNOWLEDGED', 'working'], target: ['working', 'ACKNOWLEDGED', 'working'],
+    });
+  }
+  await expect(panel.locator('.acct-position')).toContainText('Long 10 @');
+  await page.screenshot({ path: info.outputPath('account-bracket-reconnected.png'), animations: 'disabled' });
+  expect(errors).toEqual([]);
+});
