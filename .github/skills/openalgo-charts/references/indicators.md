@@ -1624,7 +1624,7 @@ import { ema, emaSeries, rsi, rsiSeries, atr, trueRange, supertrend, supertrendS
 | `supertrend` | `(bars, period = 10, multiplier = 3) => SupertrendPoint[]` | `{ value, direction }`; `value` is `NaN` during ATR warmup. `direction` `-1` = uptrend, `+1` = downtrend. |
 | `supertrendSeries` | `(bars, period, multiplier) => { up: Bar[]; down: Bar[] }` | inactive leg carries `NaN` so the line breaks at flips. |
 
-The tier exports the pure helpers from `src/indicators/calc.ts`, including `sma`, `wma`, `rma`, `stdev`, `highest`, `lowest`, `nulls`, `connorsStreak`, `rollingSum`, `correlation`, `pivotHigh`, `pivotLow`, `barsSince` and `valueWhen`. Read each signature before composing it; these helpers do not all return the same shape. `nulls` converts `NaN` to `null` for a plot column. Default scalar `sma` sums each finite current window independently, so expired gaps or overflow cannot poison later windows.
+The tier exports the pure helpers from `src/indicators/calc.ts`, including `sma`, `wma`, `rma`, `stdev`, `highest`, `lowest`, `nulls`, `connorsStreak`, `rollingSum`, `correlation`, `pivotHigh`, `pivotLow`, `barsSince` and `valueWhen`. Read each signature before composing it; these helpers do not all return the same shape. `nulls` converts `NaN` to `null` for a plot column. Default scalar `sma` sums each finite current window independently, so expired gaps or overflow cannot poison later windows. `correlation` takes two passes over each window, oldest first, finishing both means before any deviation, so it keeps its precision at high price levels where a single-pass sum of squares cancels; a window with a missing value, no spread or an overflowing step is `NaN`.
 
 The tier also exports every descriptor by name in SCREAMING_SNAKE form (`RSI`, `MACD`, `HALFTREND`, ...), the per-family arrays (`OVERLAY_INDICATORS`, `OSCILLATOR_INDICATORS`, `VOLATILITY_INDICATORS`, `FLOW_INDICATORS`, `ADAPTIVE_INDICATORS`, `AVERAGE_INDICATORS`, `STRENGTH_INDICATORS`, `INDEX_INDICATORS`, `RANGE_INDICATORS`, `SIGNAL_INDICATORS`), and the flat `BUILTIN_INDICATORS`. Read `BUILTIN_INDICATORS` rather than hard-coding a list of ids.
 
@@ -1745,6 +1745,41 @@ of history; skip mode holds the last finite extreme. Crossings require two adjac
 finite pairs by default; skip mode compares the current pair with the latest jointly
 finite pair. Rising and falling exclude the current bar from their history window.
 All predicates return false when the current observation is missing.
+
+## Numerical contract with the companion scripting language
+
+The built-ins are compared cell by cell with the companion scripting language.
+Eleven differences are documented choices that stay as they are; the website
+indicators page (Numerical contract) and `docs/reference-coverage/numerical-audit.md`
+state each one with the studies and cells it affects. What a downstream author
+needs from them:
+
+- **Extremes skip a missing bar (K1).** `highest`, `lowest`, `highestBars` and
+  `lowestBars` without options report the extreme of the present bars. Pass
+  `{ missing: 'propagate' }` when a window with a gap must have no reading.
+- **No volume is no trade (K2).** Every built-in reads an `undefined` volume as
+  zero traded, and money-flow studies count a missing price as no flow.
+- **CCI reads 0 on a flat window (K3)**, and only there: a window holding a
+  missing bar or an overflowing deviation has no reading.
+- **One bar early (K4):** Supertrend on its ATR seed bar, PVT on bar 0 and
+  Choppiness from its first high-low range.
+- **Last-bit only (K5, K6, K7):** host `Math.exp` and `Math.log` in ALMA,
+  Choppiness and Fisher; percent Historical Volatility and per-bar scaled Ease
+  of Movement; the one-step Aroon Oscillator.
+- **Parabolic SAR (K8)** clamps its stop to the previous two bars and includes
+  the reversal bar; the language stop is the unclamped recurrence.
+- **Overflow (K9)** near 1.8e308 follows IEEE infinities; **negative zero (K10)**
+  can appear in Chop Zone and Net Volume, so compare with `=== 0`.
+- **Klinger (K11)** skips a bar with a `NaN` volume and reads `undefined` as
+  zero.
+
+A `NaN` volume has no single rule yet. It reads as zero (like `undefined`) in
+Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index,
+Net Volume, VWMA, MA Ribbon's VWMA lines, NVI, PVI, PVT and PVO; as a missing
+bar that the study recovers from in Volume, MFI, Klinger, AlphaTrend and the
+VWMA smoothing of CCI and RVI; and it blanks VWAP, OBV and A/D for the rest of
+the history, a known defect. Map missing or unparseable feed volume to
+`undefined` before it reaches the chart.
 
 ## Grouped descriptor exports
 

@@ -12,7 +12,8 @@ All notable changes to OpenAlgo Charts.
   zeros. A genuinely flat window still reads 0.
 - Stochastic %K multiplies by 100 before dividing by the window range, the order
   the definition fixes, so a reading can move in its last bit and %D follows. A
-  window whose range overflows has no reading instead of a flat 0.
+  window whose range overflows has no reading instead of a flat 0, and neither
+  does one whose scaled distance overflows (above about 1.8e306).
 - Fisher Transform restarts both recursions on the bar after a missing midpoint,
   as its documented rule says. The missing value used to enter the recursion and
   leave the study blank for the rest of the history.
@@ -25,12 +26,20 @@ All notable changes to OpenAlgo Charts.
   or below ordinary readings are unchanged.
 - True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator multiply
   the smoothed change by 100 before dividing, which can move readings in the last
-  bit. Near the top of the double range the product can overflow, and that bar
-  is then a gap rather than a reading formed from an infinity.
+  bit. Above about 1.8e306 that product overflows and the bar is a gap, as in the
+  companion scripting language, where the former order still printed a reading.
 - Trend Strength Index and the exported `correlation` helper finish both window
   means before forming any deviation, taking two passes oldest first. The former
   single-pass sums cancelled at ordinary price levels: at 1e5 with 0.01 moves the
   reading was about one percent off, and at 1e9 it had no value.
+
+### Documentation
+
+- The indicators page has a Numerical contract section: the eleven documented
+  differences from the companion scripting language (missing observations in
+  extremes, missing volume, flat CCI windows, first-bar conventions, host
+  logarithms, units, the Aroon Oscillator, Parabolic SAR, overflow, signed zero
+  and Klinger), and how each built-in treats a NaN volume today.
 
 ## 2.5.4
 
