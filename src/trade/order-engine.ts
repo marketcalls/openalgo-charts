@@ -1059,10 +1059,16 @@ export class OrderEngine {
     if (o === undefined) return;
     o.writeRevision++;
     o.brokerStatus = status;
-    // A stream can cancel an order (an IOC that found nothing) before the
-    // transport has answered for it. Being reported at all means the broker
-    // accepted it, which is the step the machine needs before a cancel.
-    if (o.state === 'pending_place' && status === 'cancelled') o.state = transition(o.state, 'ack');
+    // A terminal state on an AMBIGUOUS row is the client's own guess: a lost
+    // answer reads `rejected`, a row a snapshot missed reads `stale`. The
+    // broker describing the row is the first real word on it, so the machine
+    // starts again from the place. Left on the guess, a live order could be
+    // neither cancelled nor modified, and would be pruned as if it had settled.
+    if (o.intent === 'AMBIGUOUS' && isTerminal(o.state)) o.state = 'pending_place';
+    // Being reported at all, even as pending or already cancelled (an IOC that
+    // found nothing), means the broker accepted the order. That is the step
+    // the machine needs before a cancel or a modify can be asked of it.
+    if (o.state === 'pending_place' && status !== 'rejected') o.state = transition(o.state, 'ack');
     const event = BROKER_EVENT[status];
     if (event !== undefined) o.state = transition(o.state, event);
     o.intent = BROKER_FINAL.has(status) ? 'SETTLED' : 'ACKNOWLEDGED';

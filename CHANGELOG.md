@@ -49,6 +49,14 @@ All notable changes to OpenAlgo Charts.
   switching, preview-gated placement with durations and leverage, native close,
   partial close, reverse and brackets, executions, and a dropped connection.
 
+### Fixed
+
+- `onBrokerUpdate` on a row the client had written off as `AMBIGUOUS` (a lost
+  answer reads `rejected`, a row a reconnect snapshot missed reads `stale`) now
+  takes the broker's status. An order the broker reports working is live
+  again, so it can be modified and cancelled, and it is no longer pruned as if
+  it had settled. A row the broker reports as pending counts as accepted.
+
 ### Changed
 
 - `OpenAlgoTradeFeed.place` refuses `account`, `duration`, `expiresAt` and

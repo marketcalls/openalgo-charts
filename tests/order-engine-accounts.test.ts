@@ -277,6 +277,8 @@ describe('explicit close, partial close and reverse', () => {
     engine.onBrokerOrder({ id: row.order.id, clientToken: 'lost', status: row.order.status });
     expect(engine.intentState('lost')).toBe('SETTLED');
     expect(engine.brokerStatus('lost')).toBe('filled');
+    // The state follows the broker's word, not the guess made when the answer was lost.
+    expect(engine.state('lost')).toBe('filled');
     expect(await engine.closePosition({ symbol: 'SYN', qty: 6, clientToken: 'rest' })).toMatchObject({ ok: true });
     expect(broker.accountPositions('SBX-1')).toEqual([]);
     expect(updates).toContain('rest');
@@ -333,6 +335,71 @@ describe('explicit close, partial close and reverse', () => {
     expect(await engine.closePosition({ symbol: 'SYN', qty: 3 })).toMatchObject({ ok: false, intent: 'BLOCKED', reason: 'quantity 3 is not a multiple of lot size 5' });
     // An order-type list describes new orders; a native close has no order type of its own.
     expect(await engine.closePosition({ symbol: 'SYN', clientToken: 'typeless' })).toMatchObject({ ok: false, intent: 'SETTLED' });
+  });
+});
+
+describe('an ambiguous write the broker later reports', () => {
+  const resting = (clientToken: string): PlaceRequest => ({ ...market({ clientToken }), type: 'LIMIT', price: 90 });
+
+  it('becomes a live order that can be modified and cancelled, and is never pruned as settled', async () => {
+    const { accounts, engine, broker } = setup({ engine: { maxSettledOrders: 0, minModifyIntervalMs: 0 } });
+    await accounts.refresh();
+    broker.muteOrderUpdates(true);
+    broker.failNext('place', 'lost-response');
+    expect(await engine.placeOrder(resting('L1'))).toMatchObject({ ok: false, intent: 'AMBIGUOUS', state: 'rejected' });
+    const live = broker.orders().find(order => order.status === 'working')!;
+    broker.muteOrderUpdates(false);
+
+    engine.onBrokerOrder({ id: live.id, clientToken: 'L1', status: 'working' });
+    // State, intent and the broker's word agree, and with no settled rows kept
+    // the row is still here: a live order has not settled.
+    expect([engine.state('L1'), engine.intentState('L1'), engine.brokerStatus('L1')]).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+
+    engine.requestModify('L1', 91);
+    await new Promise(done => setTimeout(done, 0));
+    expect(broker.orders().find(order => order.id === live.id)?.price).toBe(91);
+    const cancel = vi.spyOn(broker, 'cancel');
+    await engine.cancelOrder('L1');
+    expect(cancel).toHaveBeenCalledWith(live.id);
+    expect(broker.orders().some(order => order.id === live.id)).toBe(false);
+  });
+
+  it('routes the fills of an adopted order and settles it from them', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    broker.muteOrderUpdates(true);
+    broker.failNext('place', 'lost-response');
+    await engine.placeOrder(resting('L2'));
+    const live = broker.orders().find(order => order.status === 'working')!;
+    broker.muteOrderUpdates(false);
+    engine.onBrokerOrder({ id: live.id, clientToken: 'L2', status: 'working' });
+    broker.fill(live.id);
+    expect([engine.state('L2'), engine.intentState('L2'), engine.brokerStatus('L2')]).toEqual(['filled', 'SETTLED', 'filled']);
+  });
+
+  it('brings back a row a snapshot missed once the broker reports it working', async () => {
+    const { accounts, engine, broker } = setup();
+    await accounts.refresh();
+    await engine.placeOrder(resting('S1'));
+    engine.beginReconcile();
+    engine.onReconnect(new Set());
+    expect([engine.state('S1'), engine.intentState('S1')]).toEqual(['stale', 'AMBIGUOUS']);
+    const live = broker.orders().find(order => order.status === 'working')!;
+    engine.onBrokerOrder({ id: live.id, clientToken: 'S1', status: 'working' });
+    expect([engine.state('S1'), engine.intentState('S1')]).toEqual(['working', 'ACKNOWLEDGED']);
+    await engine.cancelOrder('S1');
+    expect([engine.state('S1'), engine.brokerStatus('S1')]).toEqual(['cancelled', 'cancelled']);
+  });
+
+  it('keeps a row the broker reports as pending, not yet working, cancellable', async () => {
+    const feed: OrderFeed = { place: vi.fn(async () => { throw new Error('socket reset'); }), modify: vi.fn(), cancel: vi.fn(async () => {}) };
+    const engine = new OrderEngine({ feed, armed: true, constraints: { tickSize: 0.05 } });
+    await engine.placeOrder(resting('P1'));
+    expect(engine.intentState('P1')).toBe('AMBIGUOUS');
+    engine.onBrokerOrder({ id: 'X9', clientToken: 'P1', status: 'pending' });
+    expect([engine.state('P1'), engine.intentState('P1'), engine.brokerStatus('P1')]).toEqual(['working', 'ACKNOWLEDGED', 'pending']);
+    await engine.cancelOrder('P1');
+    expect(feed.cancel).toHaveBeenCalledWith('X9');
   });
 });
 
