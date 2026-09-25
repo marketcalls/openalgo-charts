@@ -114,6 +114,7 @@ Everything `src/widget/index.ts` exports at runtime. The shell (`createWidget` a
 | `focusable(n)`, `focusables(root)` | functions | Focus-trap helpers. |
 | `placeBeside(anchor, size, bounds, gap?, pad?)`, `placeBelow(...)`, `placeTip(...)` | functions | Pure placement maths in root coordinates, flipping when there is no room. |
 | `boxIn(root, el)` | function | An element's box in the widget root's coordinate space. |
+| `historyPress(ctx, 'undo' \| 'redo')`, `historyReady(ctx, 'undo' \| 'redo')` | functions | One undo or redo press through `ctx.history`, and whether it would do anything; a custom context without a history falls back to `ctx.draw`. Every widget undo control calls these. (unreleased) |
 | `WidgetContext`, `WidgetBusEvents`, `BusHandler`, `StorageLike`, `DialogMount`, `DialogHandle`, `WidgetDialogName`, `OverlayOptions`, `OverlayStack`, `TipSpec`, `TipSource`, `TipSide`, `TipController`, `Box`, `Size` | types | |
 
 ### The keymap (`keymap.ts`)
@@ -320,6 +321,7 @@ widget.root;                         // the .oac-widget element
 widget.context;                      // the WidgetContext every mounted piece was handed
 widget.objects;                      // the owned base-tier ChartObjects inventory
 widget.alerts;                       // the owned AlertController, including drawing anchors
+widget.history;                      // the ChartHistory every undo control walks (unreleased)
 widget.series;                       // the primary SeriesApi, retained by setChartType
 widget.symbol(); widget.exchange(); widget.interval(); widget.chartType(); widget.theme();
 widget.setSymbol(symbol, exchange?);
@@ -420,7 +422,7 @@ An automatic refresh that fails or returns no bars keeps the previous chart visi
 
 ## `WidgetContext`
 
-What the shell hands every mounted piece, and what a host's own panel wants: `chart`, `draw`, `root`, `document`, `theme` (`'dark' | 'light'`), `chartTheme`, `keymap`, `bus`, `storage` (a `WidgetStorage`), `locale`, `toast(message, kind?)`, `openOverlay(el, opts?)` (returns the closer), `status(text, kind?)`, `tips`, `overlays`, `symbol()` (`{ symbol, exchange }`), `interval()`.
+What the shell hands every mounted piece, and what a host's own panel wants: `chart`, `draw`, `root`, `document`, `theme` (`'dark' | 'light'`), `chartTheme`, `keymap`, `bus`, `storage` (a `WidgetStorage`), `locale`, `toast(message, kind?)`, `openOverlay(el, opts?)` (returns the closer), `status(text, kind?)`, `tips`, `overlays`, `symbol()` (`{ symbol, exchange }`), `interval()`, and optionally `objects`, `alerts` and `history` (the chart-wide `ChartHistory`; a dialog that previews live wraps its session in `ctx.history?.group(label)`).
 
 A dialog module of your own: build the panel with `createElement`, hand it to `ctx.openOverlay(el, { anchor, placement: 'below' })` or `{ placement: 'center', modal: true }`, stop propagation of its own `keydown` (except Escape and Tab) and `pointerdown` so the chart's pointer capture does not eat a click, and register chords in scope `'overlay'` if it wants any while open. Register it with `registerWidgetDialog(name, mount)` to have the shell open it by name.
 
@@ -794,3 +796,60 @@ widget.openNews();
   `loading`, `ready`, `empty`, `error`). `quoteChange(quote)` returns
   `{ change, percent }` or null without a positive `previousClose`.
 - `WATCHLIST_PANEL_CSS` and `NEWS_PANEL_CSS` are part of `WIDGET_COMPONENT_CSS`.
+
+## Chart-wide undo and redo (unreleased)
+
+`ChartHistory` (widget tier, DOM-free) is one timeline for a chart: a study added or
+removed (with its settings, visibility, pane, stacking row and scale), study settings,
+visibility and scale assignment (`setPriceScale`, `setPlotPriceScales`), the chart type and
+the primary series' scale, price scale settings (mode, invert, margins, auto-fit, pinned
+ratio, axis placement), panes (moved, folded, resized, and brought back with the studies and
+drawings they held), the chart settings `applyChartSettings` writes, and drawings. The widget
+builds one as `widget.history` and hands it to every piece as `ctx.history`; Ctrl+Z, Ctrl+Y
+and Ctrl+Shift+Z, the rail's Undo and Redo, and the mobile Drawing and More sheets all walk it.
+
+```ts
+import { ChartHistory } from 'openalgo-charts/widget';
+
+const history = new ChartHistory(chart, { draw, onError: e => console.warn(e) });
+history.undo(); history.redo();           // false when there is nothing, or the step failed
+history.canUndo(); history.canRedo();
+history.peekUndo();                       // { label?, changes: ChartHistoryChange[] } | null
+history.transact(() => chart.setPriceAxisOptions(0, 'right', { mode: 'logarithmic' }), 'Scale');
+const end = history.group('Chart settings');   // one step until end() runs; a no-op group is none
+history.ignore(() => hostOwnSetup());     // the host's own change, never a step
+history.push({ label: 'Chart type', undo: () => rebuild('candlestick'), redo: () => rebuild('line') });
+history.attach(rebuiltChart, rebuiltDraw);    // a host that rebuilds its chart keeps the timeline
+history.subscribe(refreshButtons); history.clear(); history.destroy();
+```
+
+- **Recording.** Changes the chart announces (`objects:change`, `indicatorRemoved`,
+  `pane*`, `priceAxis*`) are compared before and after the turn they happened in, so one
+  user action is one step whatever made it: a legend button, a dialog, a menu, host code.
+  Changes the chart does not announce (a pane weight set in code, a scale option, a chart
+  setting) are recorded inside `transact`. The widget's context menu runs every row that
+  way, and its chart and study settings dialogs are one `group` per session.
+- **Applying.** A step makes the chart look the way it did in exactly the fields it
+  changed, through the chart's public calls; it never restores a whole state (that would
+  rebuild every study, replay managed requests and reset the drawing history). A host's
+  change to a neighbouring field since is kept. The three chart settings that read the
+  price pane's scale but write every pane's (`scales.mode`, `scales.inverted`,
+  `scales.autoScale`) are replayed only for a chart-wide change; one axis changed from its
+  own menu is replayed on that axis alone.
+- **Drawings** stay the controller's: each step is held by the number `drawing:change`
+  reported (`DrawingChangeEvent.step`, `DrawingController.historySteps()`), and undone by the
+  controller. After `attach` to a new controller, an old step is taken back from the drawings
+  either side of it.
+- **Never**: no bars are written, no alert fires (a study brought back reseeds silently), no
+  order is placed.
+- **Failure**: a step that cannot be applied is rolled back, dropped with every step behind
+  it, and reported to `onError`; the redo branch is kept. A new action clears redo.
+- **Layouts**: `chart.restoreState` and `widget.restoreState` start a new timeline.
+- **Study ids**: `addIndicator` does not yet re-create a study under a given id, so a study
+  brought back answers to a new one; the history maps the old id to it for every later step
+  and rewrites the study-source settings of studies reading it.
+- Types: `ChartHistoryOptions` (`draw`, `limit` default 100, `series`, `setChartType`,
+  `onError`), `ChartHistoryCommand`, `ChartHistoryStep`, `ChartHistoryChange` (`study-add`,
+  `study-remove`, `study-settings`, `study-visibility`, `study-scale`, `study-pane`,
+  `study-order`, `chart-type`, `series-scale`, `pane-order`, `pane-weight`, `pane-collapse`,
+  `axis`, `settings`, `drawing`, `command`), `ChartHistoryError` (`direction`, `step`, `error`).

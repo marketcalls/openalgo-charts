@@ -30,9 +30,10 @@ import {
 } from 'openalgo-charts';
 import { DrawingController, drawingShortcuts, keyToDrawingAction, type DrawingKeyContext } from 'openalgo-charts/draw';
 import {
-  WidgetBus, WidgetStorage, createOverlayStack, createTipController, defaultStorage, h, widgetDialog,
+  WidgetBus, WidgetStorage, createOverlayStack, createTipController, defaultStorage, h, historyPress, widgetDialog,
   type OverlayOptions, type StorageLike, type WidgetBusEvents, type WidgetContext, type WidgetDialogName,
 } from './context';
+import { ChartHistory } from './history';
 import { Keymap, openShortcutsPanel, type KeyEventLike, type KeyScope } from './keymap';
 import { mountRail, toolName, type RailHandle, type RailOptions, type RailPrefs } from './rail';
 import { mountStatusline, type StatuslineHandle } from './statusline';
@@ -186,6 +187,13 @@ export interface Widget {
   readonly alerts: AlertController;
   /** Shared inventory and supported actions for drawings, indicators and registered profiles. */
   readonly objects: ChartObjects;
+  /**
+   * One undo timeline for the chart: studies, their settings, the chart type,
+   * price scales, panes and drawings. Ctrl+Z, Ctrl+Y, the rail and the mobile
+   * controls all walk it. A host's own change that should not be a step goes
+   * through `history.ignore`; loading a layout with `restoreState` clears it.
+   */
+  readonly history: ChartHistory;
   /** The `.oac-widget` element. */
   readonly root: HTMLElement;
   /** What every mounted piece was handed; a host mounting its own panel wants the same. */
@@ -308,6 +316,7 @@ class WidgetContextImpl implements WidgetContext {
   public readonly draw: DrawingController;
   public readonly objects: ChartObjects | undefined;
   public readonly alerts: AlertController | undefined;
+  public readonly history: ChartHistory | undefined;
   public readonly root: HTMLElement;
   public readonly document: Document;
   public readonly keymap: Keymap;
@@ -331,6 +340,7 @@ class WidgetContextImpl implements WidgetContext {
     this.draw = parts.draw;
     this.objects = parts.objects;
     this.alerts = parts.alerts;
+    this.history = parts.history;
     this.root = parts.root;
     this.document = parts.document;
     this.keymap = parts.keymap;
@@ -358,6 +368,7 @@ class WidgetImpl implements Widget {
   public readonly draw: DrawingController;
   public readonly objects: ChartObjects;
   public readonly alerts: AlertController;
+  public readonly history: ChartHistory;
   public readonly root: HTMLElement;
   public readonly context: WidgetContext;
   private readonly _series: SeriesApi;
@@ -515,6 +526,19 @@ class WidgetImpl implements Widget {
         else if (object.kind === 'drawing') mountDrawingProperties(this.context, undefined, { ids: [object.sourceId] });
       },
     });
+    // Before any chrome, so the first action a control takes is already a step.
+    this.history = new ChartHistory(this.chart, {
+      draw: this.draw,
+      series: () => this._series,
+      // Through the shell, so the top bar and the persisted layout follow.
+      setChartType: id => this.setChartType(id),
+      onError: ({ direction, error }) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        this._toasts.toast(direction === 'undo'
+          ? widgetText(this.context, 'That step could not be undone: {error}', { error: reason })
+          : widgetText(this.context, 'That step could not be redone: {error}', { error: reason }), 'error');
+      },
+    });
 
     // ── shared furniture ───────────────────────────────────────────────
     const overlays = createOverlayStack(root, doc);
@@ -529,6 +553,7 @@ class WidgetImpl implements Widget {
       draw: this.draw,
       objects: this.objects,
       alerts: this.alerts,
+      history: this.history,
       root,
       document: doc,
       keymap: this._keymap,
@@ -983,6 +1008,14 @@ class WidgetImpl implements Widget {
   }
 
   public restoreState(state: unknown): WidgetRestoreReport {
+    // A loaded layout is a new document, not a step: nothing recorded before
+    // it describes the chart it builds, and nothing it sets is the user's edit.
+    const report = this.history.ignore(() => this._restoreState(state));
+    if (report.applied) this.history.clear();
+    return report;
+  }
+
+  private _restoreState(state: unknown): WidgetRestoreReport {
     if (!isRecord(state)) return { applied: false, reason: 'not a widget state object' };
     if (state.version !== undefined && state.version !== WIDGET_STATE_VERSION) {
       return { applied: false, reason: `widget state version ${String(state.version)} is not ${WIDGET_STATE_VERSION}` };
@@ -1115,8 +1148,9 @@ class WidgetImpl implements Widget {
         return false;
       }
       switch (action.type) {
-        case 'undo': draw.undo(); break;
-        case 'redo': draw.redo(); break;
+        // The chart-wide timeline: a drawing, a study and a pane in the order they were made.
+        case 'undo': historyPress(this.context, 'undo'); break;
+        case 'redo': historyPress(this.context, 'redo'); break;
         case 'delete': draw.removeMany(targets()); break;
         case 'duplicate': draw.duplicate(targets()); break;
         case 'nudge': draw.nudge(targets(), action.dx, action.dy); break;
@@ -1133,12 +1167,13 @@ class WidgetImpl implements Widget {
     const G = 'Drawing';
     // The arrows are layered: with nothing selected they decline and the
     // engine's pan runs, so they are not a conflict with it.
-    const edit = (combo: string, label: string, hidden = false, layered = false): void => {
-      km.register(combo, editing, 'widget', { label, group: G, hidden, layered });
+    const edit = (combo: string, label: string, hidden = false, layered = false, group = G): void => {
+      km.register(combo, editing, 'widget', { label, group, hidden, layered });
     };
-    edit('Mod+Z', 'Undo');
-    edit('Mod+Shift+Z', 'Redo');
-    edit('Mod+Y', 'Redo', true);
+    // Undo and redo reach every step on the chart, not only drawings.
+    edit('Mod+Z', 'Undo', false, false, 'Widget');
+    edit('Mod+Shift+Z', 'Redo', false, false, 'Widget');
+    edit('Mod+Y', 'Redo', true, false, 'Widget');
     edit('Mod+C', 'Copy the selected drawing');
     edit('Mod+X', 'Cut the selected drawing');
     edit('Mod+V', 'Paste drawings');
@@ -1205,6 +1240,9 @@ class WidgetImpl implements Widget {
       'alert:created', 'alert:updated', 'alert:removed', 'alert:triggered', 'alert:expired', 'alerts:restored', 'alerts:checkpoint']) {
       this._cleanups.push(this.chart.on(ev, () => this._scheduleSave()));
     }
+    // An undo can set what the chart does not announce, a pane height or a
+    // scale option, and the saved layout has to follow it all the same.
+    this._cleanups.push(this.history.subscribe(() => this._scheduleSave()));
     this._cleanups.push(this.chart.on('alert:triggered', payload => {
       const event = payload as AlertTriggeredPayload;
       this.context.toast(event.message ?? event.title, 'success');
@@ -1239,6 +1277,7 @@ class WidgetImpl implements Widget {
     this._statusline?.destroy();
     this._toasts.destroy();
     this._keymap.destroy();
+    this.history.destroy();
     this.objects.destroy();
     this.alerts.destroy();
     this.draw.destroy();

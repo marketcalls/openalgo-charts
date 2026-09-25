@@ -1,0 +1,115 @@
+---
+title: Undo and Redo
+description: One undo timeline for studies, their settings, the chart type, price scales, panes and drawings, walked by Ctrl+Z, Ctrl+Y and every undo control.
+---
+
+# Undo and redo
+
+`ChartHistory` keeps one timeline for everything a user changes on a chart:
+
+- a study added or removed, with its settings, visibility, pane, stacking row and price scale;
+- a study's settings, visibility and scale assignment;
+- the chart type and the primary series' scale;
+- price scale settings: mode, invert, margins, auto-fit, pinned ratio and axis placement;
+- panes: moved, folded, resized, and brought back with the studies and drawings they held;
+- drawings, through the drawing controller's own steps;
+- the chart settings the settings dialog writes.
+
+They interleave in the order they were made. Ctrl+Z and Ctrl+Y (and Ctrl+Shift+Z), the rail's
+Undo and Redo, and the mobile sheets all walk the same timeline. The widget builds one for its
+chart; a host of its own builds one with `new ChartHistory(chart, { draw })` from
+`openalgo-charts/widget`.
+
+Try it in the [live example](/examples#one-undo-for-the-whole-chart): add a study, fold its pane,
+switch the chart type or draw a line, then walk the steps back and forth.
+
+## How a step is taken back
+
+The chart announces each change it makes, whether a legend button, a dialog, a menu or a
+host's own call made it, and the history compares the chart before and after the turn the
+change happened in. One user action is one turn, so a study removed with the pane it emptied
+is one step. Undo makes the chart look the way it did in exactly the fields that step changed:
+it never restores a whole saved state, which would rebuild every study, replay managed data
+requests and reset the drawing history. A change the host made since to a neighbouring field,
+another study's colour or another pane's height, is still there afterwards.
+
+Drawings stay the drawing controller's to undo. The history holds each drawing step by the
+number the controller reported it under (`historySteps()` and the `step` field of
+`drawing:change`) and asks the controller to take it back, so read-only drawings, linked
+charts and a host's forced edits keep every rule the controller applies to them.
+
+## What history never does
+
+- **It never writes bars.** Undoing a chart type, a study or a pane leaves the price data as it
+  is, including a bar that arrived after the step was made.
+- **It never fires an alert.** A study brought back computes from the bars on the chart and
+  reseeds its alerts silently, the way any study added to a loaded chart does; trader alerts
+  are not history at all.
+- **It never places an order.** Order entry is not a step, and nothing in the history reaches
+  an order route.
+
+## Grouping and live edits
+
+A dialog that previews its edits live records one step per session, and a Cancel that puts
+every value back leaves none. The widget's chart settings and study settings dialogs do this;
+a host builds the same with `group`:
+
+```ts
+const end = history.group('Chart settings');
+// every change recorded here, observed or transacted, is one step
+end();
+```
+
+A whole divider drag or drawing drag is one step without asking. A change the chart does not
+announce, a scale option, a pane height set in code or a chart setting, is recorded when it is
+made inside `transact`; the widget's context menu runs every row that way.
+
+## The host's own changes
+
+A change the host makes for itself goes through `ignore`, and is never a step. Loading a
+layout starts a new timeline: `widget.restoreState` and `chart.restoreState` clear it.
+
+A host that rebuilds its chart, for a chart-type switch or a new symbol, attaches the new
+chart and drawing controller with `attach(chart, draw)`. Studies are matched by id and panes
+by slot, which is what a chart restored from the old one's state keeps, so the steps carry
+over; a drawing step the old controller held is then taken back from the drawings either side
+of it. A change the history cannot make itself goes in as a command:
+
+```ts
+history.push({
+  label: 'Chart type',
+  undo: () => rebuildAs('candlestick'),
+  redo: () => rebuildAs('line'),
+});
+```
+
+## When a step cannot be taken back
+
+If a step fails (a study whose descriptor is no longer registered, a command that throws), the
+history puts back whatever that press had already changed, drops the step with every step
+behind it, and keeps the redo branch, so it never describes a chart that is not on screen.
+`onError` reports it; the widget shows a toast.
+
+## API
+
+| Member | What it does |
+| --- | --- |
+| `new ChartHistory(chart, options?)` | `options.draw` joins a drawing controller's steps; `limit` keeps that many steps (100); `series` names the series whose type and scale are history; `setChartType` switches the type through the host; `onError` hears a failed step. |
+| `undo()` / `redo()` | Take back the latest step, or apply again the one an undo took back. False when there was none, or it failed. A new action clears the redo branch. |
+| `canUndo()` / `canRedo()` | Whether a press would do anything. |
+| `peekUndo()` / `peekRedo()` | `{ label?, changes }` for the step a press would take, or null. |
+| `transact(fn, label?)` | Record everything `fn` changes as one step. Nested calls join the outer one. |
+| `group(label?)` | Merge everything recorded until the returned function runs. |
+| `ignore(fn)` | Run a host change that is not a step. |
+| `push(command)` | Record a host's own reversible step. |
+| `attach(chart, draw?)` | Follow a rebuilt chart, keeping the timeline. |
+| `clear()`, `subscribe(listener)`, `destroy()` | Forget every step; hear every change to what a press would do; stop. |
+
+The widget exposes its timeline as `widget.history` and `ctx.history`. `historyPress(ctx, 'undo')`
+and `historyReady(ctx, 'undo')` are what its own controls call; they fall back to the drawing
+controller for a custom context built without a history.
+
+Until the chart can re-create a study under the id it had, a study brought back answers to a
+new id: the history maps its old id to the new one for every later step, and rewrites the
+study-source reference of any study reading it. An indicator alert keyed to the old id does not
+follow it.

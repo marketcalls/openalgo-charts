@@ -111,12 +111,12 @@ const widget = createWidget('#terminal', {
 When active, the desktop top bar, status line and drawing rail are replaced by a touch
 header and bottom bar. The header provides symbol entry and interval selection. The
 bottom bar provides Draw, Studies, Objects and More as enabled by `topbar`, `rail` and
-`indicators`. More contains theme, chart settings and chart type. Selecting a drawing
-shows Properties, Lock or Unlock, and Delete. While a tool is active, the Drawing sheet
-also provides Finish, Cancel, Undo, Magnet and Stay controls.
+`indicators`. More opens with Undo and Redo, then theme, chart settings and chart type.
+Selecting a drawing shows Properties, Lock or Unlock, and Delete. While a tool is active, the
+Drawing sheet also provides Finish, Cancel, Undo, Redo, Magnet and Stay controls.
 
 The mobile and desktop controls use the same `DrawingController`, object inventory,
-selection, undo history, settings dialogs and overlay stack. Changing layout does not
+selection, [chart-wide undo history](/docs/undo-history), settings dialogs and overlay stack. Changing layout does not
 copy or reset drawings. `rail.tools` filters both the desktop rail and mobile Drawing
 sheet to the same allowed ids.
 

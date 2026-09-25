@@ -429,6 +429,56 @@ return widget;`} />
 
 Every option and event is on [The Widget Tier](/docs/widget).
 
+## One undo for the whole chart
+
+A study, a pane fold, a chart type and a drawing are steps on one timeline. Add RSI, fold its
+pane, switch to a line, draw a trend line from the rail, then take each step back and apply it
+again with the buttons, or with Ctrl+Z and Ctrl+Y over the chart. The line beside the buttons
+says what Undo would take back. See [Undo and Redo](/docs/undo-history).
+
+<RunnableExample height={520} tiers={['widget']} caption="Simulated prices. Undo never touches the bars: a study brought back computes from the prices on the chart and fires none of its alerts." code={`${STOCK_BARS_SOURCE}
+el.style.display = 'flex';
+el.style.flexDirection = 'column';
+const controls = document.createElement('div');
+controls.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px';
+el.appendChild(controls);
+const host = document.createElement('div');
+host.style.cssText = 'flex:1;min-height:0;width:100%;position:relative';
+el.appendChild(host);
+const widget = lib.createWidget(host, {
+  symbol: 'NOVA', exchange: 'DEMO', interval: '1h', persist: false, mobile: 'never',
+  feed: { getBars: async () => stockBars(1700000000, 200, 3600, 100, 41), subscribeBars: () => () => {} },
+});
+const note = document.createElement('span');
+note.style.cssText = 'color:#94a3b8;font:12px system-ui, sans-serif;margin-left:6px';
+const button = (label, run) => {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText = 'padding:5px 10px;border:1px solid #334155;border-radius:4px;background:#172033;color:#e2e8f0;cursor:pointer';
+  b.onpointerdown = (event) => event.stopPropagation();
+  b.onclick = run;
+  controls.appendChild(b);
+  return b;
+};
+button('Add RSI', () => widget.chart.addIndicator('rsi'));
+button('Fold the last pane', () => {
+  const last = widget.chart.panes().length - 1;
+  if (last > 0) widget.chart.setPaneCollapsed(last, !widget.chart.paneCollapsed(last));
+});
+button('Line or candles', () => widget.setChartType(widget.chartType() === 'line' ? 'candlestick' : 'line'));
+const undo = button('Undo', () => widget.history.undo());
+const redo = button('Redo', () => widget.history.redo());
+controls.appendChild(note);
+const show = () => {
+  const next = widget.history.peekUndo();
+  note.textContent = next ? 'Undo takes back: ' + next.changes.join(', ') : 'Nothing to undo';
+  undo.disabled = !widget.history.canUndo();
+  redo.disabled = !widget.history.canRedo();
+};
+widget.history.subscribe(show);
+show();
+return widget;`} />
+
 ## Watchlists and news
 
 Named lists with live quote rows, and the news for the chart's symbol, in the same

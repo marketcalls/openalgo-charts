@@ -265,6 +265,7 @@ widget.dataController;        // DataLoadingController | null (null without a fe
 widget.chart;                 // the Chart underneath, every base API available
 widget.draw;                  // the DrawingController the rail drives
 widget.objects;               // shared ChartObjects inventory and supported actions
+widget.history;               // one undo timeline: studies, panes, scales, chart type, drawings
 widget.series;                // primary handle, retained across chart-type changes
 widget.root;                  // the .oac-widget element
 widget.context;               // what every dialog was handed, for a panel of your own
@@ -286,6 +287,15 @@ widget.isDestroyed;
 `restoreState` applies a saved viewport only when the state was captured on the same
 symbol and interval; on any other dataset the indicators, drawings and panes still land
 and the view is dropped, because a range of bar indices means nothing on different bars.
+A restored layout starts a new undo timeline.
+
+Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z, the rail's Undo and Redo and the mobile sheets all walk
+`widget.history`: a study added or removed, its settings, the chart type, price scale
+settings, pane moves, folds and heights, and drawings, in the order they were made. The
+settings dialogs are one step per session, and a Cancel leaves none; a context-menu row is
+one step. Undo never writes bars, fires an alert or places an order. A change your own code
+makes that should not be a step goes through `widget.history.ignore(fn)`. See
+[Undo and Redo](/docs/undo-history).
 
 A `Widget` is a thin owner. Anything the chrome does not expose, do on `widget.chart` or
 `widget.draw` directly; the chrome observes the chart and stays in step.
@@ -316,11 +326,12 @@ const widget = createWidget('#terminal', {
 The mobile header contains symbol entry and interval selection. Its bottom bar exposes
 Draw, Studies, Objects and More according to the same `topbar`, `rail` and `indicators`
 switches as desktop chrome. Drawing selection adds Properties, Lock or Unlock, and Delete.
-The Drawing sheet includes Finish, Cancel, Undo, Magnet and Stay while a tool is active.
-`rail.tools` restricts both layouts to the same allowed drawing ids.
+The Drawing sheet includes Finish, Cancel, Undo, Redo, Magnet and Stay while a tool is
+active, and the More sheet opens with Undo and Redo, disabled when there is nothing to take
+back. `rail.tools` restricts both layouts to the same allowed drawing ids.
 
 Both layouts drive one `DrawingController`, `ChartObjects` inventory, overlay stack,
-selection and undo history. A container resize changes the controls without replacing
+selection and chart-wide undo history. A container resize changes the controls without replacing
 the chart or its drawings. The widget also honors `prefers-reduced-motion: reduce`: when
 the host omits `animZoom` or `animAutoscale`, their defaults become false. Explicit values
 remain authoritative.

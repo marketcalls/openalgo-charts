@@ -96,6 +96,9 @@ export function mountIndicatorSettings(
 
   const before = detached(inst.settings());
   const dirty = new Set<string>();
+  // Edits preview live, one write per keystroke or colour drag; the session
+  // is one step, and a Cancel that restores every key leaves none.
+  const endStep = ctx.history?.group('Study settings') ?? ((): void => {});
   let activeTab: IndicatorSettingsTab = tabs.some((t) => t.id === opts.tab) ? (opts.tab as IndicatorSettingsTab) : tabs[0].id;
   let form: FormHandle | null = null;
   let inputControls: IndicatorInputControlsHandle | null = null;
@@ -233,7 +236,7 @@ export function mountIndicatorSettings(
     event.preventDefault(); event.stopPropagation(); cancel();
   });
   const handle = openPanel(ctx, frame.el, { placement: 'center', modal: true, dismissOnEscape: false,
-    onClose: () => { offRemoved(); offDestroy(); inputControls?.destroy(); form?.destroy(); },
+    onClose: () => { offRemoved(); offDestroy(); inputControls?.destroy(); form?.destroy(); endStep(); },
   }, () => {
     cancel();
     // A host destroying its overlay cannot keep a rejected rollback open.

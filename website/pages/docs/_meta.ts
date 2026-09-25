@@ -44,6 +44,7 @@ export default {
   'chart-data-export': 'Chart Data & CSV Export',
   interactions: 'Interactions & A11y',
   'keyboard-shortcuts': 'Keyboard Shortcuts',
+  'undo-history': 'Undo and Redo',
   events: 'Events',
   mobile: 'Mobile & Touch',
 

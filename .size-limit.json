@@ -23,7 +23,7 @@
   {
     "name": "Draw tier (87 drawing tools + controller)",
     "path": "dist/openalgo-charts.draw.mjs",
-    "limit": "44.87 kB",
+    "limit": "44.92 kB",
     "brotli": true
   },
   {
@@ -47,7 +47,7 @@
   {
     "name": "Widget tier (shell, top bar, drawing rail, status line, dialogs, keymap, styles)",
     "path": "dist/openalgo-charts.widget.mjs",
-    "limit": "82.31 kB",
+    "limit": "87.72 kB",
     "brotli": true
   },
   {
@@ -58,7 +58,7 @@
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "282.67 kB",
+    "limit": "288.12 kB",
     "brotli": true
   },
   {
@@ -80,7 +80,7 @@
       "dist/openalgo-charts.widget.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "335.15 kB",
+    "limit": "340.61 kB",
     "brotli": true
   }
 ]

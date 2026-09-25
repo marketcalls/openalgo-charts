@@ -275,6 +275,8 @@ export type WidgetBuiltinMessage =
   | "Properties..."
   | "Ratio"
   | "Redo"
+  | "That step could not be undone: {error}"
+  | "That step could not be redone: {error}"
   | "Refreshing {symbol} {interval}"
   | "Remove"
   | "Remove all drawings ({count})"
