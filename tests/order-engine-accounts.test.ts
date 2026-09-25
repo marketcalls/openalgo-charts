@@ -597,7 +597,10 @@ describe('provider-native brackets', () => {
     expect(broker.orders().some(order => order.id === target.id)).toBe(false);
   });
 
-  it('adopts legs by their entry and role from a provider that echoes no leg token', async () => {
+  it.each([
+    ['newest first, as the history lists them', <T>(rows: readonly T[]) => [...rows]],
+    ['oldest first', <T>(rows: readonly T[]) => [...rows].reverse()],
+  ])('adopts legs by their entry and role from a provider that echoes no leg token, %s', async (_order, arrange) => {
     const { accounts, engine, broker } = setup();
     await accounts.refresh();
     broker.muteOrderUpdates(true);
@@ -608,12 +611,62 @@ describe('provider-native brackets', () => {
     broker.failNext('bracket', 'lost-response');
     expect(await engine.placeBracket(entry('bp'))).toMatchObject({ intent: 'AMBIGUOUS' });
     const history = await broker.getOrderHistory({ accountId: 'SBX-1' }, new AbortController().signal);
-    for (const row of [...history].reverse()) {
+    expect(history.map(row => row.order.role ?? 'entry')).toEqual(['tp', 'sl', 'entry']);
+    // Only the entry echoes a token; each leg names nothing but its entry and role.
+    for (const row of arrange(history)) {
       engine.onBrokerOrder({ ...row.order, clientToken: row.order.parentId === undefined ? row.clientToken : undefined });
     }
     expect(engine.bracketLegs('bp')).toEqual({ stopLoss: 'bp:stop', takeProfit: 'bp:target' });
-    expect(engine.brokerStatus('bp:target')).toBe('pending');
+    expect([engine.orderKind('bp:stop'), engine.orderKind('bp:target')]).toEqual(['bracket-stop', 'bracket-target']);
+    expect([engine.state('bp'), engine.intentState('bp'), engine.brokerStatus('bp')]).toEqual(['working', 'ACKNOWLEDGED', 'working']);
+    for (const leg of ['bp:stop', 'bp:target']) {
+      expect([engine.state(leg), engine.intentState(leg), engine.brokerStatus(leg)]).toEqual(['working', 'ACKNOWLEDGED', 'pending']);
+    }
     expect(engine.bracketLegs('bt')).toBeUndefined();
+
+    // Each leg is bound to its own broker order: cancelling the target cancels that
+    // order, and the entry's fill starts the stop the engine holds.
+    broker.muteOrderUpdates(false);
+    const [target, stop, parent] = history.map(row => row.order.id);
+    const cancel = vi.spyOn(broker, 'cancel');
+    await engine.cancelOrder('bp:target');
+    expect(cancel).toHaveBeenCalledWith(target);
+    expect([engine.state('bp:target'), engine.brokerStatus('bp:target')]).toEqual(['cancelled', 'cancelled']);
+    broker.fill(parent);
+    expect(engine.brokerStatus('bp:stop')).toBe('working');
+    broker.fill(stop);
+    expect([engine.state('bp:stop'), engine.brokerStatus('bp:stop')]).toEqual(['filled', 'filled']);
+    expect(broker.accountPositions('SBX-1')).toEqual([]);
+  });
+
+  it('holds legs the stream reports before the receipt names their entry, and applies the latest word', async () => {
+    const receipt = deferred<BracketReceipt>();
+    const cancel = vi.fn(async () => {});
+    const feed: OrderFeed = { features: { brackets: true }, place: vi.fn(), modify: vi.fn(), cancel, placeBracket: vi.fn(() => receipt.promise) };
+    const engine = new OrderEngine({ feed, armed: true, constraints: { tickSize: 0.05 } });
+    const placed = engine.placeBracket(entry('bh'));
+    engine.onBrokerOrder({ id: 'S1', parentId: 'E1', role: 'sl', status: 'pending' });
+    engine.onBrokerOrder({ id: 'T1', parentId: 'E1', role: 'tp', status: 'pending' });
+    engine.onBrokerOrder({ id: 'S1', parentId: 'E1', role: 'sl', status: 'working' });
+    expect(engine.bracketLegs('bh')).toBeUndefined();
+    // The receipt names the entry and neither leg.
+    receipt.resolve({ orderId: 'E1' });
+    expect(await placed).toMatchObject({ ok: true, kind: 'bracket', legs: { stopLoss: 'bh:stop', takeProfit: 'bh:target' } });
+    expect([engine.brokerStatus('bh:stop'), engine.brokerStatus('bh:target')]).toEqual(['working', 'pending']);
+    await engine.cancelOrder('bh:target');
+    expect(cancel).toHaveBeenCalledWith('T1');
+  });
+
+  it('holds no leg row while no bracket it could belong to is waiting for its entry', async () => {
+    const feed: OrderFeed = {
+      features: { brackets: true }, place: vi.fn(), modify: vi.fn(), cancel: vi.fn(async () => {}),
+      placeBracket: vi.fn(async (): Promise<BracketReceipt> => ({ orderId: 'E1' })),
+    };
+    const engine = new OrderEngine({ feed, armed: true, constraints: { tickSize: 0.05 } });
+    // Reported before this engine sent any bracket, so it is some other session's leg.
+    engine.onBrokerOrder({ id: 'S1', parentId: 'E1', role: 'sl', status: 'working' });
+    expect(await engine.placeBracket(entry('bn'))).toMatchObject({ ok: true, kind: 'bracket' });
+    expect(engine.bracketLegs('bn')).toBeUndefined();
   });
 
   it('claims the leg tokens with the entry token, and frees all three only when nothing was sent', async () => {

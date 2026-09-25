@@ -164,11 +164,13 @@ still apply, so a host lock during replay stops them too.
   `<token>:target`, and sends them to the feed as `legClientTokens`. A leg is adopted the
   first time the broker reports it, by that token or by its entry's broker id and role
   (`parentId`, `role`), so a bracket whose answer was lost still has legs the host can
-  cancel, modify and see filled. An `Order` row passes as it is:
-  `onBrokerOrder({ ...order, clientToken })`.
+  cancel, modify and see filled. A leg that names an entry not yet bound, as in a history
+  listed newest first or a stream that reports the legs before the entry's id comes back,
+  is held and applied when the entry binds, so the rows can be passed in any order. An
+  `Order` row passes as it is: `onBrokerOrder({ ...order, clientToken })`.
 - **Reconnect.** `beginReconcile()` and `onReconnect(presentIds)` treat commands like orders:
   an absent one becomes `AMBIGUOUS`, not cancelled. After a dropped connection, read the
-  broker's order history for each account written to, pass every row to `onBrokerOrder`,
+  broker's order history for every account written to, pass every row to `onBrokerOrder`,
   call `onReconnect` with the ids it lists, and `releaseAmbiguous` each write that complete
   history never mentions. The sandbox example on the examples page and the reference
   host's Account panel reconnect this way; without it, a close left unresolved by the drop

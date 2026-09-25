@@ -395,6 +395,8 @@ const BROKER_EVENT: Readonly<Record<OrderStatus, OrderEvent | undefined>> = {
 const BROKER_FINAL: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['filled', 'cancelled', 'rejected']);
 
 const DEFAULT_MAX_SETTLED = 500;
+/** How many unbound entries may have leg rows held for them at once. See `_hold`. */
+const MAX_HELD_ENTRIES = 64;
 
 export class OrderEngine {
   private readonly _feed: OrderFeed;
@@ -420,6 +422,8 @@ export class OrderEngine {
   private readonly _pendingModify = new Map<string, ModifyPatch>();
   /** Settled client ids, oldest first: the eviction order for the maps above. */
   private readonly _settledIds: string[] = [];
+  /** Leg rows that named an entry before it was bound, by entry broker id, then leg broker id. */
+  private readonly _heldLegs = new Map<string, Map<string, BrokerOrderUpdate>>();
   private _counter = 0;
 
   public constructor(opts: OrderEngineOptions) {
@@ -621,10 +625,7 @@ export class OrderEngine {
    * already described is left as the broker left it.
    */
   private _submitted(o: Tracked, brokerId: string): void {
-    if (o.brokerId === undefined) {
-      o.brokerId = brokerId;
-      this._byBroker.set(brokerId, o.clientId);
-    }
+    if (o.brokerId === undefined) this._bind(o, brokerId);
     if (o.brokerStatus !== undefined) return;
     o.state = transition(o.state, 'ack');
     o.intent = 'SUBMITTED';
@@ -1143,16 +1144,67 @@ export class OrderEngine {
    * failing that, by the client token the broker echoes. The token is the only
    * handle on a write whose answer was lost: it is how an AMBIGUOUS row learns
    * its broker id and its outcome from the broker rather than from a guess.
+   * Rows may come in any order: a bracket leg that names an entry not yet
+   * bound is held, and applied when the entry binds.
    */
   public onBrokerOrder(update: BrokerOrderUpdate): void {
     if (!this._byBroker.has(update.id)) {
       const row = this._unbound(update);
-      if (row !== undefined && row.brokerId === undefined) {
-        row.brokerId = update.id;
-        this._byBroker.set(update.id, row.clientId);
-      }
+      if (row === undefined) this._hold(update);
+      else if (row.brokerId === undefined) this._bind(row, update.id);
     }
     this.onBrokerUpdate(update.id, update.status);
+  }
+
+  /**
+   * Give a row its broker id. A bracket entry then takes the leg rows that
+   * named it before it was bound, ahead of its own status: a filled entry
+   * can settle and leave the ring at once, and its legs would have no entry
+   * left to find.
+   */
+  private _bind(o: Tracked, brokerId: string): void {
+    o.brokerId = brokerId;
+    this._byBroker.set(brokerId, o.clientId);
+    const held = this._heldLegs.get(brokerId);
+    if (held === undefined) return;
+    this._heldLegs.delete(brokerId);
+    if (o.legReqs === undefined) return;
+    for (const update of held.values()) this.onBrokerOrder(update);
+    if (!this._awaitingEntry()) this._heldLegs.clear();
+  }
+
+  /**
+   * Keep a leg row whose entry has no broker id here yet, until `_bind`
+   * gives it one. A provider that echoes no leg token names a leg only by
+   * its entry, and may well report the leg first: its history lists the
+   * newest rows first, and its stream can describe the legs before the
+   * transport returns the entry's id. Rows are held only while a bracket
+   * this engine sent is still waiting for that id, since no other could
+   * ever claim them, and for a bounded number of entries, since other
+   * sessions' brackets arrive alongside and are never claimed. The latest
+   * row for a leg is the one kept.
+   */
+  private _hold(update: BrokerOrderUpdate): void {
+    if (update.parentId === undefined || (update.role !== 'sl' && update.role !== 'tp')) return;
+    if (!this._awaitingEntry()) {
+      this._heldLegs.clear();
+      return;
+    }
+    let held = this._heldLegs.get(update.parentId);
+    if (held === undefined) {
+      held = new Map();
+      this._heldLegs.set(update.parentId, held);
+      if (this._heldLegs.size > MAX_HELD_ENTRIES) this._heldLegs.delete(this._heldLegs.keys().next().value!);
+    }
+    held.set(update.id, { ...update });
+  }
+
+  /** Whether a bracket this engine sent could still be bound to an entry the broker reports. */
+  private _awaitingEntry(): boolean {
+    for (const o of this._orders.values()) {
+      if (o.legReqs !== undefined && o.brokerId === undefined && UNRESOLVED.has(o.intent)) return true;
+    }
+    return false;
   }
 
   /**
@@ -1160,7 +1212,9 @@ export class OrderEngine {
    * names, or a leg of a bracket this engine sent, found by the leg's own
    * token or by its entry and role. Adopting a leg on first sight is how a
    * bracket whose answer was lost still gets legs that can be cancelled,
-   * modified and filled, whichever of its rows the broker reports first.
+   * modified and filled. A leg found only by an entry not yet bound is held
+   * until the entry binds, so the order the broker reports rows in does not
+   * matter.
    */
   private _unbound(update: BrokerOrderUpdate): Tracked | undefined {
     const token = update.clientToken;
@@ -1192,6 +1246,7 @@ export class OrderEngine {
     // A bracket that never arrived took its legs' tokens nowhere either.
     if (o.legReqs !== undefined) {
       for (const suffix of LEG_SUFFIXES) if (!this._orders.has(`${clientId}:${suffix}`)) this._sentTokens.delete(`${clientId}:${suffix}`);
+      if (!this._awaitingEntry()) this._heldLegs.clear();
     }
     if (o.brokerId !== undefined) this._byBroker.delete(o.brokerId);
     this._lastModifyAt.delete(clientId);

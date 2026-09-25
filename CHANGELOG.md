@@ -42,7 +42,10 @@ All notable changes to OpenAlgo Charts.
   settles as the broker's refusal. A bracket gives each
   leg its own client token (`legClientTokens`), and `onBrokerOrder` adopts a
   leg by that token or by its entry and role (`parentId`, `role`), so a bracket
-  whose answer was lost still has legs that can be cancelled and filled.
+  whose answer was lost still has legs that can be cancelled and filled. A leg
+  that names an entry not yet bound (a history listed newest first, or legs
+  streamed before the entry's id comes back) is held until the entry binds, so
+  the broker's rows can arrive in any order.
 - `FakeBroker({ accounts })` simulates all of it: per-account ledgers filled at
   a mark price, preview, `IOC`/`FOK` cancellation, `GTD` expiry, leverage
   limits, native close, reverse and linked bracket legs, server-side refusals
@@ -60,8 +63,10 @@ All notable changes to OpenAlgo Charts.
 - The reference host's Account button opens a sandbox broker panel: account
   switching, preview-gated placement with durations and leverage, native close,
   partial close, reverse and brackets, executions, and a dropped connection
-  whose Reconnect settles every write the panel sent from the provider's order
-  history, as the sandbox example on the examples page does.
+  whose Reconnect settles every write the panel sent from the order history of
+  every account it has written to, as the sandbox example on the examples page
+  does, so the legs of a filled bracket stay live across any number of
+  reconnects.
 
 ### Fixed
 
