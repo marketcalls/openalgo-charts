@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createChart, getIndicator } from '/dist/openalgo-charts.mjs';
+import { IndicatorBackground, createChart, getIndicator } from '/dist/openalgo-charts.mjs';
 import { fakeDocument, pointer } from '../../../tests/helpers/fake-dom';
 import { initRoutedStudy, routedSignalDescriptor } from '../src/routed-study.js';
 
@@ -14,6 +14,7 @@ function outputs(settings) {
   return {
     marks: descriptor.markers({ bars, values, settings }),
     shapes: descriptor.draws({ bars, values, settings }),
+    shading: descriptor.background({ bars, values, settings }),
   };
 }
 
@@ -48,6 +49,9 @@ const plates = (chart, paneIndex) => chart.panes()[paneIndex].primitives()
 /** The drawing layers on one pane that hold a shape matching `test`. */
 const shapesOn = (chart, paneIndex, test) => chart.panes()[paneIndex].primitives()
   .filter(layer => Array.isArray(layer._items) && layer._items.some(test));
+/** The colours each shading layer on one pane holds, one list per layer. */
+const shadingOn = (chart, paneIndex) => chart.panes()[paneIndex].primitives()
+  .filter(layer => layer instanceof IndicatorBackground).map(layer => layer._colors);
 const range = shape => shape.id === 'routed-range';
 const now = shape => shape.text === 'Now';
 /** A point inside the range box, at a candle's own price on the price pane. */
@@ -74,6 +78,19 @@ describe('routed signal sample', () => {
       .toEqual([['box', true, null], ['label', null, 'momentum']]);
   });
 
+  it('shades the candles by momentum, the histogram pane when asked, and nothing when off', () => {
+    const [onPrice] = outputs({ length: 10, onPrice: true, shade: 'price' }).shading;
+    expect(onPrice.overlay).toBe(true);
+    expect(onPrice.plot).toBeUndefined();
+    expect(onPrice.colors).toHaveLength(bars.length);
+    // Null through the warmup, then one of the two regime colours on every bar.
+    expect(onPrice.colors.slice(0, 10).every(color => color === null)).toBe(true);
+    expect(new Set(onPrice.colors.slice(10))).toEqual(new Set(['rgba(38, 166, 154, 0.12)', 'rgba(239, 83, 80, 0.12)']));
+    const [local] = outputs({ length: 10, onPrice: true, shade: 'study' }).shading;
+    expect(local).toEqual({ colors: onPrice.colors });
+    expect(outputs({ length: 10, onPrice: true, shade: 'off' }).shading).toEqual([]);
+  });
+
   it('keeps the plates with the histogram when Signals on price is off', () => {
     const { marks } = outputs({ length: 10, onPrice: false });
     expect(marks.length).toBeGreaterThan(0);
@@ -95,6 +112,26 @@ describe('routed signal sample on a mounted chart', () => {
     click(el, drawn[0].x, drawn[0].y);
     click(el, ...inRange(chart));
     expect(clicks).toEqual([drawn[0].id, 'routed-range']);
+  });
+
+  it('shades the candles from the study pane, follows Momentum shading and goes with the study', () => {
+    const { chart, study } = mounted();
+    const [candles] = shadingOn(chart, 0);
+    expect(shadingOn(chart, 0)).toHaveLength(1);
+    expect(candles.filter(Boolean).length).toBeGreaterThan(40);
+    expect(shadingOn(chart, 1)).toEqual([]);
+    // Moving the study leaves the shading on the candles.
+    expect(chart.moveIndicator(study.id, chart.panes().length)).toBe(true);
+    expect(shadingOn(chart, 0)).toHaveLength(1);
+    study.setSettings({ shade: 'study' });
+    expect(shadingOn(chart, 0)).toEqual([]);
+    expect(shadingOn(chart, study.paneIndex)).toEqual([candles]);
+    study.setSettings({ shade: 'off' });
+    expect(shadingOn(chart, study.paneIndex)).toEqual([[]]);
+    study.setSettings({ shade: 'price' });
+    expect(shadingOn(chart, 0)).toEqual([candles]);
+    study.remove();
+    expect(shadingOn(chart, 0)).toEqual([]);
   });
 
   it('leaves the price axis free to move, and the routed outputs go with the candles', () => {
