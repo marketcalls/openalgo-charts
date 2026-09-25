@@ -29,6 +29,16 @@ export interface LadderRow {
   askQty: number;
 }
 
+/**
+ * Only an object is a schedule. Anything else, a numeric string from a plain-JS
+ * host included, keeps the arithmetic that predates schedules. A type guard,
+ * because the website compiles this file with strict null checks off, where an
+ * inline null check does not narrow the union.
+ */
+function isSchedule(tickSize: number | TickSchedule): tickSize is TickSchedule {
+  return typeof tickSize === 'object' && tickSize !== null;
+}
+
 function scheduleError(where: string): TypeError {
   return new TypeError(`${where} takes a tick size or a schedule built with new TickSchedule(bands)`);
 }
@@ -60,11 +70,11 @@ function scheduleBucket(ticks: TickSchedule, n: number): (p: number) => number {
  */
 export function buildRows(depth: MarketDepth, tickSize: number | TickSchedule, groupBy = 1): LadderRow[] {
   let bucket: (p: number) => number;
-  if (typeof tickSize === 'number') {
+  if (!isSchedule(tickSize)) {
     const step = tickSize * Math.max(1, groupBy);
     bucket = (p: number): number => Math.round(Math.round(p / step) * step * 1e8) / 1e8;
   } else {
-    if (typeof tickSize?.round !== 'function') throw scheduleError('buildRows');
+    if (typeof tickSize.round !== 'function') throw scheduleError('buildRows');
     bucket = scheduleBucket(tickSize, groupBy > 1 ? Math.floor(groupBy) : 1);
   }
   const map = new Map<number, LadderRow>();

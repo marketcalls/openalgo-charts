@@ -178,6 +178,20 @@ describe('buildRows with a tick schedule', () => {
     expect(Object.keys(DEFAULT_DOM_LADDER_OPTIONS)).toEqual(['tickSize', 'width', 'groupBy', 'maxRows', 'rowHeight']);
   });
 
+  it('coerces a tick size that is not an object exactly as before schedules', () => {
+    // A plain-JS host may hand over a numeric string. Only an object takes the
+    // schedule path, so every other value meets the old arithmetic unchanged.
+    const loose = ['0.05', ' 0.05 ', undefined, null, true] as unknown as number[];
+    for (const tick of loose) {
+      for (const groupBy of [1, 5, 2.5]) {
+        for (const book of [straddle(), deepStraddle()]) {
+          expect(buildRows(book, tick, groupBy)).toEqual(constantRows(book, tick, groupBy));
+        }
+      }
+    }
+    expect(buildRows(deepStraddle(), '0.05' as unknown as number, 5)).toEqual(buildRows(deepStraddle(), 0.05, 5));
+  });
+
   it('refuses a band list in place of a schedule', () => {
     const bands = [{ tick: 0.01 }, { from: 100, tick: 0.05 }] as unknown as TickSchedule;
     expect(() => buildRows(straddle(), bands)).toThrow(/new TickSchedule\(bands\)/);
@@ -192,13 +206,13 @@ describe('DomLadder with a tick schedule', () => {
     return context;
   }
 
+  function hitAt(ladder: DomLadder, price: number, context = ladderContext()): string | undefined {
+    ladder.setDepth(straddle());
+    ladder.draw(makeCtx().ctx, context);
+    return ladder.hitTest(context.plotWidth - 10, context.priceScale.priceToY(price), context)?.externalId;
+  }
+
   it('draws and hit-tests the rows the schedule allows', () => {
-    const context = ladderContext();
-    const hitAt = (ladder: DomLadder, price: number): string | undefined => {
-      ladder.setDepth(straddle());
-      ladder.draw(makeCtx().ctx, context);
-      return ladder.hitTest(context.plotWidth - 10, context.priceScale.priceToY(price), context)?.externalId;
-    };
     const banded = new DomLadder({ tickSize: 0.05, tickSchedule: BANDED, rowHeight: 8 });
     expect(hitAt(banded, 99.97)).toBe('ladder-bid:99.97');
     expect(hitAt(banded, 100.15)).toBe('ladder-ask:100.15');
@@ -208,5 +222,11 @@ describe('DomLadder with a tick schedule', () => {
       expect(hitAt(constant, 99.97)).toBeUndefined();
       expect(hitAt(constant, 99.95)).toBe('ladder-bid:99.95');
     }
+  });
+
+  it('draws the rows of a tick size given as a numeric string, as before schedules', () => {
+    const ladder = new DomLadder({ tickSize: '0.05' as unknown as number, rowHeight: 8 });
+    expect(hitAt(ladder, 99.95)).toBe('ladder-bid:99.95');
+    expect(hitAt(ladder, 100.15)).toBe('ladder-ask:100.15');
   });
 });

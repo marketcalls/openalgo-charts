@@ -134,14 +134,17 @@ test('an instrument applied before the trading layer exists snaps its drags unti
   expect(constant.newPrice).toBe(constant.raw);
 });
 
-test('a depth ladder across the boundary shows the rows each band allows', async ({ page }, info) => {
-  await page.evaluate(async () => {
+/**
+ * Docks a ladder over a book that straddles the boundary (cent bids below 100,
+ * nickel asks from it) and records chart clicks. `tickSize` crosses into the
+ * page as given, so a test can hand over what a plain-JS host would.
+ */
+async function mountLadder(page: Page, tickSize: unknown, withSchedule: boolean): Promise<void> {
+  await page.evaluate(async ({ tickSize, withSchedule }) => {
     const { chart, ticks } = window.__ticks;
     const trade = await import('/dist/openalgo-charts.trade.mjs' as string);
     chart.panes()[0].priceScale.setFixedRange({ min: 99.78, max: 100.38 });
-    // The upper band's tick as tickSize: without the schedule, the cent levels
-    // below 100 would fold into nickel rows and 99.97 would have no row.
-    const ladder = new trade.DomLadder({ tickSize: 0.05, tickSchedule: ticks, width: 120, rowHeight: 12 });
+    const ladder = new trade.DomLadder({ tickSize, tickSchedule: withSchedule ? ticks : undefined, width: 120, rowHeight: 12 });
     chart.addPrimitive(ladder);
     ladder.setDepth({
       ltp: 99.99,
@@ -151,23 +154,41 @@ test('a depth ladder across the boundary shows the rows each band allows', async
     const ids: (string | null)[] = [];
     chart.on('click', event => ids.push((event as { id: string | null }).id));
     (window as unknown as { __clicks: (string | null)[] }).__clicks = ids;
-  });
+  }, { tickSize, withSchedule });
   await paint(page);
-  const clickAt = async (price: number): Promise<string | null> => {
-    const at = await page.evaluate(price => {
-      const { chart } = window.__ticks;
-      const rect = document.getElementById('chart')!.getBoundingClientRect();
-      return { x: Math.round(rect.left + rect.width - 72 - 30), y: Math.round(rect.top + chart.priceToCoordinate(price, 0)!) };
-    }, price);
-    await page.mouse.click(at.x, at.y);
-    await paint(page);
-    return page.evaluate(() => (window as unknown as { __clicks: (string | null)[] }).__clicks.at(-1) ?? null);
-  };
+}
+
+/** Clicks the ladder strip at a price and returns the id the chart reported. */
+async function clickLadder(page: Page, price: number): Promise<string | null> {
+  const at = await page.evaluate(price => {
+    const { chart } = window.__ticks;
+    const rect = document.getElementById('chart')!.getBoundingClientRect();
+    return { x: Math.round(rect.left + rect.width - 72 - 30), y: Math.round(rect.top + chart.priceToCoordinate(price, 0)!) };
+  }, price);
+  await page.mouse.click(at.x, at.y);
+  await paint(page);
+  return page.evaluate(() => (window as unknown as { __clicks: (string | null)[] }).__clicks.at(-1) ?? null);
+}
+
+test('a depth ladder across the boundary shows the rows each band allows', async ({ page }, info) => {
+  // The upper band's tick as tickSize: without the schedule, the cent levels
+  // below 100 would fold into nickel rows and 99.97 would have no row.
+  await mountLadder(page, 0.05, true);
   // A cent row below the boundary and a nickel row above it, each a price the band allows.
-  expect(await clickAt(99.97)).toBe('ladder-bid:99.97');
-  expect(await clickAt(99.99)).toBe('ladder-bid:99.99');
-  expect(await clickAt(100.15)).toBe('ladder-ask:100.15');
+  expect(await clickLadder(page, 99.97)).toBe('ladder-bid:99.97');
+  expect(await clickLadder(page, 99.99)).toBe('ladder-bid:99.99');
+  expect(await clickLadder(page, 100.15)).toBe('ladder-ask:100.15');
   // Between two nickel rows there is no row: 100.07 is not a price the upper band allows.
-  expect(await clickAt(100.075)).toBeNull();
+  expect(await clickLadder(page, 100.075)).toBeNull();
   await page.screenshot({ path: info.outputPath('tick-schedule-ladder.png') });
+});
+
+test('a ladder given its tick size as a numeric string draws the rows it did before schedules', async ({ page }, info) => {
+  // A plain-JS host can read the tick from a form field or a query string.
+  await mountLadder(page, '0.05', false);
+  // Constant nickel rows, as a numeric 0.05 gives: the cent bids fold into them.
+  expect(await clickLadder(page, 99.95)).toBe('ladder-bid:99.95');
+  expect(await clickLadder(page, 100.15)).toBe('ladder-ask:100.15');
+  expect(await clickLadder(page, 99.97)).toBeNull();
+  await page.screenshot({ path: info.outputPath('string-tick-ladder.png') });
 });
