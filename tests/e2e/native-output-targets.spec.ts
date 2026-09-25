@@ -309,3 +309,194 @@ test('a price-pane box measures on the price pane when the candles live on anoth
   await page.screenshot({ path: info.outputPath('output-targets-candles-elsewhere.png') });
   expect(errors).toEqual([]);
 });
+
+/** Exact-colour ink per pane for the shading tests: own and sent columns, the routed box and dot, two studies' columns. */
+async function shadeInk(page: Page) {
+  return page.evaluate(() => window.__outputTargets.chart.panes().map(pane => {
+    const counts = { own: 0, sent: 0, box: 0, dot: 0, first: 0, second: 0 };
+    for (const canvas of pane.element.querySelectorAll('canvas')) {
+      const ctx = canvas.getContext('2d');
+      if (!ctx || canvas.width === 0 || canvas.height === 0) continue;
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] !== 255) continue;
+        const rgb = `${pixels[i]},${pixels[i + 1]},${pixels[i + 2]}`;
+        if (rgb === '34,85,170') counts.own++;
+        else if (rgb === '34,170,102') counts.sent++;
+        else if (rgb === '204,34,68') counts.box++;
+        else if (rgb === '238,204,34') counts.dot++;
+        else if (rgb === '170,51,34') counts.first++;
+        else if (rgb === '51,34,170') counts.second++;
+      }
+    }
+    return counts;
+  }));
+}
+
+/** The opaque colour on screen at a chart coordinate, read from the topmost pane canvas that painted it. */
+async function colourAt(page: Page, x: number, y: number): Promise<string | null> {
+  return page.evaluate(([cx, cy]) => {
+    const box = document.querySelector('#chart')!.getBoundingClientRect();
+    const px = box.left + cx, py = box.top + cy;
+    const canvases = [...document.querySelectorAll<HTMLCanvasElement>('#chart canvas')].reverse();
+    for (const canvas of canvases) {
+      const rect = canvas.getBoundingClientRect();
+      if (px < rect.left || px >= rect.right || py < rect.top || py >= rect.bottom) continue;
+      const scale = canvas.width / rect.width;
+      const [r, g, b, a] = canvas.getContext('2d')!.getImageData(Math.floor((px - rect.left) * scale), Math.floor((py - rect.top) * scale), 1, 1).data;
+      if (a === 255) return `${r},${g},${b}`;
+    }
+    return null;
+  }, [x, y]);
+}
+
+test('routed study shading paints where it is sent, under the candles, shapes and marks, and follows the study', async ({ page }, info) => {
+  const errors = await blank(page);
+  await page.evaluate(async () => {
+    const bundle = '/dist/openalgo-charts.mjs';
+    const lib = await import(bundle) as typeof Charts;
+    const chart = lib.createChart(document.querySelector<HTMLElement>('#chart')!, { branding: false, theme: lib.darkTheme });
+    // Rising bodies from 99 to 101, so a body sits at 100 on every bar.
+    chart.addSeries('candlestick')
+      .setData(Array.from({ length: 60 }, (_, i) => ({ time: 1700000000 + i * 60, open: 99, high: 102, low: 98, close: 101 })));
+    lib.registerIndicator({
+      id: 'native-shading-targets', name: 'Routed shading', placement: 'pane',
+      inputs: [{ key: 'shade', label: 'Shade', type: 'select', default: 'price',
+        options: [{ label: 'Price', value: 'price' }, { label: 'Alt', value: 'alt' }, { label: 'None', value: 'none' }] }],
+      plots: [
+        { key: 'osc', type: 'line', title: 'Osc', style: { color: '#ffffff' } },
+        { key: 'alt', type: 'line', title: 'Alt', style: { color: '#888888' } },
+      ],
+      calc: bars => ({ osc: bars.map((_, i) => 30 + (i % 10)), alt: bars.map((_, i) => 500 + i) }),
+      // Opaque on purpose, so every colour can be counted exactly and covering is visible.
+      background: ({ bars, settings }) => [
+        { colors: bars.map((_, i) => (i >= 5 && i < 15 ? '#2255aa' : null)) },
+        ...(settings.shade === 'none' ? [] : [{ colors: bars.map((_, i) => (i >= 18 && i < 36 ? '#22aa66' : null)),
+          ...(settings.shade === 'alt' ? { plot: 'alt' } : { overlay: true }) }]),
+      ],
+      draws: ({ bars }) => [{ kind: 'box', from: { time: bars[26].time, price: 101.5 }, to: { time: bars[32].time, price: 98.5 },
+        color: '#cc2244', fillColor: '#cc2244', opacity: 1, overlay: true }],
+      markers: ({ bars }) => [{ time: bars[22].time, position: 'atPrice', price: 100, shape: 'circle', size: 'big', color: '#eecc22', overlay: true }],
+    });
+    const study = chart.addIndicator('native-shading-targets', {}, { plotPriceScaleIds: { alt: 'left' } });
+    chart.setVisibleLogicalRange({ from: -2, to: 62 });
+    window.__outputTargets = { chart, study, clicks: [] };
+  });
+  await painted(page);
+  const first = await shadeInk(page);
+  await page.screenshot({ path: info.outputPath('shading-targets.png') });
+  expect(first).toHaveLength(2);
+  // The sent column on the candles, the study's own column in its pane.
+  expect(first[0].sent).toBeGreaterThan(5000);
+  expect(first[0].own).toBe(0);
+  expect(first[1].own).toBeGreaterThan(2000);
+  expect(first[1].sent).toBe(0);
+  // The box and the dot paint over the shading, whole.
+  expect(first[0].box).toBeGreaterThan(1000);
+  expect(first[0].dot).toBeGreaterThan(20);
+  // A candle body covers the shading at its bar; between two bars the shading shows.
+  const at = await page.evaluate(() => {
+    const { chart } = window.__outputTargets;
+    return { x: chart.timeToCoordinate(1700000000 + 20 * 60), gap: chart.timeScale.barSpacing / 2, y: chart.priceToCoordinate(100, 0)! };
+  });
+  expect(await colourAt(page, at.x, at.y)).not.toBe('34,170,102');
+  expect(await colourAt(page, at.x + at.gap - 0.5, at.y)).toBe('34,170,102');
+
+  await page.evaluate(() => window.__outputTargets.study.setVisible(false));
+  await painted(page);
+  const hidden = await shadeInk(page);
+  expect(hidden.map(counts => counts.own + counts.sent)).toEqual([0, 0]);
+  await page.evaluate(() => window.__outputTargets.study.setVisible(true));
+  await painted(page);
+  expect((await shadeInk(page))[0].sent).toBeGreaterThan(5000);
+
+  // Moving the study to a new pane takes its own column along and leaves the sent one on the candles.
+  await page.evaluate(() => {
+    const { chart, study } = window.__outputTargets;
+    chart.addIndicator('native-shading-targets', { shade: 'none' });
+    chart.moveIndicator(study.id, chart.panes().length);
+  });
+  await painted(page);
+  const moved = await page.evaluate(() => window.__outputTargets.study.paneIndex);
+  const afterMove = await shadeInk(page);
+  expect(afterMove).toHaveLength(3);
+  expect(afterMove[0].sent).toBeGreaterThan(5000);
+  expect(afterMove[moved].own).toBeGreaterThan(2000);
+  expect(afterMove[moved].sent).toBe(0);
+
+  // Naming the alt plot sends the column to the study pane and releases the price-pane one.
+  await page.evaluate(() => window.__outputTargets.study.setSettings({ shade: 'alt' }));
+  await painted(page);
+  const onPlot = await shadeInk(page);
+  expect(onPlot[0].sent).toBe(0);
+  expect(onPlot[moved].sent).toBeGreaterThan(2000);
+  await page.screenshot({ path: info.outputPath('shading-targets-plot.png') });
+
+  // Naming no target any more releases it; the study's own column stays.
+  await page.evaluate(() => window.__outputTargets.study.setSettings({ shade: 'none' }));
+  await painted(page);
+  const released = await shadeInk(page);
+  expect(released.every(counts => counts.sent === 0)).toBe(true);
+  expect(released[moved].own).toBeGreaterThan(2000);
+
+  await page.evaluate(() => {
+    const { study } = window.__outputTargets;
+    study.setSettings({ shade: 'price' });
+    study.remove();
+  });
+  await painted(page);
+  // The second instance keeps its own box, dot and column; nothing of the first is left.
+  const removed = await shadeInk(page);
+  expect(removed).toHaveLength(2);
+  expect(removed.map(counts => counts.sent)).toEqual([0, 0]);
+  expect(removed[1].own).toBeGreaterThan(2000);
+  await page.screenshot({ path: info.outputPath('shading-targets-removed.png') });
+  expect(errors).toEqual([]);
+});
+
+test('shading from two studies stacks in study order on the candles, also when the first starts on a live bar', async ({ page }, info) => {
+  const errors = await blank(page);
+  await page.evaluate(async () => {
+    const bundle = '/dist/openalgo-charts.mjs';
+    const lib = await import(bundle) as typeof Charts;
+    const chart = lib.createChart(document.querySelector<HTMLElement>('#chart')!, { branding: false, theme: lib.darkTheme });
+    const source = chart.addSeries('candlestick');
+    source.setData(Array.from({ length: 60 }, (_, i) => ({ time: 1700000000 + i * 60, open: 99, high: 102, low: 98, close: 101 })));
+    const plots = [{ key: 'osc', type: 'line' as const, title: 'Osc', style: { color: '#ffffff' } }];
+    const calc = (rows: readonly unknown[]) => ({ osc: rows.map((_, i) => 30 + (i % 10)) });
+    // The first study only shades once a live bar arrives, over bars 10 to 29.
+    lib.registerIndicator({
+      id: 'native-shading-first', name: 'First', placement: 'pane', inputs: [], plots, calc,
+      background: ({ bars }) => (bars.length > 60 ? [{ overlay: true, colors: bars.map((_, i) => (i >= 10 && i < 30 ? '#aa3322' : null)) }] : []),
+    });
+    // The second shades bars 20 to 39 from the start, so the two overlap on bars 20 to 29.
+    lib.registerIndicator({
+      id: 'native-shading-second', name: 'Second', placement: 'pane', inputs: [], plots, calc,
+      background: ({ bars }) => [{ overlay: true, colors: bars.map((_, i) => (i >= 20 && i < 40 ? '#3322aa' : null)) }],
+    });
+    const study = chart.addIndicator('native-shading-first');
+    chart.addIndicator('native-shading-second');
+    chart.setVisibleLogicalRange({ from: -2, to: 62 });
+    window.__outputTargets = { chart, study, clicks: [] };
+    (window as unknown as { __tick: () => void }).__tick = () => source.update({ time: 1700000000 + 60 * 60, open: 99, high: 102, low: 98, close: 101 });
+  });
+  await painted(page);
+  const before = await shadeInk(page);
+  expect(before[0].first).toBe(0);
+  expect(before[0].second).toBeGreaterThan(5000);
+  await page.evaluate(() => (window as unknown as { __tick: () => void }).__tick());
+  await painted(page);
+  const after = await shadeInk(page);
+  expect(after[0].first).toBeGreaterThan(2000);
+  // Where the two overlap, the later study's shading covers the earlier one's.
+  const x = await page.evaluate(() => {
+    const { chart } = window.__outputTargets;
+    return [15, 25, 35].map(i => chart.timeToCoordinate(1700000000 + i * 60) + chart.timeScale.barSpacing / 2 - 0.5);
+  });
+  const y = await page.evaluate(() => window.__outputTargets.chart.priceToCoordinate(100, 0)!);
+  expect(await colourAt(page, x[0], y)).toBe('170,51,34');
+  expect(await colourAt(page, x[1], y)).toBe('51,34,170');
+  expect(await colourAt(page, x[2], y)).toBe('51,34,170');
+  await page.screenshot({ path: info.outputPath('shading-targets-stacked.png') });
+  expect(errors).toEqual([]);
+});
