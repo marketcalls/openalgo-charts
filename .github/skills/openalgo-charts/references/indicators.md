@@ -1749,7 +1749,7 @@ All predicates return false when the current observation is missing.
 ## Numerical contract with the companion scripting language
 
 The built-ins are compared cell by cell with the companion scripting language.
-Eleven differences are documented choices that stay as they are; the website
+Thirteen differences are documented choices that stay as they are; the website
 indicators page (Numerical contract) and `docs/reference-coverage/numerical-audit.md`
 state each one with the studies and cells it affects. What a downstream author
 needs from them:
@@ -1772,14 +1772,22 @@ needs from them:
   can appear in Chop Zone and Net Volume, so compare with `=== 0`.
 - **Klinger (K11)** skips a bar with a `NaN` volume and reads `undefined` as
   zero.
+- **RVI warmup (K12).** The Relative Volatility Index's two averages restart
+  after every missing value until the standard deviation has its first reading,
+  as they always have, so complete data reads unchanged at every Length. After
+  that a missing close is held across. The language also holds a seed made
+  inside the warmup, so above Length 16 its first reading can come earlier.
+- **PVO signal (K13)** restarts after a stretch where the slow volume average
+  is exactly 0 (the SMA oscillator over a window with no volume); the language
+  would hold it.
 
 A `NaN` volume has no single rule yet. It reads as zero (like `undefined`) in
 Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index,
-Net Volume, VWMA, MA Ribbon's VWMA lines, NVI, PVI, PVT and PVO; as a missing
-bar that the study recovers from in Volume, MFI, Klinger, AlphaTrend and the
-VWMA smoothing of CCI and RVI; and it blanks VWAP, OBV and A/D for the rest of
-the history, a known defect. Map missing or unparseable feed volume to
-`undefined` before it reaches the chart.
+Net Volume, VWMA, MA Ribbon's VWMA lines, NVI, PVI, PVT, PVO, OBV (with its
+smoothing and bands) and A/D; and as a missing bar that the study recovers from
+in Volume, MFI, Klinger, AlphaTrend, the VWMA smoothing of CCI and RVI, and
+VWAP with its bands, whose running totals leave that bar out. Map missing or
+unparseable feed volume to `undefined` before it reaches the chart.
 
 ## Grouped descriptor exports
 

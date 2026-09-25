@@ -2130,7 +2130,7 @@ The built-in studies are compared cell by cell with the companion scripting
 language, which runs the same published formulas under its own rules for missing
 data and floating point. Most readings agree to the last bit. Where they do not,
 the difference is either a defect, corrected as it is found and listed in the
-changelog, or one of the eleven documented choices below. These are deliberate
+changelog, or one of the thirteen documented choices below. These are deliberate
 and stay as they are. Each gives the chart's rule, the language's rule, the
 studies it touches with the number of differing cells in the audit corpus, and
 the one thing you can rely on. The engineering record, with the specification
@@ -2257,26 +2257,62 @@ volume.
 
 - **Chart:** Klinger skips a bar whose volume is `NaN`, as a missing bar, and
   reads an `undefined` volume as zero.
-- **Language:** the compared composition reads a missing volume as zero, the
-  chart's documented rule.
+- **Language:** a missing volume is missing, not zero. The comparison supplies
+  zero for it explicitly (`orElse(volume, 0)`), to test the chart's documented
+  rule rather than the language's.
 - **Studies:** Klinger Oscillator (904 cells).
 - **You can rely on:** send a bar without volume as `undefined`, and Klinger
   reads it as zero like every other volume study.
+
+### K12: Relative Volatility Index warmup
+
+- **Chart:** the study's two 14-bar averages restart after every missing value
+  until the standard deviation has its first reading. During that warmup the
+  upper average has nothing on a bar that rose and the lower one nothing on a
+  bar that did not, so a fourteen-bar one-way run can seed one of them only for
+  the next bar the other way to restart it. After the warmup, a missing close
+  is held across instead.
+- **Language:** has no call for this study. Composed from its exponential
+  average, each average keeps a seed made in the warmup and holds it across the
+  missing values that follow.
+- **Studies:** Relative Volatility Index with a Length above 16, on a series
+  whose warmup holds a fourteen-bar one-way run followed by a turn. The default
+  Length 10 is never affected. On a 400-bar test wave the first reading is bar
+  42 against the language's 38 at Length 30, and 52 against 39 at Length 40;
+  later readings differ by an amount that shrinks bar by bar.
+- **You can rely on:** on complete data the study reads exactly as it always
+  has, at every Length.
+
+### K13: PVO signal after a stretch with no volume
+
+- **Chart:** PVO has no reading where its slow volume average is exactly 0, and
+  its signal average then starts again: once PVO prints again, the signal and
+  histogram wait `signalLength - 1` bars for a fresh seed.
+- **Language:** has no call for this study. Composed from its exponential
+  average, the signal holds across the missing readings and continues on the
+  next one.
+- **Studies:** PVO with the SMA oscillator type, after zero or missing volume
+  for at least a slow window. With the default EMA oscillator the slow average
+  never returns to 0 once it has seen volume. On a 300-bar test series with 40
+  bars of zero volume the chart's signal is missing on 8 bars where the
+  language prints, and later values differ.
+- **You can rely on:** a stretch with no traded volume costs the PVO signal
+  one signal window after PVO returns; a series without such a stretch reads
+  as it always has.
 
 ### Missing volume
 
 An `undefined` volume is zero traded in every built-in; that is the rule to
 build on. A `NaN` volume is not handled the same way everywhere yet, so there is
-no single rule for it. Today each built-in that reads volume does one of three
-things with it:
+no single rule for it. Each built-in that reads volume does one of two things
+with it:
 
 | A `NaN` volume is read as | Built-ins |
 | --- | --- |
-| Zero, exactly like `undefined` | Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index, Net Volume, VWMA, the VWMA lines of MA Ribbon, NVI, PVI, PVT, PVO |
-| A missing bar: that bar, and any window or average holding it, has no reading, then the study recovers | Volume and its average, MFI, Klinger Oscillator, AlphaTrend, the VWMA smoothing option of CCI and of Relative Volatility Index |
-| A missing total: no reading from that bar to the end of the history | VWAP and its bands, OBV with its smoothing and bands, A/D |
+| Zero, exactly like `undefined` | Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index, Net Volume, VWMA, the VWMA lines of MA Ribbon, NVI, PVI, PVT, PVO, OBV with its smoothing and bands, A/D |
+| A missing bar: that bar, and any window or average holding it, has no reading, then the study recovers | Volume and its average, MFI, Klinger Oscillator, AlphaTrend, the VWMA smoothing option of CCI and of Relative Volatility Index, VWAP and its bands (the running totals leave that bar out) |
 
-The last row is a known defect in those three studies. Until every study treats
+Neither treatment loses the rest of the history. Until every study treats
 `NaN` the same way, map a feed's missing or unparseable volume to `undefined`
 before it reaches the chart.
 

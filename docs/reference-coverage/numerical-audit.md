@@ -282,9 +282,13 @@ attributed to one cause. The recorded companion arrays are 0.7.0; the released
   skips the bar, which is the descriptor's own documented rule.
 - **Relative Volatility Index and Mass Index** (3,507 cells). The RVI's private
   EMA and the Mass Index's run-by-run second EMA restarted from a fresh simple
-  mean after any gap, blanking the study for another 14 or 9 bars. Both now use
-  the SMA-seeded EMA over the whole series, which holds its state across a gap
-  (standard library 20.2.2). The RVI's EMA smoothing option follows.
+  mean after any gap, blanking the study for another 14 or 9 bars. The Mass
+  Index now runs the SMA-seeded EMA over the whole series, which holds its
+  state across a gap (standard library 20.2.2). The RVI's two averages keep the
+  reference recursion inside the deviation warmup, where a hole restarts them
+  as before (K12), and hold across a hole from the deviation's first reading
+  on, which only a missing close can make. The RVI's EMA smoothing option uses
+  the SMA-seeded EMA and holds as well.
 - **True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator**
   (8,869 cells). The ratio is `(100 * doubleSmoothedChange) / doubleSmoothedSize`
   (standard library 20.4). Above about 1.8e306 the product overflows and the
@@ -295,16 +299,24 @@ attributed to one cause. The recorded companion arrays are 0.7.0; the released
   `(cross / len) / (sqrt(squaresA / len) * sqrt(squaresB / len))` (standard
   library 20.8). The single pass lost about one percent of the reading at a
   price of 1e5 with 0.01 moves and had no reading at 1e9.
+- **NVI and PVI** (not a classified cause). A missing close on a bar whose
+  volume qualified was compounded into the running product and removed the
+  index and its average for the rest of the history. A missing close now holds
+  the index, as a zero or missing previous close already did, so both lines
+  carry on. The index therefore has no gap for its average to restart after.
 
-Twenty-three unit tests in `tests/indicator-numeric-absence.test.ts` use
-recorded companion readings or hand derivations; eighteen failed on the
-previous sources. Reverting each of eight individual changes (the CCI guard, the
-Stochastic order and span guard, the Fisher midpoint guard, the RVI average,
-the Mass Index second average, the TSI order and the two-pass correlation)
-makes between one and three of them fail. Four built-package browser
-regressions (CCI, Fisher, RVI with Mass Index, and Trend Strength at 1e9)
-failed on a build of the previous sources and pass on the corrected build in
-Chromium, Firefox and WebKit; the screenshots were inspected.
+The boundary tests in `tests/indicator-numeric-absence.test.ts` use recorded
+companion readings or hand derivations, and failed on the previous sources.
+Reverting each individual change (the CCI guard, the Stochastic order and span
+guard, the Fisher midpoint guard, the RVI hold after the deviation warmup, the
+RVI smoothing average, the Mass Index second average, the TSI order, the
+two-pass correlation and the NVI and PVI close guard) makes between one and
+three of them fail; holding the RVI averages inside the warmup as well makes
+the complete-data check and the Length 30 parity case fail. Five
+built-package browser regressions (CCI, Fisher, RVI with Mass Index, Trend
+Strength at 1e9, and NVI across a missing close) failed on a build of
+the previous sources and pass on the corrected build in Chromium, Firefox and
+WebKit; the screenshots were inspected.
 
 Ordinary data was compared against the previous sources on 22 gapless series
 (a sine wave at 100 and 1e5, random walks at levels 1, 5, 100, 25,000 and
@@ -317,25 +329,33 @@ Trend Strength is within 6.7e-16 of an exact rational correlation on every
 cell; the former single pass was off by up to 0.084 on 2-bar windows and missed
 one reading.
 
-The RVI is unchanged at every deviation Length up to 16, the default 10
-included: its averages need fourteen present inputs and bar 0 is always absent,
-so no seed can form and then meet a gap before the deviation exists. Above 16 a
-complete one-sided run inside the deviation warmup now seeds an average that
-holds across the warmup's remaining gaps, so the first reading can arrive
-earlier: bar 39 instead of bar 52 on the 400-bar wave at Length 40. The 0.7.1
-engine agrees bit-for-bit at Lengths 10, 16, 17, 25 and 40 on that series; the
-former reseeding differed on 26 availability cells and 484 values there.
+The RVI, NVI and PVI are bit-for-bit unchanged on complete data at every
+setting tried. Their unit tests compare the RVI with the 2.5.4 formula at
+deviation Lengths 2, 10, 14, 16, 17, 30 and 100, with and without the EMA
+smoothing, on six series chosen so that the longer lengths meet a seed inside
+the warmup followed by a hole, the case where holding would move the reading;
+NVI and PVI are compared at four average lengths on three series. A sweep
+against the 2.5.4 sources themselves covered deviation Lengths 1 to 120, 150
+and 200 with all eight smoothing options, NVI and PVI at four average lengths
+and PVO at five settings, over fourteen complete series including stretches of
+zero volume: 33,555,900 cells, none different. Every built-in at its defaults
+on eight further complete series (1,170,400 cells) differs from 2.5.4 only in
+Stochastic and the TSI family, in the last bits, and in Trend Strength, by the
+former single pass's error, with identical availability.
 
-These corrections move the indicator tier from 36.27 to 36.22 kB Brotli, the
-widget terminal from 267.55 to 267.50 kB and all tiers from 310.09 to
-310.03 kB. No budget changed.
+These corrections move the indicator tier from 36.27 to 36.31 kB Brotli
+(36,310 bytes), the widget terminal from 267.55 to 267.59 kB (267,594 bytes)
+and all tiers from 310.09 to 310.13 kB (310,127 bytes). Their budgets are now
+36.31, 267.60 and 310.13 kB, the smallest two-decimal values that pass.
 
 ### Contract differences
 
-These eleven are documented choices, not defects, and this change does not
+These thirteen are documented choices, not defects, and this change does not
 alter them. The website indicators page carries the same rules for users under
-Numerical contract. Cell counts are each cause's attributed cells in the
-classified corpus (31,926 in all); a column can carry more than one cause.
+Numerical contract. For K1 to K11, cell counts are each cause's attributed
+cells in the classified corpus (31,926 in all); a column can carry more than
+one cause. K12 and K13 came out of correcting D11 and are measured on the
+fixtures named in each entry.
 
 **K1. Extremes skip missing observations inside the window** (6,704 cells).
 - Chart: `highest`, `lowest`, `highestBars` and `lowestBars` without options
@@ -476,32 +496,77 @@ cells).
 - Rely on: pass missing volume as `undefined`; Klinger then reads it as zero,
   like every other volume study.
 
+**K12. The RVI averages restart inside the deviation warmup** (measured on
+fixtures).
+- Chart: the Relative Volatility Index's two 14-bar averages follow the
+  reference recursion,
+  `sum := na(sum[1]) ? sma(src, 14) : alpha * src + (1 - alpha) * sum[1]`.
+  Until the standard deviation's first reading, the upper average's source is
+  absent on every bar that rose and the lower average's on every bar that did
+  not, and each absent bar restarts the average, which seeds again on the next
+  fourteen present bars. From the deviation's first reading on, a hole can
+  only come from a missing close, and the averages hold across it.
+- Language: there is no call for this study; composed with `ema`, each average
+  seeds on its first fourteen present inputs and holds across every later
+  absent one, the warmup's included (20.2.2).
+- Affected: the RVI at a deviation Length above 16 on a series whose warmup
+  holds a fourteen-bar one-way run followed by a bar the other way; the default
+  Length 10 never. Against the 0.7.1 engine on the 400-bar test wave the first
+  reading is bar 42 in the chart and 38 in the language at Length 30, 52 and 39
+  at Length 40, and 112 and 99 at Length 100, and the later readings differ by
+  a shrinking amount (4 availability and 241 value cells at Length 30); Lengths
+  2 to 25 agree bit for bit there. On runs of exactly fourteen bars the first
+  reading is bar 29 against 28 at Length 17.
+- Rely on: on complete data the RVI reads exactly as it always has, at every
+  length; at a long deviation Length the language's first reading can come
+  earlier, and its later readings differ from the chart's until the difference
+  decays.
+
+**K13. The PVO signal restarts after a stretch with no reading** (measured on
+fixtures).
+- Chart: after its warmup PVO has no reading only where the slow volume
+  average is exactly 0. The signal average then starts again on the next full
+  window of readings, so after PVO prints again the signal and histogram wait
+  `signalLength - 1` bars for a new seed.
+- Language: there is no call for this study; composed with `ema`, the signal
+  holds across the absent readings and resumes on the next one (20.2.2).
+- Affected: PVO with the SMA oscillator and the EMA signal, after a stretch of
+  zero or missing volume at least one slow window long. With the default EMA
+  oscillator the slow average stays above 0 once it has seeded on any volume.
+  Against the 0.7.1 engine on a 300-bar wave with 40 bars of zero volume the
+  chart's signal and histogram are absent on 8 bars where the language prints,
+  and 152 later values differ; with the EMA oscillator nothing differs.
+- Rely on: a stretch with no traded volume costs the PVO signal one signal
+  window after PVO returns; complete data without such a stretch reads as it
+  always has.
+
 ### NaN volume
 
 An undefined volume is zero traded in every built-in (K2), and that is the rule
-to rely on. A NaN volume is treated three different ways at this revision, so
-no single rule can be written down for it. Setting one bar's volume to NaN and,
-separately, to `undefined` on a 300-bar series, for every descriptor at its
-defaults and with each VWMA smoothing option, gives:
+to rely on. A NaN volume is treated two different ways, so no single rule can be
+written down for it. Setting one bar's volume to NaN and, separately, to
+`undefined` on a 300-bar series, for every descriptor at its defaults and with
+each VWMA smoothing option, gives:
 
 | Treatment of a NaN volume | Built-ins |
 | --- | --- |
-| Zero, identical to an undefined volume | Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index, Net Volume, VWMA, the VWMA lines of MA Ribbon, NVI, PVI, PVT, PVO |
-| A missing bar: that bar and any window or average holding it are absent, then the study recovers | Volume and its average, MFI, Klinger Oscillator (K11), AlphaTrend, the VWMA smoothing option of CCI and of the RVI |
-| Absent for the rest of the history | VWAP and its bands, OBV with its smoothing and bands, A/D |
+| Zero, identical to an undefined volume | Chaikin Money Flow, Chaikin Oscillator, Ease of Movement, Elder Force Index, Net Volume, VWMA, the VWMA lines of MA Ribbon, NVI, PVI, PVT, PVO, OBV with its smoothing and bands, A/D |
+| A missing bar: that bar and any window or average holding it are absent, then the study recovers | Volume and its average, MFI, Klinger Oscillator (K11), AlphaTrend, the VWMA smoothing option of CCI and of the RVI, VWAP and its bands (that bar has no reading and the running totals leave it out) |
 
-The last row is classified as chart defects (D2 for VWAP, D4 for OBV and A/D),
-whose corrections are outside this change. Until the chart settles on one
-treatment, hosts should send a bar without volume as `undefined`.
+VWAP, OBV and A/D follow the gap recovery change (D2 and D4). In 2.5.4 a NaN
+volume blanked VWAP until its next anchor restart, which on the continuous
+anchor was never, and removed OBV and A/D for the rest of the history on any
+bar where it entered the total. Until the chart settles on one treatment, hosts
+should send a bar without volume as `undefined`.
 
 ### Still open
 
 The other classified chart defects (ATR after a missing observation, VWAP and
 TWAP running totals, OBV and A/D with a NaN volume, the TEMA grouping and
-Parabolic SAR after a missing high or low) are outside this change. One
-companion engine defect (PVT commits an overflowing total) belongs to the
-companion engines, and three comparison artifacts (the slope reference, a
-newest-first CCI reference and the consolidation reference) belong to the
-comparison harness. The wider comparison does not replace the independently
+Parabolic SAR after a missing high or low) are corrected by the gap recovery
+change, not here. One companion engine defect (PVT commits an overflowing
+total) belongs to the companion engines, and three comparison artifacts (the
+slope reference, a newest-first CCI reference and the consolidation reference)
+belong to the comparison harness. The wider comparison does not replace the independently
 derived Hull and directional fixtures above or establish complete numerical
 coverage.

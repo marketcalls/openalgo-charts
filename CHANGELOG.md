@@ -20,10 +20,12 @@ All notable changes to OpenAlgo Charts.
 - Relative Volatility Index and Mass Index hold their exponential averages across
   a missing bar and resume on the next present one, instead of reseeding and
   blanking the study for another 14 (RVI) or 9 (Mass Index) bars. The RVI's EMA
-  smoothing option follows the same rule. With a Length above 16 the RVI
-  averages can also seed on a one-way run inside the deviation warmup and hold
-  across it, so the first reading can arrive earlier than before; at Length 16
-  or below ordinary readings are unchanged.
+  smoothing option follows the same rule. Inside the RVI's deviation warmup its
+  averages still restart as before, so complete data reads exactly as in 2.5.4
+  at every Length.
+- NVI and PVI hold their index across a missing close, as they already did after
+  a zero previous close, instead of losing the index and its average for the
+  rest of the history. Complete data is unchanged.
 - True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator multiply
   the smoothed change by 100 before dividing, which can move readings in the last
   bit. Above about 1.8e306 that product overflows and the bar is a gap, as in the
@@ -35,11 +37,12 @@ All notable changes to OpenAlgo Charts.
 
 ### Documentation
 
-- The indicators page has a Numerical contract section: the eleven documented
+- The indicators page has a Numerical contract section: the thirteen documented
   differences from the companion scripting language (missing observations in
   extremes, missing volume, flat CCI windows, first-bar conventions, host
-  logarithms, units, the Aroon Oscillator, Parabolic SAR, overflow, signed zero
-  and Klinger), and how each built-in treats a NaN volume today.
+  logarithms, units, the Aroon Oscillator, Parabolic SAR, overflow, signed zero,
+  Klinger, the RVI warmup and the PVO signal after a stretch with no volume),
+  and how each built-in treats a NaN volume.
 
 ## 2.5.4
 
