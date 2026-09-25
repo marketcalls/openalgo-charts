@@ -47,7 +47,7 @@
   {
     "name": "Widget tier (shell, top bar, drawing rail, status line, dialogs, keymap, styles)",
     "path": "dist/openalgo-charts.widget.mjs",
-    "limit": "80.37 kB",
+    "limit": "80.63 kB",
     "brotli": true
   },
   {
@@ -58,7 +58,7 @@
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "276.58 kB",
+    "limit": "276.85 kB",
     "brotli": true
   },
   {
@@ -80,7 +80,7 @@
       "dist/openalgo-charts.widget.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "320.06 kB",
+    "limit": "320.33 kB",
     "brotli": true
   }
 ]
