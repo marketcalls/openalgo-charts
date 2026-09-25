@@ -387,6 +387,108 @@ test.describe('the whole drawing at a device pixel ratio of two', () => {
   });
 });
 
+// ── a label outside a pinned box ─────────────────────────────────────────────
+//
+// A box's label with `position: 'outside'` is painted above the box, so a box
+// kept on the plot by its outline alone loses the label off the top edge.
+
+async function mountLabelled(page: Page) {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await page.goto('/');
+  await page.waitForFunction(() => (window as any).__ready);
+  await page.evaluate(async () => {
+    (window as any).__api.chart.destroy();
+    const { createChart } = await import('/dist/openalgo-charts.mjs');
+    const { DrawingController } = await import('/dist/openalgo-charts.draw.mjs');
+    const chart = createChart(document.getElementById('c'), { priceAxisWidth: 64, timeAxisHeight: 28, timeNavigator: false });
+    const bars = Array.from({ length: 200 }, (_, i) => {
+      const close = 23800 + Math.sin(i / 8) * 160;
+      return { time: 1750000000 + i * 86400, open: close - 20, high: close + 35, low: close - 40, close };
+    });
+    chart.addSeries('candlestick').setData(bars);
+    chart.setVisibleLogicalRange({ from: 60, to: 160 });
+    const draw = new DrawingController(chart);
+    const box = draw.add({ tool: 'rectangle', paneIndex: 0, points: [], space: 'viewport',
+      viewportPoints: [{ x: 0.3, y: 0.4 }, { x: 0.6, y: 0.7 }], style: { color: '#ff00ff', lineWidth: 4 },
+      text: { value: 'Outside label', position: 'outside', color: '#ffd400', fontSize: 18, bold: true } });
+    (window as any).__label = { chart, draw, box: box.id };
+  });
+  await page.mouse.move(2, 2);
+  return errors;
+}
+
+async function labelAtTheTop(page: Page, info: { outputPath(name: string): string }, prefix: string) {
+  const dpr = await page.evaluate(() => window.devicePixelRatio);
+  const full = { label: await inkBox(page, YELLOW), box: await inkBox(page, MAGENTA) };
+  expect(full.label.count).toBeGreaterThan(20);
+  expect(full.label.y1).toBeLessThan(full.box.y0);
+  // At the top, the label's line (18 px at a gap of 1.35) and its 6 px lift sit
+  // above the outline, whose 4 px stroke then starts 2 px higher. Measured on
+  // the outline, since where a glyph's ink starts in its line differs by engine.
+  const top = (18 * 1.35 + 6 - 2) * dpr;
+  const whole = (at: { label: Box; box: Box }) => {
+    expect(at.label.count).toBeGreaterThan(full.label.count * 0.9);
+    expect(Math.abs((at.label.y1 - at.label.y0) - (full.label.y1 - full.label.y0))).toBeLessThanOrEqual(2 * dpr);
+    expect(at.label.y0).toBeGreaterThanOrEqual(0);
+    expect(at.label.y1).toBeLessThan(at.box.y0);
+    expect(Math.abs(at.box.y0 - top)).toBeLessThanOrEqual(2 * dpr);
+  };
+
+  // The top-left handle dragged to the top of the page stops below the label,
+  // and the bottom edge stays where it was.
+  const corner = await page.evaluate(() => {
+    const { draw, box } = (window as any).__label;
+    draw.select(box);
+    return draw.screenPoints(box)[0];
+  });
+  await pan(page, corner, 0, -corner.y + 1);
+  await page.evaluate(() => (window as any).__label.draw.select(null));
+  await page.mouse.move(2, 2);
+  const handled = { label: await inkBox(page, YELLOW), box: await inkBox(page, MAGENTA) };
+  whole(handled);
+  expect(Math.abs(handled.box.y1 - full.box.y1)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: info.outputPath(`${prefix}label-handle-top.png`) });
+
+  // The body thrown past the top-right corner keeps the label whole on the plot.
+  await page.evaluate(() => {
+    const { draw, box } = (window as any).__label;
+    draw.update(box, { viewportPoints: [{ x: 0.3, y: 0.4 }, { x: 0.6, y: 0.7 }] });
+  });
+  await page.mouse.move(2, 2);
+  const from = await inkBox(page, MAGENTA);
+  const grab = { x: (from.x1 - 6 * dpr) / dpr, y: (from.y0 + 6 * dpr) / dpr };
+  await pan(page, grab, page.viewportSize()!.width - 2 - grab.x, 1 - grab.y);
+  await page.evaluate(() => (window as any).__label.draw.select(null));
+  await page.mouse.move(2, 2);
+  const thrown = { label: await inkBox(page, YELLOW), box: await inkBox(page, MAGENTA) };
+  whole(thrown);
+  expect(Math.abs((thrown.box.y1 - thrown.box.y0) - (full.box.y1 - full.box.y0))).toBeLessThanOrEqual(2 * dpr);
+  await page.screenshot({ path: info.outputPath(`${prefix}label-thrown-top.png`) });
+  // Still clickable where it landed.
+  await page.mouse.click((thrown.box.x1 - 6 * dpr) / dpr, (thrown.box.y0 + 6 * dpr) / dpr);
+  await page.mouse.move(2, 2);
+  expect(await page.evaluate(() => (window as any).__label.draw.selected())).toBe(await page.evaluate(() => (window as any).__label.box));
+}
+
+test('a pinned box keeps its outside label whole on the plot at the top edge, through a handle and a throw', async ({ page }, info) => {
+  const errors = await mountLabelled(page);
+  await labelAtTheTop(page, info, '');
+  expect(errors).toEqual([]);
+});
+
+test.describe('a label outside a pinned box at a device pixel ratio of two', () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test('a pinned box keeps its outside label whole on the plot at the top edge, through a handle and a throw', async ({ page }, info) => {
+    const errors = await mountLabelled(page);
+    expect(await page.evaluate(() => window.devicePixelRatio)).toBe(2);
+    await labelAtTheTop(page, info, 'dpr2-');
+    expect(errors).toEqual([]);
+  });
+});
+
 // ── panes, the clipboard, and the other pinnable tools ───────────────────────
 
 type PageBox = { x0: number; y0: number; x1: number; y1: number; count: number };
