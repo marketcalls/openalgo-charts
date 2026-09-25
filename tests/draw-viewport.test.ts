@@ -64,12 +64,12 @@ function mount(width = 800, height = 600, options: { panes?: number; clipboard?:
       plotWidth: w, plotHeight: h, priceAxisWidth: 56, dpr, theme: darkTheme } as never);
     return rec;
   };
-  const hit = (x: number, y: number, paneIndex = 0) => {
+  const hit = (x: number, y: number, paneIndex = 0, dpr = 1) => {
     const pane = chart.panes()[paneIndex];
     const layer = pane.primitives().find(p => p instanceof DrawingLayer && p.zOrder() === 'top') as DrawingLayer;
     const { w, h } = size(paneIndex);
     return layer.hitTest(x, y, { timeScale: chart.timeScale, dataLayer: chart.dataLayer, priceScale: pane.priceScale,
-      plotWidth: w, plotHeight: h, priceAxisWidth: 56, dpr: 1, theme: darkTheme } as never);
+      plotWidth: w, plotHeight: h, priceAxisWidth: 56, dpr, theme: darkTheme } as never);
   };
   return { chart, draw, el, move, click, dragBy, paint, hit, size };
 }
@@ -93,6 +93,60 @@ const close = (a: readonly number[] | undefined, b: readonly number[], digits = 
   expect(a!.length).toBe(b.length);
   a!.forEach((v, i) => expect(v).toBeCloseTo(b[i], digits));
 };
+
+type Hit = (x: number, y: number) => { externalId: string } | null;
+
+/**
+ * Where a drawing answers the pointer, found by probing a grid that reaches
+ * well past the plot on every side: its body or any of its handles.
+ */
+function hitRegion(hit: Hit, id: string, w: number, h: number, step = 7) {
+  const region = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, count: 0, inside: 0 };
+  for (let y = -60; y <= h + 300; y += step) {
+    for (let x = -60; x <= w + 300; x += step) {
+      const at = hit(x, y)?.externalId;
+      if (at !== `draw:${id}` && at?.startsWith(`draw:${id}#`) !== true) continue;
+      region.count++;
+      if (x > 0 && x < w && y > 0 && y < h) region.inside++;
+      region.x0 = Math.min(region.x0, x); region.y0 = Math.min(region.y0, y);
+      region.x1 = Math.max(region.x1, x); region.y1 = Math.max(region.y1, y);
+    }
+  }
+  return region;
+}
+
+/**
+ * A drawing that can be seen and clicked: it answers the pointer at several
+ * places inside the plot, and nowhere further out than the few pixels a grab
+ * reaches past an edge. A box left outside the plot is clipped away and the
+ * chart never routes a click to it.
+ */
+function expectOnPlot(hit: Hit, id: string, w: number, h: number) {
+  const region = hitRegion(hit, id, w, h);
+  expect(region.inside).toBeGreaterThan(3);
+  expect(region.x0).toBeGreaterThanOrEqual(-8);
+  expect(region.y0).toBeGreaterThanOrEqual(-8);
+  expect(region.x1).toBeLessThanOrEqual(w + 8);
+  expect(region.y1).toBeLessThanOrEqual(h + 8);
+  return region;
+}
+
+/** Every piece of text, fill and outline the layer painted starts inside the clipped plot, in device px. */
+function expectPaintedOnPlot(rec: RecordingContext, w: number, h: number, dpr: number) {
+  const ops = rec.ops.filter(op => op.type === 'fillText' || op.type === 'strokeRect' || op.type === 'fillRect' || op.type === 'roundRect');
+  expect(ops.length).toBeGreaterThan(0);
+  for (const op of ops) {
+    const [x, y, bw, bh] = op.args;
+    expect(x).toBeGreaterThanOrEqual(-1);
+    expect(y).toBeGreaterThanOrEqual(-1);
+    expect(x).toBeLessThanOrEqual(w * dpr + 1);
+    expect(y).toBeLessThanOrEqual(h * dpr + 1);
+    if (op.type !== 'fillText') {
+      expect(x + bw).toBeLessThanOrEqual(w * dpr + 1);
+      expect(y + bh).toBeLessThanOrEqual(h * dpr + 1);
+    }
+  }
+}
 
 describe('a viewport drawing on screen', () => {
   it('paints at its fraction of the plot and stays there through pan, zoom and a price range change', () => {
@@ -246,7 +300,8 @@ describe('editing a viewport drawing', () => {
     const r = viewportRect(draw);
     const { w, h } = size();
     dragBy(0.35 * w, 0.35 * h, 2000, 2000);
-    expect(draw.get(r.id)!.viewportPoints).toEqual([{ x: 0.7, y: 0.7 }, { x: 1, y: 1 }]);
+    const [p0, p1] = draw.get(r.id)!.viewportPoints!;
+    close([p0.x, p0.y, p1.x, p1.y], [0.7, 0.7, 1, 1], 9);
     draw.select(r.id);
     dragBy(0.2 * w + 0.7 * w - 0.2 * w, 0.7 * h, -3000, -3000);
     const [a] = draw.get(r.id)!.viewportPoints!;
@@ -277,6 +332,202 @@ describe('editing a viewport drawing', () => {
     expect(info.available).toBe(false);
     expect(info.reason).toMatch(/screen/);
     expect(draw.valueAt(pinned.id, bars[50].time)).toBeUndefined();
+  });
+});
+
+describe('keeping a pinned drawing on screen', () => {
+  const pinnedNote = (draw: DrawingController, text: Partial<NonNullable<Drawing['text']>> = {}): Drawing => draw.add({
+    tool: 'text', paneIndex: 0, style: {}, points: [], space: 'viewport', viewportPoints: [{ x: 0.45, y: 0.45 }],
+    text: { value: 'Edge note', ...text },
+  });
+  const pinnedTable = (draw: DrawingController): Drawing => draw.add({
+    tool: 'table', paneIndex: 0, style: {}, points: [], space: 'viewport', viewportPoints: [{ x: 0.45, y: 0.45 }],
+    text: { value: 'Level|Price\nEntry|101.25\nStop|99.50' },
+  });
+  const makers: [string, (draw: DrawingController) => Drawing][] = [
+    ['a note', draw => pinnedNote(draw)],
+    ['a note hung from its bottom edge', draw => pinnedNote(draw, { valign: 'bottom' })],
+    ['a table', pinnedTable],
+    ['a box', draw => viewportRect(draw)],
+  ];
+  const corners = [[1, 1], [-1, -1], [1, -1], [-1, 1]];
+
+  it.each(makers)('keeps %s wholly inside the plot, painted and clickable, when dragged past every corner', (_name, make) => {
+    for (const [sx, sy] of corners) {
+      const { draw, dragBy, hit, paint, size } = mount();
+      const d = make(draw);
+      const { w, h } = size();
+      const start = expectOnPlot(hit, d.id, w, h);
+      dragBy((start.x0 + start.x1) / 2, (start.y0 + start.y1) / 2, sx * 3000, sy * 3000);
+      const end = expectOnPlot(hit, d.id, w, h);
+      // It went all the way to the corner it was thrown at.
+      if (sx > 0) expect(end.x1).toBeGreaterThan(w - 16); else expect(end.x0).toBeLessThan(16);
+      if (sy > 0) expect(end.y1).toBeGreaterThan(h - 16); else expect(end.y0).toBeLessThan(16);
+      expectPaintedOnPlot(paint(0, 1), w, h, 1);
+      expectPaintedOnPlot(paint(0, 2), w, h, 2);
+      // Grabbable again from where it landed, and it moves off the edge. The
+      // grab is near its top-right corner, clear of the chart's logo mark,
+      // which takes a press in the bottom-left before any drawing does.
+      const before = draw.get(d.id)!.viewportPoints!.map(p => ({ ...p }));
+      dragBy(end.x1 - 8, end.y0 + 8, -sx * 40, -sy * 30);
+      const after = draw.get(d.id)!.viewportPoints!;
+      expect(after[0].x).toBeCloseTo(before[0].x - (sx * 40) / w, 6);
+      expect(after[0].y).toBeCloseTo(before[0].y - (sy * 30) / h, 6);
+    }
+  });
+
+  it('keeps a note inside through a nudge and a drag of its handle, and a box resized by a handle keeps its other corner', () => {
+    const { draw, dragBy, hit, size } = mount();
+    const note = pinnedNote(draw);
+    const { w, h } = size();
+    draw.nudge([note.id], 5000, 5000);
+    expectOnPlot(hit, note.id, w, h);
+    draw.nudge([note.id], -9000, -9000);
+    expectOnPlot(hit, note.id, w, h);
+    close([draw.get(note.id)!.viewportPoints![0].x, draw.get(note.id)!.viewportPoints![0].y], [0, 0], 9);
+    draw.select(note.id);
+    const [corner] = draw.screenPoints(note.id)!;
+    dragBy(corner.x, corner.y, 3000, 3000);
+    const region = expectOnPlot(hit, note.id, w, h);
+    expect(region.x1).toBeGreaterThan(w - 16);
+    const box = viewportRect(draw);
+    draw.select(box.id);
+    dragBy(0.5 * w, 0.5 * h, 3000, 3000);
+    const [a, b] = draw.get(box.id)!.viewportPoints!;
+    close([a.x, a.y, b.x, b.y], [0.2, 0.2, 1, 1], 9);
+  });
+
+  it('pastes and duplicates a note at the edge onto the plot', async () => {
+    const port = memoryPort();
+    const { draw, dragBy, hit, size } = mount(800, 600, { clipboard: port });
+    const note = pinnedNote(draw);
+    const { w, h } = size();
+    const start = hitRegion(hit, note.id, w, h);
+    dragBy((start.x0 + start.x1) / 2, (start.y0 + start.y1) / 2, 3000, 3000);
+    expect(await draw.copy(note.id)).toBe(true);
+    const [pasted] = await draw.paste();
+    expectOnPlot(hit, pasted.id, w, h);
+    const [dup] = draw.duplicate([note.id]);
+    expectOnPlot(hit, dup.id, w, h);
+  });
+
+  it('stays wholly on screen and clickable when the chart shrinks, and where a host placed it off the plot', () => {
+    const { chart, draw, dragBy, hit, paint, size } = mount();
+    const note = pinnedNote(draw);
+    let { w, h } = size();
+    const noteAt = hitRegion(hit, note.id, w, h);
+    dragBy((noteAt.x0 + noteAt.x1) / 2, (noteAt.y0 + noteAt.y1) / 2, 3000, 3000);
+    // The table goes to the other corner on the right, so neither covers the other.
+    const table = pinnedTable(draw);
+    const tableAt = hitRegion(hit, table.id, w, h);
+    dragBy((tableAt.x0 + tableAt.x1) / 2, (tableAt.y0 + tableAt.y1) / 2, 3000, -3000);
+    chart.applySize(360, 240);
+    ({ w, h } = size());
+    expectOnPlot(hit, note.id, w, h);
+    expectOnPlot(hit, table.id, w, h);
+    expectPaintedOnPlot(paint(0, 1), w, h, 1);
+    expectPaintedOnPlot(paint(0, 2), w, h, 2);
+    // The host's editor is placed where the note is painted.
+    const region = hitRegion(hit, note.id, w, h);
+    const [at] = draw.screenPoints(note.id)!;
+    expect(Math.abs(at.x - (region.x0 + 3))).toBeLessThanOrEqual(7);
+    // A host may store any finite fraction; the note is still painted on the plot.
+    const off = draw.add({ tool: 'text', paneIndex: 0, style: {}, points: [], space: 'viewport',
+      viewportPoints: [{ x: 1.4, y: -0.3 }], text: { value: 'Parked' } });
+    expectOnPlot(hit, off.id, w, h);
+    expect(draw.get(off.id)!.viewportPoints).toEqual([{ x: 1.4, y: -0.3 }]);
+  });
+
+  it('hit-tests a pinned drawing at a device pixel ratio of two where it does at one', () => {
+    const { draw, hit, size } = mount();
+    const note = pinnedNote(draw);
+    const box = viewportRect(draw);
+    const { w, h } = size();
+    for (const d of [note, box]) {
+      const one = hitRegion((x, y) => hit(x, y, 0, 1), d.id, w, h, 11);
+      const two = hitRegion((x, y) => hit(x, y, 0, 2), d.id, w, h, 11);
+      expect(two).toEqual(one);
+      expect(one.inside).toBeGreaterThan(3);
+    }
+  });
+});
+
+describe('placing a pinned drawing', () => {
+  it('lands where it is clicked with the magnet on, and shows no magnet ring on the way', () => {
+    const { draw, click, move, paint, size } = mount();
+    viewportRect(draw);
+    draw.setOptions({ magnet: 'strong' });
+    // The control: armed for time and price, the strong magnet shows its ring.
+    draw.setTool('text');
+    move(300, 40);
+    expect(paint().count('arc')).toBeGreaterThan(0);
+    draw.setTool('text', { space: 'viewport' });
+    move(300, 41);
+    expect(paint().count('arc')).toBe(0);
+    click(300, 40);
+    const note = draw.drawings().find(d => d.tool === 'text')!;
+    const { w, h } = size();
+    expect(note.space).toBe('viewport');
+    expect(note.viewportPoints![0].x).toBeCloseTo(300 / w, 6);
+    expect(note.viewportPoints![0].y).toBeCloseTo(40 / h, 6);
+  });
+
+  it('places a note clicked at the right edge with the whole note on the plot', () => {
+    const { draw, click, hit, size } = mount();
+    const { w, h } = size();
+    draw.setTool('text', { space: 'viewport' });
+    click(w - 2, h - 2);
+    const note = draw.drawings()[0];
+    expect(note.space).toBe('viewport');
+    expectOnPlot(hit, note.id, w, h);
+  });
+});
+
+describe('pinning a drawing that is not wholly on screen', () => {
+  it('brings one that is scrolled off the plot onto it, where it can be grabbed and moved', () => {
+    const { chart, draw, dragBy, hit, size } = mount();
+    const r = dataRect(draw);
+    chart.setVisibleLogicalRange({ from: 70, to: 99 });
+    const { w, h } = size();
+    expect(hitRegion(hit, r.id, w, h).inside).toBe(0);
+    expect(draw.update(r.id, { space: 'viewport' })).toBe(true);
+    const region = expectOnPlot(hit, r.id, w, h);
+    // What is stored is where it is painted, so a resize keeps it there in proportion.
+    for (const p of draw.get(r.id)!.viewportPoints!) {
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.x).toBeLessThanOrEqual(1);
+    }
+    const [a] = draw.get(r.id)!.viewportPoints!;
+    dragBy((region.x0 + region.x1) / 2, (region.y0 + region.y1) / 2, 60, 20);
+    expect(draw.get(r.id)!.viewportPoints![0].x).toBeCloseTo(a.x + 60 / w, 6);
+  });
+
+  it('cuts one wider than the plot to it, so every handle is on screen', () => {
+    const { chart, draw, hit, size } = mount();
+    const r = draw.add({ tool: 'rectangle', paneIndex: 0, style: { color: '#00ffff' },
+      points: [{ time: bars[2].time, price: 101 }, { time: bars[97].time, price: 99 }] });
+    chart.setVisibleLogicalRange({ from: 30, to: 60 });
+    draw.update(r.id, { space: 'viewport' });
+    const { w, h } = size();
+    for (const p of draw.get(r.id)!.viewportPoints!) {
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.x).toBeLessThanOrEqual(1);
+    }
+    draw.select(r.id);
+    draw.screenPoints(r.id)!.forEach((p, i) => expect(hit(Math.min(p.x, w - 1), p.y)?.externalId).toBe(`draw:${r.id}#${i}`));
+    expectOnPlot(hit, r.id, w, h);
+  });
+
+  it('reports a change of space it could not make, and applies the rest of the patch', () => {
+    const { draw } = mount();
+    const line = draw.add({ tool: 'trend-line', paneIndex: 0, style: {},
+      points: [{ time: bars[10].time, price: 100 }, { time: bars[20].time, price: 102 }] });
+    expect(draw.update(line.id, { space: 'viewport', style: { color: '#123456' } })).toBe(false);
+    expect(draw.get(line.id)!.style.color).toBe('#123456');
+    const r = dataRect(draw);
+    expect(draw.update(r.id, { space: 'viewport' })).toBe(true);
+    expect(draw.update(r.id, { space: 'viewport' })).toBe(true);
+    expect(draw.update(r.id, { style: { color: '#654321' } })).toBe(true);
   });
 });
 
@@ -359,8 +610,9 @@ describe('panes', () => {
     // A strip plots nothing, so it has no place on screen for the note.
     expect(draw.screenPoints(note.id)).toBeNull();
     expect(draw.get(note.id)!.viewportPoints).toEqual([{ x: 0.4, y: 0.3 }]);
-    // Nor can it be converted while folded: the strip is not the plot it is a fraction of.
-    draw.update(note.id, { space: 'data' });
+    // Nor can it be converted while folded: the strip is not the plot it is a
+    // fraction of. The call says so, where a host would otherwise think it did.
+    expect(draw.update(note.id, { space: 'data' })).toBe(false);
     expect(draw.get(note.id)!.space).toBe('viewport');
     expect(chart.setPaneCollapsed(1, false)).toBe(true);
     const after = draw.screenPoints(note.id)!;
@@ -471,6 +723,44 @@ describe('drawing links', () => {
     expect(a.draw.get(shared.id)?.style.color).toBe('#00ffff');
     expect(a.draw.get(shared.id)?.space).toBe('viewport');
     expect(a.draw.get(shared.id)?.props?.['openalgo-charts/drawing-link']).toBeUndefined();
+  });
+
+  const linked = () => {
+    const a = mount();
+    const b = mount();
+    const group = createDrawingLinkGroup({ enabled: true });
+    cleanups.push(() => group.destroy());
+    group.add(a.chart, a.draw, { symbol: 'X', exchange: 'NSE' });
+    group.add(b.chart, b.draw, { symbol: 'X', exchange: 'NSE' });
+    const shared = dataRect(a.draw);
+    return { a, b, shared, copy: b.draw.drawings()[0] };
+  };
+
+  it('rejoins the link when pinning a shared drawing is undone, so edits reach both charts again', () => {
+    const { a, b, shared, copy } = linked();
+    a.draw.update(shared.id, { space: 'viewport' });
+    expect(a.draw.undo()).toBe(true);
+    expect(a.draw.get(shared.id)!.space).toBeUndefined();
+    b.draw.update(copy.id, { style: { color: '#abcdef' } });
+    expect(a.draw.get(shared.id)!.style.color).toBe('#abcdef');
+    a.draw.update(shared.id, { style: { lineWidth: 3 } });
+    expect(b.draw.get(copy.id)!.style.lineWidth).toBe(3);
+    // A restore finds nothing stale to pull back over this chart's edits.
+    a.chart.restoreState(JSON.parse(JSON.stringify(a.chart.getState())));
+    expect(a.draw.get(shared.id)!.style).toMatchObject({ color: '#abcdef', lineWidth: 3 });
+  });
+
+  it('keeps an undone pin on this chart alone when the other charts have deleted their copies', () => {
+    const { a, b, shared, copy } = linked();
+    a.draw.update(shared.id, { space: 'viewport' });
+    expect(b.draw.remove(copy.id)).toBe(true);
+    expect(a.draw.undo()).toBe(true);
+    expect(a.draw.get(shared.id)!.space).toBeUndefined();
+    expect(b.draw.get(copy.id)).toBeUndefined();
+    // A later restore does not apply the other chart's deletion here.
+    a.chart.restoreState(JSON.parse(JSON.stringify(a.chart.getState())));
+    expect(a.draw.get(shared.id)).toBeDefined();
+    expect(b.draw.drawings()).toHaveLength(0);
   });
 });
 

@@ -16,9 +16,10 @@
  *
  * A viewport drawing (`space: 'viewport'`) skips the time and price mapping:
  * its anchors are fractions of this pane's plot and scale by the plot size in
- * the render context, which is all that pan and zoom never touch. Everything
- * after the projection (paint, handles, hit-testing) is shared, so the two
- * spaces cannot drift apart in how they are grabbed.
+ * the render context, which is all that pan and zoom never touch. The one step
+ * added is keeping its box inside the plot. Everything after the projection
+ * (paint, handles, hit-testing) is shared, so the two spaces cannot drift
+ * apart in how they are grabbed.
  *
  * The hover ring, the magnet ring and the hover handles are all overlay
  * state: they change on every pointer move, so they must only ever cost the
@@ -27,10 +28,11 @@
  * stores that state and asks for nothing.
  */
 import type { IPrimitive, PrimitiveHost, PrimitiveRenderContext, PrimitiveHit, ZOrder } from 'openalgo-charts';
-import type { Drawing, DrawingPoint, ScreenPoint } from './types';
+import type { Drawing, DrawingPoint, ScreenPoint, ViewportPoint } from './types';
 import { getDrawingTool, hasDrawingTool } from './tools';
 import { withDrawingTextMetrics } from './text-metrics';
-import { anchorCount, viewportToPlot } from './viewport';
+import { anchorCount, containInPlot, viewportToPlot } from './viewport';
+import { boundsOf } from './geometry';
 
 /** Grab radius for a shape, in media px. */
 const GRAB = 6;
@@ -68,11 +70,27 @@ function runnable(d: Drawing): boolean {
 }
 
 /**
+ * Where a viewport drawing with anchors `points` sits on a plot of `width` by
+ * `height`, in plot-relative media px: at those fractions, moved as a whole as
+ * far as it takes to keep the tool's box (`DrawingTool.bounds`) inside the
+ * plot. The fractions scale with the plot and a note's type does not, so it
+ * is the box, measured here in pixels, that decides what stays on screen at
+ * any size. What the layer paints and hit-tests, and what the controller
+ * moves from, so a drag starts where the eye sees the drawing.
+ */
+export function placeViewportAnchors(d: Drawing, points: readonly ViewportPoint[], width: number, height: number): ScreenPoint[] {
+  const pts = viewportToPlot(points, width, height);
+  if (pts.length === 0) return pts;
+  const box = hasDrawingTool(d.tool) ? getDrawingTool(d.tool).bounds?.(pts, d) : undefined;
+  return containInPlot(pts, box ?? boundsOf(pts), width, height);
+}
+
+/**
  * A drawing's anchors in plot-relative media px: time and price through the
  * pane's scales, or viewport fractions through the plot size.
  */
 export function projectAnchors(rc: PrimitiveRenderContext, d: Drawing): ScreenPoint[] {
-  if (d.space === 'viewport') return viewportToPlot(d.viewportPoints ?? [], rc.plotWidth, rc.plotHeight);
+  if (d.space === 'viewport') return placeViewportAnchors(d, d.viewportPoints ?? [], rc.plotWidth, rc.plotHeight);
   return d.points.map((p) => ({
     x: rc.timeScale.indexToX(rc.dataLayer.timeToIndexFloat(p.time)),
     y: rc.priceScale.priceToY(p.price),

@@ -5,8 +5,8 @@
  * chart, so the migration can use it and stay pure too.
  *
  * A viewport anchor is a fraction of its pane's plot, so the only operations
- * are validation, a clamped shift, and the two scalings to and from pixels,
- * which need nothing but the plot's size.
+ * are validation, the scaling to pixels, which needs nothing but the plot's
+ * size, and keeping a drawing's box inside the plot, which needs the box.
  */
 import type { Drawing, ScreenPoint, ViewportPoint } from './types';
 
@@ -25,8 +25,9 @@ export const anchorCount = (d: Drawing): number =>
 /**
  * A list of finite `{ x, y }` records as fresh objects, or null. Empty is
  * null as well: a drawing with no anchor can never be painted or grabbed.
- * Values outside 0..1 are kept, since a host may deliberately place a note
- * part way off its pane; only a gesture is kept inside it.
+ * Values outside 0..1 are kept as given: the layer paints the drawing with
+ * its box moved inside the plot whatever its anchors say, so a value a host
+ * set outside cannot hide it.
  */
 export function readViewportPoints(value: unknown, max = Infinity): ViewportPoint[] | null {
   if (!Array.isArray(value) || value.length === 0 || value.length > max) return null;
@@ -38,32 +39,29 @@ export function readViewportPoints(value: unknown, max = Infinity): ViewportPoin
   return out;
 }
 
-const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
-
-/** One anchor held inside its pane. */
-export const clampViewportPoint = (p: ViewportPoint): ViewportPoint => ({ x: clamp01(p.x), y: clamp01(p.y) });
+/** An extent in plot px: what a pinned drawing covers, and so what must stay on screen. */
+export interface PlotBox { x0: number; y0: number; x1: number; y1: number }
 
 /**
- * The widest step along one axis that keeps every value inside 0..1, or at
- * least no further outside it than it already was. A shape a host parked part
- * way off the pane may move back in, never further out.
+ * The step along one axis that brings the span `lo..hi` inside `0..size`, or,
+ * when the span is longer than that, brings its start to 0: the top-left of a
+ * note or a table is what is read first, so it is the part kept in view.
  */
-function limit(values: readonly number[], delta: number): number {
-  const lo = Math.min(0, -Math.min(...values));
-  const hi = Math.max(0, 1 - Math.max(...values));
-  return delta < lo ? lo : delta > hi ? hi : delta;
-}
+const into = (lo: number, hi: number, size: number): number =>
+  lo < 0 || hi - lo > size ? -lo : hi > size ? size - hi : 0;
 
 /**
- * Every anchor moved by the same fraction, the step clamped as a whole so the
- * shape keeps its size and proportions at the pane's edge instead of being
- * squashed against it. What a body drag, a nudge and a paste offset share.
+ * Anchors in plot px moved together, so the shape keeps its size, by as much
+ * as it takes to bring `box` (the drawing's extent at those anchors) inside a
+ * plot of `width` by `height`. It is the box and not the anchors that is kept
+ * in: a text note is laid out right of and below its one anchor, so an anchor
+ * held at the plot's edge leaves the whole note outside it, where it can be
+ * neither seen nor clicked.
  */
-export function shiftViewportPoints(points: readonly ViewportPoint[], dx: number, dy: number): ViewportPoint[] {
-  if (points.length === 0) return [];
-  const sx = limit(points.map((p) => p.x), dx);
-  const sy = limit(points.map((p) => p.y), dy);
-  return points.map((p) => ({ x: p.x + sx, y: p.y + sy }));
+export function containInPlot(pts: readonly ScreenPoint[], box: PlotBox, width: number, height: number): ScreenPoint[] {
+  const dx = into(box.x0, box.x1, width);
+  const dy = into(box.y0, box.y1, height);
+  return pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
 }
 
 /** Viewport anchors to plot-relative media px on a plot of `width` by `height`. */

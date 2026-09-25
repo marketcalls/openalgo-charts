@@ -1191,22 +1191,30 @@ export const TEXT: DrawingTool = {
     ctx.restore();
   },
   distance: (x, y, h) => {
-    // Measure with a throwaway 2D context so the hit box matches what is drawn
-    // (wrapping and font metrics decide the real size, not a character count).
-    const t = textOf(h.drawing);
-    const value = contentOf(h.drawing, 'Text');
-    const size = t.fontSize ?? TEXT_SIZE;
-    const p = h.pts[0];
-    const probe = measureContext();
-    const box = probe === null
-      ? { width: value.length * size * 0.6 + 10, height: size * LINE_GAP + 10 }
-      : textBox(probe, t, value, 1);
-    const v = t.valign ?? 'top';
-    const top = v === 'middle' ? p.y - box.height / 2 : v === 'bottom' ? p.y - box.height : p.y;
-    return x >= p.x - 3 && x <= p.x + box.width + 3
-      && y >= top - 3 && y <= top + box.height + 3 ? 0 : null;
+    const r = textRect(h.pts[0], h.drawing);
+    return x >= r.x0 - 3 && x <= r.x1 + 3 && y >= r.y0 - 3 && y <= r.y1 + 3 ? 0 : null;
   },
+  // The box it is grabbed by is the box a pinned note keeps on screen.
+  bounds: (pts, drawing) => textRect(pts[0], drawing),
 };
+
+/**
+ * The text tool's box in media px from its anchor. Measured with a throwaway
+ * 2D context so it matches what is drawn (wrapping and font metrics decide the
+ * real size, not a character count).
+ */
+function textRect(p: ScreenPoint, drawing: Drawing): { x0: number; y0: number; x1: number; y1: number } {
+  const t = textOf(drawing);
+  const value = contentOf(drawing, 'Text');
+  const size = t.fontSize ?? TEXT_SIZE;
+  const probe = measureContext();
+  const box = probe === null
+    ? { width: value.length * size * 0.6 + 10, height: size * LINE_GAP + 10 }
+    : textBox(probe, t, value, 1);
+  const v = t.valign ?? 'top';
+  const top = v === 'middle' ? p.y - box.height / 2 : v === 'bottom' ? p.y - box.height : p.y;
+  return { x0: p.x, y0: top, x1: p.x + box.width, y1: top + box.height };
+}
 
 /** A 1x1 offscreen context used only for text measurement. Cached. */
 let _probe: CanvasRenderingContext2D | null | undefined;
@@ -2083,13 +2091,19 @@ export const TABLE: DrawingTool = {
     c.ctx.restore();
   },
   distance: (x, y, h) => {
-    const p = h.pts[0];
-    const rows = tableRows(h.drawing);
-    const size = h.drawing.text?.fontSize ?? TABLE_SIZE;
-    const width = tableWidths(measureContext(), textOf(h.drawing), rows, 1).reduce((sum, w) => sum + w, 0);
-    return insidePlate(x, y, p.x, p.y, width, size * 1.7 * rows.length);
+    const r = tableRect(h.pts[0], h.drawing);
+    return insidePlate(x, y, r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
   },
+  bounds: (pts, drawing) => tableRect(pts[0], drawing),
 };
+
+/** The table's grid in media px from its top-left anchor, laid out as it is drawn. */
+function tableRect(p: ScreenPoint, drawing: Drawing): { x0: number; y0: number; x1: number; y1: number } {
+  const rows = tableRows(drawing);
+  const size = drawing.text?.fontSize ?? TABLE_SIZE;
+  const width = tableWidths(measureContext(), textOf(drawing), rows, 1).reduce((sum, w) => sum + w, 0);
+  return { x0: p.x, y0: p.y, x1: p.x + width, y1: p.y + size * 1.7 * rows.length };
+}
 
 /** Rows of cells from the pipe-and-newline encoding. Always at least one cell. */
 function tableRows(d: Drawing): string[][] {

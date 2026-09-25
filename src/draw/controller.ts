@@ -24,9 +24,10 @@ import type {
   MagnetMode, ScreenPoint, DrawingGroup, DrawingSpace, ViewportPoint,
 } from './types';
 import { DRAWING_STATE_VERSION } from './types';
-import { DrawingLayer, type DrawingPointerKind } from './layer';
+import { DrawingLayer, placeViewportAnchors, type DrawingPointerKind } from './layer';
 import { getDrawingTool, hasDrawingTool, viewportDrawingTool } from './tools';
-import { clampViewportPoint, readViewportPoints, shiftViewportPoints } from './viewport';
+import { readViewportPoints } from './viewport';
+import { boundsOf } from './geometry';
 import { DrawingClipboard, cloneDrawing, type ClipboardPort } from './clipboard';
 import { migrateDrawings, migrateGroups } from './migrate';
 import { rdpSimplify } from './freehand';
@@ -327,6 +328,9 @@ function magnetModeOf(value: boolean | MagnetMode | undefined): MagnetMode {
 /** Whether Shift is held, from either form the payload carries it in. */
 const shiftOf = (p: PointerFacts & { shiftKey?: boolean }): boolean =>
   p.modifiers?.shift === true || p.shiftKey === true;
+
+/** `v` held to `0..size`: a pixel on a plot of that size. */
+const within = (v: number, size: number): number => (v < 0 ? 0 : v > size ? size : v);
 
 /** The pointer kind behind a payload; anything unnamed is a mouse. */
 const pointerKindOf = (p: PointerFacts): DrawingPointerKind =>
@@ -848,12 +852,18 @@ export class DrawingController {
    * Patch one drawing. False when there is no such drawing, or when it is
    * read-only to the user and `options.force` is not set. A patch that
    * carries `policy` is the host's, and like a forced one records no step.
+   *
+   * Also false when the patch asks for a `space` the drawing could not be
+   * moved to (a tool without viewport support, or a pane with no place on
+   * screen, folded or hidden behind a maximized pane): the rest of the patch
+   * still applies, and the false tells a host that the drawing is not in the
+   * space it asked for, which a control showing that space has to say.
    */
   public update(id: string, patch: DrawingPatch, options: DrawingEditOptions = {}): boolean {
     const d = this.get(id);
     if (d === undefined || (pinned(d) && options.force !== true)) return false;
     this.updateMany([{ id, patch }], options);
-    return true;
+    return patch.space === undefined || (d.space === 'viewport') === (patch.space === 'viewport');
   }
 
   /**
@@ -912,11 +922,11 @@ export class DrawingController {
     if (to === 'viewport') {
       const given = viewportPoints === undefined ? null : readViewportPoints(viewportPoints);
       if (to === from) return given === null ? rest : { ...rest, viewportPoints: given };
-      const anchors = given ?? this._toViewport(points ?? d.points, d.paneIndex);
+      const anchors = given ?? this._toViewport(points ?? d.points, d.paneIndex, d);
       return anchors === null ? rest : { ...rest, space: 'viewport', points: [], viewportPoints: anchors };
     }
     if (to === from) return points === undefined ? rest : { ...rest, points };
-    const anchors = points ?? this._fromViewport(readViewportPoints(viewportPoints) ?? d.viewportPoints ?? [], d.paneIndex);
+    const anchors = points ?? this._fromViewport(readViewportPoints(viewportPoints) ?? d.viewportPoints ?? [], d.paneIndex, d);
     return anchors === null ? rest : { ...rest, space: 'data', points: anchors };
   }
 
@@ -1129,7 +1139,7 @@ export class DrawingController {
     for (const d of list) {
       if (d.space === 'viewport') {
         const frame = this._plotFrame(d.paneIndex);
-        if (frame !== null) d.viewportPoints = shiftViewportPoints(d.viewportPoints ?? [], dxPx / frame.width, dyPx / frame.height);
+        if (frame !== null) d.viewportPoints = this._shiftPinned(d, d.viewportPoints ?? [], dxPx, dyPx, frame);
         continue;
       }
       d.points = d.points.map((p) => ({
@@ -1259,16 +1269,17 @@ export class DrawingController {
   /**
    * A copy's anchors, offset from the original's in its own space. A viewport
    * copy moves the paste offset in pixels on both axes, as a fraction of the
-   * pane it lands on, so it reads the same on a chart of any size.
+   * pane it lands on, so it reads the same on a chart of any size, and stays
+   * on that pane's plot when the original sits at its edge.
    */
-  private _offsetAnchors(d: Pick<Drawing, 'points' | 'space' | 'viewportPoints'>, paneIndex: number): Pick<Drawing, 'points' | 'viewportPoints'> {
+  private _offsetAnchors(d: Omit<Drawing, 'id'>, paneIndex: number): Pick<Drawing, 'points' | 'viewportPoints'> {
     if (d.space !== 'viewport') return { points: this._offsetPoints(d.points, paneIndex) };
     const anchors = d.viewportPoints ?? [];
     const frame = this._plotFrame(paneIndex);
     const px = this._opts.pasteOffsetPixels;
     return {
       points: [],
-      viewportPoints: frame === null ? anchors.map((p) => ({ x: p.x, y: p.y })) : shiftViewportPoints(anchors, px / frame.width, px / frame.height),
+      viewportPoints: frame === null ? anchors.map((p) => ({ x: p.x, y: p.y })) : this._shiftPinned({ ...d, id: '' }, anchors, px, px, frame),
     };
   }
 
@@ -1644,13 +1655,17 @@ export class DrawingController {
   private _commit(pts: DrawingPoint[]): void {
     const tool = getDrawingTool(this._tool as string);
     const pane = this._pendingPane;
-    // Placement runs in data space, where the preview and the magnet already
-    // work; a tool armed for the viewport converts at the moment it lands,
-    // which is exactly where each anchor was clicked.
-    const pinned = this._toolSpace === 'viewport' ? this._toViewport(pts, pane) : null;
+    // Placement runs in data space, where the preview already works; a tool
+    // armed for the viewport converts at the moment it lands, which is
+    // exactly where each anchor was clicked (the magnet does not pull for
+    // it). Its box is measured with the text the drawing will be given.
+    const text = tool.defaultText === undefined ? {} : { text: { ...tool.defaultText } };
+    const pinned = this._toolSpace === 'viewport'
+      ? this._toViewport(pts, pane, { id: '', tool: tool.id, points: [], style: {}, paneIndex: pane, zIndex: 0, ...text })
+      : null;
     const created = this.add(pinned === null
       ? { tool: tool.id, points: pts, style: {}, paneIndex: pane }
-      : { tool: tool.id, points: [], space: 'viewport', viewportPoints: pinned.map(clampViewportPoint), style: {}, paneIndex: pane });
+      : { tool: tool.id, points: [], space: 'viewport', viewportPoints: pinned, style: {}, paneIndex: pane });
     this._pending = [];
     if (!this._opts.stayInDrawingMode) {
       this._tool = null;
@@ -1840,7 +1855,9 @@ export class DrawingController {
    */
   private _snapPoint(point: DrawingPoint, paneIndex: number): DrawingPoint | null {
     const mode = this._opts.magnet;
-    if (mode === 'off' || paneIndex !== 0) return null;
+    // A drawing pinned to the screen lands where it is clicked: a bar's price
+    // is no reference for something that will not follow the bars.
+    if (mode === 'off' || paneIndex !== 0 || this._toolSpace === 'viewport') return null;
     const bar = this._lastBar;
     if (bar === null) return null;
     const values = [bar.open, bar.high, bar.low, bar.close];
@@ -1963,9 +1980,7 @@ export class DrawingController {
         if (m === undefined) continue;
         if (item.viewportPoints !== undefined) {
           const frame = this._plotFrame(item.paneIndex);
-          if (frame !== null && travel !== null) {
-            m.viewportPoints = shiftViewportPoints(item.viewportPoints, travel.x / frame.width, travel.y / frame.height);
-          }
+          if (frame !== null && travel !== null) m.viewportPoints = this._shiftPinned(m, item.viewportPoints, travel.x, travel.y, frame);
           continue;
         }
         const samePane = item.paneIndex === p.paneIndex;
@@ -1976,13 +1991,16 @@ export class DrawingController {
         }));
       }
     } else if (d.space === 'viewport') {
-      // A handle lands under the pointer, held inside the pane so the shape
-      // can always be reached again.
+      // A handle lands under the pointer, held on the plot, and then the box
+      // is kept inside it: a note's one handle is its corner, and the rest of
+      // the note has to stay where it can be seen and grabbed again too.
       const anchors = start.items[0].viewportPoints ?? [];
       const at = this._gesturePlot(p, d.paneIndex);
       const frame = this._plotFrame(d.paneIndex);
       if (handle >= 0 && handle < anchors.length && at !== null && frame !== null) {
-        d.viewportPoints = anchors.map((q, i) => (i === handle ? clampViewportPoint({ x: at.x / frame.width, y: at.y / frame.height }) : { ...q }));
+        const placed = placeViewportAnchors(d, anchors, frame.width, frame.height);
+        placed[handle] = { x: within(at.x, frame.width), y: within(at.y, frame.height) };
+        d.viewportPoints = this._pinPlot(d, placed, frame);
       }
     } else if (handle >= 0 && handle < d.points.length) {
       const item = start.items[0];
@@ -2062,7 +2080,8 @@ export class DrawingController {
     const frame = this._plotFrame(d.paneIndex);
     if (frame === null) return null;
     const left = this._plotLeft();
-    return (d.viewportPoints ?? []).map((p) => ({ x: left + p.x * frame.width, y: frame.top + p.y * frame.height }));
+    return placeViewportAnchors(d, d.viewportPoints ?? [], frame.width, frame.height)
+      .map((p) => ({ x: left + p.x, y: frame.top + p.y }));
   }
 
   /** A pane's price projection, when the host exposes one. */
@@ -2139,36 +2158,74 @@ export class DrawingController {
     return this._gesturePlot(p, p.paneIndex);
   }
 
-  /** Data anchors as fractions of their pane's plot at the view on screen, or null when it has none. */
-  private _toViewport(points: readonly DrawingPoint[], paneIndex: number): ViewportPoint[] | null {
+  /**
+   * Data anchors as fractions of their pane's plot at the view on screen, or
+   * null when it has none. What is on screen stays where it is; a drawing part
+   * way or wholly off the plot comes onto it, since once pinned no pan could
+   * bring it back. One that fits moves in whole. One wider or taller than the
+   * plot is cut to it on that axis instead, so every handle of a pinned box
+   * is on screen to be grabbed.
+   */
+  private _toViewport(points: readonly DrawingPoint[], paneIndex: number, d: Drawing): ViewportPoint[] | null {
     const frame = this._plotFrame(paneIndex);
     const pane = this._pane(paneIndex);
     const ts = this._chart.timeScale;
     if (frame === null || pane === null || ts === undefined || points.length === 0) return null;
-    const out: ViewportPoint[] = [];
+    const px: ScreenPoint[] = [];
     for (const p of points) {
       const x = ts.indexToX(this._chart.dataLayer.timeToIndexFloat(p.time));
       const y = pane.priceToY(p.price);
       if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-      out.push({ x: x / frame.width, y: y / frame.height });
+      px.push({ x, y });
     }
-    return out;
+    const box = (hasDrawingTool(d.tool) ? getDrawingTool(d.tool).bounds?.(px, d) : undefined) ?? boundsOf(px);
+    const cutX = box.x1 - box.x0 > frame.width;
+    const cutY = box.y1 - box.y0 > frame.height;
+    return this._pinPlot(d, px.map((p) => ({
+      x: cutX ? within(p.x, frame.width) : p.x,
+      y: cutY ? within(p.y, frame.height) : p.y,
+    })), frame);
   }
 
-  /** The inverse of `_toViewport`: fractions back to time and price at the view on screen. */
-  private _fromViewport(points: readonly ViewportPoint[], paneIndex: number): DrawingPoint[] | null {
+  /**
+   * The inverse of `_toViewport`: fractions back to time and price at the view
+   * on screen, from where the drawing is painted, so it does not move.
+   */
+  private _fromViewport(points: readonly ViewportPoint[], paneIndex: number, d: Drawing): DrawingPoint[] | null {
     const frame = this._plotFrame(paneIndex);
     const pane = this._pane(paneIndex);
     const ts = this._chart.timeScale;
     if (frame === null || pane === null || ts === undefined || points.length === 0) return null;
     const out: DrawingPoint[] = [];
-    for (const p of points) {
-      const time = this._chart.dataLayer.indexToTimeFloat(ts.xToIndex(p.x * frame.width));
-      const price = pane.yToPrice(p.y * frame.height);
+    for (const p of placeViewportAnchors(d, points, frame.width, frame.height)) {
+      const time = this._chart.dataLayer.indexToTimeFloat(ts.xToIndex(p.x));
+      const price = pane.yToPrice(p.y);
       if (!Number.isFinite(time) || !Number.isFinite(price)) return null;
       out.push({ time, price });
     }
     return out;
+  }
+
+  /**
+   * Anchors in plot px as the fractions a pinned drawing stores, moved first
+   * so its box lies inside the plot. Every gesture ends here, so what is
+   * stored is what is painted, and no drag can leave the box where the
+   * pointer cannot reach it.
+   */
+  private _pinPlot(d: Drawing, pts: readonly ScreenPoint[], frame: PlotFrame): ViewportPoint[] {
+    const fraction = (p: ScreenPoint): ViewportPoint => ({ x: p.x / frame.width, y: p.y / frame.height });
+    return placeViewportAnchors(d, pts.map(fraction), frame.width, frame.height).map(fraction);
+  }
+
+  /**
+   * Pinned anchors moved by a screen distance in media px, from where the
+   * drawing is painted rather than from what it stores: a note the layer
+   * holds in from a stored place off the plot (a host's value, a larger
+   * chart) moves at once, with no dead travel before it starts.
+   */
+  private _shiftPinned(d: Drawing, points: readonly ViewportPoint[], dxPx: number, dyPx: number, frame: PlotFrame): ViewportPoint[] {
+    const at = placeViewportAnchors(d, points, frame.width, frame.height);
+    return this._pinPlot(d, at.map((p) => ({ x: p.x + dxPx, y: p.y + dyPx })), frame);
   }
 
   /** Put a drawing's anchors back as a gesture found them. */

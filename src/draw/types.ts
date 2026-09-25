@@ -250,7 +250,8 @@ export type DrawingInput = Omit<Drawing, 'id' | 'zIndex' | 'createdAt'> & {
  * bars. With the new space's anchors in the same patch (`viewportPoints` for
  * the viewport, `points` for data) they are taken as given. A conversion the
  * controller cannot make (a tool without viewport support, a pane with no
- * place on screen) is left out of the patch and the rest of it applies.
+ * place on screen) is left out of the patch and the rest of it applies, and
+ * `DrawingController.update` returns false.
  */
 export type DrawingPatch = Partial<Pick<Drawing,
   'points' | 'style' | 'text' | 'props' | 'locked' | 'visible' | 'zIndex' | 'policy' | 'space' | 'viewportPoints'>>;
@@ -366,6 +367,17 @@ export interface DrawingTool {
    * `alertValue` apply to data space only.
    */
   viewport?: boolean;
+  /**
+   * The box the drawing covers at `pts`, its anchors in media px (the space
+   * of {@link HitContext}). A drawing anchored to the viewport is always
+   * painted, hit-tested and moved with this box inside its pane's plot, so it
+   * can be seen and grabbed at every edge and after the chart resizes, and no
+   * drag, nudge or handle can take it out. Declare it on a `viewport` tool
+   * that paints beyond its anchors, as the text note and the table do from
+   * their one corner; without it the box is the anchors' own bounds, which is
+   * right for a rectangle.
+   */
+  bounds?(pts: readonly ScreenPoint[], drawing: Drawing): { x0: number; y0: number; x1: number; y1: number };
   /**
    * Turn the anchors actually clicked into the full anchor set. Lets a tool drop
    * a complete, immediately editable default from fewer clicks: the position

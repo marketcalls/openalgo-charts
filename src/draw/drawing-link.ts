@@ -237,6 +237,7 @@ export class DrawingLinkGroup {
     if (this._broadcasting || !this._eligible(member) || drawing.paneIndex !== 0) return;
     if (!removed && drawing.space === 'viewport') { this._unlink(member, drawing); return; }
     let shared = member.drawings.get(drawing.id);
+    if (shared === undefined && !added && !removed) shared = this._rejoin(member, drawing);
     const first = shared === undefined && added;
     if (shared === undefined && added) shared = this._create(member, drawing);
     if (shared !== undefined) this._commit(shared, member, removed ? null : drawing, first);
@@ -259,6 +260,32 @@ export class DrawingLinkGroup {
     delete props[DRAWING_LINK_METADATA_KEY];
     this._broadcasting = true;
     try { member.controller.applyLinkedDrawing(drawing.id, { ...drawing, props }); } finally { this._broadcasting = false; }
+  }
+
+  /**
+   * An unbound drawing that carries this chart's lineage mark, while a peer
+   * still holds that lineage, is one that left the link by being pinned and
+   * came back by undo: the undo put the mark back but no binding. It joins
+   * again, as the newest edit, so its state goes to the peers the way any
+   * other undo on a linked drawing does. If the peers have since deleted
+   * their copies it stays on this chart alone and loses the mark, since an
+   * edit never brings back another chart's deletion, and a later restore
+   * must not apply that deletion here. A mark no peer holds is left for a
+   * peer that has yet to join, as after any restore.
+   */
+  private _rejoin(member: Member, drawing: Drawing): SharedDrawing | undefined {
+    const lineage = lineageOf(drawing, member.context as string);
+    if (lineage === undefined || !linkable(drawing)) return undefined;
+    for (const peer of this._members.values()) {
+      for (const shared of peer.drawings.values()) {
+        if (shared.context !== member.context || shared.lineage !== lineage) continue;
+        if (shared.drawing === null) { this._unlink(member, drawing); return undefined; }
+        shared.bindings.set(member, { id: drawing.id, local: true });
+        member.drawings.set(drawing.id, shared);
+        return shared;
+      }
+    }
+    return undefined;
   }
 
   private _commit(shared: SharedDrawing, from: Member, drawing: Drawing | null, includeNew: boolean): void {
