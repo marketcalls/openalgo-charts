@@ -160,6 +160,61 @@ describe('quote board', () => {
     board.destroy();
   });
 
+  it('arms no stale timer behind a live stream, so a quiet market costs nothing', async () => {
+    vi.useFakeTimers();
+    const { feed, streams } = streamingFeed();
+    const onChange = vi.fn();
+    const board = new QuoteBoard({ feed, staleAfterMs: 200, onChange });
+    board.setVisible([k('A')]);
+    streams.get('A')!.onQuote(q('A', 101));
+    expect(board.row(k('A')).status).toBe('live');
+    onChange.mockClear();
+    // A live stream vouches for its last quote however long nothing trades.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(board.row(k('A')).status).toBe('live');
+    // A stream that drops back to connecting leaves only the snapshot window to trust.
+    streams.get('A')!.onQuote(q('A', 102));
+    streams.get('A')!.onStatus!('connecting');
+    expect(board.row(k('A')).status).toBe('snapshot');
+    onChange.mockClear();
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(board.row(k('A')).status).toBe('stale');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    board.destroy();
+  });
+
+  it('ages each snapshot into stale with one timer per transition, then schedules nothing and repaints nothing', async () => {
+    vi.useFakeTimers();
+    const feed: QuoteFeed = { getQuotes: async ({ instruments }) => instruments.map(i => q(i.symbol, 200)) };
+    const onChange = vi.fn();
+    const board = new QuoteBoard({ feed, pollMs: 0, staleAfterMs: 1000, onChange });
+    board.setVisible([k('A')]);
+    await vi.advanceTimersByTimeAsync(300);
+    board.setVisible([k('A'), k('B')]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(board.row(k('A')).status).toBe('snapshot');
+    expect(board.row(k('B')).status).toBe('snapshot');
+    onChange.mockClear();
+    // One timer, for the next row to age: A, answered 300 ms before B.
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(701);
+    expect(board.row(k('A')).status).toBe('stale');
+    expect(board.row(k('B')).status).toBe('snapshot');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(board.row(k('B')).status).toBe('stale');
+    expect(onChange).toHaveBeenCalledTimes(2);
+    // Every row on screen is already stale: nothing is left to wait for.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(600000);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    board.destroy();
+  });
+
   it('ignores quotes for another instrument, non-finite prices and instruments nobody asked for', async () => {
     const { feed, streams, pending } = streamingFeed();
     const board = new QuoteBoard({ feed });

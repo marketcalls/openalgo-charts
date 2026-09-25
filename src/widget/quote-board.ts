@@ -113,6 +113,8 @@ export class QuoteBoard {
     this._trim();
     if (added.length > 0) this._snapshot(added);
     this._schedulePoll();
+    // A row that left the screen no longer needs its deadline watched.
+    this._scheduleStale();
     this._onChange();
   }
 
@@ -185,6 +187,7 @@ export class QuoteBoard {
           if (stream.status === 'connecting') stream.status = 'live';
           target.pushed = ++this._seq;
           this._accept(target, clean);
+          this._scheduleStale();
           this._onChange();
         },
         onStatus: status => {
@@ -196,6 +199,8 @@ export class QuoteBoard {
             target.fresh = false;
             this._queueResync(key);
           }
+          // Whether age can make this row stale depends on the stream's state.
+          this._scheduleStale();
           this._onChange();
         },
       });
@@ -228,7 +233,6 @@ export class QuoteBoard {
     entry.fresh = true;
     entry.missing = false;
     entry.error = null;
-    this._scheduleStale();
   }
 
   private _queueResync(key: InstrumentKey): void {
@@ -268,6 +272,7 @@ export class QuoteBoard {
         if (entry && !answered.has(id) && this._visible.has(id) && !entry.quote) entry.missing = true;
       }
       this._error = null;
+      this._scheduleStale();
       this._onChange();
     }, error => {
       if (!this._requests.delete(request) || this._destroyed) return;
@@ -290,16 +295,35 @@ export class QuoteBoard {
     }, this._pollMs);
   }
 
+  /** When a visible row turns stale by age alone, or null when age cannot change what it shows. */
+  private _expires(id: string): number | null {
+    const entry = this._entries.get(id);
+    if (!entry?.fresh || entry.quote === null || entry.receivedAt === null) return null;
+    // A live stream vouches for its quote however quiet the market; a broken one is stale already.
+    const stream = entry.stream?.status;
+    return stream === 'live' || stream === 'reconnecting' || stream === 'disconnected' ? null : entry.receivedAt + this._staleAfter;
+  }
+
+  /**
+   * One timer, for the next moment a row on screen ages into stale. A deadline
+   * already passed is a row already shown stale, so an idle board waits for
+   * nothing and repaints nothing.
+   */
   private _scheduleStale(): void {
-    if (this._stale !== null) clearTimeout(this._stale);
-    this._stale = null;
+    if (this._stale !== null) { clearTimeout(this._stale); this._stale = null; }
+    if (this._destroyed) return;
+    const now = this._now();
     let next = Infinity;
     for (const id of this._visible) {
-      const entry = this._entries.get(id);
-      if (entry?.fresh && entry.receivedAt !== null) next = Math.min(next, entry.receivedAt + this._staleAfter);
+      const at = this._expires(id);
+      if (at !== null && at >= now) next = Math.min(next, at);
     }
-    if (!Number.isFinite(next)) return;
-    // Nothing else changes when a quote ages, so the board says so itself.
-    this._stale = setTimeout(() => { this._stale = null; this._onChange(); this._scheduleStale(); }, Math.max(0, next - this._now()) + 1);
+    if (next === Infinity) return;
+    this._stale = setTimeout(() => {
+      this._stale = null;
+      // row() calls a quote stale once its age exceeds the window; a timer that fires early changes nothing.
+      if (this._now() > next) this._onChange();
+      this._scheduleStale();
+    }, next - now + 1);
   }
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Chart } from '../src/core/chart';
-import { mountWatchlistPanel } from '../src/widget/watchlist-panel';
+import { mountWatchlistPanel, type WatchlistPanelOptions } from '../src/widget/watchlist-panel';
 import { createOverlayStack, WidgetStorage, type WidgetContext } from '../src/widget/context';
 import {
   WatchlistRepository, WatchlistConflictError, createMemoryWatchlistStorage, type WatchlistStore, type WatchlistStorage,
@@ -9,7 +9,10 @@ import type { InstrumentKey, QuoteFeed, QuoteSnapshot, QuoteStreamHandlers } fro
 import { fakeWidgetDocument, fakeContainer, fire, fireKey, type FakeElement } from './helpers/fake-dom-widget';
 
 const nse = (symbol: string): InstrumentKey => ({ symbol, exchange: 'NSE' });
-const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
+const flush = async () => {
+  if (vi.isFakeTimers()) { await vi.advanceTimersByTimeAsync(0); return; }
+  for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0));
+};
 
 class FakeObserver {
   static last: FakeObserver | null = null;
@@ -39,9 +42,12 @@ function streamingFeed() {
 }
 
 const charts: Chart[] = [];
-afterEach(() => { for (const chart of charts.splice(0)) chart.destroy(); FakeObserver.last = null; });
+afterEach(() => { for (const chart of charts.splice(0)) chart.destroy(); FakeObserver.last = null; vi.useRealTimers(); });
 
-async function rig(options: { store?: WatchlistStore; storage?: WatchlistStorage; quotes?: QuoteFeed | null; observer?: boolean; lists?: Array<[string, InstrumentKey[]]> } = {}) {
+async function rig(options: {
+  store?: WatchlistStore; storage?: WatchlistStorage; quotes?: QuoteFeed | null; observer?: boolean; lists?: Array<[string, InstrumentKey[]]>;
+  panel?: Partial<WatchlistPanelOptions>;
+} = {}) {
   const doc = fakeWidgetDocument();
   if (options.observer) (doc as unknown as { defaultView: unknown }).defaultView = { IntersectionObserver: FakeObserver };
   const root = fakeContainer(doc);
@@ -63,7 +69,7 @@ async function rig(options: { store?: WatchlistStore; storage?: WatchlistStorage
   const host = doc.createElement('div'); root.appendChild(host);
   const quotes = options.quotes === undefined ? streamingFeed() : null;
   const onSelect = vi.fn();
-  const panel = mountWatchlistPanel(ctx, host as unknown as HTMLElement, { store, quotes: options.quotes ?? quotes?.feed, onSelect });
+  const panel = mountWatchlistPanel(ctx, host as unknown as HTMLElement, { store, quotes: options.quotes ?? quotes?.feed, onSelect, ...options.panel });
   await flush();
   const rows = () => (host as FakeElement).querySelectorAll('tbody tr');
   const cell = (row: FakeElement, name: string) => row.querySelector(`.oac-watchlist__${name}`)!;
@@ -294,6 +300,21 @@ describe('watchlist panel', () => {
     expect(r.rows()[0].dataset.state).toBe('stale');
     expect(r.cell(r.rows()[0], 'last').textContent).toBe('1,500.00');
     expect(r.host.querySelector('.oac-watchlist__status')!.textContent).toBe('Reconnecting. Quotes shown may be stale.');
+    r.panel.destroy();
+  });
+
+  it('repaints once when its snapshots age into stale, then does no work while the board sits idle', async () => {
+    vi.useFakeTimers();
+    const feed: QuoteFeed = { getQuotes: async ({ instruments }) => instruments.map(i => ({ ...i, last: 100, previousClose: 99 })) };
+    const r = await rig({ quotes: feed, panel: { pollMs: 0, staleAfterMs: 1000 }, lists: [['Tech', [nse('INFY'), nse('TCS')]]] });
+    expect(r.rows().map(row => row.dataset.state)).toEqual(['snapshot', 'snapshot']);
+    // Every paint reads the chart's instrument once, which makes it countable.
+    const paints = vi.spyOn(r.ctx, 'symbol');
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(r.rows().map(row => row.dataset.state)).toEqual(['stale', 'stale']);
+    expect(paints).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(paints).toHaveBeenCalledTimes(1);
     r.panel.destroy();
   });
 });
