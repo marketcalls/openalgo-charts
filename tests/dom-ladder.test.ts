@@ -1,6 +1,7 @@
 import { darkTheme } from '../src/theme';
 import { describe, it, expect } from 'vitest';
-import { DomLadder, ladderCapability, buildRows, visibleRows } from '../src/trade/dom-ladder';
+import { DomLadder, DEFAULT_DOM_LADDER_OPTIONS, ladderCapability, buildRows, visibleRows, type LadderRow } from '../src/trade/dom-ladder';
+import { TickSchedule } from '../src/feed/tick-schedule';
 import { FakeBroker } from '../src/trade/fake-broker';
 import type { MarketDepth } from '../src/feed/types';
 import type { PrimitiveRenderContext } from '../src/primitives/primitive';
@@ -97,5 +98,115 @@ describe('DomLadder primitive', () => {
     const y = r.priceScale.priceToY(askPrice);
     const hit = ladder.hitTest(r.plotWidth - 10, y, r);
     expect(hit?.externalId.startsWith('ladder-')).toBe(true);
+  });
+});
+
+// Synthetic rules, not any venue's: 0.01 below 100 and 0.05 from 100.
+const BANDED = new TickSchedule([{ tick: 0.01 }, { from: 100, tick: 0.05 }]);
+const level = (price: number, qty: number) => ({ price, qty });
+/** A book that straddles the boundary: cent bids below 100, nickel asks from it. */
+const straddle = (): MarketDepth => ({
+  ltp: 99.99,
+  bids: [99.99, 99.98, 99.97, 99.96, 99.95].map((price, i) => level(price, 10 + i)),
+  asks: [100, 100.05, 100.1, 100.15, 100.2].map((price, i) => level(price, 20 + i)),
+});
+/** A deep one: 50 cent bids from 99.50 and 50 nickel asks from 100. */
+const deepStraddle = (): MarketDepth => ({
+  ltp: 99.99,
+  bids: Array.from({ length: 50 }, (_, i) => level(+(99.99 - i * 0.01).toFixed(2), 1 + i)),
+  asks: Array.from({ length: 50 }, (_, i) => level(+(100 + i * 0.05).toFixed(2), 100 + i)),
+});
+const total = (rows: readonly LadderRow[]): number => rows.reduce((sum, row) => sum + row.bidQty + row.askQty, 0);
+const onGrid = (price: number, tick: number): boolean => Math.abs(price / tick - Math.round(price / tick)) < 1e-9;
+/** The ladder's bucketing before schedules, kept to prove the constant path unchanged. */
+function constantRows(book: MarketDepth, tickSize: number, groupBy = 1): LadderRow[] {
+  const step = tickSize * Math.max(1, groupBy);
+  const bucket = (p: number): number => Math.round(Math.round(p / step) * step * 1e8) / 1e8;
+  const map = new Map<number, LadderRow>();
+  const add = (price: number, qty: number, side: 'bid' | 'ask'): void => {
+    const key = bucket(price);
+    let row = map.get(key);
+    if (row === undefined) { row = { price: key, bidQty: 0, askQty: 0 }; map.set(key, row); }
+    if (side === 'bid') row.bidQty += qty; else row.askQty += qty;
+  };
+  for (const b of book.bids) add(b.price, b.qty, 'bid');
+  for (const a of book.asks) add(a.price, a.qty, 'ask');
+  return Array.from(map.values()).sort((x, y) => y.price - x.price);
+}
+
+describe('buildRows with a tick schedule', () => {
+  it('keeps each level on the price its own band allows across the boundary', () => {
+    expect(buildRows(straddle(), BANDED).map(row => row.price))
+      .toEqual([100.2, 100.15, 100.1, 100.05, 100, 99.99, 99.98, 99.97, 99.96, 99.95]);
+    // One constant step cannot serve both bands: the upper tick folds the cent
+    // levels below 100 into rows the book does not have.
+    expect(buildRows(straddle(), 0.05).map(row => row.price)).toEqual([100.2, 100.15, 100.1, 100.05, 100, 99.95]);
+  });
+
+  it('moves an off-grid level to the nearest price its band allows', () => {
+    const odd: MarketDepth = { ltp: 100, bids: [level(99.994, 3)], asks: [level(100.03, 4), level(100.05, 5)] };
+    expect(buildRows(odd, BANDED)).toEqual([{ price: 100.05, bidQty: 0, askQty: 9 }, { price: 99.99, bidQty: 3, askQty: 0 }]);
+  });
+
+  it('groups ticks of the band each level is in, preserving every quantity', () => {
+    const book = deepStraddle();
+    const rows = buildRows(book, BANDED, 5);
+    expect(total(rows)).toBe(total(buildRows(book, BANDED)));
+    // Five cents below 100, five nickels from 100.
+    for (const row of rows) expect(onGrid(row.price, row.price < 100 ? 0.05 : 0.25)).toBe(true);
+    expect(rows.filter(row => row.price < 100).length).toBe(10);
+    // 101.15 through 101.35: the five nickels nearest 101.25.
+    expect(rows.find(row => row.price === 101.25)).toEqual({ price: 101.25, bidQty: 0, askQty: 123 + 124 + 125 + 126 + 127 });
+  });
+
+  it('never lets a group in one band label a row with a price the next band forbids', () => {
+    // Six cents is 0.06: 99.99 is nearest 100.02, which the 0.05 band above
+    // 100 cannot trade at, so the group stops at the boundary.
+    const book: MarketDepth = { ltp: 99.99, bids: [level(99.99, 7)], asks: [level(100.05, 8)] };
+    expect(buildRows(book, BANDED, 6)).toEqual([{ price: 100, bidQty: 7, askQty: 8 }]);
+    const above = new TickSchedule([{ tick: 0.05 }, { from: 100.1, tick: 0.1 }]);
+    // Downward too: 100.2 on a 0.5 group is nearest 100, below where its band starts.
+    expect(buildRows({ ltp: 100.2, bids: [], asks: [level(100.2, 2)] }, above, 5)).toEqual([{ price: 100.1, bidQty: 0, askQty: 2 }]);
+  });
+
+  it('keeps the constant tick path exactly as it was', () => {
+    for (const groupBy of [1, 5, 2.5, 0]) {
+      for (const book of [depth(200), straddle(), deepStraddle()]) {
+        expect(buildRows(book, 0.05, groupBy)).toEqual(constantRows(book, 0.05, groupBy));
+      }
+    }
+    expect(Object.keys(DEFAULT_DOM_LADDER_OPTIONS)).toEqual(['tickSize', 'width', 'groupBy', 'maxRows', 'rowHeight']);
+  });
+
+  it('refuses a band list in place of a schedule', () => {
+    const bands = [{ tick: 0.01 }, { from: 100, tick: 0.05 }] as unknown as TickSchedule;
+    expect(() => buildRows(straddle(), bands)).toThrow(/new TickSchedule\(bands\)/);
+    expect(() => new DomLadder({ tickSchedule: bands })).toThrow(TypeError);
+  });
+});
+
+describe('DomLadder with a tick schedule', () => {
+  function ladderContext(): PrimitiveRenderContext {
+    const context = rc();
+    context.priceScale.setPriceRange({ min: 99.9, max: 100.3 });
+    return context;
+  }
+
+  it('draws and hit-tests the rows the schedule allows', () => {
+    const context = ladderContext();
+    const hitAt = (ladder: DomLadder, price: number): string | undefined => {
+      ladder.setDepth(straddle());
+      ladder.draw(makeCtx().ctx, context);
+      return ladder.hitTest(context.plotWidth - 10, context.priceScale.priceToY(price), context)?.externalId;
+    };
+    const banded = new DomLadder({ tickSize: 0.05, tickSchedule: BANDED, rowHeight: 8 });
+    expect(hitAt(banded, 99.97)).toBe('ladder-bid:99.97');
+    expect(hitAt(banded, 100.15)).toBe('ladder-ask:100.15');
+    // On a constant 0.05 step the cent levels fold into 99.95 and 100, so
+    // there is no row at 99.97 to click. Null is no schedule, as on chart.trading.
+    for (const constant of [new DomLadder({ tickSize: 0.05, rowHeight: 8 }), new DomLadder({ tickSize: 0.05, tickSchedule: null, rowHeight: 8 })]) {
+      expect(hitAt(constant, 99.97)).toBeUndefined();
+      expect(hitAt(constant, 99.95)).toBe('ladder-bid:99.95');
+    }
   });
 });

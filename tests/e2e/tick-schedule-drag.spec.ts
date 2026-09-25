@@ -1,10 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { Chart, TickSchedule } from '../../src/index';
+import type { Chart, Instrument, InstrumentMetadata, TickSchedule } from '../../src/index';
 
 declare global {
   interface Window {
     __ticks: {
-      chart: Chart; ticks: TickSchedule;
+      chart: Chart; ticks: TickSchedule; banded: InstrumentMetadata;
+      Instrument: new (metadata: unknown) => Instrument;
       events: { type: string; id?: string; price?: number; newPrice?: number; previousPrice?: number; orderId?: string; bracketRole?: string }[];
       preview(id: string): number | undefined;
     };
@@ -95,4 +96,78 @@ test('a dragged bracket leg lands on the finer grid below the boundary', async (
   expect(bracket[0].newPrice!).toBeLessThan(100);
   expect(onGrid(bracket[0].newPrice!)).toBe(true);
   await page.screenshot({ path: info.outputPath('tick-schedule-bracket-released.png') });
+});
+
+/** Drag the limit order from where it rests to `price`; the release's order event and the drag's raw price. */
+async function dragOrder(page: Page, price: number): Promise<{ raw: number; newPrice: number }> {
+  const current = await page.evaluate(() => window.__ticks.chart.trading.getOrders().find(order => order.id === 'limit')!.price);
+  const from = await point(page, current);
+  const to = await point(page, price);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 10 });
+  await page.mouse.up();
+  await paint(page);
+  return page.evaluate(() => {
+    const { events } = window.__ticks;
+    return { raw: events.filter(event => event.type === 'drag').at(-1)!.price!,
+      newPrice: events.filter(event => event.type === 'order').at(-1)!.newPrice! };
+  });
+}
+
+test('an instrument applied before the trading layer exists snaps its drags until a constant tick replaces it', async ({ page }, info) => {
+  await page.goto('/tests/e2e/tick-schedule-drag-fixture.html?via=instrument');
+  await page.waitForFunction(() => !!window.__ticks);
+  await paint(page);
+  const upper = await dragOrder(page, 100.33);
+  expect(upper.raw).toBeGreaterThan(100);
+  expect(upper.newPrice).toBe(await page.evaluate(price => window.__ticks.ticks.round(price), upper.raw));
+  expect(Math.round(upper.newPrice * 100) % 5).toBe(0);
+  await page.screenshot({ path: info.outputPath('instrument-applied-drag.png') });
+
+  // The same symbol on a constant tick: no bands are left behind on the drag.
+  await page.evaluate(() => {
+    const { banded, Instrument, chart } = window.__ticks;
+    new Instrument({ ...banded, tickBands: undefined, priceTick: 0.05 }).applyTo(chart, '1m');
+  });
+  const constant = await dragOrder(page, 99.73);
+  expect(constant.newPrice).toBe(constant.raw);
+});
+
+test('a depth ladder across the boundary shows the rows each band allows', async ({ page }, info) => {
+  await page.evaluate(async () => {
+    const { chart, ticks } = window.__ticks;
+    const trade = await import('/dist/openalgo-charts.trade.mjs' as string);
+    chart.panes()[0].priceScale.setFixedRange({ min: 99.78, max: 100.38 });
+    // The upper band's tick as tickSize: without the schedule, the cent levels
+    // below 100 would fold into nickel rows and 99.97 would have no row.
+    const ladder = new trade.DomLadder({ tickSize: 0.05, tickSchedule: ticks, width: 120, rowHeight: 12 });
+    chart.addPrimitive(ladder);
+    ladder.setDepth({
+      ltp: 99.99,
+      bids: Array.from({ length: 20 }, (_, i) => ({ price: +(99.99 - i * 0.01).toFixed(2), qty: 40 + i * 7 })),
+      asks: Array.from({ length: 8 }, (_, i) => ({ price: +(100 + i * 0.05).toFixed(2), qty: 60 + i * 11 })),
+    });
+    const ids: (string | null)[] = [];
+    chart.on('click', event => ids.push((event as { id: string | null }).id));
+    (window as unknown as { __clicks: (string | null)[] }).__clicks = ids;
+  });
+  await paint(page);
+  const clickAt = async (price: number): Promise<string | null> => {
+    const at = await page.evaluate(price => {
+      const { chart } = window.__ticks;
+      const rect = document.getElementById('chart')!.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width - 72 - 30), y: Math.round(rect.top + chart.priceToCoordinate(price, 0)!) };
+    }, price);
+    await page.mouse.click(at.x, at.y);
+    await paint(page);
+    return page.evaluate(() => (window as unknown as { __clicks: (string | null)[] }).__clicks.at(-1) ?? null);
+  };
+  // A cent row below the boundary and a nickel row above it, each a price the band allows.
+  expect(await clickAt(99.97)).toBe('ladder-bid:99.97');
+  expect(await clickAt(99.99)).toBe('ladder-bid:99.99');
+  expect(await clickAt(100.15)).toBe('ladder-ask:100.15');
+  // Between two nickel rows there is no row: 100.07 is not a price the upper band allows.
+  expect(await clickAt(100.075)).toBeNull();
+  await page.screenshot({ path: info.outputPath('tick-schedule-ladder.png') });
 });
