@@ -211,9 +211,13 @@ export const STOCHASTIC: IndicatorDescriptor = {
   calc: (bars, s) => {
     const hi = highest(bars.map((b) => b.high), num(s, 'kPeriod', 14));
     const lo = lowest(bars.map((b) => b.low), num(s, 'kPeriod', 14));
+    // Scaled before dividing, the arrangement the definition fixes. A span
+    // that overflows has no reading, where dividing by it printed a flat 0; a
+    // scaled distance that overflows leaves an infinity, which the smoothing
+    // and `nulls` both drop as absent.
     const raw = bars.map((b, i) => {
       const span = hi[i] - lo[i];
-      return span > 0 ? ((b.close - lo[i]) / span) * 100 : NaN;
+      return span > 0 && span < Infinity ? (100 * (b.close - lo[i])) / span : NaN;
     });
     const k = sma(raw, num(s, 'kSmoothing', 1));
     const d = sma(k, num(s, 'dPeriod', 3));
@@ -358,7 +362,9 @@ export const CCI: IndicatorDescriptor = {
       let dev = 0;
       for (let j = 0; j < period; j++) dev += Math.abs(tp[i - j] - avg[i]);
       const md = dev / period;
-      out[i] = md > 0 ? (tp[i] - avg[i]) / (k * md) : 0;
+      // A window holding a missing bar, or one whose deviation overflows, has
+      // no reading. Only a genuinely flat window (md exactly 0) prints 0.
+      out[i] = !Number.isFinite(md) ? NaN : md > 0 ? (tp[i] - avg[i]) / (k * md) : 0;
     }
 
     const maType = str(s, 'maType', 'SMA');

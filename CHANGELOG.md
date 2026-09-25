@@ -2,6 +2,36 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Calculations
+
+- CCI has no reading on a window that holds a missing high, low or close, or
+  whose mean deviation overflows. It used to print 0 there for a whole window's
+  worth of bars, and the CCI-based average and its bands smoothed those invented
+  zeros. A genuinely flat window still reads 0.
+- Stochastic %K multiplies by 100 before dividing by the window range, the order
+  the definition fixes, so a reading can move in its last bit and %D follows. A
+  window whose range overflows has no reading instead of a flat 0.
+- Fisher Transform restarts both recursions on the bar after a missing midpoint,
+  as its documented rule says. The missing value used to enter the recursion and
+  leave the study blank for the rest of the history.
+- Relative Volatility Index and Mass Index hold their exponential averages across
+  a missing bar and resume on the next present one, instead of reseeding and
+  blanking the study for another 14 (RVI) or 9 (Mass Index) bars. The RVI's EMA
+  smoothing option follows the same rule. With a Length above 16 the RVI
+  averages can also seed on a one-way run inside the deviation warmup and hold
+  across it, so the first reading can arrive earlier than before; at Length 16
+  or below ordinary readings are unchanged.
+- True Strength Index, SMI Ergodic Indicator and SMI Ergodic Oscillator multiply
+  the smoothed change by 100 before dividing, which can move readings in the last
+  bit. Near the top of the double range the product can overflow, and that bar
+  is then a gap rather than a reading formed from an infinity.
+- Trend Strength Index and the exported `correlation` helper finish both window
+  means before forming any deviation, taking two passes oldest first. The former
+  single-pass sums cancelled at ordinary price levels: at 1e5 with 0.01 moves the
+  reading was about one percent off, and at 1e9 it had no value.
+
 ## 2.5.4
 
 2026-09-25

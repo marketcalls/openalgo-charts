@@ -15,9 +15,9 @@
  *
  * Second, three of the six studies smooth a series that already carries a
  * warmup gap (Mass Index is an EMA of an EMA, PVO runs a signal average over
- * the oscillator, NVI and PVI run a 255-bar EMA over the index). A recursive
- * smoother handed a NaN never recovers, so those all go through `smoothRuns`
- * rather than calling the smoother directly.
+ * the oscillator, NVI and PVI run a 255-bar EMA over the index). `smaSeededEma`
+ * seeds on the first clean window of such a series and holds across later
+ * gaps; the other smoothers go through `smoothRuns`.
  */
 import { sourceValues } from 'openalgo-charts';
 import type { Bar, IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
@@ -45,13 +45,11 @@ type Smoother = (values: readonly number[], period: number) => number[];
 /**
  * Smooth a series that already carries gaps, one gapless run at a time.
  *
- * Handing a NaN to `smaSeededEma` (or to `rollingSum`) poisons the running value for
- * the rest of the series, which would blank every chained study below from its
- * input's warmup onward. the reference does not behave that way: `ema` reseeds from
- * `sma` whenever its running value is `na`, so it restarts on the first full
- * window of real values after any gap. Smoothing each run independently
- * reproduces that, and reduces to a plain call when the only gap is the leading
- * warmup, which is the case on every real feed here.
+ * Each run starts the smoother afresh, so after an interior gap the result
+ * waits for a new full window. That reduces to a plain call when the only gap
+ * is the leading warmup. A windowed sum loses nothing by it, since a window
+ * holding the gap has no sum either; a recursive average does, which is why
+ * Mass Index smooths its second average with `smaSeededEma` directly.
  */
 function smoothRuns(values: readonly number[], period: number, smooth: Smoother): number[] {
   const out = new Array<number>(values.length).fill(NaN);
@@ -277,8 +275,8 @@ export const PVO: IndicatorDescriptor = {
  * volatility is steady and rises as the range widens, so the sum reads as
  * "volatility has been building for a while" rather than "this bar was wide".
  * The nested EMA is the parity trap in this file: its input is already `na` for
- * the first 8 bars, and the reference reseeds past that rather than propagating it, which
- * is why the plot starts two warmups plus a window deep.
+ * the first 8 bars, and the second average seeds past that rather than
+ * propagating it, which is why the plot starts two warmups plus a window deep.
  */
 export const MASS_INDEX: IndicatorDescriptor = {
   id: 'mass-index',
@@ -296,7 +294,10 @@ export const MASS_INDEX: IndicatorDescriptor = {
     // The two 9-bar periods are part of the definition of the study, not inputs:
     // the reference hard-codes them and exposes only the sum length.
     const single = smaSeededEma(span, 9);
-    const double = smoothRuns(single, 9, smaSeededEma);
+    // Over the whole series, not run by run: after a missing range the second
+    // average holds and resumes with the first, where restarting it would
+    // blank the study for another nine bars and then print a fresh-seed value.
+    const double = smaSeededEma(single, 9);
 
     const ratio = new Array<number>(n).fill(NaN);
     for (let i = 0; i < n; i++) {

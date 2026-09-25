@@ -812,7 +812,15 @@ export function percentileNearestRank(
   return out;
 }
 
-/** the reference `correlation`: Pearson correlation of two series over `period`. */
+/**
+ * the reference `correlation`: population Pearson correlation of two series over
+ * `period`. Each window takes two passes, oldest first: both means are finished
+ * before any deviation is formed, then
+ * `(cross / period) / (sqrt(squaresA / period) * sqrt(squaresB / period))`.
+ * A window with a missing value, no spread or an overflowing step is NaN. A
+ * period that is not a whole number above 1 gives NaN throughout, as it did
+ * before.
+ */
 export function correlation(
   a: readonly number[],
   b: readonly number[],
@@ -822,15 +830,20 @@ export function correlation(
   const out = new Array<number>(n).fill(NaN);
   if (period <= 1 || n < period) return out;
   for (let i = period - 1; i < n; i++) {
-    let sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
-    for (let k = 0; k < period; k++) {
-      const x = a[i - k];
-      const y = b[i - k];
-      sa += x; sb += y; saa += x * x; sbb += y * y; sab += x * y;
+    // Summing squares and cross products in one pass and subtracting at the
+    // end cancels catastrophically at ordinary price levels: at 1e5 with 0.01
+    // moves it was off by about one percent, and at 1e9 it had no value.
+    let sumA = 0, sumB = 0, cross = 0, squaresA = 0, squaresB = 0;
+    for (let k = i - period + 1; k <= i; k++) { sumA += a[k]; sumB += b[k]; }
+    const meanA = sumA / period;
+    const meanB = sumB / period;
+    for (let k = i - period + 1; k <= i; k++) {
+      const x = a[k] - meanA;
+      const y = b[k] - meanB;
+      cross += x * y; squaresA += x * x; squaresB += y * y;
     }
-    const cov = period * sab - sa * sb;
-    const den = Math.sqrt(period * saa - sa * sa) * Math.sqrt(period * sbb - sb * sb);
-    out[i] = den === 0 ? NaN : cov / den;
+    const value = (cross / period) / (Math.sqrt(squaresA / period) * Math.sqrt(squaresB / period));
+    if (Number.isFinite(value)) out[i] = value;
   }
   return out;
 }

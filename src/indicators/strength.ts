@@ -59,6 +59,11 @@ function emaOfGapped(values: readonly number[], period: number): number[] {
  *
  * `change` is `na` on bar 0, so both smoothed legs inherit that gap and the
  * first printed value lands at `longLength + shortLength - 1`.
+ *
+ * The 100 is applied before the division, the arrangement the definition
+ * fixes. Near the top of the double range that product can overflow where the
+ * ratio would not. The infinity it leaves is absent to every consumer: the
+ * signal average skips it and `nulls` prints a gap.
  */
 function tsiSeries(values: readonly number[], shortLength: number, longLength: number): number[] {
   const pc = change(values);
@@ -66,7 +71,7 @@ function tsiSeries(values: readonly number[], shortLength: number, longLength: n
     emaOfGapped(emaOfGapped(v, longLength), shortLength);
   const smoothed = doubleSmooth(pc);
   const smoothedAbs = doubleSmooth(pc.map((v) => Math.abs(v)));
-  return smoothed.map((v, i) => 100 * (v / smoothedAbs[i]));
+  return smoothed.map((v, i) => (100 * v) / smoothedAbs[i]);
 }
 
 /**
