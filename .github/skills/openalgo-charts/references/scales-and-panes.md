@@ -506,9 +506,10 @@ Heights are **relative weights**, not pixels: pane height is `chartHeight * weig
 | `chart.setPaneWeight(index, weight)` | `void` | Clamped to a minimum of `0.05`. Unknown index is a silent no-op. |
 | `chart.paneWeight(index)` | `number` | `0` for an unknown index. |
 | `chart.removePane(index)` | `boolean` | Removes its series, data rows and indicators. `false` for the price pane, in any slot. |
-| `chart.movePane(index, -1 \| 1)` | `boolean` | Swaps with the neighbour and re-appends the DOM in order. Any pane moves, the price pane included, and any pane can displace it. |
-| `chart.primaryPaneIndex()` | `number` | The slot the price pane holds now: `0` until something moves it. |
-| `chart.setPrimaryPaneIndex(index)` | `boolean` | Move the price pane to a slot, one `movePane` step at a time (one `paneMoved` per step). `false` for an unknown slot or the one it holds. |
+| `chart.movePane(index, -1 \| 1)` | `boolean` | Swaps with the neighbour and re-appends the DOM in order. By default the price pane is pinned: a move that takes it off slot 0 or displaces it is refused. With `movablePrimaryPane` any pane moves, the price pane included. |
+| `chart.primaryPaneIndex()` | `number` | The slot the price pane holds now: always `0` without `movablePrimaryPane`, and `0` until something moves it with it. |
+| `chart.setPrimaryPaneIndex(index)` | `boolean` | Move the price pane to a slot, one `movePane` step at a time (one `paneMoved` per step). `false` for an unknown slot or the one it holds, and always `false` without `movablePrimaryPane`. |
+| `chart.movablePrimaryPane()` | `boolean` | Whether the chart was built with `movablePrimaryPane`. |
 | `chart.maximizePane(index)` | `boolean` | Toggle: one pane takes the whole chart and the rest are **hidden**, not shrunk. Stored weights are untouched, so un-maximizing restores the stack exactly. |
 | `chart.maximizedPane()` | `number \| null` | |
 | `chart.setPaneCollapsed(index, collapsed)` | `boolean` | Fold a study pane to its header strip, or open it again. `false` for the price pane in any slot, an unknown index, a non-boolean, or no change. |
@@ -517,15 +518,25 @@ Heights are **relative weights**, not pixels: pane height is `chartHeight * weig
 
 Each call emits an event: `paneRemoved`, `paneMoved`, `paneMaximized`, `paneCollapsed`, and `paneResized` after a divider drag.
 
-### The price pane is an identity, not a slot
+**Pane 0 is pinned by default.** `removePane(0)` and any `movePane` that would displace pane 0 return `false`, including `movePane(1, -1)`, so the up control on the first study pane does nothing and an explicit pane `0` always means the price. Both also return `false` for an out-of-range index, so check the boolean rather than assuming success.
 
-The price pane (primary pane) is the pane the chart is built with. It holds the price series a host adds without naming a pane and the on-chart studies, and it can sit in any slot: `movePane(0, 1)`, `movePane(1, -1)` on the study below it, or `setPrimaryPaneIndex(panes().length - 1)` put it below its studies. `primaryPaneIndex()` says where it is now.
+### Moving the price pane (opt-in)
 
-Everything that means "the price pane" follows it rather than slot 0: `addSeries`, `addPriceLine`, `addEventMarkers`, `setEvents`, `addPrimitive` and `tradeHost` with no pane, `priceToCoordinate` / `coordinateToPrice` / `priceAxisState` / `priceAxisLayout` with no pane, `priceScaleOptions()`, the `panUp` / `panDown` shortcuts, an `onchart` study and every `overlay` plot, band, table and price-anchored mark, comparisons, price alerts, the drawing magnet and a drawing link. The legend offset, the `Indicators N` count and the chart's background text sit on it (anchor `'primary-pane'`); the time navigator and the brand mark stay on the bottom open pane, which is the price pane when it is at the bottom.
+`createChart(el, { movablePrimaryPane: true })` lets the price pane (primary pane) leave slot 0. It is the pane the chart is built with, and it holds the price series a host adds without naming a pane and the on-chart studies. With the option it can sit in any slot: `movePane(0, 1)`, `movePane(1, -1)` on the study below it (the study row's up control does exactly that), or `setPrimaryPaneIndex(panes().length - 1)` put it below its studies. `primaryPaneIndex()` says where it is now. The option is decided at construction; the widget and the reference host turn it on.
+
+It is opt-in because the move changes what slot 0 means. A host that passes `0` for the price pane would, once a user put a study above the candles, place order and price lines on the study, price a right-click order in the study's units through `coordinateToPrice(y, 0)` and test price alerts against the wrong pane. Before turning it on:
+
+- **Drop every explicit `0` that means the price pane**, or pass `chart.primaryPaneIndex()` read at the moment of use. Omitting the pane is the simplest: every call listed below defaults to the price pane wherever it sits. `panes()[0]` is the top pane, not the price pane.
+- **Follow `paneMoved`.** Anything keyed by slot moves with it, including a DOM overlay drawn over the price pane: position it from `panes()[primaryPaneIndex()].element` after each move.
+- **Persist `primaryPane`.** A host that saves `getState()` through a field allowlist must keep `primaryPane` (and the version 2 it comes with), or a reload puts the price pane back on top.
+- **Forward `plan.primaryPane` when applying a template.** `planIndicatorTemplateState` returns the destination's price-pane slot beside `plan.panes`; restore them together in a version 2 state, and roll back with `getState().primaryPane`, or the restore returns the price pane to the top. `planIndicatorTemplate` takes the slot as its sixth argument.
+- **Structural hosts** (`IndicatorHost`, `DrawingChartHost`, `AlertChartHost`, `ComparisonChartHost`) have an optional `primaryPaneIndex()`; a custom host that omits it keeps slot-0 semantics.
+
+Everything that means "the price pane" follows it rather than slot 0: `addSeries`, `addPriceLine`, `addEventMarkers`, `setEvents`, `addPrimitive` and `tradeHost` with no pane, `priceToCoordinate` / `coordinateToPrice` / `priceAxisState` / `priceAxisLayout` with no pane, `priceScaleOptions()`, the `panUp` / `panDown` shortcuts, an `onchart` study and every `overlay` plot, band, table and price-anchored mark, comparisons, price alerts, the drawing magnet, drawing copy and paste (the clipboard counts panes price pane first, so a drawing copied beside the candles pastes beside the candles on any chart) and a drawing link. The legend offset, the `Indicators N` count and the chart's background text sit on it (anchor `'primary-pane'`); the time navigator and the brand mark stay on the bottom open pane, which is the price pane when it is at the bottom.
 
 It is never removed and never collapses, in any slot. A study pane moved above it, to slot 0, removes, folds and prunes like any other study pane, and its first study row carries the pane controls; the price pane's rows never do. Out-of-range moves return `false`, so check the boolean rather than assuming success.
 
-A moved price pane is saved: `getState()` writes version 2 with `primaryPane` (see [events-and-state](events-and-state.md)).
+A moved price pane is saved: `getState()` writes version 2 with `primaryPane` (see [events-and-state](events-and-state.md)). A chart built without the option refuses to restore such a layout (`restoreState` returns `applied: false` with the reason) rather than laying the price pane's scales, studies and drawings on the study pane in slot 0.
 
 **Removing a pane re-indexes everything below it.** Indicators shift with their pane, but any `paneIndex` a host has cached is stale afterwards.
 

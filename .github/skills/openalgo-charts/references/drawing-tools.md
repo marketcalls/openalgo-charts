@@ -430,7 +430,7 @@ before. `locked` is unchanged.
 
 ```ts
 const mark = draw.add({
-  tool: 'horizontal-line', paneIndex: 0, style: { lineStyle: 'dashed' },
+  tool: 'horizontal-line', paneIndex: chart.primaryPaneIndex(), style: { lineStyle: 'dashed' },
   points: [{ time, price }],
   policy: { editable: false, persistent: false, listed: false },
 });
@@ -523,7 +523,9 @@ Fresh objects with **fresh ids**, never a second reference to the drawing that w
 
 The copy is nudged so it is visibly a second shape: `pasteOffsetBars` (2) along time, and `pasteOffsetPixels` (16) down the price axis. The vertical nudge is applied **per anchor** through `priceToCoordinate` / `coordinateToPrice`, not as one price delta, so it is a rigid *screen* translation and a shape keeps its proportions on a logarithmic scale.
 
-A `paneIndex` the receiving chart does not have is folded onto one it does. Without that, `addPrimitive` would conjure an empty pane on the target chart.
+The clipboard counts panes **price pane first**: the price pane is `0` and the study panes follow in their order, whatever slot the price pane held on the source chart. `copy` and `paste` convert, so a drawing copied beside the candles pastes beside the candles on a chart that keeps its price pane below its studies (`movablePrimaryPane`), and a study-pane drawing lands on the study pane in the same position. On a chart with the price pane on top, which is every chart without the option, that is the chart's own slot, as it always was.
+
+A `paneIndex` the receiving chart does not have is folded onto one it does, counted the same way, so a drawing from a taller stack lands on the last study pane rather than on the price pane. Without that, `addPrimitive` would conjure an empty pane on the target chart.
 
 ## Persistence
 

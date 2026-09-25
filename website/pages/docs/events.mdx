@@ -60,7 +60,7 @@ it on teardown (component unmount, route change) so listeners never leak.
 | `resize` | `{ width, height }` | The container size changes (CSS px). |
 | `lazy-load` | `{ from, to, direction }` | The viewport nears the oldest bar and history paging should run. |
 | `priceAxisMoved` | `{ paneIndex, from, to }` | A pane's price axis moved to the other strip, via `chart.movePriceAxis`. The scale object travels with it, so a menu holding a `scaleId` should follow. |
-| `paneRemoved` / `paneMaximized` / `paneResized` | `{ paneIndex }` | The pane layout changed through a legend button or a divider drag. `paneMoved` reports `{ from, to }` instead: two neighbours swapped, the price pane included. `setPrimaryPaneIndex` emits one per step; read `chart.primaryPaneIndex()` after one. |
+| `paneRemoved` / `paneMaximized` / `paneResized` | `{ paneIndex }` | The pane layout changed through a legend button or a divider drag. `paneMoved` reports `{ from, to }` instead: two neighbours swapped, the price pane included on a chart built with `movablePrimaryPane`. `setPrimaryPaneIndex` emits one per step; read `chart.primaryPaneIndex()` after one. |
 | `paneCollapsed` | `{ paneIndex, collapsed }` | A study pane folded to its header strip or opened again, from `setPaneCollapsed`, its legend button or a host menu. |
 | `indicatorRemoved` / `indicatorSettings` | `{ instanceId, indicatorId, paneIndex }` | An indicator legend's close or gear button was pressed. |
 | `indicatorSource` | `{ instanceId, indicatorId, paneIndex }` | The source button of a descriptor with `hasSource: true` was pressed. The [host supplies the code and viewer](/docs/indicators#source-access-and-legend-controls). |

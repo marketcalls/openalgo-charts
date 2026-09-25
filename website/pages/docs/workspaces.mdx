@@ -83,7 +83,8 @@ armed execution state do not belong in portable workspaces.
 malformed documents reject before application. Document parsers accept JSON
 text. A chart snapshot is version 1, or version 2 when it records `primaryPane`, the
 slot of a price pane moved below its studies; a version 1 snapshot that claims a slot,
-or a slot that names no saved pane, is refused rather than laid onto a study pane. Unknown custom study IDs are preserved so an import does not silently
+or a slot that names no saved pane, is refused rather than laid onto a study pane. Only a
+chart built with `movablePrimaryPane` restores a moved one; any other chart refuses it. Unknown custom study IDs are preserved so an import does not silently
 discard another installation's configuration; the applying host checks that
 those studies are available.
 

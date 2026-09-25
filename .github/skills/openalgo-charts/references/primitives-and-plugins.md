@@ -207,13 +207,15 @@ Keep it cheap: it runs on every `Full` invalidation, which includes every `serie
 Attachment:
 
 ```ts
-chart.addPrimitive(primitive, paneIndex = 0);
+// Every paneIndex below defaults to the price pane: slot 0, or wherever it sits
+// on a chart built with movablePrimaryPane. Omit it for price-pane furniture.
+chart.addPrimitive(primitive, paneIndex?);
 chart.removePrimitive(primitive);
 
-chart.addPriceLine({ price, color, lineWidth, dashed, id }, paneIndex = 0); // returns PriceLine
-chart.addEventMarkers(paneIndex = 0, { clustering: false });                // returns EventMarkers
+chart.addPriceLine({ price, color, lineWidth, dashed, id }, paneIndex?);    // returns PriceLine
+chart.addEventMarkers(paneIndex?, { clustering: false });                   // returns EventMarkers
 series.createMarkers();                                                     // returns SeriesMarkers, wired to that series
-chart.tradeHost(paneIndex = 0);                                             // { addPrimitive, removePrimitive } for the trade tier
+chart.tradeHost(paneIndex?);                                                // { addPrimitive, removePrimitive } for the trade tier
 ```
 
 `PaneLegend` fits its row inside the plot, including hover actions and hit areas.
@@ -275,11 +277,11 @@ Chart conveniences:
 
 | API | Contract |
 |---|---|
-| `setEvents(events, paneIndex = 0)` | Owns the event data and applies `setEventOptions` type filters. |
+| `setEvents(events, paneIndex = primaryPaneIndex())` | Owns the event data and applies `setEventOptions` type filters. |
 | `eventMarkers()` | Returns that chart-owned primitive, or null before data/options install it. |
 | `setEventMarkerOptions(options)` | Configures clustering on the chart-owned strip. |
 | `setEventGroups(groups)` / `setEventGroupVisible(id, visible)` | Configures its hierarchy and visibility. |
-| `addEventMarkers(paneIndex = 0, options = {})` | Creates a separately owned primitive; the host supplies its data and filters. |
+| `addEventMarkers(paneIndex = primaryPaneIndex(), options = {})` | Creates a separately owned primitive; the host supplies its data and filters. |
 
 For chart-owned markers, `chart.on('event:click', handler)` delivers `ChartEventClick`,
 which extends `EventMarkerDetails` with `point: { x, y }` and `paneIndex`. A custom
@@ -334,7 +336,7 @@ const levels = new PriceLevels({
   },
   timezone: 'America/New_York',
 });
-chart.addPrimitive(levels, 0);
+chart.addPrimitive(levels);   // the price pane, wherever it sits
 
 levels.setLevel('previousClose', { color: '#8b95a8', lineStyle: 'dashed' });
 levels.values().previousClose;      // number | null, as of the last frame
@@ -443,7 +445,7 @@ class SupplyZone implements IPrimitive {
   }
 }
 
-chart.addPrimitive(new SupplyZone(24100, 24250), 0);
+chart.addPrimitive(new SupplyZone(24100, 24250));   // the price pane
 chart.subscribeClick((id) => { if (id === 'supply-zone') openZoneEditor(); });
 ```
 

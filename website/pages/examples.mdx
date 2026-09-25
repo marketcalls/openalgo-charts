@@ -148,10 +148,12 @@ return chart;`} />
 
 ## Price pane below the studies
 
-Read the studies first and the price last. The price pane is an identity rather than a
-slot: moving it takes the candles, the moving average drawn on them, the price line, the
-study count and the time navigator along, while RSI and MACD keep their own panes and
-scales. The saved layout keeps the arrangement. See
+Read the studies first and the price last. A chart built with `movablePrimaryPane` treats the
+price pane as an identity rather than a slot: moving it takes the candles, the moving average
+drawn on them, the price line and the study count along, while RSI and MACD keep their own
+panes and scales. The time navigator stays at the foot of the chart, on whichever pane is at
+the bottom. The saved layout keeps the arrangement. The option is off by default, so a host
+that still passes pane `0` for the price keeps its price pane on top. See
 [Moving the price pane](/docs/scales-and-panes#moving-the-price-pane-below-its-studies).
 
 <RunnableExample height={520} tiers={['indicators']} caption="Simulated prices. The buttons move only the price pane; every study stays on its own pane." code={`el.style.display = 'flex';
@@ -162,7 +164,7 @@ el.appendChild(controls);
 const host = document.createElement('div');
 host.style.cssText = 'flex:1;min-height:0;width:100%';
 el.appendChild(host);
-const chart = lib.createChart(host);
+const chart = lib.createChart(host, { movablePrimaryPane: true });
 const bars = lib.generateBars(1700000000, 220, 3600);
 chart.addSeries('candlestick').setData(bars);
 chart.addIndicator('ema', { length: 21 });

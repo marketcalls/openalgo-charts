@@ -854,4 +854,14 @@ ladder chords, the order menu and the price alert row follow the price pane
 wherever it sits (`chart.primaryPaneIndex()`), and so does a template applied
 to the chart. The price pane never folds, in any slot. The arrangement is per
 chart and survives a chart-type switch, reloads and named-workspace restoration
-(it is saved as a version 2 chart state).
+(it is saved as a version 2 chart state). A drawing copied beside the candles
+pastes beside the candles on either chart, wherever each keeps its price pane.
+
+The engine keeps the price pane pinned on top unless a chart is built with
+`movablePrimaryPane: true`, which both of this host's charts are (`main.js`,
+`split.js`). That option is a promise that nothing in the host passes pane `0`
+to mean the price pane: this host names no pane or asks `primaryPaneIndex()` for
+its order and price lines, volume, legends, price levels, replay marks, session
+marks, alert and order rows and axis chords, keeps `primaryPane` in its
+named-workspace allowlist, and forwards `plan.primaryPane` when it applies a
+template.

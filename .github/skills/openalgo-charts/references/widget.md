@@ -205,7 +205,7 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 | `mountDrawingProperties(ctx, anchor?, { ids?, onClose? })` | function | The selected drawings' fields, from `drawingSettingsSchema`. |
 | `mountLevelEditor(ctx, anchor?, { ids? })` | function | Per-level ratio, colour and visibility for the fib and gann tools. |
 | `mountTextEditor(ctx, anchor?, { id?, onDone? })` | function | In-place editing laid over the painted text. Returns a `TextEditorHandle` with `commit()` and `cancel()`; an outside press commits, Escape cancels. |
-| `mountContextMenu(ctx, anchor?, { event?, hooks? })` | function | The right-click menu for the chart's `contextmenu` payload: trade rows when `onOrder` is given, drawing actions on a drawing, scale modes on a price axis, `Move pane up` and `Move pane down` (row ids `pane-up`, `pane-down`, greyed at an edge) over any pane when there are two or more, the price pane included, `Collapse pane` or `Expand pane` (row id `pane-collapse`) over a study pane in any slot, paste, fit, indicators, settings. A menu raised from a button names no pane and has no pane rows. A move or a collapse is saved with the layout and emitted as a `layout` event with reason `paneMoved` or `paneCollapsed`. |
+| `mountContextMenu(ctx, anchor?, { event?, hooks? })` | function | The right-click menu for the chart's `contextmenu` payload: trade rows when `onOrder` is given (limit and stop rows only over the price pane, where the pointer's price is the instrument's; a study pane offers the market rows alone), drawing actions on a drawing, scale modes on a price axis, `Move pane up` and `Move pane down` (row ids `pane-up`, `pane-down`, greyed at an edge, and greyed with the note "price pane stays on top" where a chart built without `movablePrimaryPane` would refuse the swap) over any pane when there are two or more, the price pane included, `Collapse pane` or `Expand pane` (row id `pane-collapse`) over a study pane in any slot, paste, fit, indicators, settings. A menu raised from a button names no pane and has no pane rows. A move or a collapse is saved with the layout and emitted as a `layout` event with reason `paneMoved` or `paneCollapsed`. |
 | `mountAlertEditor(ctx, anchor?, opts?: AlertEditorOptions)` | function | Draft editor seeded by `source` or editing `alertId`. Save validates source identities, finite bounds and expiry in the labelled chart timezone. Cancel never arms an alert. |
 | `mountAlertsPanel(ctx, anchor?, opts?: AlertsPanelOptions)` | function | Live alert list with lifecycle, scope, timing, availability, last delivery, edit, enable/disable and delete. Both options types accept `onClose`. |
 | `attachContextMenu(ctx, hooks?)` | function | Subscribe to the chart's `contextmenu`, `preventDefault`, mount the menu. Returns the unsubscriber. `createWidget` does this itself. |
@@ -280,6 +280,7 @@ Color swatches stay compact. Theme overrides should target these tokens.
 | `lookbackBars` | `number` | `DEFAULT_LOOKBACK_BARS` | Bars per load. |
 | `now` | `() => number` | `Date.now` | Clock for the load window and the capture filename. |
 | `onOrder` | `(order: OrderRequest) => void` | none | Order entry from the right-click menu. Without it the menu draws no trade rows. |
+| `movablePrimaryPane` | `boolean` | `true` (the engine's own default is `false`) | The widget lets the price pane move below its studies, since all of its own chrome follows the price pane. Pass `false` when host code drives `widget.chart` with an explicit pane `0` for the price. See [scales-and-panes](scales-and-panes.md#moving-the-price-pane-opt-in). |
 | `styleNonce` | `string` | none | Response CSP nonce for the shared widget and dialog stylesheet. Style-attribute policy remains the host's responsibility. |
 | `keyboardRoute` | `() => boolean \| undefined` | none | For hosts with several widgets: false silences this widget's chords and chart shortcuts, true sends them here, undefined keeps the usual rule (pointer or focus, or always for a `shortcuts` scope of `global`). Applies to a `ShortcutManager` instance too, shared or not. The chart grid sets it per cell. |
 
@@ -358,7 +359,8 @@ const panel = mountObjectsPanel(widget.context, openButton, {
 panel.close();
 ```
 
-Search matches name, kind and pane labels (displayed starting at 1). Live updates
+Search matches name, kind and pane labels (displayed starting at 1, with the price
+pane named **Price pane** in any slot, in the section headings and the move targets alike). Live updates
 preserve search and action-button focus. Rows show visibility, drawing lock and
 selection, and external-indicator data status. Only supported actions appear; an
 action returning `false` or throwing reports through the existing toast. No primary

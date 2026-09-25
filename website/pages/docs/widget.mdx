@@ -361,7 +361,8 @@ passes through to `createChart` unchanged.
 | `symbolSearch` | `(query) => SymbolMatch[] \| Promise<SymbolMatch[]>` | Called as the user types in the symbol box; the results open as a menu under it. |
 | `lookbackBars` | `number` | Bars per load. Default 500. |
 | `now` | `() => number` | The clock for the load window and the capture filename. Default `Date.now`. |
-| `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). Without it the menu draws no trade rows. |
+| `onOrder` | `(order: OrderRequest) => void` | Order entry from the right-click menu (`{ side, type, price, paneIndex }`). Without it the menu draws no trade rows. Limit and stop rows appear only over the price pane, where the pointer's price is the instrument's; a study pane offers the market rows alone. |
+| `movablePrimaryPane` | `boolean` | On in the widget (the engine's own default is off). Lets a trader move the price pane below the studies, since all of the widget's chrome follows it. Pass `false` if your own code drives `widget.chart` with an explicit pane `0` for the price. See [Moving the price pane](/docs/scales-and-panes#moving-the-price-pane-below-its-studies). |
 | `styleNonce` | `string` | The host's CSP nonce for the shared widget and dialog stylesheet. See [Content Security Policy](#content-security-policy). |
 
 The chrome switches (`rail`, `topbar`, `statusline`, `indicators`) default to on, so a
@@ -374,10 +375,12 @@ from a schema the engine already ships: chart settings from `chartSettingsSchema
 indicator settings from the descriptor, drawing properties from `drawingSettingsSchema`,
 so a field appears only when the renderer reads it. The right-click menu draws its order
 rows only when `onOrder` is given, offers **Move pane up** and **Move pane down** over any
-pane when there are two or more, the price pane included (greyed at the top or bottom), and
-offers **Collapse pane** or **Expand pane** only over a study pane, since the price pane
-always stays open in whatever slot it sits. Moving the price pane below its studies is
-saved with the layout and reported as a `layout` event with reason `paneMoved`.
+pane when there are two or more, the price pane included (greyed at the top or bottom, and
+greyed with a note on a widget built with `movablePrimaryPane: false`, where the price pane
+stays on top), and offers **Collapse pane** or **Expand pane** only over a study pane, since
+the price pane always stays open in whatever slot it sits. Moving the price pane below its
+studies is saved with the layout and reported as a `layout` event with reason `paneMoved`.
+The Objects panel names it **Price pane** in its headings and move targets, wherever it sits.
 </Callout>
 
 ## Live history and reconnect recovery

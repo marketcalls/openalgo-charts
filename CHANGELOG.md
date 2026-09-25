@@ -6,8 +6,20 @@ All notable changes to OpenAlgo Charts.
 
 ### Added
 
-- The price pane can move below its studies. It is now an identity rather than
-  slot 0: `chart.primaryPaneIndex()` reads the slot it holds, and
+- The price pane can move below its studies, on a chart that opts in with the
+  new `movablePrimaryPane` chart option. It is off by default, and a chart
+  without it behaves exactly as 2.5.4 did: the price pane stays at slot 0,
+  `movePane` refuses to move or displace it (so the up control on the first
+  study pane still does nothing), `setPrimaryPaneIndex` returns false and
+  `restoreState` refuses a layout that moved it. It is opt-in because a host
+  that passes an explicit 0 to mean the price pane (a price or order line,
+  `coordinateToPrice(y, 0)` pricing a right-click order, a price alert check,
+  `panes()[0]`) would otherwise read a study's units, order prices included,
+  the moment a user moved a study above the candles. Before turning it on,
+  drop those zeros or ask `chart.primaryPaneIndex()`, and follow `paneMoved`;
+  read the option back with `chart.movablePrimaryPane()`.
+- With the option on, the price pane is an identity rather than slot 0:
+  `chart.primaryPaneIndex()` reads the slot it holds, and
   `chart.setPrimaryPaneIndex(index)` moves it there one `movePane` step at a
   time, one `paneMoved` event per step. `movePane` moves the price pane like any
   other pane, and a study pane can displace it. Everything that meant "the price
@@ -17,37 +29,58 @@ All notable changes to OpenAlgo Charts.
   `priceScaleOptions()`; on-chart studies and every `overlay` plot, band, table,
   price-anchored mark and the instrument tick a study's `calc` sees;
   comparisons, whose handle `paneIndex` now follows its pane; price alerts and
-  drawing alerts; the drawing magnet; a drawing link between charts that keep
-  their price panes in different slots; the magnet crosshair, a scale-targeted
-  pick and the `panUp` / `panDown` keys. The legend offset, the study count and
-  the background text sit on the price pane (the new primitive anchor
-  `'primary-pane'`); the time navigator and the brand mark stay on the bottom
-  open pane. The price pane is never removed and never collapses, in any slot,
-  so a chart always keeps one open pane; a study pane moved above it folds,
-  maximizes, prunes and carries its pane controls like any other.
+  drawing alerts; the drawing magnet; drawing copy and paste; a drawing link
+  between charts that keep their price panes in different slots; the magnet
+  crosshair, a scale-targeted pick and the `panUp` / `panDown` keys. The legend
+  offset, the study count and the background text sit on the price pane (the
+  new primitive anchor `'primary-pane'`); the time navigator and the brand mark
+  stay on the bottom open pane. The price pane is never removed and never
+  collapses, in any slot, so a chart always keeps one open pane; a study pane
+  moved above it folds, maximizes, prunes and carries its pane controls like
+  any other.
 - A moved price pane is saved. `getState()` writes version 2 with `primaryPane`
   only when the price pane is not on top, and writes every other layout as
   version 1, unchanged, so an older reader still opens it and refuses a moved
   one rather than laying the price pane's settings on a study pane.
   `CHART_STATE_VERSION` is now 2. A layout without `primaryPane` restores with
-  the price pane on top; a slot that names no saved pane is refused before
-  anything is applied. Workspace documents accept a version 2 chart and refuse
-  `primaryPane` on version 1. Portable templates are written price pane first,
-  so they apply the same way whichever slot the price pane holds;
+  the price pane on top; a slot that names no saved pane, a `primaryPane` in a
+  version 1 state, and a moved slot on a chart without the option are refused
+  before anything is applied. Workspace documents accept a version 2 chart and
+  refuse `primaryPane` on version 1. Portable templates are written price pane
+  first, so they apply the same way whichever slot the price pane holds;
   `planIndicatorTemplateState` keeps the destination's price pane in place and
   returns `primaryPane` for the restore, and `planIndicatorTemplate` takes the
   destination's price-pane slot as an optional sixth argument.
-- The widget's right-click menu moves the pane under the pointer up or down
-  (`pane-up`, `pane-down`), the price pane included, and the reference host's
-  right-click menus on both charts do the same. Both keep the collapse row off
-  the price pane in every slot and forward the price-pane slot when applying a
-  template.
+- The widget turns the option on for its chart (pass `movablePrimaryPane: false`
+  to keep it pinned), and its right-click menu moves the pane under the pointer
+  up or down (`pane-up`, `pane-down`), the price pane included, greying a row
+  that has nowhere to go or that a pinned price pane refuses. The Objects panel
+  names the price pane in its pane headings and its move targets wherever it
+  sits (`ChartObjects.primaryPaneIndex()`). The reference host builds both of its
+  charts with the option and offers the same rows on both right-click menus.
+  Both keep the collapse row off the price pane in every slot and forward the
+  price-pane slot when applying a template.
+
+### Changed
+
+- `CHART_STATE_VERSION` is 2, but `getState()` still writes 1 for a chart whose
+  price pane is on top. A host that checks a saved state against the constant
+  should refuse only a newer version (`version > CHART_STATE_VERSION`), as
+  `restoreState` does, not demand equality.
+- Drawings on the clipboard count their pane with the price pane first and the
+  study panes after it in order. On a chart that keeps its price pane on top,
+  which is every chart without the option, that is the slot it always was.
 
 ### Fixed
 
 - A restore now hands the drawing tier its drawings before it prunes the study
   panes it emptied, so a drawing kept through a template swap shifts with the
-  panes instead of recreating a pane at its old slot.
+  panes instead of recreating a pane at its old slot. The saved drawings a
+  draw tier reads when it loads later are shifted the same way, by every pane
+  removal or move before it arrives.
+- The widget's right-click menu offered Buy and Sell limit and stop rows over a
+  study pane, priced from that pane's scale: an RSI reading of 58.75 became a
+  limit price. A study pane now offers the market rows only.
 
 ## 2.5.4
 

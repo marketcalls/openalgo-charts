@@ -73,7 +73,7 @@ does not need to be loaded again.
 | `priceAxisWidth` | `number` | `56` | Media px. Also the width reserved for a left axis when one exists. |
 | `timeAxisHeight` | `number` | `22` | Media px, bottom pane only. |
 | `timeScale` | `Partial<TimeScaleOptions>` | `DEFAULT_TIME_SCALE_OPTIONS` | Initial spacing, offset, and spacing limits. Added in 2.1.1; use live scale setters for spacing/offset changes. |
-| `legendOffset` | `{ top?, left? }` | `{ top: 6, left: 8 }` | Where indicator legend rows start in the top-most pane. |
+| `legendOffset` | `{ top?, left? }` | `{ top: 6, left: 8 }` | Where indicator legend rows start in the price pane, the top-most pane unless `movablePrimaryPane` let it move. |
 | `priceOnlyAutoScale` | `boolean` | `false` | Fit the primary series' actual scale using only that series. Does not enable auto-fit. |
 | `indicatorLegendCollapsed` | `boolean` | `false` | Suppress study legend rows while retaining plots and a count toggle. |
 | `crosshairMode` | `'normal' \| 'magnet'` | `'normal'` | `magnet` snaps to O/H/L/C, price pane only, wherever it sits. |
@@ -82,6 +82,7 @@ does not need to be loaded again.
 | `animAutoscale` | `boolean` | value of `animZoom` | Ease automatic price-range changes while navigation reveals new extrema. Manual and fixed scales remain authoritative. Programmatic viewport replacement, primary data replacement, reset and destruction cancel pending navigation motion. Not re-appliable. |
 | `zoomAnchor` | `'cursor' \| 'right'` | `'cursor'` | What a wheel zoom holds still: the bar under the cursor, or the right edge (the latest bar), which a live chart usually wants. Not re-appliable. |
 | `doubleClick` | `'reset' \| 'maximize' \| 'none'` | `'reset'` | Restore the configured default view and autoscale, toggle that pane to the whole stack, or only emit `dblclick`. A listener that sets `handled` on the event suppresses the action for that press. |
+| `movablePrimaryPane` | `boolean` | `false` | Let the price pane leave slot 0: `movePane`, `setPrimaryPaneIndex`, a study pane's up control and a restored layout can put it below its studies. Off, the price pane is pinned at the top exactly as in 2.5.4 and earlier, so an explicit pane `0` always means the price. Turn it on only once the host stops passing `0` for the price pane. Not re-appliable; read it with `chart.movablePrimaryPane()`. See [scales-and-panes](scales-and-panes.md#moving-the-price-pane-opt-in). |
 | `navigation` | `Partial<ChartNavigationOptions>` | `{ panEnabled: true, zoomEnabled: true, mousePan: 'both', defaultVisibleBars: 0 }` | Independent native user navigation, mouse/pen plot-pan direction and the initial/reset view. Touch retains two-axis panning. Use `setNavigationOptions` at runtime. |
 | `conflate` | `boolean` | `false` | OHLC-preserving downsampling when bars fall under ~0.5 device px. |
 | `conflationFactor` | `number` | `1` | Conflation aggressiveness. |
@@ -107,7 +108,7 @@ There is no `width`/`height` option; size comes from the container plus `applySi
 
 ```ts
 const vol = chart.addSeries('histogram', {
-  paneIndex: 0,
+  // No paneIndex: the price pane, wherever it sits.
   priceScaleId: '',                      // hidden overlay scale
   style: { color: '#33415e', base: 0 },
   priceFormat: { type: 'volume' },
@@ -337,7 +338,8 @@ only its listed members (through `removeMany`, one undo step), and `ungroup` ref
 selected, locked?, dataStatus?, capabilities }`. `ChartObjectKind` is
 `'source' | 'indicator' | 'drawing' | 'profile'`. `ChartObjectCapabilities` contains
 boolean `select`, `visibility`, `lock`, `remove`, `settings`, `focus`. `paneIndex` is
-zero-based; the widget displays pane numbers starting at 1. `dataStatus` uses
+zero-based; the widget displays pane numbers starting at 1 and names the price pane
+**Price pane** wherever it sits, read from `objects.primaryPaneIndex()`. `dataStatus` uses
 `IndicatorDataStatus`, including loading, ready, empty, unsupported and error.
 
 | Method | Contract |
@@ -349,6 +351,7 @@ zero-based; the widget displays pane numbers starting at 1. `dataStatus` uses
 | `remove(id)` / `openSettings(id)` / `focus(id)` | Delegates the supported action. |
 | `register(provider)` | Adds explicit host-owned state; returns idempotent registration cleanup. |
 | `refresh()` | Re-reads provider state without polling. |
+| `paneCount()` / `primaryPaneIndex()` | The pane count (a move target list adds one new pane after it) and the price pane's slot, so a list can name the price pane in any slot. |
 | `destroy()` | Releases chart/provider observations without deleting objects; idempotent. |
 
 All six action methods return `false` for missing, unsupported or failed actions.
@@ -471,7 +474,7 @@ The widget defaults to 8 CSS pixels per bar unless a count or spacing is supplie
 | `timeToCoordinate(time)` | UTC seconds -> container x, media px | Interpolates and extrapolates past the right edge. |
 | `coordinateToTime(x)` | container x -> UTC seconds | |
 | `priceToCoordinate(price, paneIndex = primaryPaneIndex())` | price -> container y, media px \| `null` | `null` when the pane does not exist or is collapsed to its header strip (`setPaneCollapsed`), which plots no price. Uses the pane's **readout** scale, which is the one its first visible price series maps to, so it is right on a pane whose axis was moved to the left strip. |
-| `coordinateToPrice(y, paneIndex = 0)` | container y -> price \| `null` | Same scale, and `null` on the same panes. |
+| `coordinateToPrice(y, paneIndex = primaryPaneIndex())` | container y -> price \| `null` | Same scale, and `null` on the same panes. |
 
 Both price conversions force an autoscale pass first, so they are correct before the first paint.
 
@@ -536,7 +539,7 @@ request checks; see [host-integration](host-integration.md).
 
 ## Panes and primitives
 
-`chart.panes(): readonly Pane[]` exposes the live panes (each with `.priceScale`, `.weight`, `.series()`, `.primitives()`, `.base`, `.top`). Pane management lives in [scales-and-panes](scales-and-panes.md); `chart.addPrimitive(primitive, paneIndex = 0)` and `chart.removePrimitive(primitive)` in [primitives-and-plugins](primitives-and-plugins.md).
+`chart.panes(): readonly Pane[]` exposes the live panes (each with `.priceScale`, `.weight`, `.series()`, `.primitives()`, `.base`, `.top`). Pane management lives in [scales-and-panes](scales-and-panes.md); `chart.addPrimitive(primitive, paneIndex?)` (the price pane when none is named) and `chart.removePrimitive(primitive)` in [primitives-and-plugins](primitives-and-plugins.md).
 
 `chart.getState()` / `chart.restoreState(state)` serialise viewport, grid, crosshair mode, timezone, pane weights and price scales, indicators, the settings block (canvas, navigation, status line, trading colours, event filters), and an opaque `drawings` slot. **Series data is never captured**: `restoreState` returns a `RestoreReport` listing series descriptors for the host to rebuild. Navigation options restore before the saved viewport, so its explicit range wins; an older state without `navigation` keeps the chart's current navigation options.
 
@@ -557,7 +560,7 @@ chart.setPriceAxisPlacement(0, 'overlay:spread', 'hidden');
 |---|---|---|
 | `priceAxisPlacement(paneIndex, scaleId)` | `PriceAxisPlacement \| null` | Detached `{ side, order }`; reads placement even when the scale has no active column. |
 | `setPriceAxisPlacement(paneIndex, scaleId, side, order?)` | `boolean` | Places an axis on `'left'`, `'right'` or `'hidden'`. Invalid and unchanged requests return false before mutation. |
-| `priceAxisLayout(paneIndex = 0)` | `readonly PriceAxisSlot[]` | Active columns with `{ scaleId, side, order, x, width }`. `x` is the column's left edge in absolute pane CSS pixels; width is one column. |
+| `priceAxisLayout(paneIndex = primaryPaneIndex())` | `readonly PriceAxisSlot[]` | Active columns with `{ scaleId, side, order, x, width }`. `x` is the column's left edge in absolute pane CSS pixels; width is one column. |
 
 Order zero is nearest the plot. An explicit order is a nonnegative safe integer,
 clamped to the side's available ranks. Omitting it retains the rank on the same

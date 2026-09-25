@@ -167,8 +167,9 @@ See also: [Series and Styling](/docs/series-and-styling)
 ### Pane
 
 A horizontally-stacked chart area that owns one price scale and a set of series and
-primitives. Pane 0 is the main price pane; pane 1, 2, and so on are created automatically
-when you pass `paneIndex: 1` (or higher) to `addSeries`. All panes share the same time
+primitives. The price pane is pane 0, unless a chart built with `movablePrimaryPane` lets
+it move below its studies (`primaryPaneIndex()` says where); pane 1, 2, and so on are created
+automatically when you pass `paneIndex: 1` (or higher) to `addSeries`. All panes share the same time
 axis and scroll together. The price pane takes full weight; sub-panes default to 32% of
 the chart height.
 

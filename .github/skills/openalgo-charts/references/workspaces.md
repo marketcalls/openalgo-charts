@@ -12,7 +12,8 @@ Runtime exports:
   panes, grid slots, focus and crosshair/viewport/symbol/interval sync settings.
   A chart state is version 1, or version 2 with `primaryPane`, the slot of a
   price pane moved below its studies; a `primaryPane` on version 1, or one that
-  names no saved pane, is refused.
+  names no saved pane, is refused. Restoring a moved one needs a chart built with
+  `movablePrimaryPane`; any other chart refuses it rather than misplace the panes.
   Optional layout `rowWeights`/`columnWeights` preserve unequal tracks: positive
   finite values up to 1,000, one per track. Missing lists mean equal tracks.
 - `parseIndicatorTemplate`, `parseIndicatorTemplatePayload`, `parseIndicatorStates`: retain duplicate instances,
