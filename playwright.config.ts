@@ -16,6 +16,10 @@ const DEMO_PORT = Number(process.env.OAC_E2E_DEMO_PORT || 8124);
 const DEMO_URL = `http://127.0.0.1:${DEMO_PORT}`;
 const ENGINE_PORT = process.env.OAC_E2E_ENGINE_PORT || '4173';
 const ENGINE_URL = `http://127.0.0.1:${ENGINE_PORT}`;
+// The widget fixtures get their own server; several checkouts can run the
+// suite at once when each sets distinct ports.
+const WIDGET_PORT = process.env.OAC_E2E_WIDGET_PORT || '4176';
+const WIDGET_URL = `http://127.0.0.1:${WIDGET_PORT}`;
 
 /** The first Python 3 on PATH, as the command to run it by, or null. */
 function pythonOnPath(): string | null {
@@ -49,8 +53,8 @@ export default defineConfig({
     },
     {
       command: 'node tests/e2e/serve.cjs',
-      env: { OAC_E2E_PORT: '4176' },
-      url: 'http://127.0.0.1:4176/dist/openalgo-charts.mjs',
+      env: { OAC_E2E_PORT: WIDGET_PORT },
+      url: `${WIDGET_URL}/dist/openalgo-charts.mjs`,
       reuseExistingServer: false,
       timeout: 30_000,
     },
@@ -70,7 +74,7 @@ export default defineConfig({
     ...(['chromium', 'firefox', 'webkit'] as const).map(browserName => ({
       name: `widget-loading-${browserName}`,
       testMatch: /(?:widget-grid|widget-ui-253|widget-data-loading|widget-localization|widget-alerts|drawing-future|drawing-catalog|analysis-linked-events|widget-objects|navigation-wheel|widget-mobile|branding-watermark|crosshair-snap|workspace-storage|open-interest|alerts|alert-line-drag|table-layout|replay-time|chart-data-export|instruments|indicator-source-markers|indicator-visuals|scale-state|native-timeframe-navigation|native-fill-gradients|native-series-scale-assignment|native-indicator-lifecycle|native-study-scale-assignment|native-requested-provider|native-external-lifecycle|native-indicator-alerts|native-study-dependencies|native-study-source-ui|native-multiple-price-axes|native-plot-scale-assignments|native-template-layouts|native-numerical-indicators|native-chart-preferences|native-typed-inputs|indicator-curved-polylines|table-cell-tooltips|indicator-window-arithmetic|cpr-period-observations|user-navigation-policy(?:-reference)?|indicator-text-style|date-navigation|pane-collapse|native-output-targets)\.spec\.ts/,
-      use: { browserName, baseURL: 'http://127.0.0.1:4176' },
+      use: { browserName, baseURL: WIDGET_URL },
     })),
     // The demo, against its own server. Kept in the list even with no
     // Python, so the spec is found and can report itself skipped.
