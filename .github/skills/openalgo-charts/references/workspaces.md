@@ -121,7 +121,9 @@ await lists.setActiveList(tech.id);
   `moveEntry(id, entry, index)`, and `subscribe(listener)`, called with a detached copy
   after every change this repository commits. It implements the `WatchlistStore`
   contract, which is what the widget's panel takes; a host with server-side lists can
-  implement `WatchlistStore` itself.
+  implement `WatchlistStore` itself. Its `subscribe` listeners must run before the
+  change's own promise resolves, as the repository's do: the panel computes a queued
+  move (a held Alt+Arrow) from the catalog they deliver.
 - Writes are queued and each one is applied to the catalog as stored at that moment, so a
   change made in another session survives. Every mutation takes
   `WatchlistOperationOptions` (`signal`, `expectedRevision`): pass the revision a

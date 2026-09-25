@@ -298,19 +298,31 @@ export function mountWatchlistPanel(ctx: WidgetContext, host: HTMLElement, optio
     event.preventDefault();
     event.stopPropagation();
     const step = event.key === 'ArrowDown' ? 1 : -1;
-    const list = current();
     if (event.altKey) {
       // Only list order is the user's own; a value sort would move the row straight back.
-      if (list === null || catalog === null || sort.key !== 'list') return;
-      const index = list.entries.findIndex(entry => sameInstrument(entry, row.entry));
-      const target = index + step;
-      if (index < 0 || target < 0 || target >= list.entries.length) return;
-      showMessage('');
-      store.moveEntry(list.id, row.entry, target, { expectedRevision: catalog.revision }).catch(fail);
+      if (sort.key === 'list') moveRow(row.entry, step);
       return;
     }
     const at = order.indexOf(keyOf(row.entry));
     rows.get(order[at + step])?.open.focus();
+  }
+
+  /**
+   * Moves run one at a time, each computed from the catalog the one before it
+   * saved, so a held key is a run of moves rather than a conflict with itself.
+   * The revision still refuses a move another session has overtaken.
+   */
+  let moving: Promise<void> = Promise.resolve();
+  function moveRow(entry: WatchlistEntry, step: number): void {
+    moving = moving.then(async () => {
+      const list = current();
+      if (destroyed || list === null || catalog === null || sort.key !== 'list') return;
+      const index = list.entries.findIndex(item => sameInstrument(item, entry));
+      const target = index + step;
+      if (index < 0 || target < 0 || target >= list.entries.length) return;
+      showMessage('');
+      try { await store.moveEntry(list.id, entry, target, { expectedRevision: catalog.revision }); } catch (error) { fail(error); }
+    });
   }
 
   function sorted(): string[] {

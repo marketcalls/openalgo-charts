@@ -49,7 +49,11 @@ export interface WatchlistRepositoryOptions { now?: () => number; id?: () => str
  */
 export interface WatchlistStore {
   load(): Promise<WatchlistCatalog>;
-  /** Called after each change this store commits. Returns the unsubscribe. */
+  /**
+   * Called after each change this store commits, before that change's promise
+   * resolves, as `WatchlistRepository` does: the panel computes a following
+   * move from the catalog delivered here. Returns the unsubscribe.
+   */
   subscribe(listener: (catalog: WatchlistCatalog) => void): () => void;
   createList(name: string, entries?: readonly WatchlistEntry[], options?: WatchlistOperationOptions): Promise<Watchlist>;
   renameList(id: string, name: string, options?: WatchlistOperationOptions): Promise<Watchlist>;

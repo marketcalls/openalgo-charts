@@ -278,6 +278,20 @@ describe('watchlist panel', () => {
     r.panel.destroy();
   });
 
+  it('lands two quick Alt+Arrow moves in turn instead of calling the second a conflict', async () => {
+    const r = await rig({ lists: [['Order', [nse('A'), nse('B'), nse('C')]]] });
+    const a = r.rows()[0].querySelector('.oac-watchlist__open') as FakeElement;
+    a.focus();
+    // A held key repeats before the first move is saved.
+    fireKey(a, 'ArrowDown', { altKey: true });
+    fireKey(a, 'ArrowDown', { altKey: true });
+    await flush();
+    expect(r.host.querySelector('.oac-watchlist__message')!.hidden).toBe(true);
+    expect(r.symbols()).toEqual(['B', 'C', 'A']);
+    expect((await r.store.load()).lists[0].entries).toEqual([nse('B'), nse('C'), nse('A')]);
+    r.panel.destroy();
+  });
+
   it('opens the chosen instrument and marks the chart\'s own row', async () => {
     const r = await rig({ lists: [['Dual', [nse('INFY'), { symbol: 'INFY', exchange: 'BSE' }]]] });
     expect(r.rows()[0].getAttribute('aria-current')).toBe('true');
