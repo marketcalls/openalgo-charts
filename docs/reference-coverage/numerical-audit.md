@@ -254,6 +254,52 @@ including ordinary directional and Hull values, RSI recovery, absent Balance
 of Power points, WaveTrend crossing markers, AlphaTrend recovery and finite
 Seasonality table pixels. Screenshots were inspected.
 
+## Gap recovery in running studies
+
+The classification of the refreshed comparison attributed six further causes to
+the chart: a missing observation that removed a running study for the rest of
+the history, or a regrouped formula. Each is now corrected at its source, and a
+missing input costs only the bars it covers, apart from the Volatility Stop and
+OBV cases listed under the remaining distinctions.
+
+- The base `atr` seeds from the first complete window of finite true ranges,
+  keeps its average across a missing or overflowing true range and resumes from
+  it. A running overflow stays unavailable instead of reseeding. A true range
+  reads the previous close, so a missing close costs the ATR the next bar rather
+  than its own. Keltner, Chandelier Exit, Chande Kroll Stop, Median, HalfTrend
+  and Volatility Stop read it and inherit the correction, and Volatility Stop no
+  longer falls back to the unmultiplied true range after a gap.
+- `supertrend` leaves a bar with no ATR or no close absent, with its bands,
+  direction and last accepted close unchanged. A missing close has a finite ATR
+  on its own bar, and its NaN comparison flipped the trend, which the resumed
+  ATR would otherwise have carried into every later bar.
+- VWAP leaves a bar with a missing price or a nonfinite volume absent and its
+  totals untouched; an undefined volume still counts as nothing traded.
+- TWAP skips a missing price and divides by the bars it counted.
+- OBV and Accumulation/Distribution read a nonfinite volume as nothing traded,
+  as the money-flow studies already did. Accumulation/Distribution leaves a bar
+  missing its high, low or close, or whose span or term overflows, absent with
+  its total unchanged.
+- Parabolic SAR steps over a bar missing its high, low or close, seeds from the
+  first two complete bars and clamps against the two complete bars before each
+  step.
+- TEMA adds its three terms left to right, as the specification fixes them.
+
+The minimal ATR, Keltner, VWAP, TWAP and TEMA cases the classification recorded
+for these causes now read exactly as their expected values. The Supertrend line,
+OBV, A/D and Parabolic SAR cases differ only in cells of a documented contract
+difference: the Supertrend seed bar, the carried OBV and A/D total on the bar
+whose volume is missing, and the Parabolic SAR clamp. Finite results on complete
+data are unchanged: digests of 27 affected configurations over five generated
+sessions, recorded from 2.5.4 before the change, match bit for bit, and the
+public `atr` equals the 2.5.4 recurrence at periods 1, 2, 3, 14, 50 and 500.
+TEMA is the exception by design and moves only in its last digits. Reverting
+each correction fails its own regression tests, and four browser regressions
+paint the resumed ATR, Supertrend, VWAP, band, Parabolic SAR, OBV and
+Accumulation/Distribution readings, a Supertrend that keeps its side across a
+missing close, and no bridge across a gap, in all three browser engines.
+Screenshots were inspected.
+
 ## Remaining contract distinctions
 
 Known distinctions include:
@@ -266,6 +312,15 @@ Known distinctions include:
   and parameters alone does not make those algorithms equivalent.
 - Several native recursive studies remain unavailable after an interior source
   hole, while the language recurrences preserve their prior state and resume.
+  ATR and the studies built on it, Supertrend, VWAP, TWAP,
+  Accumulation/Distribution and Parabolic SAR now resume after a missing price
+  or volume, and OBV after a missing volume; the rest remain open. Two of the
+  corrected studies still do not hold their state across every gap. Volatility
+  Stop restarts its stop at the source on a bar with no true range, as its
+  reference definition does, and after a missing source, so its level and
+  sometimes its side differ from complete data for some bars. OBV adds nothing
+  on a bar with a missing close or on the next bar, which compares with it, so
+  its total stays offset by that step.
 - Native extrema, zero-denominator handling and missing-volume defaults can
   change availability even when complete, ordinary inputs agree.
 

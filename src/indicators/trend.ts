@@ -269,6 +269,11 @@ export const VWAP: IndicatorDescriptor = {
       if (restarts[i]) { pv = 0; vol = 0; pv2 = 0; }
       const v = bars[i].volume ?? 0;
       const x = values[i];
+      // A missing price or an unusable volume leaves this bar absent and the
+      // totals as they were. Adding it in would blank the line and every band
+      // until the next restart, which on the continuous anchor is never. An
+      // undefined volume is still a bar that traded nothing.
+      if (!Number.isFinite(x) || !Number.isFinite(v)) continue;
       pv += x * v;
       pv2 += x * x * v;
       vol += v;
@@ -377,21 +382,38 @@ export const PARABOLIC_SAR: IndicatorDescriptor = {
   calc: (bars, s) => {
     const n = bars.length;
     const out = new Array<number>(n).fill(NaN);
-    if (n < 2) return { sar: nulls(out) };
     const step = num(s, 'start', 0.02);
     const inc = num(s, 'increment', 0.02);
     const max = num(s, 'maximum', 0.2);
 
-    let rising = bars[1].close >= bars[0].close;
-    let sar = rising ? bars[0].low : bars[0].high;
-    let ep = rising ? bars[1].high : bars[1].low;
+    // Only complete bars take part. A bar missing its high, low or close is a
+    // gap that leaves the stop, trend and acceleration as they were: it cannot
+    // seed, and the clamp reads the two complete bars before this one, so one
+    // hole cannot turn the stop NaN for the rest of the history.
+    let prev: Bar | undefined;
+    let prev2: Bar | undefined;
+    let rising = false;
+    let sar = NaN;
+    let ep = NaN;
     let af = step;
-    // The seed bar carries the seed itself. Accelerating and testing for a
-    // reversal on it uses an extreme point taken from that same bar, which can
-    // flip the trend before a single step has been walked.
-    out[1] = sar;
 
-    for (let i = 2; i < n; i++) {
+    for (let i = 0; i < n; i++) {
+      const bar = bars[i];
+      if (!Number.isFinite(bar.high) || !Number.isFinite(bar.low) || !Number.isFinite(bar.close)) continue;
+      if (prev === undefined) { prev = bar; continue; }
+      if (prev2 === undefined) {
+        rising = bar.close >= prev.close;
+        sar = rising ? prev.low : prev.high;
+        ep = rising ? bar.high : bar.low;
+        // The seed bar carries the seed itself. Accelerating and testing for a
+        // reversal on it uses an extreme point taken from that same bar, which can
+        // flip the trend before a single step has been walked.
+        out[i] = sar;
+        prev2 = prev;
+        prev = bar;
+        continue;
+      }
+
       sar += af * (ep - sar);
 
       // The reversal is decided on the propagated stop, before the clamp below:
@@ -400,26 +422,24 @@ export const PARABOLIC_SAR: IndicatorDescriptor = {
       // the stop is the ending trend's extreme, and that extreme includes this
       // bar: a stop left inside the bar that triggered it is already breached
       // the moment it is plotted.
-      if (rising && bars[i].low < sar) {
-        rising = false; sar = Math.max(ep, bars[i].high); ep = bars[i].low; af = step;
-      } else if (!rising && bars[i].high > sar) {
-        rising = true; sar = Math.min(ep, bars[i].low); ep = bars[i].high; af = step;
-      } else if (rising && bars[i].high > ep) {
-        ep = bars[i].high; af = Math.min(max, af + inc);
-      } else if (!rising && bars[i].low < ep) {
-        ep = bars[i].low; af = Math.min(max, af + inc);
+      if (rising && bar.low < sar) {
+        rising = false; sar = Math.max(ep, bar.high); ep = bar.low; af = step;
+      } else if (!rising && bar.high > sar) {
+        rising = true; sar = Math.min(ep, bar.low); ep = bar.high; af = step;
+      } else if (rising && bar.high > ep) {
+        ep = bar.high; af = Math.min(max, af + inc);
+      } else if (!rising && bar.low < ep) {
+        ep = bar.low; af = Math.min(max, af + inc);
       }
 
       // SAR may not penetrate the prior two bars' range, on whichever side the
       // trend now runs. Applied last so a reversal stop is contained too.
-      const lo1 = bars[i - 1].low;
-      const hi1 = bars[i - 1].high;
-      const lo2 = bars[i - 2].low;
-      const hi2 = bars[i - 2].high;
-      if (rising) sar = Math.min(sar, lo1, lo2);
-      else sar = Math.max(sar, hi1, hi2);
+      if (rising) sar = Math.min(sar, prev.low, prev2.low);
+      else sar = Math.max(sar, prev.high, prev2.high);
 
       out[i] = sar;
+      prev2 = prev;
+      prev = bar;
     }
     return { sar: nulls(out) };
   },

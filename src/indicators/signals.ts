@@ -118,7 +118,9 @@ export const VORTEX: IndicatorDescriptor = {
  * details are load-bearing:
  *   - while the ATR is still warming there is no band to scale, and the formula
  *     falls back to the bar's own true range, unmultiplied, so the stop exists
- *     from bar 0;
+ *     from bar 0. The ATR resumes after a missing bar, so this covers the
+ *     warmup alone. An ATR that never resumed would leave the stop on the bare
+ *     true range for the rest of the history, plausible and a factor too tight;
  *   - the stop only ever ratchets *towards* price in the live direction, which
  *     is what makes it a stop rather than a band;
  *   - a flip resets the running extreme to the current source and recomputes the
