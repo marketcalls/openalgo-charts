@@ -188,3 +188,37 @@ test('IndexedDB watchlists survive a reload and refuse a second tab\'s stale wri
   expect(writes.sort()).toEqual(['WatchlistConflictError', 'saved']);
   await Promise.all([page, other].map(tab => tab.evaluate(() => (window as any).__storage.close())));
 });
+
+test('the website example prices its rows and its chart from one simulated exchange', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1000, height: 640 });
+  await page.route('**/watchlist-example.html', route => route.fulfill({ contentType: 'text/html', body:
+    '<!doctype html><html><head><style>html,body{margin:0;background:#101010}#example{width:960px;height:560px}</style></head><body><div id="example"></div></body></html>' }));
+  await page.goto('/watchlist-example.html');
+  const [page_, market] = await Promise.all([
+    page.request.get('/website/pages/examples.mdx').then(response => response.text()),
+    page.request.get('/website/components/synthetic-market.ts').then(response => response.text()),
+  ]);
+  // The same code the site runs: the section's template, with the shared bar generator spliced in.
+  const template = page_.split('## Watchlists and news')[1].split('code={`')[1].split('`} />')[0];
+  const code = template.replace('${STOCK_BARS_SOURCE}', market.split('STOCK_BARS_SOURCE = `')[1].split('`;')[0]);
+  await page.evaluate(async source => {
+    const all = '/dist/openalgo-charts.all.mjs', tier = '/dist/openalgo-charts.widget.mjs', studies = '/dist/openalgo-charts.indicators.mjs';
+    const [lib, widget] = await Promise.all([import(all), import(tier), import(studies)]);
+    const run = new Function('el', 'lib', source) as (el: HTMLElement, lib: unknown) => unknown;
+    (window as any).__example = run(document.getElementById('example')!, { ...lib, createWidget: (host: HTMLElement, options: object) => widget.createWidget(host, { theme: 'dark', ...options }) });
+  }, code);
+  const panel = page.locator('#example .oac-watchlist');
+  await expect(panel.locator('tbody tr')).toHaveCount(8);
+  await expect(panel.locator('tr[data-symbol="NOVA"] .oac-watchlist__last')).toHaveText(/^\d[\d,]*\.\d{2}$/);
+  await expect(panel.locator('.oac-watchlist__status')).toHaveText('Live quotes');
+  // The chart's forming bar and the NOVA row read the same exchange, tick for tick.
+  await expect.poll(() => page.evaluate(() => {
+    const text = document.querySelector('#example tr[data-symbol="NOVA"] .oac-watchlist__last')!.textContent!.replace(/,/g, '');
+    const bars = (window as any).__example.series.getData();
+    return Math.abs(Number(text) - bars[bars.length - 1].close) < 0.005;
+  }), { timeout: 10_000 }).toBe(true);
+  await page.locator('#example').screenshot({ path: info.outputPath('website-watchlist-example.png') });
+  expect(errors).toEqual([]);
+});

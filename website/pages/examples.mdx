@@ -341,24 +341,35 @@ panel as Data and Objects. Only the rows on screen hold a quote stream. Sort by 
 column, open a row to chart it, or switch to **News** and open an item. Unreleased:
 see [Watchlists & News](/docs/watchlists-and-news).
 
-<RunnableExample height={560} tiers={['widget']} caption="Simulated quotes and headlines. The rows take prices only from the quote source; this simulated source starts each symbol at its simulated last close." code={`${STOCK_BARS_SOURCE}
+<RunnableExample height={560} tiers={['widget']} caption="Simulated quotes, bars and headlines. One simulated exchange prices both the chart and the rows, and the rows take their prices only from the quote source, never from a candle." code={`${STOCK_BARS_SOURCE}
 const names = ['NOVA', 'ORBIT', 'PULSE', 'QUILL', 'RIDGE', 'SOLAR', 'TIDAL', 'UMBRA'];
-const base = symbol => 40 + Array.from(symbol).reduce((n, c) => n + c.charCodeAt(0), 0) % 160;
-const bars = (symbol, seconds) => stockBars(1700000000, 180, seconds, base(symbol), symbol.length);
-// The simulated market's own price: its last 5m close, then a small drift.
-const opening = {};
-const reference = symbol => (opening[symbol] ??= bars(symbol, 300).at(-1).close);
-const quote = (item, step) => {
-  const last = reference(item.symbol) * (1 + Math.sin(step / 4 + item.symbol.length) * 0.01);
-  return { ...item, last: Math.round(last * 100) / 100, previousClose: Math.round(reference(item.symbol) * 98.5) / 100 };
+// A simulated exchange owns every price. The bar feed and the quote source each
+// read it; a quote is never taken from a candle.
+const seed = symbol => Array.from(symbol).reduce((n, c) => n + c.charCodeAt(0), 0);
+const exchange = {
+  previousClose: symbol => 40 + seed(symbol) % 160,
+  last(symbol) {
+    const step = Math.floor(Date.now() / 700);
+    const move = (seed(symbol) % 7 - 3) / 100 + Math.sin(step / 4 + seed(symbol)) * 0.01;
+    return Math.round(exchange.previousClose(symbol) * (1 + move) * 100) / 100;
+  },
 };
+const round = value => Math.round(value * 100) / 100;
+const seconds = interval => interval === '1d' ? 86400 : 300;
+// Simulated history, scaled to end at the exchange's price now.
+const bars = (symbol, interval) => {
+  const series = stockBars(1700000000, 180, seconds(interval), exchange.previousClose(symbol), seed(symbol));
+  const scale = exchange.last(symbol) / series[series.length - 1].close;
+  return series.map(bar => ({ ...bar, open: round(bar.open * scale), high: round(bar.high * scale),
+    low: round(bar.low * scale), close: round(bar.close * scale) }));
+};
+const quote = item => ({ ...item, last: exchange.last(item.symbol), previousClose: exchange.previousClose(item.symbol) });
 const quotes = {
-  getQuotes: async ({ instruments }) => instruments.map(item => quote(item, 0)),
+  getQuotes: async ({ instruments }) => instruments.map(quote),
   subscribeQuotes(instruments, { onQuote, onStatus }) {
     const [item] = instruments;
-    let step = 0;
     if (onStatus) onStatus('live');
-    const timer = setInterval(() => onQuote(quote(item, ++step)), 700);
+    const timer = setInterval(() => onQuote(quote(item)), 700);
     return () => clearInterval(timer);
   },
 };
@@ -379,8 +390,20 @@ store.createList('Simulated', names.map(symbol => ({ symbol, exchange: 'DEMO' })
 const widget = lib.createWidget(el, {
   symbol: 'NOVA', exchange: 'DEMO', interval: '5m', persist: false, intervals: ['5m', '1d'],
   feed: {
-    getBars: async request => bars(request.symbol, request.interval === '1d' ? 86400 : 300),
-    subscribeBars: () => () => {},
+    getBars: async request => bars(request.symbol, request.interval),
+    // The forming bar follows the same exchange the rows quote.
+    subscribeBars(request, onBar) {
+      const history = bars(request.symbol, request.interval);
+      const forming = { ...history[history.length - 1] };
+      const timer = setInterval(() => {
+        const price = exchange.last(request.symbol);
+        forming.close = price;
+        forming.high = Math.max(forming.high, price);
+        forming.low = Math.min(forming.low, price);
+        onBar({ ...forming });
+      }, 700);
+      return () => clearInterval(timer);
+    },
   },
   watchlist: { store, quotes },
   news: { feed: news, pageSize: 8 },
