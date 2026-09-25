@@ -4,6 +4,7 @@ import { autosave } from './persist.js';
 import { capturePaneTarget } from './pane-target.js';
 import { createColorPicker, applyTokens, widgetTokens } from '/dist/openalgo-charts.widget.mjs';
 import { bindTypedField, typedFieldValue, typedFieldError, validateTypedRows, mountReferenceInputControls } from './indicator-input-controls.js';
+import { studyAllows } from './host-study.js';
 
 let app;
 
@@ -40,12 +41,20 @@ export function renderIndicatorChips() {
   const target = capturePaneTarget(app);
   const chart = target?.chart;
   if (!chart) return;
-  for (const inst of chart.indicators()) {
+  // A study its host keeps out of the inventory stays out of the chips too.
+  for (const inst of chart.indicators().filter((study) => studyAllows(study, 'listed'))) {
     const chip = document.createElement('span');
     chip.className = 'chip';
     const first = inst.series(Object.keys(inst.values())[0]);
     const color = (inst.settings().color) || '#8892a6';
     chip.innerHTML = `<span class="sw" style="background:${esc(String(color))}"></span><b>${esc(inst.name)}</b>`;
+    // No remove button on a study the host keeps; the chip says why instead.
+    if (!studyAllows(inst, 'removable')) {
+      chip.title = `${inst.name} is protected by the host`;
+      chip.classList.add('is-protected');
+      host.appendChild(chip);
+      continue;
+    }
     const x = document.createElement('button');
     x.textContent = '×';
     x.title = 'remove';
@@ -95,6 +104,8 @@ export function openSettings(instanceId, target = capturePaneTarget(app)) {
   if (!target?.current()) return;
   const inst = target.chart.indicators().find((i) => i.id === instanceId);
   if (!inst) return;
+  // Every write would be refused, so the dialog says why instead of opening.
+  if (!studyAllows(inst, 'configurable')) { el('status').textContent = `${inst.name} settings are protected by the host`; return; }
   disposeSettings?.();
   settingsTarget = target;
   settingsFor = inst;

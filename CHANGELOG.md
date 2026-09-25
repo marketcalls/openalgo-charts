@@ -2,6 +2,69 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Added
+
+- Study policies. A study carries an `IndicatorPolicy` of four independent flags,
+  each defaulting to true, the way a drawing carries its `DrawingPolicy`:
+  `removable`, `configurable`, `movable` and `listed`. Pass it with
+  `addIndicator(id, settings, { policy })`, read it with `indicator.policy()`
+  (the flags that are false) and replace it with `indicator.setPolicy(policy)`,
+  or `null`, which is always the host's act. A policy restricts the user: every
+  native call a user control makes treats its caller as the user unless it passes
+  `{ force: true }` (`IndicatorEditOptions`), and returns false with nothing
+  changed when refused. `removable` covers `chart.removeIndicator`,
+  `indicator.remove` and `chart.removePane` for a pane holding the study;
+  `configurable` covers `setSettings`, `setPriceScale` and `setPlotPriceScales`;
+  `movable` covers `chart.moveIndicator`, `chart.reorderIndicator` and
+  `chart.moveInSeriesStack`. `setSettings` and `remove` now return a boolean. The
+  legend row drops its close button and gear (and a stale press on either does
+  nothing), `ChartObjects` withholds remove, settings, reorder, move and place and
+  leaves an unlisted study out, and the widget greys its settings and remove menu
+  rows and the picker's remove button with the note "protected", declines the
+  settings dialog with the reason, and leaves an unlisted study out of the picker
+  and the alert source lists. Hiding a study stays the user's choice. A restore is
+  the host's act and replaces a protected study. The chart state saves only the
+  restrictions (`IndicatorState.policy`), so an unrestricted layout is written
+  exactly as before and older layouts restore unrestricted; a malformed policy
+  refuses the restore. Workspace documents keep policies, portable templates drop
+  them, and a template applied in `replace` mode keeps every study the user may not
+  remove, on its own pane. `parseIndicatorPolicy` validates a policy. The yfinance
+  host adds **Add Protected VWAP** to its chart menu, and removes it with `force`.
+- Draw order across sources, studies and drawings. A pane paints in bands, back
+  to front: behind the series, the series band, the overlay band (price lines,
+  markers, study levels) and in front. The series band holds the price source and
+  each study in paint order, read with `chart.seriesStack(paneIndex)`, and
+  `chart.moveInSeriesStack(id, target, 'above' | 'below', options?)` moves the source
+  or a study next to another entry; a study's fills, levels and markers keep their
+  bands and follow the new study order. A drawing can now sit between studies:
+  `Drawing.stackAbove` names the entry it paints directly above,
+  `draw.placeInStack(id, { drawing } | { entry }, where)` puts it next to another
+  drawing or an entry as one undo step, `reorder`, `bringToFront` and `sendToBack`
+  work within the slot it paints in, and `sendBehindSeries` and `bringAboveSeries`
+  take it out of the series band. Any primitive can be placed the same way with
+  `chart.setPrimitiveStackAbove(primitive, entry)`; a batching renderer flushes
+  before it, so the WebGL2 backend keeps the order. `ChartObjects.stack(paneIndex)`
+  lists a pane back to front, and `canPlace` and `place` move a drawing anywhere in
+  its pane and a source or study only between whole slots, taking the drawings
+  placed on it along; a move the bands cannot paint is refused. Rows gain `band`,
+  `stackAbove` and the `place` capability (`ChartObjectBand`,
+  `ChartObjectDrawingSource.placeInStack`, `DrawingStackTarget`). The pointer takes
+  what is painted on top: the front drawing layer answers for every layer of its
+  pane front to back, and a right-click over a drawing and a series painted over it
+  targets the series (`PrimitiveHit.paintedBy`), which also applies to a drawing
+  sent behind the series. The price source stays the pane's instrument wherever it
+  paints: the crosshair readout, the last-price line and a rebased axis describe it.
+  A moved source saves `ChartState.sourceAbove`; a drawing's slot is saved in the
+  drawing document and carried by duplicate and the clipboard; a drawing whose
+  study is gone paints in front until the study returns. Layouts and drawing
+  documents from 2.5.5 load and paint unchanged. The widget's Objects panel lists
+  each pane in draw order, notes a drawing behind the series or above an entry,
+  reorders by dragging a row onto the upper or lower half of another and refuses a
+  drop the bands cannot paint before it lands, and Earlier and Later step through
+  the same order.
+
 ## 2.5.5
 
 2026-09-26

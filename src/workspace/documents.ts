@@ -1,5 +1,5 @@
 import type { ChartState, ChartSettingsState, IndicatorState, PaneState, PriceScaleId, SeriesState } from 'openalgo-charts';
-import { parseAlertsDocument, parsePaneState } from 'openalgo-charts';
+import { parseAlertsDocument, parseIndicatorPolicy, parsePaneState } from 'openalgo-charts';
 import { boolean, choice, list, number, readJson, record, string, WorkspaceDocumentError, type Json } from './json';
 
 export { WorkspaceDocumentError } from './json';
@@ -59,7 +59,11 @@ function priceScaleId(input: Json, label: string): PriceScaleId {
   return input as PriceScaleId;
 }
 
-function indicatorStates(input: Json | undefined, preserveIdentity = true): IndicatorState[] {
+/**
+ * `keepPolicy` false drops each study's policy: a portable template is the
+ * user's own copy, and a host's restriction must not ride along into it.
+ */
+function indicatorStates(input: Json | undefined, preserveIdentity = true, keepPolicy = true): IndicatorState[] {
   const ids = new Set<string>();
   return list(input, 'indicators', 256).map(item => {
     const entry = record(item, 'indicator');
@@ -85,6 +89,12 @@ function indicatorStates(input: Json | undefined, preserveIdentity = true): Indi
       out.studyInputs = keys;
     }
     if (entry.visible !== undefined) out.visible = boolean(entry.visible, 'indicator visibility');
+    if (keepPolicy && entry.policy !== undefined) {
+      let policy: ReturnType<typeof parseIndicatorPolicy>;
+      try { policy = parseIndicatorPolicy(entry.policy); }
+      catch { throw new WorkspaceDocumentError('Invalid indicator policy'); }
+      if (Object.keys(policy).length) out.policy = { ...policy };
+    }
     if (entry.priceScaleId !== undefined) {
       out.priceScaleId = priceScaleId(entry.priceScaleId, 'indicator priceScaleId');
     }
@@ -111,7 +121,7 @@ function templateIndicatorStates(input: Json | undefined, requireIdentity = fals
     const keys = record(item, 'indicator').studyInputs;
     return Array.isArray(keys) && keys.length > 0;
   });
-  const states = indicatorStates(entries, connected || requireIdentity);
+  const states = indicatorStates(entries, connected || requireIdentity, false);
   if (requireIdentity && states.some(state => state.instanceId === undefined)) {
     throw new WorkspaceDocumentError('Template layout requires every indicator instance ID');
   }
@@ -251,6 +261,7 @@ function chartState(input: Json | undefined): WorkspaceChartState {
   if (source.priceOnlyAutoScale !== undefined) out.priceOnlyAutoScale = boolean(source.priceOnlyAutoScale, 'priceOnlyAutoScale');
   if (source.indicatorLegendCollapsed !== undefined) out.indicatorLegendCollapsed = boolean(source.indicatorLegendCollapsed, 'indicatorLegendCollapsed');
   if (source.indicators !== undefined) out.indicators = indicatorStates(source.indicators);
+  if (source.sourceAbove !== undefined) out.sourceAbove = string(source.sourceAbove, 'sourceAbove');
   if (source.alerts !== undefined) {
     try { out.alerts = parseAlertsDocument(source.alerts); }
     catch (error) { throw new WorkspaceDocumentError(error instanceof Error ? error.message : 'Invalid alert document'); }

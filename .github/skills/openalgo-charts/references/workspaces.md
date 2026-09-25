@@ -106,6 +106,14 @@ must survive JSON without losing symbols, accessors or extra array properties.
 Arbitrary free text is not secret-scanned.
 Do not execute imported text or assume namespace names provide authorization.
 
+## Study policies in documents
+
+Workspace chart states keep each study's `policy` (validated, restrictions only) and a
+moved source's `sourceAbove`. Portable indicator templates drop `policy`: a template is
+the user's own copy. `planIndicatorTemplate` and `planIndicatorTemplateState` in
+`replace` mode keep every current study whose policy is not `removable`, with its identity
+and policy, and give the template's pane groups the free slots around its pane.
+
 ## Named watchlists (2.5.5)
 
 DOM-free named symbol lists in the same tier and with the same storage discipline as

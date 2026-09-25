@@ -2,7 +2,7 @@ import * as engine from '/dist/openalgo-charts.mjs';
 import { el, fmt, esc, inTextField } from './ui.js';
 import { snapPrice } from './ticks.js';
 import { ticon } from './toolbar.js';
-import { openSettings } from './indicators.js';
+import { openSettings, rememberIndicators, renderIndicatorChips } from './indicators.js';
 import { openChartSettings } from './chart-settings.js';
 import { volumeShown, setVolumeShown } from './volume.js';
 import { placeOrder, removeAllOrders, clearPosition, saveState } from './orders.js';
@@ -11,6 +11,7 @@ import { clipboardAction } from './clipboard.js';
 import { autosave } from './persist.js';
 import { alertContextEntries } from './alerts.js';
 import { addSessionMark, sessionMarks, clearSessionMarks } from './session-marks.js';
+import { addHostStudy, hostStudy, removeHostStudy, studyAllows } from './host-study.js';
 import { capturePaneTarget } from './pane-target.js';
 
 // Price-level family (previous close, session extremes, extended hours,
@@ -112,8 +113,13 @@ export function openContextMenu(e, pane = 1) {
     rows.push({ label: 'Chart settings...', onSelect: () => openChartSettings(undefined, owner) });
     if (app.volume2) rows.push({ label: 'Volume', on: volumeShown(2),
       onSelect: () => { if (owner.current()) setVolumeShown(!volumeShown(2), 2); } });
-    if (e.target?.kind === 'indicator') rows.push({ label: 'Study settings...',
-      onSelect: () => openSettings(e.target.instanceId, owner) });
+    if (e.target?.kind === 'indicator') {
+      // A study its host protects keeps the row, greyed with the reason.
+      const study = owner.chart.indicators().find((item) => item.id === e.target.instanceId);
+      const allowed = studyAllows(study, 'configurable');
+      rows.push({ label: 'Study settings...', disabled: !allowed, reason: allowed ? undefined : 'protected by the host',
+        onSelect: () => openSettings(e.target.instanceId, owner) });
+    }
     const onAxis = e.target?.kind === 'time-scale';
     for (const move of onAxis ? [] : paneMoveRows(owner.chart, e.paneIndex)) {
       rows.push({ label: move.label, disabled: move.disabled, reason: move.reason, onSelect: () => { if (owner.current()) move.onSelect(); } });
@@ -193,6 +199,15 @@ export function openContextMenu(e, pane = 1) {
   if (ctxIndicator) {
     const inst = app.chart.indicators().find((i) => i.id === ctxIndicator);
     rowInd.textContent = (inst ? inst.name : 'Indicator') + ' settings...';
+    // Greyed with its reason on a study whose host keeps its settings.
+    rowInd.disabled = !studyAllows(inst, 'configurable');
+    rowInd.title = rowInd.disabled ? 'protected by the host' : '';
+  }
+  // The host's own protected study: one row adds it, the same row takes it away.
+  const rowHost = ctxMenu.querySelector('[data-act="hoststudy"]');
+  if (rowHost) {
+    rowHost.hidden = !app.chart || !app.currentBars?.length;
+    rowHost.textContent = hostStudy(app.chart) ? 'Remove Protected VWAP' : 'Add Protected VWAP';
   }
 
   ctxPane = target.kind === 'time-scale' ? null : paneCollapseRow(app.chart, e.paneIndex);
@@ -751,6 +766,17 @@ export function initMenus(a) {
     if (act === 'unmark') {
       const n = clearSessionMarks(app.draw, app.req.symbol);
       el('status').textContent = `cleared ${n} session mark${n === 1 ? '' : 's'}`;
+      return;
+    }
+    // The protected study is the host's too, so taking it away passes `force`.
+    if (act === 'hoststudy') {
+      if (!ctxOwner?.current()) return;
+      if (hostStudy(app.chart)) { removeHostStudy(app.chart); el('status').textContent = 'removed the protected VWAP'; }
+      else { addHostStudy(app.chart); el('status').textContent = 'added a protected VWAP: the host keeps it, its settings and its place'; }
+      // The rebuild after a symbol or type switch re-adds the remembered studies, policy and all.
+      rememberIndicators();
+      renderIndicatorChips();
+      autosave();
       return;
     }
     if (act === 'copy' || act === 'cut' || act === 'paste') {

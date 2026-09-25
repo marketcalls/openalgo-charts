@@ -3,6 +3,14 @@ import type { IndicatorDataStatus } from './indicator-registry';
 
 export type ChartObjectKind = 'source' | 'indicator' | 'drawing' | 'profile' | 'group';
 
+/**
+ * Where a row paints on its pane, back to front: `below` the series (a drawing
+ * sent behind them), in the `series` band (the price source, each study, and a
+ * drawing placed directly above one of them), or `above` everything the series
+ * band holds (drawings in front, the default).
+ */
+export type ChartObjectBand = 'below' | 'series' | 'above';
+
 export interface ChartObjectCapabilities {
   readonly select: boolean;
   readonly visibility: boolean;
@@ -12,6 +20,8 @@ export interface ChartObjectCapabilities {
   readonly focus: boolean;
   readonly reorder?: boolean;
   readonly move?: boolean;
+  /** Takes part in its pane's stack and can be moved in it with `place`. */
+  readonly place?: boolean;
 }
 
 /** One immutable row in a chart's object inventory. */
@@ -27,6 +37,10 @@ export interface ChartObjectSnapshot {
   readonly groupId?: string;
   readonly dataStatus?: Readonly<IndicatorDataStatus>;
   readonly capabilities: ChartObjectCapabilities;
+  /** The band it paints in, for a row that is part of its pane's stack (see `stack`). */
+  readonly band?: ChartObjectBand;
+  /** For a drawing in the series band: the id of the source or study row it paints directly above. */
+  readonly stackAbove?: string;
 }
 
 /** State supplied by a host for an explicitly managed profile or source. */
@@ -66,6 +80,8 @@ export interface ChartObjectDrawing {
   visible?: boolean;
   locked?: boolean;
   zIndex?: number;
+  /** The source or study it paints directly above, when it is placed in the series band. */
+  stackAbove?: string;
   /**
    * The drawing tier's policy flags the inventory honours: `listed` false
    * leaves the drawing out, `selectable` false withholds select, and
@@ -90,6 +106,11 @@ export interface ChartObjectDrawingSource {
   /** Delete several as one undo step; a group row holding an unlisted drawing needs it to offer remove. */
   removeMany?(ids: readonly string[]): void;
   reorder?(id: string, direction: -1 | 1): boolean;
+  /**
+   * Move a drawing directly above or below another drawing or a series-band
+   * entry of its pane, as one undo step. Without it drawings cannot be placed.
+   */
+  placeInStack?(id: string, target: { drawing: string } | { entry: string }, where: 'above' | 'below'): boolean;
   groups?(): readonly ChartObjectDrawingGroup[];
   createGroup?(name: string, ids: readonly string[]): ChartObjectDrawingGroup | null;
   renameGroup?(id: string, name: string): boolean;
@@ -104,7 +125,7 @@ export interface ChartObjectsOptions {
 }
 
 type Actions = Pick<ChartObjectProvider, 'select' | 'setVisible' | 'setLocked' | 'remove' | 'openSettings' | 'focus' | 'reorder' | 'move'>
-  & { ungroup?(): boolean };
+  & { ungroup?(): boolean; place?(target: string, where: 'above' | 'below'): boolean };
 interface Entry { row: ChartObjectSnapshot; actions: Actions }
 interface Registration { provider: ChartObjectProvider; off?: () => void }
 const EMPTY: readonly ChartObjectSnapshot[] = Object.freeze([]);
@@ -112,6 +133,7 @@ const sameRows = (a: readonly ChartObjectSnapshot[], b: readonly ChartObjectSnap
   a.length === b.length && a.every((x, i) => {
     const y = b[i];
     return x.id === y.id && x.name === y.name && x.kind === y.kind && x.paneIndex === y.paneIndex
+      && x.band === y.band && x.stackAbove === y.stackAbove
       && x.visible === y.visible && x.locked === y.locked && x.selected === y.selected && x.groupId === y.groupId
       && x.dataStatus?.state === y.dataStatus?.state
       && (x.dataStatus?.state !== 'error' || (y.dataStatus?.state === 'error' && x.dataStatus.error === y.dataStatus.error))
@@ -127,6 +149,15 @@ export class ChartObjects {
   private readonly _providers = new Map<string, Registration>();
   private readonly _listeners = new Set<(objects: readonly ChartObjectSnapshot[]) => void>();
   private _entries = new Map<string, Entry>();
+  /** Each drawing row's place among the drawings of its slot: its z-index, then its list position. */
+  private _order = new Map<string, readonly [number, number]>();
+  /**
+   * The draw order the rows were last published with. A restack changes no
+   * row, only the order `stack` reads, and a panel listing that order still
+   * has to hear of it.
+   */
+  private _stackKey = '';
+  private _publishedStackKey = '';
   private _rows = EMPTY;
   private _selected: string | null = null;
   private _destroyed = false;
@@ -205,8 +236,9 @@ export class ChartObjects {
         this._entries = entries;
         if (this._selected !== null && !entries.has(this._selected)) this._selected = null;
         const rows = Object.freeze([...entries.values()].map(entry => entry.row));
-        if (sameRows(rows, this._rows)) continue;
+        if (sameRows(rows, this._rows) && this._stackKey === this._publishedStackKey) continue;
         this._rows = rows;
+        this._publishedStackKey = this._stackKey;
         for (const listener of [...this._listeners]) {
           if (this._destroyed) break;
           try { listener(rows); } catch { /* Other observers still receive the state. */ }
@@ -266,6 +298,92 @@ export class ChartObjects {
     catch { this.refresh(); return false; }
   }
 
+  /**
+   * A pane's stack in paint order, back to front: drawings behind the series,
+   * then each series-band entry (the price source, each study) followed by
+   * the drawings placed directly above it, then the drawings in front. Group
+   * rows, profiles and other rows outside the stack are not in it.
+   */
+  public stack(paneIndex: number): readonly ChartObjectSnapshot[] {
+    if (!this._refreshing) this.refresh();
+    return this._stackOf(paneIndex);
+  }
+
+  /** Whether `place` would move `id` and paint the result. */
+  public canPlace(id: string, targetId: string, where: 'above' | 'below'): boolean {
+    return this._plan(id, targetId, where) !== null;
+  }
+
+  /**
+   * Move a row directly above or below another row of its pane's stack. A
+   * drawing goes anywhere in its pane: next to a drawing it joins that
+   * drawing's slot, above an entry it is placed on that entry, below one it
+   * goes on top of the slot under it. A source or study moves between whole
+   * slots, taking the drawings placed on it along, since nothing can paint
+   * between an entry and a drawing placed on it: such a move, one out of the
+   * series band, and one across panes are refused, not approximated.
+   */
+  public place(id: string, targetId: string, where: 'above' | 'below'): boolean {
+    const run = this._plan(id, targetId, where);
+    if (run === null) return false;
+    try { const result = run(); this.refresh(); return result; }
+    catch { this.refresh(); return false; }
+  }
+
+  private _stackOf(paneIndex: number): ChartObjectSnapshot[] {
+    const rows = this._rows.filter(row => row.paneIndex === paneIndex && row.band !== undefined);
+    const drawings = (band: ChartObjectBand, above?: string): ChartObjectSnapshot[] => rows
+      .filter(row => row.kind === 'drawing' && row.band === band && row.stackAbove === above)
+      .sort((a, b) => { const x = this._order.get(a.id)!, y = this._order.get(b.id)!; return x[0] - y[0] || x[1] - y[1]; });
+    const out = drawings('below');
+    for (const entry of this._chart.seriesStack(paneIndex)) {
+      const row = rows.find(item => item.id === entry && item.kind !== 'drawing');
+      if (row) out.push(row);
+      out.push(...drawings('series', entry));
+    }
+    return [...out, ...drawings('above')];
+  }
+
+  /** The move `place` would make, or null for one it refuses or that changes nothing. */
+  private _plan(id: string, targetId: string, where: 'above' | 'below'): (() => boolean) | null {
+    if (this._destroyed || id === targetId || (where !== 'above' && where !== 'below')) return null;
+    const row = this.get(id), target = this.get(targetId);
+    if (!row?.capabilities.place || !target || row.paneIndex !== target.paneIndex) return null;
+    // By id: `get` reads the latest refresh, the stack the rows it kept.
+    const stack = this._stackOf(row.paneIndex), at = stack.findIndex(item => item.id === id), to = stack.findIndex(item => item.id === targetId);
+    if (at < 0 || to < 0) return null;
+    const slot = (item: ChartObjectSnapshot): string => item.band === 'series' ? 'series:' + item.stackAbove : item.band!;
+    if (row.kind === 'drawing') {
+      const draw = this._options.drawings!;
+      if (target.kind === 'drawing') {
+        if (slot(row) === slot(target) && at === to + (where === 'above' ? 1 : -1)) return null;
+        return () => draw.placeInStack!(row.sourceId, { drawing: target.sourceId }, where);
+      }
+      if (where === 'above' ? row.stackAbove === target.id && at === to + 1 : at === to - 1) return null;
+      return () => draw.placeInStack!(row.sourceId, { entry: target.id }, where);
+    }
+    // An entry lands only on a boundary between slots.
+    const entries = this._chart.seriesStack(row.paneIndex);
+    const next = stack[to + 1], previous = stack[to - 1];
+    let anchor: string | undefined, side = where;
+    if (target.kind !== 'drawing') {
+      // Not between an entry and a drawing placed on it.
+      if (where === 'below' || !(next?.kind === 'drawing' && next.stackAbove === target.id)) anchor = target.id;
+    } else if (target.band === 'series' && where === 'above' && (next === undefined || slot(next) !== slot(target))) {
+      anchor = target.stackAbove;
+    } else if (target.band === 'below' && where === 'above' && next?.band !== 'below') {
+      [anchor, side] = [entries[0], 'below'];
+    } else if (target.band === 'above' && where === 'below' && previous?.band !== 'above') {
+      [anchor, side] = [entries[entries.length - 1], 'above'];
+    }
+    if (anchor === undefined || anchor === id || !entries.includes(anchor)) return null;
+    const order = entries.filter(item => item !== id);
+    order.splice(order.indexOf(anchor) + (side === 'above' ? 1 : 0), 0, id);
+    if (order.every((item, i) => item === entries[i])) return null;
+    const [a, s] = [anchor, side];
+    return () => this._entries.get(id)?.actions.place?.(a, s) === true;
+  }
+
   public canGroup(): boolean { return !this._destroyed && typeof this._options.drawings?.createGroup === 'function'; }
 
   /** Accept inventory ids so callers never need to strip provider prefixes. */
@@ -310,45 +428,69 @@ export class ChartObjects {
   }
 
   private _read(): Map<string, Entry> {
-    const entries = new Map<string, Entry>();
+    const rows = new Map<string, Entry>();
+    const order = new Map<string, readonly [number, number]>();
     const draw = this._options.drawings;
     const selected = draw?.selection() ?? [];
     if (selected.length > 0) this._selected = null;
-    const add = (id: string, sourceId: string, state: ChartObjectDefinition, actions: Actions): void => {
+    const add = (id: string, sourceId: string, state: ChartObjectDefinition, actions: Actions,
+      band?: ChartObjectBand, stackAbove?: string): void => {
       const capabilities = Object.freeze({
         select: typeof actions.select === 'function', visibility: typeof actions.setVisible === 'function',
         lock: typeof actions.setLocked === 'function', remove: typeof actions.remove === 'function',
         settings: typeof actions.openSettings === 'function', focus: typeof actions.focus === 'function',
         reorder: typeof actions.reorder === 'function', move: typeof actions.move === 'function',
+        // A host provider's own `place` is not part of the stack contract.
+        place: typeof actions.place === 'function' && !id.startsWith('custom:'),
       });
       const row: ChartObjectSnapshot = Object.freeze({
         id, sourceId, kind: state.kind, name: state.name, paneIndex: state.paneIndex ?? this._chart.primaryPaneIndex(),
         visible: state.visible !== false, locked: state.locked, groupId: state.groupId, selected: state.selected === true || this._selected === id,
         dataStatus: state.dataStatus ? Object.freeze({ ...state.dataStatus }) : undefined, capabilities,
+        ...(band === undefined ? {} : { band }), ...(stackAbove === undefined ? {} : { stackAbove }),
       });
-      entries.set(id, { row, actions });
+      rows.set(id, { row, actions });
     };
     const settings = (id: string): Pick<Actions, 'openSettings'> => this._options.onSettings
       ? { openSettings: () => { const row = this.get(id); if (row) this._options.onSettings!(row); } } : {};
     const chart = this._chart;
+    // The series band of each pane that has one, read once per refresh.
+    const stacks = new Map<number, string[]>();
+    const entries = (paneIndex: number): string[] => {
+      let list = stacks.get(paneIndex);
+      if (!list) stacks.set(paneIndex, list = chart.seriesStack(paneIndex));
+      return list;
+    };
+    const place = (id: string): Pick<Actions, 'place'> =>
+      ({ place: (target, where) => chart.moveInSeriesStack(id, target, where) });
     if (chart.primarySeries() !== null) {
       const context = chart.getDataContext();
+      const inBand = entries(chart.primaryPaneIndex()).includes('source:primary');
       add('source:primary', 'primary', {
         kind: 'source', name: context?.symbol || 'Price',
         visible: chart.primarySeriesInfo()?.style.visible !== false,
-      }, settings('source:primary'));
+      }, { ...settings('source:primary'), ...(inBand ? place('source:primary') : {}) }, inBand ? 'series' : undefined);
     }
     for (const indicator of chart.indicators()) {
+      // Each flag withholds the actions that would do what it forbids; an
+      // unlisted study has no row, so nothing here reaches it.
+      const policy = indicator.policy();
+      if (policy.listed === false) continue;
       const id = 'indicator:' + indicator.id;
+      const inBand = entries(indicator.paneIndex).includes(id);
       add(id, indicator.id, {
         kind: 'indicator', name: indicator.name, paneIndex: indicator.paneIndex,
         visible: indicator.visible(), dataStatus: indicator.dataStatus() ?? undefined,
       }, {
         select: () => {}, setVisible: on => indicator.setVisible(on),
-        reorder: direction => chart.reorderIndicator(indicator.id, direction),
-        move: paneIndex => chart.moveIndicator(indicator.id, paneIndex),
-        remove: () => { chart.removeIndicator(indicator.id); }, ...settings(id),
-      });
+        ...(policy.movable !== false ? {
+          reorder: (direction: -1 | 1) => chart.reorderIndicator(indicator.id, direction),
+          move: (paneIndex: number) => chart.moveIndicator(indicator.id, paneIndex),
+          ...(inBand ? place(id) : {}),
+        } : {}),
+        ...(policy.removable !== false ? { remove: () => { chart.removeIndicator(indicator.id); } } : {}),
+        ...(policy.configurable !== false ? settings(id) : {}),
+      }, inBand ? 'series' : undefined);
     }
     if (draw) {
       // An unlisted drawing is not in the inventory at all, so no row, group
@@ -387,8 +529,14 @@ export class ChartObjects {
           } : {}),
         });
       }
+      const positions = new Map(draw.drawings().map((drawing, index) => [drawing.id, index]));
       for (const drawing of [...draw.drawings()].filter(listed).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))) {
         const id = 'drawing:' + drawing.id;
+        // The slot it paints in: over the entry it names while that entry is
+        // in its pane's series band, else the side of the series its z-index gives.
+        const above = drawing.stackAbove !== undefined && entries(drawing.paneIndex).includes(drawing.stackAbove) ? drawing.stackAbove : undefined;
+        const band: ChartObjectBand = above !== undefined ? 'series' : (drawing.zIndex ?? 0) < 0 ? 'below' : 'above';
+        order.set(id, [drawing.zIndex ?? 0, positions.get(drawing.id) ?? 0]);
         const canFocus = chart.dataLayer.length > 0 && drawing.points.length > 0
           && drawing.points.every(p => Number.isFinite(p.time) && Number.isFinite(p.price))
           && chart.panes()[drawing.paneIndex] !== undefined;
@@ -398,13 +546,14 @@ export class ChartObjects {
           locked: drawing.locked === true, selected: selected.includes(drawing.id),
         }, {
           ...(draw.reorder ? { reorder: (direction: -1 | 1) => draw.reorder!(drawing.id, direction) } : {}),
+          ...(draw.placeInStack ? { place: () => false } : {}),
           ...(drawing.policy?.selectable !== false ? { select: () => draw.select(drawing.id) } : {}),
           ...(drawing.policy?.editable !== false ? {
             setVisible: (on: boolean) => draw.update(drawing.id, { visible: on }),
             setLocked: (on: boolean) => draw.update(drawing.id, { locked: on }), remove: () => { draw.remove(drawing.id); },
           } : {}),
           ...(canFocus ? { focus: () => this._focusDrawing(drawing) } : {}), ...settings(id),
-        });
+        }, band, above);
       }
     }
     for (const [id, { provider }] of this._providers) {
@@ -415,7 +564,9 @@ export class ChartObjects {
         add(id, provider.id, state, provider);
       } catch { /* A failing optional provider cannot hide usable chart objects. */ }
     }
-    return entries;
+    this._order = order;
+    this._stackKey = JSON.stringify([[...stacks], [...order]]);
+    return rows;
   }
 
   private _focusDrawing(drawing: ChartObjectDrawing): void {

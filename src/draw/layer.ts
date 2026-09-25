@@ -5,11 +5,14 @@
  * between bars (inside a collapsed weekend) or past the last one (a forward
  * projection), and whole-index lookups have nothing to return there.
  *
- * Each pane carries **two** layers, one at z-order `bottom` for drawings with a
- * negative `zIndex` (under the series) and one at `top` for the rest. The top
- * one takes over handles and hit-testing for the pair through `setBelow`, so a
- * shape parked under the candles still shows its grab handles above them and
- * a click lands on whatever the eye sees on top.
+ * Each pane carries a `bottom` layer for drawings with a negative `zIndex`
+ * (under the series), a `top` one for the rest, and a `series` layer for each
+ * series-band entry a drawing is placed above (`stackAbove`), which the chart
+ * paints right after that entry's series. The top one takes over handles and
+ * hit-testing for the others through `setBelow`, so a shape parked under the
+ * candles still shows its grab handles above them and a click lands on
+ * whatever the eye sees on top: the top layer's bodies first, then each layer
+ * under it in the order they paint, front to back.
  *
  * Hit ids are `draw:<id>` for the body and `draw:<id>#<n>` for anchor `n`, so
  * the controller can tell "move the whole shape" from "move this handle".
@@ -47,8 +50,11 @@ const SNAP_RING = 5.5;
  */
 const TOUCH_SCALE = 2;
 
-/** Which side of the series a layer paints on. */
-export type DrawingLayerOrder = 'bottom' | 'top';
+/**
+ * Where a layer paints: under the series, in the series band (placed above an
+ * entry by the controller, and over the series while it is not), or on top.
+ */
+export type DrawingLayerOrder = 'bottom' | 'series' | 'top';
 
 /** The pointer kinds the layer sizes its targets for. */
 export type DrawingPointerKind = 'mouse' | 'touch' | 'pen';
@@ -130,8 +136,8 @@ export class DrawingLayer implements IPrimitive {
   private _snap: DrawingPoint | null = null;
   /** Anchors of the in-progress drawing, plus the live cursor point. */
   private _preview: Drawing | null = null;
-  /** The layer under this one, whose handles and hits this layer answers for. */
-  private _below: DrawingLayer | null = null;
+  /** The layers under this one, front to back, whose handles and hits this layer answers for. */
+  private _below: DrawingLayer[] = [];
   /** The layer that has taken over this one's handles and hit-testing. */
   private _above: DrawingLayer | null = null;
   /** Sizes grab targets for the device last seen. */
@@ -143,7 +149,9 @@ export class DrawingLayer implements IPrimitive {
 
   public attached(host: PrimitiveHost): void { this._host = host; }
   public detached(): void { this._host = null; }
-  public zOrder(): ZOrder { return this._order; }
+  // A series layer paints on the base canvas, and over the series while the
+  // entry it is placed above is not on its pane.
+  public zOrder(): ZOrder { return this._order === 'series' ? 'normal' : this._order; }
   /** Drawings overlay the price range; they never drive it. */
   public autoscaleInfo(): null { return null; }
 
@@ -205,20 +213,22 @@ export class DrawingLayer implements IPrimitive {
   }
 
   /**
-   * Adopt the layer under this one. From then on this layer paints the handles
-   * of both and answers `hitTest` for both, and the adopted layer paints bodies
+   * Adopt the layers under this one, front to back: the order they paint in,
+   * reversed. From then on this layer paints the handles of all of them and
+   * answers `hitTest` for all of them, and the adopted layers paint bodies
    * only. Handles have to live up here: a selected drawing under the series
    * would otherwise have its handles buried under the candles, and a handle
    * you cannot see is a handle you cannot grab. Pass null to release.
    */
-  public setBelow(layer: DrawingLayer | null): void {
-    if (this._below === layer) return;
-    if (this._below !== null) this._below._above = null;
-    this._below = layer;
-    if (layer !== null) {
-      if (layer._above !== null && layer._above !== this) layer._above._below = null;
-      layer._above = this;
-      layer._host?.requestUpdate();
+  public setBelow(layer: DrawingLayer | readonly DrawingLayer[] | null): void {
+    const next = layer === null ? [] : Array.isArray(layer) ? [...layer as readonly DrawingLayer[]] : [layer as DrawingLayer];
+    if (next.length === this._below.length && next.every((item, i) => item === this._below[i])) return;
+    for (const old of this._below) if (!next.includes(old)) { old._above = null; old._host?.requestUpdate(); }
+    this._below = next;
+    for (const item of next) {
+      if (item._above !== null && item._above !== this) item._above._below = item._above._below.filter(other => other !== item);
+      item._above = this;
+      item._host?.requestUpdate();
     }
     this._host?.requestUpdate();
   }
@@ -324,17 +334,17 @@ export class DrawingLayer implements IPrimitive {
     }
 
     // Handles go on after every body so they are never painted over by a
-    // later shape, and only the top layer of a pair paints them at all.
+    // later shape, and only the top layer paints them at all.
     if (this._above !== null) return;
-    const hovered = [this._hoverHandled(), this._below?._hoverHandled() ?? null];
-    for (const d of hovered) {
+    const layers: DrawingLayer[] = [this, ...this._below];
+    for (const layer of layers) {
+      const d = layer._hoverHandled();
       if (d !== null) this._drawHandles(ctx, rc, this._points(rc, d), d.tool, true);
     }
     // A selected read-only drawing shows its anchors at the hover weight: the
     // selection is visible, and nothing claims it can be grabbed.
-    for (const d of this._handled()) this._drawHandles(ctx, rc, this._points(rc, d), d.tool, readOnly(d));
-    if (this._below !== null) {
-      for (const d of this._below._handled()) this._drawHandles(ctx, rc, this._points(rc, d), d.tool, readOnly(d));
+    for (const layer of layers) {
+      for (const d of layer._handled()) this._drawHandles(ctx, rc, this._points(rc, d), d.tool, readOnly(d));
     }
     if (this._snap !== null) this._drawSnapRing(ctx, rc, this._project(rc, this._snap.time, this._snap.price));
   }
@@ -409,12 +419,22 @@ export class DrawingLayer implements IPrimitive {
 
     // Handles of every selected drawing win: they sit on top of their own body
     // and grabbing an anchor must beat dragging the whole shape.
-    const handle = this._hitHandle(x, y, rc) ?? this._below?._hitHandle(x, y, rc) ?? null;
-    if (handle !== null) return handle;
+    for (const layer of [this, ...this._below]) {
+      const handle = layer._hitHandle(x, y, rc);
+      if (handle !== null) return handle;
+    }
 
-    // Bodies on this layer beat anything under the series, whatever the
-    // distance: what is painted on top is what the eye expects to grab.
-    return this._hitBody(x, y, rc) ?? this._below?._hitBody(x, y, rc) ?? null;
+    // Bodies on a layer beat those on every layer it paints over, whatever the
+    // distance: what is painted on top is what the eye expects to grab. A body
+    // on a lower layer names that layer, so the chart can rank it against a
+    // series painted over it.
+    const own = this._hitBody(x, y, rc);
+    if (own !== null) return own;
+    for (const layer of this._below) {
+      const body = layer._hitBody(x, y, rc);
+      if (body !== null) return { ...body, paintedBy: layer };
+    }
+    return null;
   }
 
   private _hitHandle(x: number, y: number, rc: PrimitiveRenderContext): PrimitiveHit | null {

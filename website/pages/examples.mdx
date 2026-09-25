@@ -393,6 +393,60 @@ button('Pin selected', 'viewport');
 button('Unpin selected', 'data');
 return chart;`} />
 
+## Draw order across studies
+
+A drawing can sit behind the series, over the candles and under a study, over a study, or
+in front of everything, and the candles can move over a study. The line under the buttons
+lists the pane back to front, the order it paints in. See
+[Draw order](/docs/objects#draw-order).
+
+<RunnableExample height={400} tiers={['indicators', 'draw']} caption="Simulated prices. Each button moves one object; the list reads the pane from back to front." code={`const bar = document.createElement('div');
+bar.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px';
+el.appendChild(bar);
+const order = document.createElement('div');
+order.style.cssText = 'color:#94a3b8;font:12px system-ui, sans-serif;margin-bottom:6px';
+el.appendChild(order);
+const host = document.createElement('div');
+host.style.cssText = 'height:300px';
+el.appendChild(host);
+
+const chart = lib.createChart(host);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.setVisibleLogicalRange({ from: 110, to: 200 });
+const ema = chart.addIndicator('ema', { length: 9, color: '#f5c542' });
+const draw = new lib.DrawingController(chart);
+const span = bars.slice(140, 181);
+const box = draw.add({ tool: 'rectangle', paneIndex: 0,
+  style: { color: '#4f8cff', fill: true, fillOpacity: 0.85, lineWidth: 2 }, points: [
+    { time: bars[140].time, price: Math.max(...span.map(b => b.high)) },
+    { time: bars[180].time, price: Math.min(...span.map(b => b.low)) },
+  ] });
+// One list for the whole pane: the same inventory an Objects panel reads.
+const objects = new lib.ChartObjects(chart, { drawings: draw });
+const label = row => row.band === 'above' ? row.name + ' (in front)'
+  : row.band === 'below' ? row.name + ' (behind the series)' : row.name;
+const show = () => { order.textContent = 'Back to front: ' + objects.stack(0).map(label).join(', '); };
+objects.subscribe(show);
+
+const moves = [
+  ['Box in front', () => draw.bringAboveSeries(box.id)],
+  ['Box over the average', () => draw.placeInStack(box.id, { entry: 'indicator:' + ema.id }, 'above')],
+  ['Box over the candles', () => draw.placeInStack(box.id, { entry: 'source:primary' }, 'above')],
+  ['Box behind the series', () => draw.sendBehindSeries(box.id)],
+  ['Candles over the average', () => chart.moveInSeriesStack('source:primary', 'indicator:' + ema.id, 'above')],
+  ['Candles under the average', () => chart.moveInSeriesStack('source:primary', 'indicator:' + ema.id, 'below')],
+];
+for (const [label, run] of moves) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+  b.onpointerdown = (event) => event.stopPropagation();
+  b.onclick = run;
+  bar.appendChild(b);
+}
+return { destroy() { objects.destroy(); draw.destroy(); chart.destroy(); } };`} />
+
 ## The terminal in one call
 
 Add a toolbar, drawing tools, settings, and the Data and Objects panels with

@@ -157,7 +157,9 @@ export function mountDrawingProperties(ctx: WidgetContext, anchor?: HTMLElement,
     const primary = live[0];
     const locked = primary.locked === true;
     const hidden = primary.visible === false;
-    const behind = primary.zIndex < 0;
+    // Between studies it is on neither side of the series, so neither toggle is pressed.
+    const between = primary.stackAbove !== undefined && ctx.chart.seriesStack(primary.paneIndex).includes(primary.stackAbove);
+    const behind = !between && primary.zIndex < 0;
     const why = lockedOut();
     const add = (spec: ButtonSpec, act: string, pressed?: boolean, edits = false): void => {
       const b = button(doc, { ...spec, iconOnly: true });
@@ -177,7 +179,7 @@ export function mountDrawingProperties(ctx: WidgetContext, anchor?: HTMLElement,
     add({ label: widgetText(ctx, 'Bring to front'), icon: 'front', onClick: () => { for (const id of ids) draw.bringToFront(id); } }, 'front');
     add({ label: widgetText(ctx, 'Send to back'), icon: 'back', onClick: () => { for (const id of ids) draw.sendToBack(id); } }, 'back');
     add({ label: widgetText(ctx, 'In front of the series'), svg: glyphSvg(ABOVE_GLYPH),
-      onClick: () => { for (const id of ids) draw.bringAboveSeries(id); } }, 'above', !behind);
+      onClick: () => { for (const id of ids) draw.bringAboveSeries(id); } }, 'above', !behind && !between);
     add({ label: widgetText(ctx, 'Behind the series'), svg: glyphSvg(BEHIND_GLYPH),
       onClick: () => { for (const id of ids) draw.sendBehindSeries(id); } }, 'behind', behind);
     sep();

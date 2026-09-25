@@ -153,6 +153,8 @@ export type {
   DrawingInput,
   DrawingPatch,
   DrawingPolicy,
+  // Where `placeInStack` puts a drawing: next to another drawing or a series-band entry.
+  DrawingStackTarget,
   DrawingPoint,
   // Viewport anchoring: a drawing pinned to the screen instead of to time and price.
   DrawingSpace,

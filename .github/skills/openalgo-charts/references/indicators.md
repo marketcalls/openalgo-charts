@@ -236,13 +236,14 @@ const rsi = chart.addIndicator('rsi', {}, { paneIndex: macd.paneIndex }); // sha
 | `name` | `string` | Display name. |
 | `paneIndex` | `number` | Mutable: the chart re-indexes it when panes move or are removed. |
 | `settings()` | `IndicatorSettings` | A **copy**. Mutating it does nothing. |
-| `setSettings(patch)` | `void` | Merge, restyle, recompute, re-run `attach`. |
+| `setSettings(patch, options?)` | `boolean` | Merge, restyle, recompute, re-run `attach`. `false` for a study whose policy is not `configurable` unless `options.force`. |
+| `policy()` / `setPolicy(policy \| null)` | `IndicatorPolicy` / `void` | Host restrictions (`removable`, `configurable`, `movable`, `listed`); see [study policies](core-api.md#study-policies). |
 | `series(plotKey)` | `SeriesApi \| undefined` | Backing series, for direct styling. |
 | `values()` | `IndicatorValues` | Live **reference** into the last `calc` result. Do not mutate. |
 | `visible()` / `setVisible(on)` | `boolean` / `void` | The legend eye toggle; hides plots and fills without removing. |
 | `legend()` | `PaneLegend \| null` | This indicator's legend row. |
 | `updateLegendValues(index?)` | `void` | Refresh readings for a bar index; omit for the latest bar. |
-| `remove()` | `void` | Tears down series, levels, fills, legend. Idempotent. |
+| `remove(options?)` | `boolean` | Tears down series, levels, fills, legend. Idempotent. `false` when already gone, or not `removable` without `options.force`. |
 
 `recompute()` exists on `IndicatorInstance` but is **not** on the `IndicatorApi` type: the runtime calls it. Since 1.8.4 a data change only *marks* the indicators stale and requests a frame; the recompute happens in that frame, before the paint.
 

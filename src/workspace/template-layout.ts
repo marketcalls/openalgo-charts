@@ -223,19 +223,23 @@ function planTemplateOrder(chart: Chart, incoming: IndicatorTemplateInput, mode:
     return { indicators: planIndicatorTemplate(current.indicators, incomingState.indicators, mode, available, current.panes.length) };
   }
   const layout = incomingState.layout, additions = incomingState.indicators, previous = parseIndicatorStates(current.indicators ?? []);
-  const planned = mode === 'append' ? [...previous, ...additions] : additions;
+  // A study the user may not remove survives a replace, and its pane is kept out of the template's way.
+  const kept = mode === 'replace' ? previous.filter(study => study.policy?.removable === false) : [];
+  const planned = mode === 'append' ? [...previous, ...additions] : [...kept, ...additions];
   if (planned.length > 256) throw new WorkspaceDocumentError('At most 256 indicator instances are supported');
   const missing = [...new Set(planned.filter(study => !available.has(study.indicatorId)).map(study => study.indicatorId))];
   if (missing.length) throw new WorkspaceDocumentError(`Missing indicators: ${missing.join(', ')}`);
   const bindings = validateBindings(additions, layout);
   const reservedPanes = mode === 'replace' ? hostPanes(chart) : new Set<number>();
+  for (const study of kept) if (study.paneIndex > 0) reservedPanes.add(study.paneIndex);
   const restoreOptions: ChartRestoreOptions = { preserveScaleFormats: current.panes.flatMap((pane, paneIndex) =>
     paneIndex === 0 || mode === 'append' || reservedPanes.has(paneIndex)
       ? scaleEntries(pane).map(([scaleId]) => ({ paneIndex, scaleId })) : []) };
   if (mode === 'append' && !additions.length) return { indicators: previous, restoreOptions };
   const destinationPrimary = primaryId(chart, primary, current.panes[0]);
   const panes = current.panes.map(pane => parsePaneState(pane));
-  if (mode === 'replace') clearOutgoingOwners(panes, new Set(previous.flatMap(study => study.instanceId ? [study.instanceId] : [])));
+  if (mode === 'replace') clearOutgoingOwners(panes, new Set(previous.filter(study => !kept.includes(study))
+    .flatMap(study => study.instanceId ? [study.instanceId] : [])));
   const paneMap = new Map<number, number>([[0, 0]]);
   let nextPane = mode === 'append' ? panes.length : 1;
   for (const sourcePane of [...new Set(additions.map(study => study.paneIndex).filter(index => index > 0))].sort((a, b) => a - b)) {

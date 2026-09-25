@@ -22,6 +22,7 @@ export { ChartObjects } from './model/chart-objects';
 export type {
   ChartObjectKind, ChartObjectCapabilities, ChartObjectSnapshot, ChartObjectDefinition,
   ChartObjectProvider, ChartObjectDrawing, ChartObjectDrawingSource, ChartObjectDrawingGroup, ChartObjectsOptions,
+  ChartObjectBand,
 } from './model/chart-objects';
 export { darkTheme, lightTheme, DEFAULT_THEME } from './theme';
 export type { ChartTheme } from './theme';
@@ -126,6 +127,9 @@ export type {
   DrawAnchor,
 } from './model/indicator-registry';
 export type { IndicatorApi, IndicatorHost } from './model/indicator-instance';
+// What a user may do with a study, and the host's way past it.
+export { parseIndicatorPolicy } from './model/indicator-policy';
+export type { IndicatorPolicy, IndicatorEditOptions } from './model/indicator-policy';
 
 // serialisable chart state (saved layouts / templates / drawings passthrough)
 export { CHART_STATE_VERSION, parsePaneState } from './model/chart-state';

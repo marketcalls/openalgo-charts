@@ -86,6 +86,8 @@ export function mountIndicatorSettings(
   const resolved = resolveInstance(ctx, anchor, opts);
   if (resolved.inst === null) return declined(ctx, resolved.why ?? widgetText(ctx, 'No indicator to configure'));
   const inst: IndicatorApi = resolved.inst;
+  // Every write would be refused, so the dialog says why instead of opening.
+  if ((inst as Partial<IndicatorApi>).policy?.().configurable === false) return declined(ctx, widgetText(ctx, '{name} settings are protected', { name: inst.name }));
   const descriptor: IndicatorDescriptor = getIndicator(inst.indicatorId);
 
   const tabs: Array<{ id: IndicatorSettingsTab; label: string; icon: string; inputs: readonly IndicatorInput[] }> = [];

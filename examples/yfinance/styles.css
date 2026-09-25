@@ -336,6 +336,8 @@ select.field { cursor: pointer; padding-right: 24px; }
 .chip button { border: 0; background: transparent; color: var(--faint); cursor: pointer;
   font-size: 13px; line-height: 1; padding: 2px 3px; border-radius: 4px; }
 .chip button:hover { background: var(--elev-3); color: var(--danger-tx); }
+/* A study the host protects: no remove button, a dashed edge in its place. */
+.chip.is-protected { border-style: dashed; padding-right: 9px; }
 .spacer { flex: 1 1 auto; }
 .hint { color: var(--faint); font-size: 12px; font-style: italic; }
 

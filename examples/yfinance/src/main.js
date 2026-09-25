@@ -277,7 +277,9 @@ function render({ keepView = true, state } = {}) {
   if (!isTransform) {
     for (const spec of rebuildState ? [] : app.activeIndicators) {
       try {
-        const instance = app.chart.addIndicator(spec.indicatorId, spec.settings, { paneIndex: spec.paneIndex });
+        // A study the host protects comes back protected: the policy rides with the spec.
+        const instance = app.chart.addIndicator(spec.indicatorId, spec.settings, { paneIndex: spec.paneIndex,
+          ...(spec.policy ? { policy: spec.policy } : {}) });
         if (spec.visible === false) instance.setVisible(false);
       }
       catch (e) { console.warn('indicator', spec.indicatorId, e.message); }

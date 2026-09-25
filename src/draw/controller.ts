@@ -21,10 +21,10 @@
 import type { IPrimitive, DataLayer, AlertDrawingValue, AlertDrawingInfo } from 'openalgo-charts';
 import type {
   Drawing, DrawingInput, DrawingPatch, DrawingPoint, DrawingStyle, DrawingTool, DrawingsDocument,
-  MagnetMode, ScreenPoint, DrawingGroup, DrawingSpace, ViewportPoint,
+  MagnetMode, ScreenPoint, DrawingGroup, DrawingSpace, DrawingStackTarget, ViewportPoint,
 } from './types';
 import { DRAWING_STATE_VERSION } from './types';
-import { DrawingLayer, placeViewportAnchors, type DrawingPointerKind } from './layer';
+import { DrawingLayer, placeViewportAnchors, sortByZIndex, type DrawingPointerKind } from './layer';
 import { getDrawingTool, hasDrawingTool, viewportDrawingTool } from './tools';
 import { readViewportPoints } from './viewport';
 import { boundsOf } from './geometry';
@@ -107,6 +107,14 @@ export interface DrawingChartHost {
    * puts the price pane below its studies; without it the price pane is slot 0.
    */
   primaryPaneIndex?(): number;
+  /**
+   * Optional, both: a pane's series band, back to front, and the call that
+   * paints a layer directly above one of its entries. Without them no drawing
+   * can be placed in the series band, and one saved there paints by its
+   * `zIndex`.
+   */
+  seriesStack?(paneIndex: number): readonly string[];
+  setPrimitiveStackAbove?(primitive: IPrimitive, above: string | null): boolean;
 }
 
 /** The pane-local price projection a chart pane carries, in media px. */
@@ -268,10 +276,14 @@ interface CrosshairPayload extends PointerFacts {
   samples?: PointerSample[];
 }
 
-/** The two layers of one pane: under the series and over it. */
+/**
+ * The layers of one pane: under the series, over it, and one inside the
+ * series band for each entry a drawing is placed above.
+ */
 interface PaneLayers {
   bottom: DrawingLayer;
   top: DrawingLayer;
+  series: Map<string, DrawingLayer>;
 }
 
 /**
@@ -405,6 +417,8 @@ export class DrawingController {
    * a drag that follows the hand and one that stutters through the candles.
    */
   private readonly _lifted = new Set<string>();
+  /** The slots the series-band drawings were last listed in; see `_slotSignature`. */
+  private _slotKey = '';
   /** Shift as of the last pointer report: what angle lock reads mid-preview. */
   private _shift = false;
   /** The device behind the last pointer report, for target sizing. */
@@ -480,6 +494,13 @@ export class DrawingController {
       const { from, to } = value as { from: number; to: number };
       this._remapPanes(index => index === from ? to : index === to ? from : index);
     }));
+    // A study added, removed, moved or restacked changes which slot a drawing
+    // placed in the series band paints in, and nothing else of it: only the
+    // layers are re-listed, and only when a slot changed. Writing the chart
+    // state here would announce a change of its own and come straight back.
+    for (const event of ['objects:change', 'indicatorRemoved']) {
+      this._off.push(chart.on(event, () => { if (this._slotKey !== this._slotSignature()) this._syncLayers(); }));
+    }
     this._sync();
   }
 
@@ -635,11 +656,16 @@ export class DrawingController {
     return this._destroyed || (!options.force && group?.members.some(member => pinned(this.get(member)))) ? undefined : group;
   }
 
-  /** Move one step through the rendered stack, preserving the side of the series. */
+  /**
+   * Move one step through the rendered stack, within the slot it paints in:
+   * its side of the series, or the entry it is placed above. `placeInStack`
+   * moves it between slots.
+   */
   public reorder(id: string, direction: -1 | 1): boolean {
     const drawing = this.get(id);
     if (!drawing || this._destroyed || (direction !== -1 && direction !== 1)) return false;
-    const band = this._drawings.filter(item => item.paneIndex === drawing.paneIndex && (item.zIndex < 0) === (drawing.zIndex < 0))
+    const entries = this._entries(drawing.paneIndex), slot = this._slotOf(drawing, entries);
+    const band = this._drawings.filter(item => item.paneIndex === drawing.paneIndex && this._slotOf(item, entries) === slot)
       .sort((a, b) => a.zIndex - b.zIndex);
     const index = band.indexOf(drawing);
     const target = index + direction;
@@ -649,11 +675,70 @@ export class DrawingController {
     const members = new Set(band);
     let cursor = 0;
     this._drawings = this._drawings.map(item => members.has(item) ? band[cursor++] : item);
-    band.forEach((item, position) => { item.zIndex = drawing.zIndex < 0 ? position - band.length : position; });
+    band.forEach((item, position) => { item.zIndex = slot === 'below' ? position - band.length : position; });
     this._sync();
     for (const item of band) this._chart.emit('draw:update', { drawing: item });
     this._emitChange(band.map(item => item.id), 'reorder');
     return true;
+  }
+
+  /**
+   * Move a drawing directly above or below `target` in its pane's paint
+   * order, as one undo step. Next to another drawing it joins the slot that
+   * drawing paints in; above a series-band entry (`chart.seriesStack`) it is
+   * placed on that entry, under the drawings already there; below one it goes
+   * on top of the slot under that entry, the drawings behind the series when
+   * the entry is the first. A slot's drawings are renumbered, below the series
+   * up to -1 and elsewhere from 0. False, with nothing recorded, for a target
+   * on another pane, one the host cannot report, or a move that changes nothing.
+   * Like `reorder`, it is outside a drawing's policy.
+   */
+  public placeInStack(id: string, target: DrawingStackTarget, where: 'above' | 'below'): boolean {
+    const d = this.get(id);
+    if (d === undefined || this._destroyed || (where !== 'above' && where !== 'below') || target === null || typeof target !== 'object') return false;
+    const entries = this._entries(d.paneIndex);
+    let slot: string, index: number;
+    if ('drawing' in target) {
+      const t = this.get(target.drawing);
+      if (t === undefined || t === d || t.paneIndex !== d.paneIndex) return false;
+      slot = this._slotOf(t, entries);
+      index = this._slotMembers(d.paneIndex, slot, entries).filter(m => m !== d).indexOf(t) + (where === 'above' ? 1 : 0);
+    } else {
+      const at = entries.indexOf((target as { entry: string }).entry);
+      if (at < 0) return false;
+      slot = where === 'above' ? 'entry:' + entries[at] : at === 0 ? 'below' : 'entry:' + entries[at - 1];
+      index = where === 'above' ? 0 : this._slotMembers(d.paneIndex, slot, entries).filter(m => m !== d).length;
+    }
+    const members = this._slotMembers(d.paneIndex, slot, entries);
+    if (this._slotOf(d, entries) === slot && members.indexOf(d) === index) return false;
+    this._pushUndo();
+    const next = members.filter(m => m !== d);
+    next.splice(index, 0, d);
+    if (slot.startsWith('entry:')) d.stackAbove = slot.slice('entry:'.length);
+    else delete d.stackAbove;
+    next.forEach((m, position) => { m.zIndex = slot === 'below' ? position - next.length : position; });
+    this._sync();
+    for (const m of next) this._chart.emit('draw:update', { drawing: m });
+    this._emitChange(next.map(m => m.id), 'reorder');
+    return true;
+  }
+
+  /** A pane's series band as the chart reports it, or none on a host that cannot. */
+  private _entries(paneIndex: number): readonly string[] {
+    return this._chart.seriesStack?.(paneIndex) ?? [];
+  }
+
+  /**
+   * The slot a drawing paints in: `entry:<id>` while the entry it is placed
+   * above is in its pane's series band, else its side of the series by `zIndex`.
+   */
+  private _slotOf(d: Drawing, entries: readonly string[]): string {
+    return d.stackAbove !== undefined && entries.includes(d.stackAbove) ? 'entry:' + d.stackAbove : d.zIndex < 0 ? 'below' : 'above';
+  }
+
+  /** The drawings of one slot of a pane, in paint order. */
+  private _slotMembers(paneIndex: number, slot: string, entries: readonly string[]): Drawing[] {
+    return sortByZIndex(this._drawings.filter(d => d.paneIndex === paneIndex && this._slotOf(d, entries) === slot));
   }
 
   private _remapPanes(map: (index: number) => number | null): void {
@@ -913,13 +998,15 @@ export class DrawingController {
       this._applyPatch(held as Drawing, rest);
       // Data is stored as an absent space, so the held patch names it outright.
       if (rest.space !== undefined) held.space = rest.space;
+      // Likewise a drawing taken out of the series band.
+      if (rest.stackAbove !== undefined) (held as DrawingPatch).stackAbove = rest.stackAbove;
       if (points) held.points = d.points;
       this._hostPatches.set(d.id, held);
       // History cannot reach a read-only drawing's content until its policy
       // changes, and that change is a rewrite which takes this patch first,
       // so moving one (a trailing level, every tick) costs no rewrite. Its
       // place in the stack is within history's reach.
-      rewrite ||= !pinned(d) || !!rest.policy || rest.zIndex !== undefined;
+      rewrite ||= !pinned(d) || !!rest.policy || rest.zIndex !== undefined || rest.stackAbove !== undefined;
     }
     if (rewrite) this._rebase();
     this._sync();
@@ -972,6 +1059,8 @@ export class DrawingController {
     if (patch.visible !== undefined) d.visible = patch.visible;
     if (patch.zIndex !== undefined && Number.isFinite(patch.zIndex)) d.zIndex = patch.zIndex;
     if (patch.policy !== undefined) d.policy = { ...d.policy, ...patch.policy };
+    if (typeof patch.stackAbove === 'string' && patch.stackAbove !== '') d.stackAbove = patch.stackAbove;
+    else if (patch.stackAbove === null) delete d.stackAbove;
   }
 
   /** Delete one drawing. A read-only one goes only with `options.force`. */
@@ -1058,10 +1147,7 @@ export class DrawingController {
   private _setSelection(next: string[]): void {
     const changed = !sameIds(next, this._selection);
     this._selection = next;
-    for (const l of this._layers.values()) {
-      l.bottom.setSelected(next);
-      l.top.setSelected(next);
-    }
+    for (const layer of this._allLayers()) layer.setSelected(next);
     if (!changed) return;
     this._chart.emit('draw:select', { id: this.selected() });
     this._chart.emit('drawing:select', { ids: next.slice() });
@@ -1093,7 +1179,7 @@ export class DrawingController {
     this._emitChange([id], 'reorder');
   }
 
-  /** In front of every other drawing on its pane. Stays on its side of the series. */
+  /** In front of every other drawing in its slot: its side of the series, or the entry it is placed above. */
   public bringToFront(id: string): void {
     const d = this.get(id);
     if (d === undefined) return;
@@ -1102,7 +1188,7 @@ export class DrawingController {
     this._reorder(d, z, 'end');
   }
 
-  /** Behind every other drawing on its pane. Stays on its side of the series. */
+  /** Behind every other drawing in its slot: its side of the series, or the entry it is placed above. */
   public sendToBack(id: string): void {
     const d = this.get(id);
     if (d === undefined) return;
@@ -1111,22 +1197,38 @@ export class DrawingController {
     this._reorder(d, z, 'start');
   }
 
-  /** Under the series (`zIndex` -1). A no-op for a drawing already there. */
+  /**
+   * Under the series (`zIndex` -1), out of the series band when it was placed
+   * in it. A no-op for a drawing already there.
+   */
   public sendBehindSeries(id: string): void {
     const d = this.get(id);
-    if (d !== undefined && d.zIndex >= 0) this.setZIndex(id, -1);
+    // A placement kept for a study that is gone goes too: the user chose a side.
+    if (d !== undefined && (d.stackAbove !== undefined || this._slotOf(d, this._entries(d.paneIndex)) !== 'below')) this._crossSeries(d, -1);
   }
 
-  /** Over the series (`zIndex` 0). A no-op for a drawing already there. */
+  /**
+   * Over the series (`zIndex` 0), out of the series band when it was placed
+   * in it. A no-op for a drawing already there.
+   */
   public bringAboveSeries(id: string): void {
     const d = this.get(id);
-    if (d !== undefined && d.zIndex < 0) this.setZIndex(id, 0);
+    if (d !== undefined && (d.stackAbove !== undefined || this._slotOf(d, this._entries(d.paneIndex)) !== 'above')) this._crossSeries(d, 0);
   }
 
-  /** The other drawings sharing `d`'s pane and side of the series. */
+  private _crossSeries(d: Drawing, z: number): void {
+    this._pushUndo();
+    d.zIndex = z;
+    delete d.stackAbove;
+    this._sync();
+    this._chart.emit('draw:update', { drawing: d });
+    this._emitChange([d.id], 'reorder');
+  }
+
+  /** The other drawings sharing `d`'s pane and slot. */
   private _band(d: Drawing): Drawing[] {
-    const below = d.zIndex < 0;
-    return this._drawings.filter((o) => o !== d && o.paneIndex === d.paneIndex && (o.zIndex < 0) === below);
+    const entries = this._entries(d.paneIndex), slot = this._slotOf(d, entries);
+    return this._drawings.filter((o) => o !== d && o.paneIndex === d.paneIndex && this._slotOf(o, entries) === slot);
   }
 
   private _reorder(d: Drawing, z: number, where: 'start' | 'end'): void {
@@ -1532,8 +1634,14 @@ export class DrawingController {
       l.top.setBelow(null);
       this._chart.removePrimitive(l.top);
       this._chart.removePrimitive(l.bottom);
+      for (const layer of l.series.values()) this._chart.removePrimitive(layer);
     }
     this._layers.clear();
+  }
+
+  /** Every layer of every pane. */
+  private _allLayers(): DrawingLayer[] {
+    return [...this._layers.values()].flatMap(l => [l.bottom, l.top, ...l.series.values()]);
   }
 
   // ── interaction ─────────────────────────────────────────────────────────
@@ -1576,10 +1684,7 @@ export class DrawingController {
   private _setHovered(id: string | null): void {
     if (id === this._hovered) return;
     this._hovered = id;
-    for (const l of this._layers.values()) {
-      l.bottom.setHovered(id);
-      l.top.setHovered(id);
-    }
+    for (const layer of this._allLayers()) layer.setHovered(id);
     this._chart.emit('drawing:hover', { id });
   }
 
@@ -1588,10 +1693,7 @@ export class DrawingController {
     const kind = pointerKindOf(p);
     if (kind === this._pointerKind) return;
     this._pointerKind = kind;
-    for (const l of this._layers.values()) {
-      l.bottom.setPointerType(kind);
-      l.top.setPointerType(kind);
-    }
+    for (const layer of this._allLayers()) layer.setPointerType(kind);
   }
 
   /**
@@ -1967,7 +2069,7 @@ export class DrawingController {
       // costs; a drag with nothing to lift never touches it.
       let lifted = false;
       for (const m of moving) {
-        if (m.zIndex < 0) { this._lifted.add(m.id); lifted = true; }
+        if (!this._onTop(m)) { this._lifted.add(m.id); lifted = true; }
       }
       this._moveDrag(p, d, handle);
       if (lifted) this._sync();
@@ -2325,7 +2427,7 @@ export class DrawingController {
   private _layerFor(paneIndex: number): PaneLayers {
     let pair = this._layers.get(paneIndex);
     if (pair === undefined) {
-      pair = { bottom: new DrawingLayer('bottom'), top: new DrawingLayer('top') };
+      pair = { bottom: new DrawingLayer('bottom'), top: new DrawingLayer('top'), series: new Map() };
       this._chart.addPrimitive(pair.bottom, paneIndex);
       this._chart.addPrimitive(pair.top, paneIndex);
       pair.top.setBelow(pair.bottom);
@@ -2336,44 +2438,103 @@ export class DrawingController {
     return pair;
   }
 
-  /** Whether a drawing paints on the top layer: over the series, or lifted for a drag. */
-  private _onTop(d: Drawing): boolean {
-    return d.zIndex >= 0 || this._lifted.has(d.id);
+  /**
+   * Whether a drawing paints on the top layer: over the series and outside
+   * the series band, or lifted for a drag.
+   */
+  private _onTop(d: Drawing, entries = this._entries(d.paneIndex)): boolean {
+    return this._lifted.has(d.id) || this._slotOf(d, entries) === 'above';
   }
 
   /** Push the current list into each pane's layers and into the chart state. */
   private _sync(): void {
     this._groups = migrateGroups(this._groups, this._drawings);
-    const byPane = new Map<number, { below: Drawing[]; above: Drawing[] }>();
-    for (const committed of this._drawings) {
-      const d = this._linkedPreviews.get(committed.id) ?? committed;
-      let lists = byPane.get(d.paneIndex);
-      if (lists === undefined) {
-        lists = { below: [], above: [] };
-        byPane.set(d.paneIndex, lists);
-      }
-      (this._onTop(d) ? lists.above : lists.below).push(d);
-    }
-    for (const [pane, lists] of byPane) {
-      const l = this._layerFor(pane);
-      l.bottom.setDrawings(lists.below);
-      l.top.setDrawings(lists.above);
-    }
-    // Panes that lost their last drawing must be cleared, not left stale.
-    for (const [pane, l] of this._layers) {
-      if (!byPane.has(pane)) {
-        l.bottom.setDrawings([]);
-        l.top.setDrawings([]);
-      }
-      l.bottom.setSelected(this._selection);
-      l.top.setSelected(this._selection);
-    }
+    this._syncLayers();
     // A hover or a selection on a drawing that has just gone, or has just
     // been made unselectable, would otherwise outlive it until the pointer
     // next moves.
     this._pruneSelection();
     if (this._hovered !== null && !this._selectable(this._hovered)) this._setHovered(null);
     this._chart.setDrawingState(this.toJSON());
+  }
+
+  /** Each drawing placed in the series band, with the slot it resolves to now. */
+  private _slotSignature(): string {
+    const stacks = new Map<number, readonly string[]>();
+    let key = '';
+    for (const d of this._drawings) {
+      if (d.stackAbove === undefined) continue;
+      let entries = stacks.get(d.paneIndex);
+      if (entries === undefined) stacks.set(d.paneIndex, entries = this._entries(d.paneIndex));
+      key += d.id + '\u0000' + this._slotOf(d, entries) + '\u0000';
+    }
+    return key;
+  }
+
+  /** List every drawing on the layer of the slot it paints in. */
+  private _syncLayers(): void {
+    this._slotKey = this._slotSignature();
+    const byPane = new Map<number, { below: Drawing[]; above: Drawing[]; series: Map<string, Drawing[]> }>();
+    const stacks = new Map<number, readonly string[]>();
+    for (const committed of this._drawings) {
+      const d = this._linkedPreviews.get(committed.id) ?? committed;
+      let lists = byPane.get(d.paneIndex);
+      if (lists === undefined) {
+        lists = { below: [], above: [], series: new Map() };
+        byPane.set(d.paneIndex, lists);
+      }
+      let entries = stacks.get(d.paneIndex);
+      if (entries === undefined) stacks.set(d.paneIndex, entries = this._entries(d.paneIndex));
+      const slot = this._lifted.has(d.id) ? 'above' : this._slotOf(d, entries);
+      if (slot === 'above') lists.above.push(d);
+      else if (slot === 'below') lists.below.push(d);
+      else {
+        const list = lists.series.get(slot.slice('entry:'.length));
+        if (list) list.push(d); else lists.series.set(slot.slice('entry:'.length), [d]);
+      }
+    }
+    for (const [pane, lists] of byPane) {
+      const l = this._layerFor(pane);
+      l.bottom.setDrawings(lists.below);
+      l.top.setDrawings(lists.above);
+      this._syncSeriesLayers(pane, l, lists.series, stacks.get(pane) ?? []);
+    }
+    // Panes that lost their last drawing must be cleared, not left stale.
+    for (const [pane, l] of this._layers) {
+      if (!byPane.has(pane)) {
+        l.bottom.setDrawings([]);
+        l.top.setDrawings([]);
+        this._syncSeriesLayers(pane, l, new Map(), []);
+      }
+      for (const layer of [l.bottom, l.top, ...l.series.values()]) layer.setSelected(this._selection);
+    }
+  }
+
+  /**
+   * One series-band layer per entry a drawing on this pane is placed above,
+   * made on first use and dropped when its last drawing leaves, each painted
+   * by the chart right after its entry. The top layer answers for them,
+   * front to back, then for the layer under the series.
+   */
+  private _syncSeriesLayers(pane: number, l: PaneLayers, groups: ReadonlyMap<string, Drawing[]>, entries: readonly string[]): void {
+    for (const [entry, layer] of l.series) {
+      if (groups.has(entry)) continue;
+      l.series.delete(entry);
+      this._chart.removePrimitive(layer);
+    }
+    for (const [entry, list] of groups) {
+      let layer = l.series.get(entry);
+      if (layer === undefined) {
+        layer = new DrawingLayer('series');
+        this._chart.addPrimitive(layer, pane);
+        this._chart.setPrimitiveStackAbove?.(layer, entry);
+        layer.setPointerType(this._pointerKind);
+        layer.setHovered(this._hovered);
+        l.series.set(entry, layer);
+      }
+      layer.setDrawings(list);
+    }
+    l.top.setBelow([...entries].reverse().flatMap(entry => l.series.get(entry) ?? []).concat(l.bottom));
   }
 
   /**

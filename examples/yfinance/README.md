@@ -52,8 +52,11 @@ The editor keeps its opening timezone throughout the draft.
 
 The toolbar's **Data** and **Objects** controls open a resizable information
 dock for the selected chart. Data follows the crosshair and lists the candle
-and running study values. Objects groups sources, studies and drawings by pane
-and exposes only actions each object supports. Each chart keeps its own dock
+and running study values. Objects groups sources, studies and drawings by pane,
+each pane in draw order from back to front, and exposes only actions each object
+supports. Drag a row onto the upper or lower half of another, or use Earlier and
+Later, to put a drawing behind the series, between two studies or in front, or the
+candles over a study; a drop the chart cannot paint is refused. Each chart keeps its own dock
 choice and width through rebuilds and saved layouts. A narrow chart shows the
 dock as a sheet. The host mounts the library's `mountPanelDock`,
 `mountDataWindow` and `createObjectsPanelContent` with a `ChartObjects` model;
@@ -294,6 +297,7 @@ examples/yfinance/
     clipboard.js      the drawing clipboard and its chords
     menus.js          the right-click menu (including Move pane up/down and Collapse pane), the price-axis menu, the popup menu
     session-marks.js  host-owned price marks: read-only, never saved, not listed
+    host-study.js     a host-owned study the user cannot remove, configure or move
     toolbar.js        the shell bar, chart types, chart-only full screen
     rail.js           the drawing rail: groups, pins, magnet, stay mode, selection controls, keyboard
     rail-flyout.js    the rail's flyout, context menu and dwell tooltip
@@ -493,6 +497,7 @@ exists to show one engine surface carrying real use, not just being present.
 | `compare.js`, `split.js`, `link.js` | Each selected chart owns its comparison symbols, scale mode, hidden rows and history requests. Each source has an independent scale, rebased at the first visible timestamp shared by all visible sources. Missing overlap shows "No common starting bar" and draws gaps. Replay readouts withhold forming comparison closes. The dialog retains its owner across focus changes; changing or closing a chart cancels stale loads. Source failures remain visible with Retry. The linked second chart has independent switches for crosshair, viewport, symbol and interval. Interval sync is off by default. |
 | `drawing.js`, `rail.js`, `rail-flyout.js` | The 2.0 drawing model from the host's side: the controller, the tool picker built from `BUILTIN_DRAWING_TOOLS` with the tier's own icon sprite and cursors, keyboard chords from `drawingShortcuts()`, and a rail whose flyouts and tooltips are host chrome built from the shipped glyphs. The toolbar's Del, Clear, Undo and Redo are off whenever pressing them would do nothing: Del and Clear leave read-only drawings alone, and Undo and Redo follow the controller's `canUndo()` and `canRedo()`. |
 | `properties.js` | The floating properties bar is generated from `drawingSettingsSchema`, which declares only the fields a tool's `draw` reads: a field in the schema is a control with something behind it, a field absent from it is a control not shown. With several drawings selected it edits the fields their schemas share, as one undo entry. A read-only selection shows "Read-only" and a Duplicate button instead of controls the controller would refuse. For text, rectangle, ellipse and table the schema's `space` field becomes a pin toggle: pinned, the drawing keeps its place on screen through pan and zoom and scales with the chart, and unpinning puts it back on the bars under it. The bar and the inline text editor place themselves by `draw.screenPoints(id)`, since a pinned drawing has no time and price to map. |
+| `host-study.js` | Study policies from the host's side. **Add Protected VWAP** in the right-click menu adds a VWAP with `policy: { removable: false, configurable: false, movable: false }`. Hide it, read it and raise an alert on it as usual; its legend row has no gear and no close button, its Objects dock row has no remove, settings, move, Earlier or Later and does not drag, its chip has no remove button, and the settings dialog and menu rows say it is protected. The policy is saved with the layout, so a reload brings the study back protected. The same row, now **Remove Protected VWAP**, takes it away with `removeIndicator(id, { force: true })`, the one call in the host that overrides the policy. |
 | `session-marks.js` | Drawing policies from the host's side. **Mark ... for This Session** in the right-click menu places a dashed price line with `policy: { editable: false, persistent: false, listed: false }`. Select it to read it, copy it, duplicate it into your own drawing or raise an alert from it; it cannot be dragged, nudged, restyled, cut or deleted, undo does not remove it, it is left out of saved layouts and it is absent from the Objects dock. The host keeps the marks per symbol for the life of the page and puts them back, with their ids, after every chart-type switch, reload and layout restore. **Clear Session Marks** removes them with `removeMany(ids, { force: true })`, the one call in the host that overrides the policy. |
 | `clipboard.js` | One in-memory clipboard shared by both charts' controllers, so copy here and paste there works even when the browser refuses the OS clipboard; the OS read is bounded so a paste never hangs on a permission popup. |
 | `level-editor.js` | A ladder tool's levels (retracement, extension, channel, fan, time zones, the Gann pair) edited one row each: enable, ratio, colour, label, add, remove, reset. Every edit is one undo entry through the controller. |

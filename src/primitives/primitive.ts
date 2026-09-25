@@ -65,6 +65,13 @@ export interface PrimitiveHit {
   draggable?: boolean;
   /** Opt into Escape cancellation without a release. Listen for `drag:cancel` to discard the preview. */
   cancelOnEscape?: boolean;
+  /**
+   * The primitive that paints what was hit, when it is not the one answering:
+   * a drawing layer answers for the layers under it. The chart ranks the hit
+   * by where that primitive paints, so a series painted over it takes the
+   * context menu. Omission means the answering primitive painted it.
+   */
+  paintedBy?: IPrimitive;
 }
 
 /** Injected when a primitive is attached; lets it request a repaint. */

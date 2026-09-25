@@ -1,0 +1,95 @@
+import { test, expect, type Page } from '@playwright/test';
+
+const ORIGIN = `http://127.0.0.1:${process.env.OAC_E2E_DEMO_PORT || '8124'}`;
+
+test.use({ viewport: { width: 1360, height: 900 } });
+test.beforeEach(async ({ page, request }) => {
+  const up = await request.get(ORIGIN + '/api/history?symbol=AAPL&interval=1d&period=1mo').then(r => r.ok(), () => false);
+  test.skip(!up, 'the yfinance fixture server is not available');
+  await page.goto(ORIGIN + '/examples/yfinance/index.html?test=1');
+  await page.waitForFunction(() => (window as any).__oac?.app.chart && !(window as any).__oac.app.loading
+    && (window as any).__oac.app.currentBars?.length);
+});
+
+async function paint(page: Page) {
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
+/** Right-click the main chart at a point in its own px, and wait for the menu. */
+async function menuAt(page: Page, x: number, y: number) {
+  const box = (await page.locator('#chart').boundingBox())!;
+  await page.mouse.click(box.x + x, box.y + y, { button: 'right' });
+  await expect(page.locator('#ctxmenu')).toBeVisible();
+}
+
+const study = (page: Page) => page.evaluate(() => {
+  const found = (window as any).__oac.app.chart.indicators().find((item: any) => item.indicatorId === 'vwap');
+  return found ? { id: found.id as string, policy: found.policy(), actions: found.legend()?.options().actions as string[] } : null;
+});
+
+test('the protected VWAP keeps every user control from removing, configuring or moving it, and only the host row takes it away', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.evaluate(() => { (window as any).__oac.app.chart.restoreState({ version: 1, indicators: [] }); });
+  await paint(page);
+  await menuAt(page, 300, 200);
+  const hostRow = page.locator('#ctxmenu [data-act="hoststudy"]');
+  await expect(hostRow).toHaveText('Add Protected VWAP');
+  await hostRow.click();
+  await expect.poll(() => study(page)).not.toBeNull();
+  const added = (await study(page))!;
+  expect(added.policy).toEqual({ removable: false, configurable: false, movable: false });
+  expect(added.actions).not.toContain('close');
+  expect(added.actions).not.toContain('settings');
+  expect(added.actions).toContain('hide');
+
+  // Over its line the settings row is greyed with the reason.
+  const point = await page.evaluate((id) => {
+    const app = (window as any).__oac.app, chart = app.chart;
+    const found = chart.indicators().find((item: any) => item.id === id);
+    const bars = app.currentBars, at = bars.length - 10;
+    const column = Object.values(found.values()).find((values: any) => Number.isFinite(values?.[at])) as number[];
+    return { x: chart.timeToCoordinate(bars[at].time), y: chart.priceToCoordinate(column[at]) };
+  }, added.id);
+  await paint(page);
+  await menuAt(page, point.x, point.y);
+  const settingsRow = page.locator('#ctxmenu [data-act="indset"]');
+  await expect(settingsRow).toBeVisible();
+  await expect(settingsRow).toBeDisabled();
+  await expect(settingsRow).toHaveAttribute('title', 'protected by the host');
+  await page.screenshot({ path: info.outputPath('protected-menu.png') });
+  await page.keyboard.press('Escape');
+
+  // The Objects dock offers only what the policy allows.
+  await page.getByRole('button', { name: 'Chart objects', exact: true }).click();
+  const row = page.locator(`#inspect-layout-1 [data-object-id="indicator:${added.id}"]`);
+  await expect(row).toBeVisible();
+  for (const action of ['remove', 'settings', 'earlier', 'later', 'move']) await expect(row.locator(`[data-action="${action}"]`)).toHaveCount(0);
+  await expect(row.locator('[data-action="visibility"]')).toHaveCount(1);
+  await expect(row).toHaveAttribute('draggable', 'false');
+  await page.screenshot({ path: info.outputPath('protected-objects.png') });
+  await row.locator('[data-action="visibility"]').click();
+  expect(await page.evaluate((id) => (window as any).__oac.app.chart.indicators().find((item: any) => item.id === id).visible(), added.id)).toBe(false);
+  await row.locator('[data-action="visibility"]').click();
+
+  // The shared indicator picker greys its remove button.
+  await page.getByRole('button', { name: 'Add an indicator', exact: true }).click();
+  const remove = page.locator(`.oac-pick__running-row[data-instance-id="${added.id}"] .oac-pick__remove`);
+  await expect(remove).toBeDisabled();
+  await expect(remove).toHaveAttribute('title', 'protected');
+  await page.keyboard.press('Escape');
+
+  // Saved with the layout: a reload brings it back protected.
+  // `pagehide` flushes the pending autosave, so the reload reads the layout just made.
+  await page.reload();
+  await page.waitForFunction(() => (window as any).__oac?.app.chart && !(window as any).__oac.app.loading
+    && (window as any).__oac.app.currentBars?.length);
+  await expect.poll(async () => (await study(page))?.policy).toEqual({ removable: false, configurable: false, movable: false });
+
+  // Only the host row, which passes force, takes it away.
+  await menuAt(page, 300, 200);
+  await expect(hostRow).toHaveText('Remove Protected VWAP');
+  await hostRow.click();
+  await expect.poll(() => study(page)).toBeNull();
+  expect(errors).toEqual([]);
+});

@@ -370,6 +370,24 @@ action returning `false` or throwing reports through the existing toast. No prim
 source removal control is offered. Settings reuse the widget's current chart,
 indicator and drawing editors. Drawing actions use existing undo history.
 
+Each pane section lists its stack in draw order, back to front (`objects.stack(pane)`),
+a group at its first member's place and rows outside the stack after. A drawing row
+notes **Behind series** or **Above** and the row it sits on. Dragging a row onto the
+upper half of another puts it under that row in paint order, the lower half over it;
+`dragover` accepts only a drop `objects.canPlace` allows, marking the row
+`is-drop-before` / `is-drop-after`, so an unpaintable drop is refused before release.
+**Earlier** and **Later** step through the same order with `objects.place` (a source or
+study steps between whole slots); rows outside the stack keep `reorder`. A drop onto a
+row of another pane moves the row there first. A custom `objects` model without `stack`
+keeps the list order.
+
+Study policies reach the panel the same way: an unlisted study has no row, and a
+protected one offers only the actions its policy allows. Elsewhere the widget greys the
+context menu's settings and remove rows with the note "protected", greys the indicator
+picker's remove button, declines the settings dialog with a toast ("{name} settings are
+protected"), and leaves unlisted studies out of the picker's running list and the alert
+source lists. See [study policies](core-api.md#study-policies).
+
 Drawing policies reach the panel through the inventory: an unlisted drawing
 (`policy.listed: false`) has no row, a read-only one (`policy.editable: false`)
 has no Hide, Lock or Remove, and an unselectable one no select. Elsewhere in the

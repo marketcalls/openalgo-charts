@@ -79,12 +79,17 @@ teardown. `widget.destroy()` handles its own inventory automatically.
 | `setVisible(id, on)` / `setLocked(id, on)` | Delegate the supported operation to its owner. |
 | `remove(id)` / `openSettings(id)` / `focus(id)` | Delegate a supported action. Return `false` for missing, unsupported, or failed operations. |
 | `register(provider)` | Add an explicit host-owned object. Returns idempotent registration cleanup. |
+| `stack(paneIndex)` | The pane's rows in draw order, back to front. See [Draw order](#draw-order). |
+| `canPlace(id, targetId, where)` / `place(id, targetId, where)` | Whether a row can move directly `'above'` or `'below'` another row of its pane's stack, and the move itself. `false` for one the bands cannot paint. |
 | `refresh()` | Re-read host state when its provider has no change subscription. |
 | `destroy()` | Stop observing; safe to call again. |
 
 Each `ChartObjectSnapshot` has `id`, `sourceId`, `kind`, `name`, `paneIndex`, `visible`,
 `selected`, optional `locked` and `dataStatus`, plus boolean capabilities for `select`,
-`visibility`, `lock`, `remove`, `settings`, and `focus`. Use the snapshot's `id` for
+`visibility`, `lock`, `remove`, `settings`, `focus`, `reorder`, `move` and `place`. A
+row that is part of its pane's stack also has `band` (`'below'`, `'series'` or
+`'above'`), and a drawing placed in the series band has `stackAbove`, the id of the row
+it paints directly above. Use the snapshot's `id` for
 inventory actions; `sourceId` identifies the existing indicator, drawing, or provider.
 The primary row is `source:primary`; indicator and drawing IDs have their kind prefix.
 Host registrations use `custom:<provider.id>` and cannot replace a built-in row.
@@ -95,6 +100,13 @@ with `policy.listed: false` has no row and is left out of its group's row. One w
 group holding it. One with `policy.selectable: false` offers no `select`. A group that
 holds an unlisted drawing removes only its listed members, as one undo step, and
 `ungroup` leaves it as it is.
+
+It honours [study policies](/docs/indicators#study-policies) the same way. A study with
+`policy.listed: false` has no row. One that is not `removable` offers no `remove`, one
+that is not `configurable` no `settings`, and one that is not `movable` no `reorder`,
+`move` or `place`; `visibility` stays. The calls behind those rows refuse the user too,
+so a custom list cannot reach around the policy, and the host passes `{ force: true }`
+to `chart.removeIndicator`, `chart.moveIndicator`, `setSettings` and the rest.
 
 ## Register a profile with supported actions
 
@@ -160,10 +172,14 @@ usual overlay stack and theme furniture. Include `OBJECTS_PANEL_CSS` alongside
 ### Ordering, study panes, and drawing groups
 
 The default widget places Objects in its information dock. Rows are organized by
-pane. Drag a study or drawing onto a compatible row to change its order, or use
-**Earlier** and **Later**. Reordering changes the rendered order as well as the list.
-Use a study's pane selector to move it to an existing pane or a new one. On touch
-or keyboard, Select/Deselect controls let you select several drawings for a group.
+pane, each pane in [draw order](#draw-order), back to front. Drag a row onto the
+upper half of another to put it under that row in paint order, or onto the lower
+half to put it over it, or use **Earlier** and **Later**. A drop the bands cannot
+paint is refused before it lands. Reordering changes the rendered order as well as
+the list. A drawing's row says **Behind series**, or **Above** and the row it sits
+on, when it is not in front. Use a study's pane selector to move it to an existing
+pane or a new one. On touch or keyboard, Select/Deselect controls let you select
+several drawings for a group.
 
 ```ts
 widget.chart.reorderIndicator(study.id, -1);
@@ -177,8 +193,45 @@ references. Empty study panes are removed after their contents move. Named drawi
 groups round-trip in `DrawingsDocument.groups`; documents without groups still
 load. Group changes participate in drawing undo/redo.
 
+### Draw order
+
+A pane paints in bands, back to front: drawings behind the series, then the series
+band, then the overlay band (price lines, markers, study levels), then drawings in
+front. The series band holds the price source and each study, in the order
+`chart.seriesStack(paneIndex)` lists them, and a drawing can sit directly above any
+of them (see [Draw order](/docs/drawing-tools#draw-order) for drawings).
+`objects.stack(paneIndex)` lists those rows as one sequence:
+
+```ts
+const rows = objects.stack(0).map(row => row.id);
+// ['drawing:d3', 'source:primary', 'indicator:ema-1', 'drawing:d1', 'indicator:rsi-2', 'drawing:d2']
+//   behind the series        the series band, with d1 placed on the EMA          in front
+```
+
+`place(id, targetId, where)` moves one row directly above or below another row of
+the same pane:
+
+- **A drawing goes anywhere in its pane.** Next to a drawing it joins the slot that
+  drawing paints in; above an entry it is placed on that entry; below an entry it
+  goes on top of the slot under it.
+- **A source or study moves between whole slots**, taking the drawings placed on it
+  along: under another entry, over the top of another entry's slot, to the back of
+  the band (over the top drawing behind the series) or to its front (under the
+  lowest drawing in front).
+- **What the bands cannot paint is refused**: an entry between another entry and a
+  drawing placed on it, an entry behind or in front of the series band, and a move to
+  another pane. `canPlace` reports the same answer without moving anything, and a
+  move that changes nothing is `false` too.
+
+A study that is not `movable` offers no `place`. The source can be moved over a
+study: it stays the pane's instrument (the crosshair readout, the last-price line and a
+rebased axis still describe it), and the chart state saves the study it sits on as
+`sourceAbove`. The drawings' slots are saved in the drawing document.
+
 For custom inventories, `ChartObjects.reorder(id, direction)` and
-`move(id, paneIndex)` respect optional `reorder` and `move` capabilities.
+`move(id, paneIndex)` respect optional `reorder` and `move` capabilities. `reorder`
+keeps its own order among one kind (a study among the studies of its pane, a drawing
+within its slot); `place` is the order across kinds.
 `createGroup(name, ids)`, `renameGroup(id, name)`, and `ungroup(id)` use inventory
 IDs. Group rows have `kind: 'group'`; child rows may carry `groupId`. A provider can
 offer `reorder` or `move` callbacks, or omit both to retain its existing behavior.

@@ -350,6 +350,8 @@ zero-based; the widget displays pane numbers starting at 1 and names the price p
 | `setVisible(id, on)` / `setLocked(id, on)` | Delegates to the owning subsystem when the capability exists. |
 | `remove(id)` / `openSettings(id)` / `focus(id)` | Delegates the supported action. |
 | `register(provider)` | Adds explicit host-owned state; returns idempotent registration cleanup. |
+| `stack(paneIndex)` | The pane's stack rows in draw order, back to front (see Draw order below). |
+| `canPlace(id, targetId, where)` / `place(id, targetId, where)` | Whether a row can move directly `'above'` or `'below'` another row of its pane's stack, and the move. `false` for a move the bands cannot paint or one that changes nothing. |
 | `refresh()` | Re-reads provider state without polling. |
 | `paneCount()` / `primaryPaneIndex()` | The pane count (a move target list adds one new pane after it) and the price pane's slot, so a list can name the price pane in any slot. |
 | `destroy()` | Releases chart/provider observations without deleting objects; idempotent. |
@@ -780,6 +782,61 @@ synchronously as `branding:changed` after `setBranding`. Host-accessible links s
 to this event and unsubscribe on teardown, so disabling or replacing a logo cannot leave
 an old destination in the toolbar.
 
+
+## Study policies
+
+`IndicatorPolicy` (from `openalgo-charts`) restricts what a user may do with a study,
+flag by flag; each defaults to `true`, mirroring the drawing policy. Pass it to
+`chart.addIndicator(id, settings, { policy })`, read it with `indicator.policy()` (only
+the flags that are `false`) and replace it with `indicator.setPolicy(policy | null)`,
+which is always the host's act. `parseIndicatorPolicy(input)` validates one and keeps
+only the four boolean flags (it throws on a non-boolean flag).
+
+| Flag | `false` restricts |
+|---|---|
+| `removable` | `chart.removeIndicator(id)`, `indicator.remove()`, `chart.removePane(index)` for a pane holding it; the legend close button; `ChartObjects` `remove`; the widget's menu row and picker remove button (greyed, note "protected"). |
+| `configurable` | `indicator.setSettings(patch)`, `setPriceScale`, `setPlotPriceScales`; the legend gear (no `indicatorSettings` event); `ChartObjects` `settings`; the widget settings dialog declines. |
+| `movable` | `chart.moveIndicator`, `chart.reorderIndicator`, `chart.moveInSeriesStack` for it; `ChartObjects` `reorder`, `move`, `place`. Others still move past it; pane controls still move its pane. |
+| `listed` | Its row in `ChartObjects` and every panel on it, the widget's picker list and alert source lists. The legend still shows it. |
+
+Every restricted call treats its caller as the user and returns `false` with nothing
+changed; the owning host passes `{ force: true }` (`IndicatorEditOptions`). `setSettings`
+and `remove` now return a boolean. A restore is the host's act and replaces a protected
+study. Hiding stays allowed. `IndicatorState.policy` saves only the restrictions, so an
+unrestricted layout is unchanged; a malformed policy refuses the restore. Workspace
+documents keep policies; portable templates drop them, and a `replace` template plan keeps
+every study that is not `removable`.
+
+## Draw order
+
+A pane paints in bands, back to front: `'bottom'` primitives and drawings behind the
+series; the series band; `'normal'` primitives (price lines, markers, study levels);
+`'top'` primitives and drawings in front. The series band's entries are the price source
+and each study living on the pane that plots a series there:
+
+- `chart.seriesStack(paneIndex?)`: entry ids in paint order, `'source:primary'` and
+  `'indicator:<instance id>'` (the inventory's ids).
+- `chart.moveInSeriesStack(id, target, 'above' | 'below', options?)`: move the source or a
+  study directly above or below another entry of the same pane. Studies take their slots
+  in the study list in the new order, so their fills, levels and markers follow. The
+  drawings placed on an entry move with it. `false` for another pane, a no-op, or a study
+  that is not `movable` (unless forced). A moved source saves `ChartState.sourceAbove`
+  (the study id it sits on, written only then); it stays the pane's instrument for the
+  readout, the last-price line and a rebased axis.
+- `chart.setPrimitiveStackAbove(primitive, entry | null)`: paint an attached primitive
+  right after that entry's last series on its pane; a batching backend flushes first.
+  While the entry plots nothing there the primitive paints in its own band.
+- Context menus rank a drawing against a series by paint order: a hit whose
+  `PrimitiveHit.paintedBy` paints under the series under the pointer gives way to it.
+
+`ChartObjects.stack(paneIndex)` joins them: drawings behind the series, each entry followed
+by the drawings placed on it, then drawings in front. Rows gain `band` (`ChartObjectBand`:
+`'below' | 'series' | 'above'`), `stackAbove` for a drawing in the series band, and the
+`place` capability. `place(id, target, where)` moves a drawing anywhere in its pane and a
+source or study only between whole slots; an entry between another entry and a drawing
+placed on it, out of the series band, or onto another pane is refused. A drawing source
+supports placement through the optional `ChartObjectDrawingSource.placeInStack`.
+`ChartObjectDrawing` gains optional `stackAbove`. `reorder` keeps its per-kind order.
 
 ## Study movement and object order (2.5.3)
 

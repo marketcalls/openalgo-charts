@@ -90,6 +90,7 @@ const INSTANCE_PALETTE: readonly string[] = [
   '#26c6da', '#8bc34a', '#ff7043', '#5c6bc0',
 ];
 import { IndicatorInstance, parseIndicatorPlotPriceScales, validateIndicatorScaleAssignment, type IndicatorApi, type IndicatorHost } from '../model/indicator-instance';
+import { parseIndicatorPolicy, type IndicatorEditOptions, type IndicatorPolicy } from '../model/indicator-policy';
 import type { AlertsDocument } from '../alerts/types';
 import { copyAlert, parseAlertsDocument, validateAlert } from '../alerts/document';
 import type { ChartDataContext } from '../model/indicator-registry';
@@ -871,6 +872,15 @@ export class Chart {
   private readonly _seriesRecords = new WeakMap<SeriesApi, SeriesRecord>();
   private readonly _seriesProvenance = new Map<number, SeriesProvenance>();
   private readonly _indicators: IndicatorInstance[] = [];
+  /**
+   * Where the price source sits among the studies of its pane: undefined until
+   * something places it (the source then stays where it was added, as it
+   * always did), null at the back of the series band, or the instance id of
+   * the study it paints directly above.
+   */
+  private _sourceAbove: string | null | undefined = undefined;
+  /** Each study legend row's own buttons, before its study's policy withholds any. */
+  private readonly _legendActions = new WeakMap<PaneLegend, readonly PaneLegendAction[]>();
   private _restoreGeneration = 0;
   private readonly _indicatorRanges = new Map<string, {
     pane: Pane; scaleId: PriceScaleId; range: { min: number; max: number };
@@ -1477,7 +1487,7 @@ export class Chart {
         this._dataLayer.removeSeries(dataId);
         this._seriesProvenance.delete(dataId);
         if (this._firstDataId.value === dataId) this._firstDataId.value = null;
-        if (this._primary?.record === record) this._primary = null;
+        if (this._primary?.record === record) { this._primary = null; owner.pane.setSourceSeries(null); }
         if (!owner.indicatorOwned) this._reconcileIndicatorRanges();
         this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
         this._recomputeAxisColumns();
@@ -1502,6 +1512,9 @@ export class Chart {
     if (!owner.indicatorOwned) this._reconcileIndicatorRanges();
     if (isPrimary) {
       this._primary = { api, record };
+      this._panes[paneIndex].setSourceSeries(record);
+      // A source added after a layout placed it goes where the layout says.
+      if (this._sourceAbove !== undefined) this._placeSource();
       this.emit('objects:change', {});
     }
     return api;
@@ -1664,13 +1677,20 @@ export class Chart {
    * macd.setSettings({ fastPeriod: 12 });
    * macd.remove();
    * ```
+   *
+   * `options.policy` restricts what the user may do with the study (see
+   * `IndicatorPolicy`); the host keeps changing it with `{ force: true }`.
    */
   public addIndicator(
     indicatorId: string,
     settings: Readonly<IndicatorSettings> = {},
-    options: { paneIndex?: number; priceScaleId?: PriceScaleId; plotPriceScaleIds?: Readonly<Record<string, PriceScaleId>> } = {},
+    options: {
+      paneIndex?: number; priceScaleId?: PriceScaleId; plotPriceScaleIds?: Readonly<Record<string, PriceScaleId>>;
+      policy?: IndicatorPolicy;
+    } = {},
   ): IndicatorApi {
     if (options.priceScaleId !== undefined && !this._validPriceScaleId(options.priceScaleId)) throw new TypeError('Invalid indicator price scale');
+    const policy = options.policy === undefined ? undefined : parseIndicatorPolicy(options.policy);
     const descriptor = getIndicator(indicatorId);
     const validatedSettings = cloneIndicatorSettings(settings);
     validateIndicatorInputs(descriptor.inputs, validatedSettings);
@@ -1691,6 +1711,7 @@ export class Chart {
       reserved,
       options.priceScaleId,
       plotPriceScaleIds,
+      policy,
     );
     this._indicators.push(instance);
     this._restackLegends();
@@ -1739,10 +1760,13 @@ export class Chart {
     return this._indicators;
   }
 
-  /** Move an existing study to an existing pane or a new pane at panes().length. */
-  public moveIndicator(instanceId: string, paneIndex: number): boolean {
+  /**
+   * Move an existing study to an existing pane or a new pane at panes().length.
+   * A study whose policy is not `movable` stays unless `options.force` is set.
+   */
+  public moveIndicator(instanceId: string, paneIndex: number, options: IndicatorEditOptions = {}): boolean {
     const instance = this._indicators.find(item => item.id === instanceId);
-    if (this.isDestroyed || !instance || !Number.isInteger(paneIndex) || paneIndex < 0 || paneIndex > this._panes.length || instance.paneIndex === paneIndex || !instance.canRelocate(paneIndex)) return false;
+    if (this.isDestroyed || !instance || !this._policyAllows(instance, 'movable', options) || !Number.isInteger(paneIndex) || paneIndex < 0 || paneIndex > this._panes.length || instance.paneIndex === paneIndex || !instance.canRelocate(paneIndex)) return false;
     const previous = instance.paneIndex;
     const freshTarget = paneIndex === this._panes.length;
     this._ensurePane(paneIndex);
@@ -1767,6 +1791,8 @@ export class Chart {
       this._panes.find(pane => pane.hasPrimitive(primitive))?.transferPrimitive(primitive, target);
     }
     instance.relocate(paneIndex);
+    // The source keeps its place when the study it sat on leaves its pane.
+    this._reanchorSource();
     this._syncLegendPanes();
     // Alert visuals resolve the instance's new pane before we decide whether its old pane is empty.
     this.emit('objects:change', {});
@@ -1781,11 +1807,14 @@ export class Chart {
     return true;
   }
 
-  /** Change study stacking order among studies on the same pane. */
-  public reorderIndicator(instanceId: string, direction: -1 | 1): boolean {
+  /**
+   * Change study stacking order among studies on the same pane. A study whose
+   * policy is not `movable` stays unless `options.force` is set.
+   */
+  public reorderIndicator(instanceId: string, direction: -1 | 1, options: IndicatorEditOptions = {}): boolean {
     if (direction !== -1 && direction !== 1) return false;
     const index = this._indicators.findIndex(item => item.id === instanceId);
-    if (this.isDestroyed || index < 0) return false;
+    if (this.isDestroyed || index < 0 || !this._policyAllows(this._indicators[index], 'movable', options)) return false;
     const paneIndex = this._indicators[index].paneIndex;
     let target = index + direction;
     while (target >= 0 && target < this._indicators.length && this._indicators[target].paneIndex !== paneIndex) target += direction;
@@ -1810,7 +1839,141 @@ export class Chart {
     const owned = new Set(legends);
     let index = 0;
     for (const entry of this._legends) if (owned.has(entry.legend)) entry.legend = legends[index++];
+    this._placeSource();
     this._syncLegendPanes();
+  }
+
+  /** Whether a call may make a change a study's policy reserves for its host. */
+  private _policyAllows(study: IndicatorApi, flag: keyof IndicatorPolicy, options: IndicatorEditOptions): boolean {
+    return options.force === true || study.policy()[flag] !== false;
+  }
+
+  /**
+   * The series band of a pane, back to front: `'source:primary'` where the
+   * price source is on this pane, and `'indicator:<id>'` for each study that
+   * lives on it and plots a series here, in the order they paint. The same
+   * ids as the object inventory. Host series and a study's plots placed on
+   * another pane paint in the band too, in their own slots, but are not
+   * entries of it.
+   */
+  public seriesStack(paneIndex = this._primaryIndex()): string[] {
+    const pane = this._panes[paneIndex];
+    if (pane === undefined) return [];
+    const owners = this._stackOwners(pane, paneIndex);
+    const out: string[] = [];
+    for (const record of pane.series()) {
+      const id = owners.get(record);
+      if (id !== undefined && !out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+
+  /**
+   * Move a source or study directly above or below another entry of the same
+   * pane's series band (see `seriesStack`). A study keeps its other bands'
+   * layers in the new study order, so its fills, levels and markers follow.
+   * The drawings placed above an entry travel with it. False, with nothing
+   * changed, for an entry of another pane, a move that changes nothing, or a
+   * study whose policy is not `movable` unless `options.force` is set.
+   */
+  public moveInSeriesStack(id: string, target: string, where: 'above' | 'below', options: IndicatorEditOptions = {}): boolean {
+    if (this.isDestroyed || id === target || (where !== 'above' && where !== 'below')) return false;
+    const study = id.startsWith('indicator:') ? this._indicators.find(item => 'indicator:' + item.id === id) : undefined;
+    const source = id === 'source:primary' && this._primary !== null ? this._seriesOwners.get(this._primary.api)?.pane : undefined;
+    const paneIndex = study ? study.paneIndex : source ? this._panes.indexOf(source) : -1;
+    const order = paneIndex < 0 ? [] : this.seriesStack(paneIndex);
+    if (!order.includes(id) || !order.includes(target) || (study && !this._policyAllows(study, 'movable', options))) return false;
+    const next = order.filter(item => item !== id);
+    next.splice(next.indexOf(target) + (where === 'above' ? 1 : 0), 0, id);
+    if (next.every((item, i) => item === order[i])) return false;
+    // The studies of this pane take their slots in the study list in the new
+    // order, which every band of theirs follows; studies elsewhere keep theirs.
+    const studies = next.flatMap(item => this._indicators.filter(entry => 'indicator:' + entry.id === item));
+    const members = new Set(studies);
+    let k = 0;
+    for (let i = 0; i < this._indicators.length; i++) if (members.has(this._indicators[i])) this._indicators[i] = studies[k++];
+    const at = next.indexOf('source:primary');
+    if (at >= 0) this._sourceAbove = at === 0 ? null : next[at - 1].slice('indicator:'.length);
+    this._reorderIndicatorResources();
+    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    this.emit('objects:change', {});
+    return true;
+  }
+
+  /**
+   * Paint an attached primitive inside the series band of its pane, directly
+   * above the source or study `above` names (an id from `seriesStack`), or
+   * pass null to return it to its own z-order band. While that entry plots
+   * no series on the primitive's pane it paints in its own band. A drawing
+   * layer is the case this exists for. False for a primitive on no pane.
+   */
+  public setPrimitiveStackAbove(primitive: IPrimitive, above: string | null): boolean {
+    const index = this._panes.findIndex(pane => pane.hasPrimitive(primitive));
+    if (index < 0 || (above !== null && typeof above !== 'string')) return false;
+    if (this._panes[index].primitiveStackAbove(primitive) === above) return true;
+    this._panes[index].setPrimitiveStackAbove(primitive, above);
+    this.invalidate(m => m.invalidatePane(index, { level: InvalidationLevel.Light, autoScale: false }));
+    return true;
+  }
+
+  /** Each series of a pane that belongs to one of its series-band entries, with that entry's id. */
+  private _stackOwners(pane: Pane, paneIndex: number): Map<SeriesRecord, string> {
+    const owners = new Map<SeriesRecord, string>();
+    if (this._primary !== null && this._seriesOwners.get(this._primary.api)?.pane === pane) owners.set(this._primary.record, 'source:primary');
+    for (const study of this._indicators) {
+      if (study.paneIndex !== paneIndex) continue;
+      for (const { api } of study.renderResources().series) {
+        const record = this._seriesRecords.get(api);
+        if (record !== undefined && this._seriesOwners.get(api)?.pane === pane) owners.set(record, 'indicator:' + study.id);
+      }
+    }
+    return owners;
+  }
+
+  /** The series an entry paints last on a pane: what a primitive placed above it paints after. */
+  private _stackSlot(paneIndex: number, entry: string): SeriesRecord | undefined {
+    const pane = this._panes[paneIndex];
+    if (pane === undefined) return undefined;
+    const owners = this._stackOwners(pane, paneIndex);
+    let last: SeriesRecord | undefined;
+    for (const record of pane.series()) if (owners.get(record) === entry) last = record;
+    return last;
+  }
+
+  /**
+   * Put the price source where it was placed: directly above its study, or
+   * behind every study of its pane. A source nobody placed stays where it was
+   * added. Host series keep their slots, so only the source record moves, and
+   * only when it is out of place.
+   */
+  private _placeSource(): void {
+    const placed = this._sourceAbove;
+    const owner = this._primary === null ? undefined : this._seriesOwners.get(this._primary.api);
+    if (placed === undefined || owner === undefined) return;
+    const pane = owner.pane, paneIndex = this._panes.indexOf(pane), source = this._primary!.record;
+    const owners = this._stackOwners(pane, paneIndex);
+    owners.delete(source);
+    const records = pane.series(), at = records.indexOf(source);
+    const after = placed === null ? undefined : this._stackSlot(paneIndex, 'indicator:' + placed);
+    // A study that is gone leaves the source at the back, and says so when saved.
+    if (after === undefined) this._sourceAbove = null;
+    const from = after === undefined ? -1 : records.indexOf(after);
+    const next = records.findIndex((record, i) => i > from && record !== source && owners.has(record));
+    if (at > from && (next < 0 || at < next)) return;
+    // The least that puts it in place: right after its study, or right before
+    // the first study at the back, so a host series beside it keeps its side.
+    pane.moveSeries(source, after === undefined ? records[next] : records[from + 1] ?? null);
+  }
+
+  /**
+   * The study directly below the source, read from the band as it stands:
+   * how the source keeps its place when the study it sat on leaves the pane.
+   */
+  private _reanchorSource(): void {
+    const pane = this._primary === null ? undefined : this._seriesOwners.get(this._primary.api)?.pane;
+    if (typeof this._sourceAbove !== 'string' || pane === undefined) return;
+    const order = this.seriesStack(this._panes.indexOf(pane)), at = order.indexOf('source:primary');
+    this._sourceAbove = at > 0 ? order[at - 1].slice('indicator:'.length) : null;
   }
 
   private _syncLegendPanes(): void {
@@ -1818,12 +1981,14 @@ export class Chart {
     this._restackLegends();
   }
 
-  /** Remove one indicator instance by its handle id. Returns true if it existed. */
-  public removeIndicator(instanceId: string): boolean {
+  /**
+   * Remove one indicator instance by its handle id. Returns true if it existed
+   * and went; a study whose policy is not `removable` stays unless
+   * `options.force` is set.
+   */
+  public removeIndicator(instanceId: string, options: IndicatorEditOptions = {}): boolean {
     const instance = this._indicators.find(x => x.id === instanceId);
-    if (instance === undefined) return false;
-    instance.remove();
-    return true;
+    return instance !== undefined && instance.remove(options);
   }
 
   private _forgetIndicator(instanceId: string, failedOwnedPane?: number): void {
@@ -1835,6 +2000,7 @@ export class Chart {
     }
     const { indicatorId, paneIndex } = this._indicators[i];
     this._indicators.splice(i, 1);
+    this._reanchorSource();
     this._restackLegends();
     this._indicatorReservedIds.add(instanceId);
     this._indicatorRefreshes.delete(instanceId);
@@ -2025,6 +2191,10 @@ export class Chart {
       // that pane is written, floor, tick, custom formatter and all.
       formatPrice: (paneIndex: number, value: number, series?: SeriesApi): string | undefined =>
         (series?.priceScale() ?? this._panes[paneIndex]?.priceScale)?.format(value),
+      policyChanged: (): void => {
+        this._restackLegends();
+        this.emit('objects:change', {});
+      },
       addIndicatorLegend: (o): PaneLegend => {
         // A row starts with its own show / settings / delete. Stacking it gives
         // it the pane-level controls when it is the first study row of a lower
@@ -2038,6 +2208,7 @@ export class Chart {
         // _syncLegendOffsets decides which pane wears the offset, and runs on
         // every relayout; this is just the initial placement.
         const legend = new PaneLegend({ ...o, actions: paneActions });
+        this._legendActions.set(legend, paneActions);
         this._studyLegends.add(legend);
         this._addPrimitive(o.paneIndex, legend);
         return legend;
@@ -3188,11 +3359,12 @@ export class Chart {
       // costing a full series redraw on every mousemove, times every chart in a
       // linked grid. Read per call rather than captured at attach: `zOrder()`
       // is a method, and a primitive is free to change layer.
-      requestUpdate: (): void =>
-        this.invalidate((m) => m.invalidatePane(this._panes.findIndex(pane => pane.hasPrimitive(primitive)), {
-          level: primitive.zOrder() === 'top' ? InvalidationLevel.Cursor : InvalidationLevel.Light,
-          autoScale: false,
-        })),
+      requestUpdate: (): void => {
+        const index = this._panes.findIndex(pane => pane.hasPrimitive(primitive));
+        // One placed in the series band paints on the base canvas, whatever its own band.
+        const top = primitive.zOrder() === 'top' && this._panes[index]?.primitiveStackAbove(primitive) == null;
+        this.invalidate((m) => m.invalidatePane(index, { level: top ? InvalidationLevel.Cursor : InvalidationLevel.Light, autoScale: false }));
+      },
     };
     this._panes[paneIndex].addPrimitive(primitive, host);
     // Track legend rows however they were added — a host can add its own (a
@@ -3258,6 +3430,15 @@ export class Chart {
     // it neither draws nor answers the pointer: it would start inside the
     // strip's lower inset.
     const strip = (entry: { legend: PaneLegend; paneIndex: number }): boolean => leads.get(entry.paneIndex) === entry.legend && this._collapsedShown(entry.paneIndex);
+    // A row offers only what its study's policy lets the user do: no close
+    // button on a study the user may not remove, no gear on one they may not
+    // configure. The pane controls act on the pane and stay.
+    const policies = new Map(this._indicators.map(study => [study.legend(), study.policy()]));
+    const own = (legend: PaneLegend): PaneLegendAction[] => {
+      const policy = policies.get(legend);
+      return (this._legendActions.get(legend) ?? legend.options().actions ?? []).filter(action =>
+        !(action === 'close' && policy?.removable === false) && !(action === 'settings' && policy?.configurable === false));
+    };
     let reserved = false;
     for (const entry of [...this._legends.filter(strip), ...this._legends.filter(entry => !strip(entry))]) {
       let row = rowByPane.get(entry.paneIndex) ?? 0;
@@ -3270,7 +3451,7 @@ export class Chart {
       }
       const pane = this._panes[entry.paneIndex];
       const collapsed = this._collapsed.has(pane);
-      entry.legend.setOptions(owned ? { row, collapsed, actions: leadActions(entry.legend.options().actions,
+      entry.legend.setOptions(owned ? { row, collapsed, actions: leadActions(own(entry.legend),
         pane !== undefined && pane !== this._primaryPane && leads.get(entry.paneIndex) === entry.legend) } : { row });
       rowByPane.set(entry.paneIndex, row + (!folded && entry.legend.options().visible !== false ? 1 : 0));
     }
@@ -3721,7 +3902,10 @@ export class Chart {
         ...(studyInputs.get(i.id)?.length ? { studyInputs: studyInputs.get(i.id)!.map(edge => edge.inputKey) } : {}),
         ...(i.priceScaleId() === null ? {} : { priceScaleId: i.priceScaleId()! }),
         ...(Object.keys(i.plotPriceScaleIds()).length ? { plotPriceScaleIds: i.plotPriceScaleIds() } : {}),
+        // Restrictions only: an unrestricted study saves what it always did.
+        ...(Object.keys(i.policy()).length ? { policy: { ...i.policy() } } : {}),
       })),
+      ...(typeof this._sourceAbove === 'string' ? { sourceAbove: this._sourceAbove } : {}),
     };
     if (this._drawingState !== undefined) state.drawings = this._drawingState;
     if (this._alertState !== undefined) state.alerts = parseAlertsDocument(this._alertState);
@@ -3809,6 +3993,7 @@ export class Chart {
         primaryPane = at;
       }
       if (s.alerts !== undefined) alerts = parseAlertsDocument(s.alerts);
+      if (s.sourceAbove !== undefined && (typeof s.sourceAbove !== 'string' || !s.sourceAbove.trim())) throw new Error('Invalid source placement');
       if (s.indicators !== undefined) {
         if (!Array.isArray(s.indicators)) throw new Error('Invalid indicator list');
         for (const spec of s.indicators) {
@@ -3825,7 +4010,8 @@ export class Chart {
         }
         this._reserveAlertStudyIds(alerts, reservedIds);
         const used = new Set([...reservedIds, ...this._indicatorReservedIds, ...this._indicators.map(item => item.id)]);
-        const specs = s.indicators.map(spec => ({ ...spec, settings: cloneIndicatorSettings(spec.settings ?? {}) }));
+        const specs = s.indicators.map(spec => ({ ...spec, settings: cloneIndicatorSettings(spec.settings ?? {}),
+          ...(spec.policy === undefined ? {} : { policy: parseIndicatorPolicy(spec.policy) }) }));
         // Missing producers remain reserved even when no descriptor can recreate them.
         for (const spec of specs) for (const value of Object.values(spec.settings)) {
           if (value && typeof value === 'object' && 'kind' in value && value.kind === 'indicator'
@@ -3950,14 +4136,15 @@ export class Chart {
     let indicators = 0;
     if (studies) {
       this._indicatorRefreshes.clear();
-      for (const instance of this._indicators.splice(0)) instance.remove();
+      // A restore is the host's act: it replaces a protected study as well.
+      for (const instance of this._indicators.splice(0)) instance.remove({ force: true });
       const byId = new Map(studies.specs.map(spec => [spec.instanceId!, spec]));
       for (const id of studies.order) {
         const spec = byId.get(id)!;
         const descriptor = studies.descriptors.get(id)!;
         const instance = new IndicatorInstance(
           this._indicatorHost(preservedFormats), descriptor, spec.settings, spec.paneIndex,
-          spec.instanceId, reservedIds, spec.priceScaleId, spec.plotPriceScaleIds,
+          spec.instanceId, reservedIds, spec.priceScaleId, spec.plotPriceScaleIds, spec.policy,
         );
         reservedIds.add(instance.id);
         this._indicators.push(instance);
@@ -3966,6 +4153,9 @@ export class Chart {
       }
       const display = new Map(studies.specs.map((spec, index) => [spec.instanceId!, index]));
       this._indicators.sort((a, b) => display.get(a.id)! - display.get(b.id)!);
+      // With the studies it is read with: a layout from before the source could
+      // move says nothing, and the source stays behind the studies just made.
+      this._sourceAbove = s.sourceAbove;
       this._reorderIndicatorResources();
     }
 
@@ -4309,10 +4499,13 @@ export class Chart {
    * nothing for a series, a price line or an on-chart study to default to. A
    * study pane is removable in any slot, the top one included.
    *
-   * Returns false when the index is out of range or names the primary pane.
+   * Returns false when the index is out of range or names the primary pane,
+   * and when it holds a study whose policy is not `removable` unless
+   * `options.force` is set.
    */
-  public removePane(index: number): boolean {
+  public removePane(index: number, options: IndicatorEditOptions = {}): boolean {
     if (!Number.isInteger(index) || index < 0 || index >= this._panes.length || this._panes[index] === this._primaryPane) return false;
+    if (this._indicators.some(study => study.paneIndex === index && !this._policyAllows(study, 'removable', options))) return false;
     if (this._eventPane === index) {
       // The strip goes home to the price pane, before the slots shift.
       const home = this._primaryIndex();
@@ -4329,7 +4522,7 @@ export class Chart {
     for (let i = this._indicators.length - 1; i >= 0; i--) {
       if (this._indicators[i].paneIndex !== index) continue;
       const [instance] = this._indicators.splice(i, 1);
-      instance.remove();
+      instance.remove({ force: true });
     }
     const pane = this._panes[index];
     for (const record of [...pane.series()]) {
@@ -4571,6 +4764,8 @@ export class Chart {
     if (indicator === undefined) return false;
     const paneIndex = indicator.paneIndex;
     switch (action) {
+      // A press on a button the policy withheld (a stale hit id) does nothing:
+      // the user's press is exactly what a policy restricts.
       case 'close':
         this.removeIndicator(instanceId);   // prunes its pane if it emptied
         return true;
@@ -4583,7 +4778,7 @@ export class Chart {
       // host's. Everything it needs to *generate* one is on the descriptor
       // (`inputs`), and applying it is `indicator.setSettings(patch)`.
       case 'settings':
-        this.emit('indicatorSettings', { instanceId, indicatorId: indicator.indicatorId, paneIndex });
+        if (indicator.policy().configurable !== false) this.emit('indicatorSettings', { instanceId, indicatorId: indicator.indicatorId, paneIndex });
         return true;
       // Same payload as the gear, and for the same reason: the engine holds no
       // code and no DOM, so it says which indicator was asked about and the
@@ -4699,6 +4894,7 @@ export class Chart {
       dragId: this._dragId,
       sessionClock: this._sessionClockOptions(),
       barCountdown: this._barCountdownOptions(),
+      stackSlot: (entry: string) => this._stackSlot(paneIndex, entry),
     };
   }
 
@@ -4928,8 +5124,14 @@ export class Chart {
       return slot ? { kind: 'price-scale', id: null, side: slot.side, scaleId: slot.scaleId } : { kind: 'empty', id: null };
     }
 
-    const hit = this._panes[p.pane]?.hitTestPrimitives(plotX, p.localY, this._renderContext(p.pane));
-    if (hit != null) {
+    const pane = this._panes[p.pane];
+    const context = this._renderContext(p.pane);
+    const hit = pane?.hitTestPrimitives(plotX, p.localY, context);
+    // A strip plots nothing, so nothing on it can be under the pointer.
+    const record = index === null || this._collapsedShown(p.pane) ? null : this._seriesAt(p.pane, index, p.localY);
+    // What is painted on top takes the menu: a drawing placed under a source
+    // or a study loses the pointer to that series where the two overlap.
+    if (hit != null && !(record !== null && hit.paintedBy !== undefined && pane.paintsBelowSeries(hit.paintedBy, record, context))) {
       const id = hit.externalId;
       if (id.startsWith('draw:')) return { kind: 'drawing', id };
       if (id.startsWith('indicator:')) {
@@ -4941,8 +5143,6 @@ export class Chart {
       if (id.endsWith('::row')) return { kind: 'legend', id };
       return { kind: 'primitive', id };
     }
-    // A strip plots nothing, so nothing on it can be under the pointer.
-    const record = index === null || this._collapsedShown(p.pane) ? null : this._seriesAt(p.pane, index, p.localY);
     if (record === null) return { kind: 'empty', id: null };
     for (const instance of this._indicators) {
       for (const plot of getIndicator(instance.indicatorId).plots) {
@@ -6068,7 +6268,7 @@ export class Chart {
       this._remeasureHandle = null;
     }
     this._stopNavigationMotion();
-    for (const indicator of this._indicators.splice(0)) indicator.remove();
+    for (const indicator of this._indicators.splice(0)) indicator.remove({ force: true });
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;
     if (typeof window !== 'undefined') {

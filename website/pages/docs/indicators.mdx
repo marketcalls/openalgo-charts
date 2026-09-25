@@ -906,19 +906,63 @@ absent filter means every day. Whitespace around the parts is ignored.
 | `name` | `string` | Display name. |
 | `paneIndex` | `number` | Pane the indicator drew into. |
 | `settings()` | `IndicatorSettings` | Current settings, as a copy. |
-| `setSettings(patch)` | `void` | Merge a patch, recompute, and restyle. |
+| `setSettings(patch, options?)` | `boolean` | Merge a patch, recompute, and restyle. False when the study's policy is not `configurable` and `options` is not `{ force: true }`. |
 | `series(plotKey)` | `SeriesApi \| undefined` | The series behind one plot, for direct styling. |
 | `priceScaleId()` | `PriceScaleId \| null` | Whole-study override, or null for descriptor defaults. Per-plot overrides can still apply. |
-| `setPriceScale(id)` | `boolean` | Assign local resources together and clear their per-plot overrides. Null restores local descriptor defaults. |
+| `setPriceScale(id, options?)` | `boolean` | Assign local resources together and clear their per-plot overrides. Null restores local descriptor defaults. Refused like `setSettings` for a study that is not `configurable`. |
 | `plotPriceScaleId(plotKey)` | `PriceScaleId \| null` | Effective scale of a declared plot, or null for an unknown key. |
 | `plotPriceScaleIds()` | `Readonly<Record<string, PriceScaleId>>` | Detached map of explicit per-plot overrides. |
-| `setPlotPriceScales(patch)` | `boolean` | Apply selected plot assignments atomically. Null values remove those overrides. |
+| `setPlotPriceScales(patch, options?)` | `boolean` | Apply selected plot assignments atomically. Null values remove those overrides. Refused like `setSettings` for a study that is not `configurable`. |
 | `values()` | `IndicatorValues` | Latest computed columns. |
-| `remove()` | `void` | Remove every series and level it created. |
+| `policy()` / `setPolicy(policy)` | `IndicatorPolicy` / `void` | The restrictions its host set (only the flags that are false), and the host's call that replaces them; `null` lifts them. See [Study policies](#study-policies). |
+| `remove(options?)` | `boolean` | Remove every series and level it created. False when it is already gone, or is not `removable` and `options` is not `{ force: true }`. |
 
-`chart.indicators()` lists the live instances; `chart.removeIndicator(id)` removes one by id.
+`chart.indicators()` lists the live instances; `chart.removeIndicator(id, options?)` removes one by id.
 Removing an indicator also prunes the pane it emptied, so a host UI cannot strand a blank
 pane under the chart.
+
+### Study policies
+
+A host that places a study of its own (a strategy's signal line, a session band, a
+study a desk requires) needs restrictions the user cannot lift, one at a time, while it
+keeps changing the study itself. `IndicatorPolicy` carries four independent flags. Each
+defaults to `true`, so a study without a policy behaves exactly as before, and the
+contract mirrors the [drawing policies](/docs/drawing-tools#drawing-policies).
+
+```ts
+const signal = chart.addIndicator('vwap', {}, {
+  policy: { removable: false, configurable: false, movable: false },
+});
+
+// The host that placed it still changes and retires it.
+signal.setSettings({ anchor: 'week' }, { force: true });
+chart.removeIndicator(signal.id, { force: true });
+```
+
+| Flag | `false` means | Calls it restricts |
+|---|---|---|
+| `removable` | No legend close button, no Objects remove, the widget's menu row and the picker's remove button greyed with the note "protected". | `chart.removeIndicator(id)`, `indicator.remove()` and `chart.removePane(index)` for a pane holding it. |
+| `configurable` | No legend gear (so no `indicatorSettings` event from it), no Objects settings, the widget's settings dialog declines with the reason. | `indicator.setSettings(patch)`, `setPriceScale(id)` and `setPlotPriceScales(patch)`. |
+| `movable` | It keeps its pane and its place in the pane's stack: no Objects move, Earlier, Later or drag. Other objects still move past it, and the pane controls on its legend still move the pane. | `chart.moveIndicator(id, pane)`, `chart.reorderIndicator(id, direction)` and `chart.moveInSeriesStack(id, ...)`. |
+| `listed` | Left out of `ChartObjects`, every Objects panel, the widget's indicator picker list and its alert source lists (unless the alert being edited already names it). | Every caller of those lists. The legend still shows it. |
+
+A policy restricts **user-facing actions**. Every call in the right-hand column treats
+its caller as the user, because host controls make exactly these calls, and returns false
+with nothing changed when the policy forbids it. The owning host passes `{ force: true }`
+(`IndicatorEditOptions`) to make the change anyway. `setPolicy` is always the host's act:
+it is never restricted and applies at once to the legend buttons and the inventory. A
+restore (`chart.restoreState`, a workspace load) is also the host's act and replaces a
+protected study like any other. Hiding a study is the user's view of the chart and stays
+available under every flag.
+
+The chart state saves only the restrictions, as `IndicatorState.policy` (`{ removable: false }`),
+so an unrestricted study saves exactly what it always did and a layout from an older
+release restores its studies unrestricted. A malformed policy refuses the whole restore
+before anything changes; `parseIndicatorPolicy(input)` is the same validation for a host
+of its own, and keeps only the four boolean flags. Workspace documents keep policies.
+Portable indicator templates drop them, since a template is the user's own copy, and a
+template applied in `replace` mode keeps every study the user may not remove, on its own
+pane, with the template's panes taking the free slots around it.
 
 ### Plot scale assignments
 
