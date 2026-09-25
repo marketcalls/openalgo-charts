@@ -10,7 +10,7 @@ import { createChart, PaneLegend } from '/dist/openalgo-charts.mjs';
 // imported by the modules that call into them; the indicators tier is only
 // ever registered, so it is imported here.
 import '/dist/openalgo-charts.indicators.mjs';
-import { el, fmt, round2, initShell, chartTheme, chartMotionOptions, setChartState, toast } from './ui.js';
+import { el, initShell, chartTheme, chartMotionOptions, setChartState, toast } from './ui.js';
 import { initHover } from './hover.js';
 import { fillIntervalSelect, clampPeriod } from './intervals.js';
 import { initFeed, fetchBars, fetchNote, feedErrorState } from './feed.js';
@@ -22,8 +22,9 @@ import { initAxisChrome, applyAxisChrome, applyStatusLineChoice, applyTradeChoic
 import { initVolume, attachVolume, refreshVolume, setVolumeShown, setLegend, applyVolumeSettings } from './volume.js';
 import {
   initOrders, saveState, restoreState, cancelOrder, attachOrderLines, removeAllOrders,
-  updatePositionLine, restyleTradeChrome, clearPosition, executionAllowed,
+  updatePositionLine, restyleTradeChrome, clearPosition, executionAllowed, repriceOrder,
 } from './orders.js';
+import { tickScheduleFor } from './ticks.js';
 import { initBracket, attachBracketLines, setBracketPrice, updateBracket, removeBracket } from './bracket.js';
 import { initIndicators, fillIndicatorPicker, renderIndicatorChips, openSettings, rememberIndicators } from './indicators.js';
 import { chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
@@ -121,6 +122,9 @@ const app = {
   volLegend: null,
   bracket: null,         // { side, entry, target, stop, qty }
   bLines: null,          // { entry, tp, sl } price-line primitives on the current chart
+  // The loaded symbol's tick schedule, when the host holds one (see ticks.js).
+  // Null means two-decimal order prices, which is every symbol but one.
+  ticks: null,
   // { symbol, color, bars, handle, legend, byTime, hidden }. The spec survives
   // a chart rebuild and a saved layout; the handle and legend do not.
   comparisons: [],
@@ -247,7 +251,11 @@ function render({ keepView = true, state } = {}) {
   // yfinance carries no tick size, so this demo picks one by market and says
   // so plainly. A real host reads it from its own instrument master, the way
   // OpenAlgo reads tick_size out of its symbol table, rather than guessing.
-  app.chart.setPriceScaleOptions({ minMove: tickFor(app.req.symbol) });
+  //
+  // A symbol with a tick schedule gives the axis the schedule's common grid:
+  // every price it can trade at lies on it, whichever band it is in.
+  app.ticks = tickScheduleFor(app.req.symbol);
+  app.chart.setPriceScaleOptions({ minMove: app.ticks ? app.ticks.minMove : tickFor(app.req.symbol) });
   attachVolume(1, !isTransform || sel === 't:heikin-ashi');
   if (!isTransform) {
     app.markersApi = app.price.createMarkers();
@@ -291,10 +299,7 @@ function render({ keepView = true, state } = {}) {
   app.chart.subscribeDrag((externalId, p) => {
     if (!executionAllowed()) return;
     if (externalId.startsWith('bk-')) { setBracketPrice(externalId.slice(3), p); return; }
-    if (externalId.startsWith('order:')) {
-      const o = app.orders.find((x) => `order:${x.id}` === externalId);
-      if (o && o.line) { o.price = round2(p); o.line.setPrice(o.price); el('status').textContent = `${o.side} ${o.type} order -> ${fmt(o.price)}`; saveState(); }
-    }
+    if (externalId.startsWith('order:')) repriceOrder(externalId, p);
   });
   // Click the cancel box on a line: cancel that order, or close the position.
   app.chart.subscribeClick((id) => {

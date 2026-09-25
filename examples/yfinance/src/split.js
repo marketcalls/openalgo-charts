@@ -20,6 +20,7 @@ import { bindIndicatorSource } from './indicator-source.js';
 import { openSettings, renderIndicatorChips } from './indicators.js';
 import { capturePaneTarget } from './pane-target.js';
 import { symbolStatus, exchangeOf, nameOf } from './status.js';
+import { tickScheduleFor } from './ticks.js';
 import { attachReplay, exitReplay, syncReplayAlertPause } from './replay.js';
 import { attachTimeline } from './timeline.js';
 
@@ -290,7 +291,8 @@ export function buildChart2({ keepView = true, typeChanged = false, state } = {}
     ? { baseValue: bars2.reduce((sum, bar) => sum + bar.close, 0) / (bars2.length || 1) } : {};
   price2 = app.chart2.addSeries(type, { style });
   price2.setData(data);
-  app.chart2.setPriceScaleOptions({ minMove: /\.(NS|BO)$/i.test(app.p2.symbol) ? 0.05 : 0.01 });
+  const ticks2 = tickScheduleFor(app.p2.symbol);
+  app.chart2.setPriceScaleOptions({ minMove: ticks2 ? ticks2.minMove : /\.(NS|BO)$/i.test(app.p2.symbol) ? 0.05 : 0.01 });
   attachVolume(2, !transformed || chartType === 't:heikin-ashi');
   app.chart2.subscribeCrosshairMove((e) => setPane2Legend(e.bar ?? app.chart2.primaryBars().at(-1)));
   attachReplay(app.chart2, 2, setPane2Legend);

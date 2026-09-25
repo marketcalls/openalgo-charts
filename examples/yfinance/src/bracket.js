@@ -1,5 +1,6 @@
 import * as engine from '/dist/openalgo-charts.mjs';
-import { el, fmt, round2, rupee } from './ui.js';
+import { el, fmt, rupee } from './ui.js';
+import { snapPrice } from './ticks.js';
 import { saveState, tradeColors, TRADE_EXTENT, removeAllOrders, clearPosition, executionAllowed } from './orders.js';
 
 let app;
@@ -10,12 +11,12 @@ const chartTop = () => el('chart').getBoundingClientRect().top;
 export function makeBracket(side) {
   if (!executionAllowed()) return;
   if (!app.currentBars.length) return;
-  const entry = round2(app.currentBars[app.currentBars.length - 1].close);
+  const entry = snapPrice(app.ticks, app.currentBars[app.currentBars.length - 1].close);
   const qty = Math.max(1, Number(el('qty').value) || 1);
   app.bracket = {
     side, entry, qty,
-    target: round2(side === 'BUY' ? entry * 1.012 : entry * 0.988),
-    stop: round2(side === 'BUY' ? entry * 0.99 : entry * 1.01),
+    target: snapPrice(app.ticks, side === 'BUY' ? entry * 1.012 : entry * 0.988),
+    stop: snapPrice(app.ticks, side === 'BUY' ? entry * 0.99 : entry * 1.01),
   };
   attachBracketLines();
   el('bracket').hidden = false;
@@ -45,15 +46,25 @@ export function attachBracketLines() {
 export function setBracketPrice(which, raw) {
   if (!executionAllowed()) return;
   if (!app.bracket) return;
-  const p = round2(raw);
+  const ticks = app.ticks;
+  const p = snapPrice(ticks, raw);
   const buy = app.bracket.side === 'BUY';
+  // One tick either side of the entry. On a scheduled instrument that is the
+  // tick of the band each side falls in, so the bound changes at a boundary.
+  const above = () => (ticks ? ticks.step(app.bracket.entry, 1) : app.bracket.entry + 0.01);
+  const below = () => (ticks ? ticks.step(app.bracket.entry, -1) : app.bracket.entry - 0.01);
   if (which === 'entry') {
     const d = p - app.bracket.entry;
-    app.bracket.entry = p; app.bracket.target = round2(app.bracket.target + d); app.bracket.stop = round2(app.bracket.stop + d);
+    app.bracket.entry = p; app.bracket.target = snapPrice(ticks, app.bracket.target + d); app.bracket.stop = snapPrice(ticks, app.bracket.stop + d);
+    // Each leg snaps in its own band, which can close a gap the shift kept.
+    if (ticks) {
+      app.bracket.target = buy ? Math.max(app.bracket.target, above()) : Math.min(app.bracket.target, below());
+      app.bracket.stop = buy ? Math.min(app.bracket.stop, below()) : Math.max(app.bracket.stop, above());
+    }
   } else if (which === 'tp') {
-    app.bracket.target = buy ? Math.max(p, app.bracket.entry + 0.01) : Math.min(p, app.bracket.entry - 0.01);
+    app.bracket.target = buy ? Math.max(p, above()) : Math.min(p, below());
   } else {
-    app.bracket.stop = buy ? Math.min(p, app.bracket.entry - 0.01) : Math.max(p, app.bracket.entry + 0.01);
+    app.bracket.stop = buy ? Math.min(p, below()) : Math.max(p, above());
   }
   updateBracket();
   saveState();
