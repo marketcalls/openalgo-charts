@@ -341,7 +341,20 @@ and PVO at five settings, over fourteen complete series including stretches of
 zero volume: 33,555,900 cells, none different. Every built-in at its defaults
 on eight further complete series (1,170,400 cells) differs from 2.5.4 only in
 Stochastic and the TSI family, in the last bits, and in Trend Strength, by the
-former single pass's error, with identical availability.
+former single pass's error. Availability is identical on those series, none of
+which holds a window of identical closes, and for Trend Strength that is as far
+as the statement goes. On such a window the two-pass form gives
+no reading when the deviations are all exactly zero, which needs an exact mean
+(fourteen bars of 5 or of 0.1), and reads exactly 0 when the mean is inexact
+(three bars of 0.1, fourteen of 2.01), as the language does. The single pass
+printed nothing or its own residue on these windows, so availability moves in
+both directions: three bars of 0.1 went from none to 0 and fourteen of 0.1 from
+-1.2e-8 to none, while fourteen of 2.01 went from 2.8e-8 to 0. On four simulated
+5,000-bar tick series (at 2, 8, 350.15 and 24,000, the first three with
+frequent unchanged closes) at Lengths 3, 14 and 30, up to 1,274 cells per series
+and Length went from none to 0 and up to 658 from a reading to none. Every one
+of them was a window of identical closes, and every new reading was 0.
+Circuit-locked and illiquid instruments produce these windows.
 
 These corrections move the indicator tier from 36.27 to 36.31 kB Brotli
 (36,310 bytes), the widget terminal from 267.55 to 267.59 kB (267,594 bytes)

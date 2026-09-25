@@ -34,6 +34,16 @@ All notable changes to OpenAlgo Charts.
   means before forming any deviation, taking two passes oldest first. The former
   single-pass sums cancelled at ordinary price levels: at 1e5 with 0.01 moves the
   reading was about one percent off, and at 1e9 it had no value.
+- On a window of identical closes, Trend Strength Index and `correlation` read
+  what the arithmetic gives, as the companion scripting language does, so
+  availability there can differ from 2.5.4 in either direction. The window has
+  no reading when its deviations are all exactly zero, which happens when the
+  mean comes out exact: fourteen bars of 5, or of 0.1, where 2.5.4 printed
+  -1.2e-8. When the mean is inexact, as for three bars of 0.1 or fourteen of
+  2.01, the deviations are a few units in the last place and Trend Strength
+  reads exactly 0, where 2.5.4 printed nothing or its own residue (2.8e-8 for
+  fourteen bars of 2.01). Against a second series other than the bar index,
+  `correlation` reads within rounding of 0 there.
 
 ### Documentation
 

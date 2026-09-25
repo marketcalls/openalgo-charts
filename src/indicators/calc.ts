@@ -817,9 +817,14 @@ export function percentileNearestRank(
  * `period`. Each window takes two passes, oldest first: both means are finished
  * before any deviation is formed, then
  * `(cross / period) / (sqrt(squaresA / period) * sqrt(squaresB / period))`.
- * A window with a missing value, no spread or an overflowing step is NaN. A
- * period that is not a whole number above 1 gives NaN throughout, as it did
- * before.
+ * A window with a missing value or an overflowing step is NaN, and so is one
+ * whose deviations are all exactly zero, such as three bars of 5. A flat window
+ * whose mean is inexact is not caught by that: three bars of 0.1 average to
+ * slightly more than 0.1, the deviations are a few units in the last place, and
+ * the window reads what that arithmetic gives, as the reference does. Against a
+ * bar index that is exactly 0; against another series it is within rounding of
+ * 0. A period that is not a whole number above 1 gives NaN throughout, as it
+ * did before.
  */
 export function correlation(
   a: readonly number[],
