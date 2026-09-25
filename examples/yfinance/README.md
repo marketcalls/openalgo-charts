@@ -255,7 +255,7 @@ examples/yfinance/
     split.js          the linked second chart and its divider
     link.js           the link-group switches
     clipboard.js      the drawing clipboard and its chords
-    menus.js          the right-click menu (including Collapse pane), the price-axis menu, the popup menu
+    menus.js          the right-click menu (including Move pane up/down and Collapse pane), the price-axis menu, the popup menu
     session-marks.js  host-owned price marks: read-only, never saved, not listed
     toolbar.js        the shell bar, chart types, chart-only full screen
     rail.js           the drawing rail: groups, pins, magnet, stay mode, selection controls, keyboard
@@ -453,7 +453,7 @@ exists to show one engine surface carrying real use, not just being present.
 | `clipboard.js` | One in-memory clipboard shared by both charts' controllers, so copy here and paste there works even when the browser refuses the OS clipboard; the OS read is bounded so a paste never hangs on a permission popup. |
 | `level-editor.js` | A ladder tool's levels (retracement, extension, channel, fan, time zones, the Gann pair) edited one row each: enable, ratio, colour, label, add, remove, reset. Every edit is one undo entry through the controller. |
 | `text-editor.js` | Inline text editing over the painted text, sized by the same rules the text tool paints with, with every pointer and key event stopped at the box so the chart under it does not pan. |
-| `menus.js`, `toolbar.js`, `hover.js` | Host chrome to the standard in `CLAUDE.md`: styled scrollbars, no native form controls on a dark panel, real tooltips that flip inside the window, and dialog furniture in one arrangement. The right-click menu over a lower pane offers **Collapse pane** and **Expand pane** (`chart.setPaneCollapsed`), on either chart of a split. |
+| `menus.js`, `toolbar.js`, `hover.js` | Host chrome to the standard in `CLAUDE.md`: styled scrollbars, no native form controls on a dark panel, real tooltips that flip inside the window, and dialog furniture in one arrangement. The right-click menu offers **Move pane up** and **Move pane down** over any pane (`chart.movePane`, the price pane included) and **Collapse pane** and **Expand pane** over a study pane (`chart.setPaneCollapsed`), on either chart of a split. |
 | `snapshot.js` | `chart.takeScreenshot()` saved as a PNG or copied to the clipboard, with chart branding, an enabled watermark and the replay mark in the image because they are on the canvas. |
 | `pane-target.js` | Captures the selected chart and request for host actions. A menu cannot act on a rebuilt chart or changed instrument, and asynchronous image export retains its original filename. |
 | `persist.js` | A versioned layout document with migrations, quarantine instead of deletion, memory-only degradation when storage refuses a write, and export and import as a file. An imported file, here or in the Layouts dialog, loses every drawing `policy`: a policy is a host's restriction on its own drawings, and one arriving in a shared file would plant a drawing no control here could remove. See the next section. |
@@ -685,7 +685,8 @@ A 1.x page used `oa-charts-layout`; that key is upgraded, moved, and removed on 
 
 **Schema version.** The document carries `schema: 2` (`LAYOUT_SCHEMA` in
 `src/persist.js`). Inside it ride two versions the demo does not own: the
-engine's `version` (`CHART_STATE_VERSION`, what `chart.getState()` produced)
+engine's `version` (what `chart.getState()` produced: 1, or 2 when the price pane
+was moved below its studies; `CHART_STATE_VERSION` is the newest this engine reads)
 and, under `drawings`, the draw tier's document with its own `version`
 (`DRAWING_STATE_VERSION`). The demo's number says what shape the wrapper is;
 the engine's numbers say what shape the parts are.
@@ -842,3 +843,15 @@ The price pane is never offered the row, and collapsing the bottom pane leaves
 the time axis at the foot of the chart. The choice is per chart and survives
 reloads and named-workspace restoration. This is not the compact study legend
 above, which hides legend rows and leaves every pane open.
+
+### The price pane below the studies
+
+Right-click the price pane and choose **Move pane down** (or a study pane and
+**Move pane up**) to read the studies first and the price last. The candles
+take their volume, the symbol row, the moving averages drawn on them, order and
+bracket lines, price alerts, session marks and drawings with them; the price
+ladder chords, the order menu and the price alert row follow the price pane
+wherever it sits (`chart.primaryPaneIndex()`), and so does a template applied
+to the chart. The price pane never folds, in any slot. The arrangement is per
+chart and survives a chart-type switch, reloads and named-workspace restoration
+(it is saved as a version 2 chart state).

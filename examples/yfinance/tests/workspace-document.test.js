@@ -41,6 +41,20 @@ describe('reference workspace documents', () => {
     expect(restored[preference]).toBe(true);
     expect(restored.secondary.state[preference]).toBe(false);
   });
+  it('keeps a price pane moved below its studies in either chart slot', () => {
+    const original = layout();
+    const panes = [{ weight: 0.32, priceScale: { marginTop: 0.1, marginBottom: 0.1, minMove: 0, mode: 'linear', inverted: false, autoScale: true } },
+      { weight: 1, priceScale: { marginTop: 0.1, marginBottom: 0.1, minMove: 0.01, mode: 'linear', inverted: false, autoScale: true } }];
+    Object.assign(original, { version: 2, panes, primaryPane: 1 });
+    original.secondary.state = { ...original.secondary.state, version: 2, panes, primaryPane: 1 };
+    const saved = workspaceFromLayout(original);
+    expect(saved.panes.map(pane => [pane.chart.version, pane.chart.primaryPane])).toEqual([[2, 1], [2, 1]]);
+    const restored = layoutFromWorkspace(saved);
+    expect([restored.version, restored.primaryPane]).toEqual([2, 1]);
+    expect(restored.secondary.state.primaryPane).toBe(1);
+    // A layout with its price pane on top is written exactly as before.
+    expect('primaryPane' in layoutFromWorkspace(workspaceFromLayout(layout()))).toBe(false);
+  });
   it('round-trips independent information dock choices and widths', () => {
     const original = layout();
     original.inspection = { panel: 'data', width: 280 };

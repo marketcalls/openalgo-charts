@@ -44,7 +44,9 @@ export function applyIndicatorTemplate(app, target, incoming, mode, options) {
   const restore = (indicators, extra, restoreOptions) => {
     expectedStart = true;
     let report;
-    const state = { version: 1, indicators, ...retained, ...extra };
+    // A price pane moved below the studies is carried as its slot, which only
+    // a version 2 state has; without one the restore puts it back on top.
+    const state = { version: extra.primaryPane > 0 ? 2 : 1, indicators, ...retained, ...extra };
     try { report = restoreOptions === undefined ? chart.restoreState(state) : chart.restoreState(state, restoreOptions); }
     finally { expectedStart = false; }
     if (!report.applied) throw new Error(report.reason || 'The template could not be applied');
@@ -53,7 +55,8 @@ export function applyIndicatorTemplate(app, target, incoming, mode, options) {
   operations.set(chart, token); flagOwners.set(app, token);
   app.applyingTemplate = true;
   try {
-    restore(planned.indicators, { panes: planned.panes ?? (mode === 'append' ? before.panes : before.panes?.slice(0, 1)) }, planned.restoreOptions);
+    restore(planned.indicators, { panes: planned.panes ?? (mode === 'append' ? before.panes : before.panes?.slice(0, 1)),
+      ...(planned.primaryPane === undefined ? {} : { primaryPane: planned.primaryPane }) }, planned.restoreOptions);
     if (!owns()) throw new Error('The chart changed or a newer restore replaced this template');
     return parseIndicatorStates(chart.getState().indicators || []);
   } catch (error) {
@@ -66,7 +69,8 @@ export function applyIndicatorTemplate(app, target, incoming, mode, options) {
           preserveScaleFormats: (planned.restoreOptions.preserveScaleFormats ?? []).filter(({ paneIndex, scaleId }) =>
             panes[paneIndex] && (scaleId === 'right' || Object.prototype.hasOwnProperty.call(panes[paneIndex].scales ?? {}, scaleId))),
         };
-        restore(previous, { panes: before.panes, viewport: before.viewport, barSpacing: before.barSpacing }, restoreOptions);
+        restore(previous, { panes: before.panes, viewport: before.viewport, barSpacing: before.barSpacing,
+          ...(before.primaryPane === undefined ? {} : { primaryPane: before.primaryPane }) }, restoreOptions);
       }
       catch (rollbackError) { throw new AggregateError([error, rollbackError], 'Template application and recovery failed'); }
     }

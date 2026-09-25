@@ -222,8 +222,10 @@ export function setShadeIndex(index) {
     target.node.classList.toggle('is-picking', active);
     if (target.chart.isDestroyed) continue;
     const panes = target.chart.panes ? target.chart.panes() : [];
+    // The cut line belongs on the price pane, wherever it sits; the other panes only dim.
+    const price = typeof target.chart.primaryPaneIndex === 'function' ? target.chart.primaryPaneIndex() : 0;
     for (let i = target.shades.length; i < panes.length; i++) {
-      const shade = new ReplayShade({ index: null, lineVisible: i === 0 });
+      const shade = new ReplayShade({ index: null, lineVisible: i === price });
       target.chart.addPrimitive(shade, i);
       target.shades.push(shade);
     }
@@ -398,7 +400,7 @@ export function showReplayMark(on) {
     if (target.chart.isDestroyed) continue;
     const active = on && memberState(target.chart)?.active;
     if (active && !target.mark) {
-      target.mark = new TextWatermark({ text: 'Replay' }); target.chart.addPrimitive(target.mark, 0);
+      target.mark = new TextWatermark({ text: 'Replay' }); target.chart.addPrimitive(target.mark);
     } else target.mark?.setOptions({ text: active ? 'Replay' : '' });
   }
 }
