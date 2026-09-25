@@ -299,7 +299,7 @@ examples/yfinance/
     workspace-host.js  reference chart ownership, pending guards and transition wiring
     workspace-catalog.js  named saves, revision conflicts, autosave ownership and storage recovery
     workspaces.js     named-layout dialog, startup selection, autosave and portable files
-    grid.js           the grid view's start-up: presets, links, import and export
+    grid.js           the grid view's start-up: presets, links, import and export, panels
     grid-view.js      the grid view's feed adapter, layout hand-off and document helpers
   tests/              vitest specs for the modules that can run without a browser
   vitest.config.ts    the config those specs run under (see Tests)
@@ -346,6 +346,11 @@ chart is a complete widget with its own top bar, loading status and retry.
   preset copies the active chart's period to the charts it adds. The grid writes
   the periods back into its saved layout and exports. No older history is paged,
   since the server answers by period.
+- Each chart's top bar opens the Watchlist and News panels in its own dock, through
+  the widget's `watchlist` and `news` options, which the grid passes to every chart.
+  They share the main page's list store, one quote poll for every visible row and
+  the same `/api/news` source; choosing a row charts it in that chart, and the symbol
+  link carries it to the others when it is on.
 - Import accepts a portable workspace document or payload whose charts use those
   intervals (`1wk` from the main page opens as `1w`) and periods the server knows.
   It is validated in full, then applied all at once; on failure nothing on screen

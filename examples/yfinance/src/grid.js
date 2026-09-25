@@ -10,6 +10,7 @@ import {
   GRID_INTERVALS, GRID_PRESET_LABELS, gridFeeds, presetGlyph, takeGridHandoff, readGridFile, gridDocument,
 } from './grid-view.js';
 import { THEME_KEY } from './ui.js';
+import { referenceWatchlists, referenceQuotes, referenceNewsFeed } from './market-panels.js';
 
 const PERSIST = 'yfinance-grid';
 const LINKS = [['crosshair', 'Crosshair'], ['viewport', 'Viewport'], ['symbol', 'Symbol'], ['interval', 'Interval']];
@@ -44,6 +45,10 @@ export function initGridView(doc = document) {
     // Touch devices get the phone controls in each chart; a mouse keeps the
     // desktop bar even when a chart in a four-way split is narrow.
     mobile: coarse ? 'auto' : 'never',
+    // Each chart's dock offers the main page's lists and news: one list store and
+    // one shared quote poll for every chart, prices only from /api/quotes.
+    watchlist: { store: referenceWatchlists(), quotes: referenceQuotes() },
+    news: { feed: referenceNewsFeed },
   });
   // A first visit shows four different instruments rather than one repeated.
   if (fresh && handed === null) grid.cells().forEach((cell, i) => cell.widget.setSymbol(FIRST_VISIT[i] || 'AAPL'));

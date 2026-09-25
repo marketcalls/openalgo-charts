@@ -126,3 +126,31 @@ test('at phone width the reference watchlist and news open as a sheet', async ({
   await expect(dock).toBeHidden();
   expect(errors).toEqual([]);
 });
+
+test('the grid view offers the watchlist and news in each chart', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/examples/yfinance/grid.html?test=1');
+  await page.waitForFunction(() => (window as any).__grid?.cells().length === 4);
+  const cell = page.locator('.oac-grid__cell').first();
+  await cell.locator('.oac-topbar').getByRole('button', { name: 'Watchlist', exact: true }).click();
+  const panel = cell.locator('.oac-watchlist');
+  await expect(panel.locator('tbody tr')).toHaveCount(8);
+  await expect(panel.locator('tr[data-symbol="MSFT"] .oac-watchlist__last')).toHaveText(/^\d[\d,]*\.\d{2}$/);
+  await expect(panel.locator('.oac-watchlist__status')).toHaveText('Live quotes');
+  await expect(panel.locator('tr[aria-current="true"]')).toHaveAttribute('data-symbol', 'AAPL');
+  await page.screenshot({ path: info.outputPath('grid-watchlist.png') });
+  await panel.getByRole('button', { name: 'MSFT', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__grid.cells()[0].widget.symbol())).toBe('MSFT');
+  await expect(panel.locator('tr[aria-current="true"]')).toHaveAttribute('data-symbol', 'MSFT');
+  await cell.locator('.oac-panel-dock__tabs').getByRole('button', { name: 'News', exact: true }).click();
+  await expect(cell.locator('.oac-news__instrument')).toHaveText('MSFT');
+  await expect(cell.locator('.oac-news__item').first()).toBeVisible();
+  await page.screenshot({ path: info.outputPath('grid-news.png') });
+  // Another chart has its own dock and its own instrument.
+  const second = page.locator('.oac-grid__cell').nth(1);
+  await second.locator('.oac-topbar').getByRole('button', { name: 'News', exact: true }).click();
+  await expect(second.locator('.oac-news__instrument')).toHaveText(await page.evaluate(() => (window as any).__grid.cells()[1].widget.symbol()));
+  expect(errors).toEqual([]);
+});
