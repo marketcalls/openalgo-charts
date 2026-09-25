@@ -17,6 +17,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Chart } from '../src/core/chart';
 import type { Pane, PaneRenderContext } from '../src/core/pane';
 import { registerIndicator, type IndicatorDescriptor } from '../src/model/indicator-registry';
+import { SMA } from '../src/indicators/trend';
 import type { IndicatorApi } from '../src/model/indicator-instance';
 import type { Bar } from '../src/model/bar';
 import type { IPrimitive, PrimitiveRenderContext } from '../src/primitives/primitive';
@@ -104,7 +105,7 @@ const untargetedPrice: IndicatorDescriptor = {
 };
 
 /** Class names of what the pane draws, in the order it draws them, for the named studies' layers. */
-function stackOn(chart: Chart, studies: Record<string, IndicatorApi>, pane: Pane): string[] {
+function stackOn(studies: Record<string, IndicatorApi>, pane: Pane): string[] {
   return pane.primitives().flatMap(primitive => {
     const owner = Object.entries(studies).find(([, study]) => owned(study).some(item => item.primitive === primitive))?.[0];
     return owner === undefined ? [] : [`${owner} ${primitive.constructor.name}`];
@@ -134,7 +135,7 @@ describe('shading that names no target', () => {
     });
     const chart = mount();
     const study = chart.addIndicator(id);
-    expect(stackOn(chart, { S: study }, chart.panes()[1])).toEqual([
+    expect(stackOn({ S: study }, chart.panes()[1])).toEqual([
       'S PaneLegend', 'S SeriesMarkers', 'S IndicatorDrawings', 'S IndicatorBackground',
     ]);
   });
@@ -153,6 +154,389 @@ describe('shading that names no target', () => {
     study.remove();
     expect(chart.panes()[0].primitives().some(primitive => primitive instanceof IndicatorBackground)).toBe(false);
   });
+
+  it('renders a list whose one column names no target exactly like the colour list', () => {
+    const id = `bg-untargeted-list-${seq++}`;
+    registerIndicator({ ...untargetedPane, id, background: ({ bars }) => [{ colors: REGIME(bars) }] });
+    registerIndicator(untargetedPane);
+    const chart = mount();
+    const legacy = chart.addIndicator(untargetedPane.id);
+    const listed = chart.addIndicator(id);
+    expect(placed(chart, listed)).toEqual([{ pane: listed.paneIndex, scale: null, overlay: false }]);
+    expect(shading(chart, listed)[0].ops).toEqual(shading(chart, legacy)[0].ops);
+  });
 });
 
 let seq = 0;
+
+const OWN = 'rgba(1,2,3,0.25)';
+const SENT = 'rgba(4,5,6,0.25)';
+type Route = 'none' | 'price' | 'osc' | 'alt' | 'guide';
+const ROUTES = (['none', 'price', 'osc', 'alt', 'guide'] as const).map(value => ({ label: value, value }));
+const target = (route: Route): { overlay?: boolean; plot?: string } => (route === 'price' ? { overlay: true } : { plot: route });
+
+/** A local oscillator, a second local plot for another axis, and a guide on the candles. */
+const PLOTS: IndicatorDescriptor['plots'] = [
+  { key: 'osc', type: 'line', title: 'Osc' },
+  { key: 'alt', type: 'line', title: 'Alt' },
+  { key: 'guide', type: 'line', title: 'Guide', overlay: true },
+];
+const CALC: IndicatorDescriptor['calc'] = bars => ({
+  osc: bars.map((_, i) => 30 + i), alt: bars.map((_, i) => 500 + i), guide: bars.map(bar => bar.close),
+});
+const own = (bars: readonly Bar[]): (string | null)[] => bars.map((_, i) => (i < 10 ? OWN : null));
+const sent = (bars: readonly Bar[]): (string | null)[] => bars.map((_, i) => (i >= 20 && i < 30 ? SENT : null));
+
+/** Shades its own pane, and sends a second column wherever the Shade input says. */
+function routedShade(): string {
+  const id = `bg-routed-${seq++}`;
+  registerIndicator({
+    id, name: 'Routed shading', placement: 'pane', plots: PLOTS, calc: CALC,
+    inputs: [{ key: 'shade', type: 'select', label: 'Shade', default: 'price', options: ROUTES }],
+    background: ({ bars, settings }) => {
+      const route = settings.shade as Route;
+      return [{ colors: own(bars) }, ...(route === 'none' ? [] : [{ colors: sent(bars), ...target(route) }])];
+    },
+  });
+  return id;
+}
+
+const layersOf = (study: IndicatorApi): IPrimitive[] =>
+  owned(study).filter(({ primitive }) => primitive instanceof IndicatorBackground).map(({ primitive }) => primitive);
+const shadingOn = (chart: Chart, paneIndex: number): IPrimitive[] =>
+  chart.panes()[paneIndex].primitives().filter(primitive => primitive instanceof IndicatorBackground);
+const allShading = (chart: Chart): number => chart.panes().reduce((sum, _, i) => sum + shadingOn(chart, i).length, 0);
+/** The colours one layer fills with, in paint order. */
+const fills = (ops: unknown[]): string[] => (ops as { type: string; fillStyle?: string }[])
+  .filter(op => op.type === 'fillRect').map(op => op.fillStyle!);
+const bound = (chart: Chart, study: IndicatorApi): string[] => placed(chart, study).map(layer => `${layer.pane}:${layer.scale}`);
+
+describe('shading targets', () => {
+  it('sends a price-pane column to the price pane, bound to no axis, and keeps its own column in the study pane', () => {
+    const chart = mount();
+    const study = chart.addIndicator(routedShade());
+    expect(placed(chart, study)).toEqual([
+      { pane: 1, scale: null, overlay: false },
+      { pane: 0, scale: null, overlay: true },
+    ]);
+    expect(shading(chart, study).map(layer => [...new Set(fills(layer.ops))])).toEqual([[OWN], [SENT]]);
+    // The whole height of the price pane, over the ten bars it names.
+    const [, price] = shading(chart, study);
+    const rects = (price.ops as { type: string; args: number[] }[]).filter(op => op.type === 'fillRect');
+    const height = (chart.panes()[0] as unknown as { _layout(ctx: PaneRenderContext): { plotHeight: number } })
+      ._layout((chart as unknown as ChartInternals)._renderContext(false)).plotHeight;
+    expect(rects).toHaveLength(1);
+    expect(rects[0].args[3]).toBe(height);
+    expect(chart.panes()[0].usesScale('left')).toBe(false);
+  });
+
+  it('binds a plot target to that plot pane and effective scale', () => {
+    const id = routedShade();
+    const chart = mount();
+    const alt = chart.addIndicator(id, { shade: 'alt' }, { plotPriceScaleIds: { alt: 'left' } });
+    const guide = chart.addIndicator(id, { shade: 'guide' }, { plotPriceScaleIds: { guide: 'overlay:guide' } });
+    expect(placed(chart, alt)).toEqual([
+      { pane: alt.paneIndex, scale: null, overlay: false },
+      { pane: alt.paneIndex, scale: 'left', overlay: false },
+    ]);
+    expect(placed(chart, guide)).toEqual([
+      { pane: guide.paneIndex, scale: null, overlay: false },
+      { pane: 0, scale: 'overlay:guide', overlay: true },
+    ]);
+  });
+
+  it('follows plot and whole-study scale reassignment, and holds no axis the plot has left', () => {
+    const id = routedShade();
+    const chart = mount();
+    const study = chart.addIndicator(id, { shade: 'alt' });
+    const guide = chart.addIndicator(id, { shade: 'guide' });
+    const pane = chart.panes()[study.paneIndex];
+    expect(study.setPlotPriceScales({ alt: 'left' })).toBe(true);
+    expect(bound(chart, study)).toEqual([`${study.paneIndex}:null`, `${study.paneIndex}:left`]);
+    expect(pane.usesScale('left')).toBe(true);
+    // Back on the oscillator's axis, the left column has nothing left to label.
+    expect(study.setPlotPriceScales({ alt: null })).toBe(true);
+    expect(bound(chart, study)).toEqual([`${study.paneIndex}:null`, `${study.paneIndex}:right`]);
+    expect(pane.usesScale('left')).toBe(false);
+    expect(study.setPriceScale('left')).toBe(true);
+    expect(bound(chart, study)).toEqual([`${study.paneIndex}:null`, `${study.paneIndex}:left`]);
+    expect(pane.usesScale('right')).toBe(false);
+    expect(guide.setPriceScale('left')).toBe(true);
+    expect(bound(chart, guide)).toEqual([`${guide.paneIndex}:null`, '0:right']);
+    study.setSettings({ shade: 'price' });
+    expect(bound(chart, study)).toEqual([`${study.paneIndex}:null`, '0:null']);
+    expect(study.setPriceScale(null)).toBe(true);
+    expect(bound(chart, study)).toEqual([`${study.paneIndex}:null`, '0:null']);
+  });
+
+  it('moves a column between targets when settings change and releases the layer it left', () => {
+    const chart = mount();
+    const study = chart.addIndicator(routedShade());
+    const [local] = layersOf(study);
+    study.setSettings({ shade: 'alt' });
+    expect(placed(chart, study)).toEqual([
+      { pane: 1, scale: null, overlay: false },
+      { pane: 1, scale: 'right', overlay: false },
+    ]);
+    expect(shadingOn(chart, 0)).toHaveLength(0);
+    study.setSettings({ shade: 'none' });
+    expect(placed(chart, study)).toEqual([{ pane: 1, scale: null, overlay: false }]);
+    expect(layersOf(study)).toEqual([local]);
+    expect(allShading(chart)).toBe(1);
+    study.setSettings({ shade: 'price' });
+    expect(shadingOn(chart, 0)).toHaveLength(1);
+  });
+
+  it('hides and shows every shading layer with the study, keeping the layers', () => {
+    const chart = mount();
+    const study = chart.addIndicator(routedShade(), { shade: 'price' });
+    const kept = layersOf(study);
+    const painted = () => shading(chart, study).map(layer => layer.ops.length > 2);
+    expect(painted()).toEqual([true, true]);
+    study.setVisible(false);
+    expect(painted()).toEqual([false, false]);
+    study.setVisible(true);
+    expect(painted()).toEqual([true, true]);
+    expect(layersOf(study)).toEqual(kept);
+  });
+
+  it('keeps price-pane shading on the price pane through moves and releases it with the study or its pane', () => {
+    const id = routedShade();
+    const chart = mount();
+    const study = chart.addIndicator(id, { shade: 'price' });
+    const other = chart.addIndicator(id, { shade: 'alt' });
+    expect(chart.moveIndicator(other.id, chart.panes().length)).toBe(true);
+    expect(placed(chart, other).map(layer => layer.pane)).toEqual([other.paneIndex, other.paneIndex]);
+    expect(chart.moveIndicator(study.id, other.paneIndex)).toBe(true);
+    expect(placed(chart, study).map(layer => layer.pane)).toEqual([other.paneIndex, 0]);
+    expect(shadingOn(chart, 0)).toHaveLength(1);
+    const guide = chart.addIndicator(id, { shade: 'guide' });
+    expect(chart.moveIndicator(guide.id, other.paneIndex)).toBe(true);
+    expect(placed(chart, guide).map(layer => layer.pane)).toEqual([other.paneIndex, 0]);
+    const removable = chart.addIndicator(id, { shade: 'price' });
+    expect(shadingOn(chart, 0)).toHaveLength(3);
+    expect(chart.removePane(removable.paneIndex)).toBe(true);
+    expect(shadingOn(chart, 0)).toHaveLength(2);
+    study.remove();
+    guide.remove();
+    expect(shadingOn(chart, 0)).toHaveLength(0);
+    other.remove();
+    expect(allShading(chart)).toBe(0);
+  });
+
+  it('stays on the price pane when a chart that allows it moves the price pane below its studies', () => {
+    const document = fakeDocument();
+    const chart = new Chart(document.createElement('div') as unknown as FakeElement, {
+      document, pixelRatio: () => 1, shortcuts: false, timeNavigator: false, animZoom: false, animAutoscale: false,
+      movablePrimaryPane: true, raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} },
+    });
+    charts.push(chart);
+    chart.applySize(800, 600);
+    chart.addSeries('candlestick').setData(BARS);
+    const study = chart.addIndicator(routedShade(), { shade: 'price' });
+    expect(chart.setPrimaryPaneIndex(1)).toBe(true);
+    expect(placed(chart, study)).toEqual([
+      { pane: study.paneIndex, scale: null, overlay: false },
+      { pane: chart.primaryPaneIndex(), scale: null, overlay: true },
+    ]);
+    expect(chart.primaryPaneIndex()).toBe(1);
+    // A layer made after the move lands where the price pane went.
+    const later = chart.addIndicator(routedShade(), { shade: 'price' });
+    expect(placed(chart, later)[1].pane).toBe(chart.primaryPaneIndex());
+  });
+
+  it('restores routed shading from saved state with its bindings', () => {
+    const id = routedShade();
+    const chart = mount();
+    chart.addIndicator(id, { shade: 'price' });
+    chart.addIndicator(id, { shade: 'alt' }, { plotPriceScaleIds: { alt: 'left' } });
+    const state = JSON.parse(JSON.stringify(chart.getState()));
+    expect(chart.restoreState(state)).toMatchObject({ applied: true, indicators: 2 });
+    const [price, alt] = chart.indicators();
+    expect(placed(chart, price)).toEqual([
+      { pane: price.paneIndex, scale: null, overlay: false },
+      { pane: 0, scale: null, overlay: true },
+    ]);
+    expect(placed(chart, alt)).toEqual([
+      { pane: alt.paneIndex, scale: null, overlay: false },
+      { pane: alt.paneIndex, scale: 'left', overlay: false },
+    ]);
+    expect(allShading(chart)).toBe(4);
+  });
+
+  it('gives each instance and each chart layers of their own', () => {
+    const id = routedShade();
+    const one = mount();
+    const two = mount();
+    const first = one.addIndicator(id, { shade: 'price' });
+    const second = one.addIndicator(id, { shade: 'price' });
+    const elsewhere = two.addIndicator(id, { shade: 'price' });
+    const kept = [layersOf(second), layersOf(elsewhere)];
+    expect(shadingOn(one, 0)).toHaveLength(2);
+    first.setSettings({ shade: 'none' });
+    expect(shadingOn(one, 0)).toEqual([kept[0][1]]);
+    first.remove();
+    expect([layersOf(second), layersOf(elsewhere)]).toEqual(kept);
+    expect(shadingOn(two, 0)).toEqual([kept[1][1]]);
+  });
+
+  it('creates a target layer only once its column has entries, and keeps it through a pass that shades nothing', () => {
+    const id = `bg-lazy-${seq++}`;
+    let columns: (bars: readonly Bar[]) => unknown[] = () => [{ colors: [], overlay: true }];
+    registerIndicator({ id, name: 'Lazy', placement: 'pane', plots: PLOTS, calc: CALC, inputs: [], background: ({ bars }) => columns(bars) as never });
+    const chart = mount();
+    const study = chart.addIndicator(id);
+    expect(layersOf(study)).toHaveLength(0);
+    columns = bars => [{ colors: sent(bars), overlay: true }];
+    study.setSettings({});
+    chart.primarySeries()!.update({ time: T0 + 40 * 60, open: 120, high: 123, low: 117, close: 121 });
+    chart.indicators();
+    const [layer] = layersOf(study);
+    expect(placed(chart, study)).toEqual([{ pane: 0, scale: null, overlay: true }]);
+    columns = bars => [{ colors: bars.map(() => null), overlay: true }];
+    chart.primarySeries()!.update({ time: T0 + 41 * 60, open: 120, high: 123, low: 117, close: 121 });
+    chart.indicators();
+    expect(layersOf(study)).toEqual([layer]);
+    expect(fills(shading(chart, study)[0].ops)).toEqual([]);
+    columns = () => [{ colors: [], overlay: true }];
+    chart.primarySeries()!.update({ time: T0 + 42 * 60, open: 120, high: 123, low: 117, close: 121 });
+    chart.indicators();
+    expect(layersOf(study)).toEqual([layer]);
+    // An empty list returns no target at all, which releases it.
+    columns = () => [];
+    chart.primarySeries()!.update({ time: T0 + 43 * 60, open: 120, high: 123, low: 117, close: 121 });
+    chart.indicators();
+    expect(layersOf(study)).toHaveLength(0);
+    expect(allShading(chart)).toBe(0);
+  });
+
+  it.each([
+    ['an unknown plot', [{ colors: ['#fff'], plot: 'missing' }], /declared plot or the price pane/],
+    ['a plot and the price pane at once', [{ colors: ['#fff'], plot: 'alt', overlay: true }], /declared plot or the price pane/],
+    ['the price pane twice', [{ colors: ['#fff'], overlay: true }, { colors: ['#000'], overlay: true }], /one column per target/],
+    ['one plot twice', [{ colors: ['#fff'], plot: 'alt' }, { colors: ['#000'], plot: 'alt' }], /one column per target/],
+    ['two columns with no target', [{ colors: ['#fff'] }, { colors: ['#000'] }], /one column per target/],
+    ['a column without colours', [{ overlay: true }], /colours or a list of columns/],
+    ['colours mixed with columns', ['#fff', { colors: ['#000'], overlay: true }], /colours or a list of columns/],
+  ])('rejects %s before any shading layer changes', (_, bad, message) => {
+    const id = `bg-invalid-${seq++}`;
+    registerIndicator({
+      id, name: 'Invalid', placement: 'pane', plots: PLOTS, calc: CALC,
+      inputs: [{ key: 'bad', type: 'boolean', label: 'Bad', default: true }],
+      background: ({ bars, settings }) => (settings.bad === true ? bad : [{ colors: own(bars) }, { colors: sent(bars), overlay: true }]) as never,
+    });
+    const chart = mount();
+    expect(() => chart.addIndicator(id)).toThrow(message);
+    expect(chart.panes()).toHaveLength(1);
+    expect(allShading(chart)).toBe(0);
+    const study = chart.addIndicator(id, { bad: false });
+    const before = shading(chart, study);
+    const layers = layersOf(study);
+    study.setSettings({ bad: true });
+    expect(study.dataStatus()?.state).toBe('error');
+    expect(layersOf(study)).toEqual(layers);
+    expect(shading(chart, study)).toEqual(before);
+  });
+
+  it('clears routed shading while a study it reads is unavailable', () => {
+    registerIndicator(SMA);
+    const id = `bg-consumer-${seq++}`;
+    registerIndicator({
+      ...SMA, id, name: 'Routed consumer', placement: 'pane',
+      background: ({ bars }) => [{ colors: sent(bars), overlay: true }, { colors: own(bars), plot: 'ma' }],
+    });
+    const chart = mount();
+    const producer = chart.addIndicator('sma', { length: 2 });
+    const consumer = chart.addIndicator(id, { length: 2, source: { kind: 'indicator', instanceId: producer.id, plotKey: 'ma' } });
+    expect(placed(chart, consumer)).toEqual([
+      { pane: 0, scale: null, overlay: true },
+      { pane: consumer.paneIndex, scale: 'right', overlay: false },
+    ]);
+    producer.remove();
+    consumer.values();
+    expect(consumer.dataStatus()?.state).toBe('error');
+    expect(shading(chart, consumer).map(layer => fills(layer.ops))).toEqual([[], []]);
+  });
+});
+
+describe('shading stacked with the other targets', () => {
+  it('follows the study\'s marks and shapes: its own column, then the price pane, then the plots', () => {
+    const id = `bg-order-${seq++}`;
+    registerIndicator({
+      id, name: 'Every output', placement: 'onchart', plots: PLOTS, calc: CALC, inputs: [],
+      markers: ({ bars }) => [
+        { time: bars[5].time, position: 'aboveBar', shape: 'circle', size: 'small', color: '#888888' },
+        { time: bars[15].time, position: 'atPrice', price: 118, shape: 'circle', size: 'small', color: '#26a69a', plot: 'guide' },
+      ],
+      draws: ({ bars }) => [
+        { kind: 'box', from: { time: bars[2].time, price: 124 }, to: { time: bars[8].time, price: 112 }, id: 'own' },
+        { kind: 'box', from: { time: bars[10].time, price: 124 }, to: { time: bars[20].time, price: 112 }, id: 'price', overlay: true },
+      ],
+      // Returned plot first, price pane last: the layers still stack in target order.
+      background: ({ bars }) => [{ colors: sent(bars), plot: 'guide' }, { colors: own(bars) }, { colors: sent(bars), overlay: true }],
+    });
+    const chart = mount();
+    const study = chart.addIndicator(id);
+    const kinds = owned(study).filter(({ primitive }) => !['PaneLegend', 'LineSeries'].includes(primitive.constructor.name))
+      .map(({ primitive, overlay }) => `${primitive.constructor.name}${overlay ? ' overlay' : ''}`);
+    expect(kinds).toEqual([
+      'SeriesMarkers', 'SeriesMarkers overlay', 'IndicatorDrawings', 'IndicatorDrawings overlay',
+      'IndicatorBackground', 'IndicatorBackground overlay', 'IndicatorBackground overlay',
+    ]);
+    expect(placed(chart, study)).toEqual([
+      { pane: 0, scale: null, overlay: false },
+      { pane: 0, scale: null, overlay: true },
+      { pane: 0, scale: 'right', overlay: true },
+    ]);
+    // All of it on one pane, drawn in that order; shading paints behind the series whatever its slot.
+    expect(stackOn({ S: study }, chart.panes()[0]).filter(layer => !layer.endsWith('PaneLegend'))).toEqual([
+      'S SeriesMarkers', 'S SeriesMarkers', 'S IndicatorDrawings', 'S IndicatorDrawings',
+      'S IndicatorBackground', 'S IndicatorBackground', 'S IndicatorBackground',
+    ]);
+    expect(chart.panes()[0].primitives().filter(primitive => primitive instanceof IndicatorBackground).every(primitive => primitive.zOrder() === 'bottom')).toBe(true);
+  });
+
+  it('keeps study order on the price pane when a live pass sends a column there for the first time', () => {
+    const make = (name: string, from: number): string => {
+      const id = `bg-late-${name}-${seq++}`;
+      registerIndicator({
+        id, name, placement: 'pane', plots: PLOTS, calc: CALC, inputs: [],
+        background: ({ bars }) => (bars.length >= from ? [{ colors: sent(bars), overlay: true }] : []),
+      });
+      return id;
+    };
+    const chart = mount();
+    const studies = { A: chart.addIndicator(make('A', 41)), B: chart.addIndicator(make('B', 0)) };
+    expect(stackOn(studies, chart.panes()[0])).toEqual(['B IndicatorBackground']);
+    chart.primarySeries()!.update({ time: T0 + 40 * 60, open: 120, high: 123, low: 117, close: 121 });
+    chart.indicators();
+    // A was added first, so its column paints first and B's covers it where they overlap.
+    expect(stackOn(studies, chart.panes()[0])).toEqual(['A IndicatorBackground', 'B IndicatorBackground']);
+    expect(chart.indicators().map(study => study.id)).toEqual([studies.A.id, studies.B.id]);
+  });
+
+  it('leaves an untargeted study\'s late shading where it lands when a routed study restacks on the same pass', () => {
+    const untargeted = (from: number): string => {
+      const id = `bg-untargeted-beside-${seq++}`;
+      registerIndicator({ ...untargetedPrice, id, background: context => (context.bars.length >= from ? untargetedPrice.background!(context) : []) });
+      return id;
+    };
+    const routed = `bg-routed-beside-${seq++}`;
+    registerIndicator({
+      id: routed, name: 'Routed late', placement: 'pane', plots: PLOTS, calc: CALC, inputs: [],
+      background: ({ bars }) => (bars.length > 40 ? [{ colors: sent(bars), overlay: true }] : []),
+    });
+    const run = (withRouted: boolean): string[] => {
+      const chart = mount();
+      const studies: Record<string, IndicatorApi> = { U: chart.addIndicator(untargeted(41)), V: chart.addIndicator(untargeted(0)) };
+      if (withRouted) studies.R = chart.addIndicator(routed);
+      chart.primarySeries()!.update({ time: T0 + 40 * 60, open: 120, high: 123, low: 117, close: 121 });
+      chart.indicators();
+      return stackOn(studies, chart.panes()[0]);
+    };
+    // What an untargeted study has always done: its late layer lands on top of the pane.
+    const base = run(false);
+    expect(base).toEqual(['U PaneLegend', 'V PaneLegend', 'V IndicatorBackground', 'U IndicatorBackground']);
+    expect(run(true)).toEqual([...base, 'R IndicatorBackground']);
+  });
+});

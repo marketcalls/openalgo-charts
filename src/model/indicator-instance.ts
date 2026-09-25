@@ -46,6 +46,7 @@ import {
   type IndicatorLevelContext,
   type IndicatorLineStyle,
   type IndicatorOutputTarget,
+  type IndicatorBackgroundSpec,
   type IndicatorSettings,
   type IndicatorStore,
   type IndicatorValues,
@@ -445,6 +446,8 @@ export class IndicatorInstance implements IndicatorApi {
   /** Drawing layers for explicit targets: `null` is the price pane, a string names a plot. */
   private readonly _drawLayers = new Map<string | null, IndicatorDrawings>();
   private _background: IndicatorBackground | null = null;
+  /** Shading layers for explicit targets, keyed as the drawing layers are. */
+  private readonly _bgLayers = new Map<string | null, IndicatorBackground>();
   /**
    * Time of the newest bar the alerts have already judged. Bars at or before it
    * are history as far as this instance is concerned, so a full recompute (a
@@ -720,7 +723,7 @@ export class IndicatorInstance implements IndicatorApi {
     if (local !== this._localScale()) for (const primitive of [...this._levels, this._draws, ...this._attachedPrimitives]) {
       if (primitive !== null) primitives.push({ primitive, scaleId: local });
     }
-    for (const [key, primitive] of this._drawLayers) {
+    for (const [key, primitive] of [...this._drawLayers, ...this._bgLayers]) {
       const scale = this._drawTarget(key, scaleId, assignments)[1];
       if (scale !== null && scale !== this._drawTarget(key)[1]) primitives.push({ primitive, scaleId: scale });
     }
@@ -796,7 +799,7 @@ export class IndicatorInstance implements IndicatorApi {
     }
     this._syncBarColors(bars);
     this._draws?.setVisible(on);
-    for (const layer of this._drawLayers.values()) layer.setVisible(on);
+    for (const layer of [...this._drawLayers.values(), ...this._bgLayers.values()]) layer.setVisible(on);
     this._background?.setVisible(on);
     this._legend?.setOptions({ hidden: !on });
     this._host.emit?.('objects:change', {});
@@ -838,7 +841,9 @@ export class IndicatorInstance implements IndicatorApi {
     routed(key => this._markerLayers.get(key)?.[0]);
     own(this._table, this._draws);
     routed(key => this._drawLayers.get(key));
-    own(this._background, ...this._attachedPrimitives);
+    own(this._background);
+    routed(key => this._bgLayers.get(key));
+    own(...this._attachedPrimitives);
     return { series, primitives };
   }
 
@@ -1081,7 +1086,6 @@ export class IndicatorInstance implements IndicatorApi {
     // Check every shape before any layer changes, so a rejected pass leaves
     // each target as the last good one drew it.
     if (groups.size > 0) new IndicatorDrawings().setItems(all);
-    let created = false;
     if (this._draws === null && items.length > 0 && this._host.addIndicatorPrimitive !== undefined) {
       this._draws = new IndicatorDrawings();
       this._draws.setVisible(this._visible);
@@ -1089,26 +1093,38 @@ export class IndicatorInstance implements IndicatorApi {
       this._host.bindIndicatorPrimitiveScale?.(this._draws, this._localScale());
     }
     this._draws?.setItems(items);
-    // A vacated target is released rather than kept empty, so a study that
-    // stops routing somewhere leaves nothing behind there. Using the target
-    // again creates a layer that the host restacks into study order.
-    for (const [key, layer] of this._drawLayers) {
+    this._syncRouted(this._drawLayers, groups,
+      (_, scale) => new IndicatorDrawings(scale === null ? rc => rc.readoutPriceScale : undefined), (layer, list) => layer.setItems(list));
+  }
+
+  /**
+   * Keep one owned layer per target a pass returned, for shapes and shading
+   * alike. A vacated target is released rather than kept empty, so a study
+   * that stops routing somewhere leaves nothing behind there. Using the target
+   * again creates a layer that the host restacks into study order. `make`
+   * declines, with null, a target not worth a layer yet.
+   */
+  private _syncRouted<L extends IndicatorDrawings | IndicatorBackground, G>(layers: Map<string | null, L>, groups: Map<string | null, G>,
+    make: (group: G, scale: PriceScaleId | null) => L | null, fill: (layer: L, group: G) => void): void {
+    let created = false;
+    for (const [key, layer] of layers) {
       if (groups.has(key)) continue;
       this._host.removeIndicatorPrimitive?.(layer);
-      this._drawLayers.delete(key);
+      layers.delete(key);
     }
-    for (const [key, list] of groups) {
-      let layer = this._drawLayers.get(key);
+    for (const [key, group] of groups) {
+      let layer = layers.get(key);
       if (layer === undefined) {
-        if (this._host.addIndicatorPrimitive === undefined) return;
         const [pane, scale] = this._drawTarget(key);
+        const made = this._host.addIndicatorPrimitive && make(group, scale);
+        if (!made) continue;
         created = true;
-        this._drawLayers.set(key, layer = new IndicatorDrawings(scale === null ? rc => rc.readoutPriceScale : undefined));
+        layers.set(key, layer = made);
         layer.setVisible(this._visible);
-        this._host.addIndicatorPrimitive(layer, pane);
+        this._host.addIndicatorPrimitive!(layer, pane);
         if (scale !== null) this._host.bindIndicatorPrimitiveScale?.(layer, scale);
       }
-      layer.setItems(list);
+      fill(layer, group);
     }
     this._restack(created);
   }
@@ -1130,17 +1146,33 @@ export class IndicatorInstance implements IndicatorApi {
    * Refresh the pane's per-bar shading, created lazily on first use the way the
    * drawing layer is. Hidden rather than detached when the indicator is hidden,
    * because a regime background is the cheapest layer here to keep around.
+   *
+   * The list form is told apart by its entries, since the plain form holds
+   * colours and gaps only. A targeted layer is created lazily too, on the first
+   * column with entries, and kept while its target is returned at all.
    */
   private _syncBackground(bars: readonly Bar[]): void {
     if (this._d.background === undefined) return;
-    const colors = this._d.background({ bars, values: this._values, settings: this._descriptorSettings() });
-    if (this._background === null) {
-      if (colors.length === 0 || this._host.addIndicatorPrimitive === undefined) return;
+    const out: readonly (string | null | IndicatorBackgroundSpec)[] =
+      this._d.background({ bars, values: this._values, settings: this._descriptorSettings() });
+    const listed = out.some(item => typeof item === 'object' && item !== null);
+    // Every column and target is checked before any layer changes. `for...of`
+    // visits holes, which `every` would skip.
+    if (listed) for (const item of out) if (!Array.isArray((item as IndicatorBackgroundSpec | null)?.colors)) {
+      throw new Error('Indicator background must return colours or a list of columns');
+    }
+    const [local, groups] = listed ? this._route(out as readonly IndicatorBackgroundSpec[])
+      : [[{ colors: out as readonly (string | null)[] }], new Map<string | null, IndicatorBackgroundSpec[]>()];
+    for (const list of [local, ...groups.values()]) if (list.length > 1) throw new Error('Indicator background allows one column per target');
+    const colors = local[0]?.colors ?? [];
+    if (this._background === null && colors.length > 0 && this._host.addIndicatorPrimitive !== undefined) {
       this._background = new IndicatorBackground();
       this._background.setVisible(this._visible);
       this._host.addIndicatorPrimitive(this._background, this.paneIndex);
     }
-    this._background.setColors(colors, bars);
+    this._background?.setColors(colors, bars);
+    this._syncRouted(this._bgLayers, groups, ([spec]) => (spec.colors.length > 0 ? new IndicatorBackground() : null),
+      (layer, [spec]) => layer.setColors(spec.colors, bars));
   }
 
   /**
@@ -1489,7 +1521,7 @@ export class IndicatorInstance implements IndicatorApi {
     for (const { table } of this._tables.values()) table.setRows([]);
     this._draws?.setItems([]);
     for (const layer of this._drawLayers.values()) layer.setItems([]);
-    this._background?.setColors([], bars);
+    for (const layer of [this._background, ...this._bgLayers.values()]) layer?.setColors([], bars);
     for (const level of this._levels) this._host.removeIndicatorLevel(level);
     this._levels = [];
     this._publishedBarColors = null;
@@ -1856,8 +1888,9 @@ export class IndicatorInstance implements IndicatorApi {
     for (const { table } of this._tables.values()) this._host.removeIndicatorTable(table);
     this._tables.clear();
     if (this._draws !== null) { this._host.removeIndicatorPrimitive?.(this._draws); this._draws = null; }
-    for (const layer of this._drawLayers.values()) this._host.removeIndicatorPrimitive?.(layer);
+    for (const layer of [...this._drawLayers.values(), ...this._bgLayers.values()]) this._host.removeIndicatorPrimitive?.(layer);
     this._drawLayers.clear();
+    this._bgLayers.clear();
     if (this._background !== null) { this._host.removeIndicatorPrimitive?.(this._background); this._background = null; }
     this._host.setIndicatorRange?.(this.id, this.paneIndex, this._localScale(), null, []);
     // Withdraw the candle colours before anything else forgets who owned them.
