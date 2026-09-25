@@ -24,8 +24,9 @@
  */
 import type { Drawing, DrawingPoint, DrawingStyle, DrawingText, FibLevel } from './types';
 import { DRAWING_STATE_VERSION } from './types';
-import { hasDrawingTool } from './tools';
+import { hasDrawingTool, viewportDrawingTool } from './tools';
 import { migrateDrawings } from './migrate';
+import { readViewportPoints } from './viewport';
 
 /**
  * Top-level key of the JSON payload. Namespaced so a paste of arbitrary text,
@@ -87,6 +88,7 @@ export function cloneDrawing(d: Drawing): Drawing {
     points: d.points.map(clonePoint),
     style: cloneStyle(d.style),
   };
+  if (d.viewportPoints !== undefined) out.viewportPoints = d.viewportPoints.map((p) => ({ x: p.x, y: p.y }));
   if (d.text !== undefined) out.text = { ...d.text };
   if (d.props !== undefined) out.props = JSON.parse(JSON.stringify(d.props)) as Record<string, unknown>;
   if (d.policy !== undefined) out.policy = { ...d.policy };
@@ -113,6 +115,11 @@ export function encodeClipboardPayload(drawings: readonly Drawing[]): string {
       drawings: drawings.map((d) => ({
         tool: d.tool,
         points: d.points.map(clonePoint),
+        // Fractions of the pane, so a paste lands at the same place on any
+        // chart, whatever its size.
+        ...(d.space === 'viewport'
+          ? { space: 'viewport', viewportPoints: (d.viewportPoints ?? []).map((p) => ({ x: p.x, y: p.y })) }
+          : {}),
         style: d.style ?? {},
         ...(d.text === undefined ? {} : { text: d.text }),
         ...(d.props === undefined ? {} : { props: d.props }),
@@ -332,7 +339,11 @@ export function sanitizeDrawing(value: unknown): Omit<Drawing, 'id'> | null {
   if (!isRecord(value)) return null;
   if (typeof value.tool !== 'string' || value.tool === '' || value.tool.length > MAX_STRING) return null;
   if (!hasDrawingTool(value.tool)) return null;
-  const points = sanitizePoints(value.points);
+  // A viewport entry is all-or-nothing like the rest: its tool must be able to
+  // hold the space, and every anchor must be a finite fraction.
+  const viewport = value.space === 'viewport' ? readViewportPoints(value.viewportPoints, MAX_POINTS) : undefined;
+  if (viewport === null || (viewport !== undefined && !viewportDrawingTool(value.tool))) return null;
+  const points = viewport === undefined ? sanitizePoints(value.points) : [];
   if (points === null) return null;
   const style = sanitizeStyle(value.style);
   if (style === null) return null;
@@ -348,6 +359,7 @@ export function sanitizeDrawing(value: unknown): Omit<Drawing, 'id'> | null {
   const out: Omit<Drawing, 'id'> = {
     tool: value.tool,
     points,
+    ...(viewport === undefined ? {} : { space: 'viewport' as const, viewportPoints: viewport }),
     style,
     paneIndex,
     zIndex: isFinite_(value.zIndex) ? value.zIndex : 0,

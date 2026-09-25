@@ -29,7 +29,7 @@ import {
   type SettingsField, type SettingsSchema,
   LINE_FIELDS, FILL_FIELDS, TEXT_FIELDS, LEVEL_FIELDS, EXTEND_FIELDS, FONT_FIELDS,
   SHAPE_TEXT_FIELDS, PLATE_TEXT_FIELDS,
-  COLOR_FIELD, LINE_WIDTH_FIELD, LINE_STYLE_FIELD, SHOW_LABELS_FIELD, TEXT_VALUE_FIELD,
+  COLOR_FIELD, LINE_WIDTH_FIELD, LINE_STYLE_FIELD, SHOW_LABELS_FIELD, TEXT_VALUE_FIELD, SPACE_FIELD,
   composeSettings,
 } from './schema';
 import {
@@ -59,6 +59,11 @@ export function getDrawingTool(id: string): DrawingTool {
 
 export function hasDrawingTool(id: string): boolean {
   return registry.has(id);
+}
+
+/** Whether a registered tool can be anchored to the viewport (`DrawingTool.viewport`). */
+export function viewportDrawingTool(id: string): boolean {
+  return registry.get(id)?.viewport === true;
 }
 
 export function registeredDrawingTools(): DrawingTool[] {
@@ -591,10 +596,18 @@ export const CROSS_LINE: DrawingTool = {
 /** What every labelled shape declares: outline, fill, and the attached label. */
 const SHAPE_SETTINGS: SettingsSchema = composeSettings([LINE_FIELDS, FILL_FIELDS, SHAPE_TEXT_FIELDS]);
 
+/**
+ * A labelled shape that can also be pinned to the screen. Only the box and the
+ * ellipse: their outline, fill and label come from the anchors alone, where a
+ * channel or a triangle is drawn to price action and means nothing once the
+ * bars pan away from it.
+ */
+const PINNABLE_SHAPE_SETTINGS: SettingsSchema = composeSettings([SHAPE_SETTINGS.fields, SPACE_FIELD]);
+
 export const RECTANGLE: DrawingTool = {
-  id: 'rectangle', name: 'Rectangle', points: 2,
+  id: 'rectangle', name: 'Rectangle', points: 2, viewport: true,
   defaultStyle: { fill: true },
-  settings: SHAPE_SETTINGS,
+  settings: PINNABLE_SHAPE_SETTINGS,
   draw: (c) => {
     const r = rectOf(c.pts[0], c.pts[1]);
     withFill(c, () => c.ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0));
@@ -607,9 +620,9 @@ export const RECTANGLE: DrawingTool = {
 };
 
 export const ELLIPSE: DrawingTool = {
-  id: 'ellipse', name: 'Ellipse', points: 2,
+  id: 'ellipse', name: 'Ellipse', points: 2, viewport: true,
   defaultStyle: { fill: true },
-  settings: SHAPE_SETTINGS,
+  settings: PINNABLE_SHAPE_SETTINGS,
   draw: (c) => {
     const r = rectOf(c.pts[0], c.pts[1]);
     const cx = (r.x0 + r.x1) / 2;
@@ -1125,9 +1138,12 @@ function shapeLabel(
 }
 
 export const TEXT: DrawingTool = {
-  id: 'text', name: 'Text', points: 1,
+  // A box of text measured from its own anchor, so it is the note that can be
+  // pinned to the screen. The pinned annotations (note, balloon, signpost)
+  // point at a bar, which a fixed place on screen would contradict.
+  id: 'text', name: 'Text', points: 1, viewport: true,
   defaultText: { value: 'Text', fontSize: TEXT_SIZE },
-  settings: composeSettings([TEXT_FIELDS], { textIsContent: true }),
+  settings: composeSettings([TEXT_FIELDS, SPACE_FIELD], { textIsContent: true }),
   draw: (c) => {
     const { ctx, rc, style } = c;
     const d = rc.dpr;
@@ -1989,7 +2005,9 @@ function tableWidths(ctx: CanvasRenderingContext2D | null, text: DrawingText, ro
  * because a table on a chart is nearly always labelled.
  */
 export const TABLE: DrawingTool = {
-  id: 'table', name: 'Table', points: 1,
+  // Laid out from its top-left anchor alone, so a table of levels can stay in
+  // a corner of the pane while the chart pans under it.
+  id: 'table', name: 'Table', points: 1, viewport: true,
   defaultText: { value: 'Level|Price\nEntry|-\nStop|-', fontSize: TABLE_SIZE },
   settings: composeSettings([
     COLOR_FIELD,
@@ -2000,6 +2018,7 @@ export const TABLE: DrawingTool = {
     { path: 'text.backgroundOpacity', label: 'Background opacity', kind: 'opacity', min: 0, max: 1, step: 0.01, group: 'text' },
     { path: 'text.border', label: 'Border', kind: 'boolean', group: 'text' },
     { path: 'text.borderColor', label: 'Border color', kind: 'color', group: 'text' },
+    SPACE_FIELD,
   ], { textIsContent: true }),
   draw: (c) => {
     const d = c.rc.dpr;

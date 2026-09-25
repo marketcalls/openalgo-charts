@@ -21,11 +21,12 @@
 import type { IPrimitive, DataLayer, AlertDrawingValue, AlertDrawingInfo } from 'openalgo-charts';
 import type {
   Drawing, DrawingInput, DrawingPatch, DrawingPoint, DrawingStyle, DrawingTool, DrawingsDocument,
-  MagnetMode, ScreenPoint, DrawingGroup,
+  MagnetMode, ScreenPoint, DrawingGroup, DrawingSpace, ViewportPoint,
 } from './types';
 import { DRAWING_STATE_VERSION } from './types';
 import { DrawingLayer, type DrawingPointerKind } from './layer';
-import { getDrawingTool, hasDrawingTool } from './tools';
+import { getDrawingTool, hasDrawingTool, viewportDrawingTool } from './tools';
+import { clampViewportPoint, readViewportPoints, shiftViewportPoints } from './viewport';
 import { DrawingClipboard, cloneDrawing, type ClipboardPort } from './clipboard';
 import { migrateDrawings, migrateGroups } from './migrate';
 import { rdpSimplify } from './freehand';
@@ -77,6 +78,20 @@ export interface DrawingChartHost {
   timeToCoordinate?(time: number): number;
   coordinateToTime?(x: number): number;
   /**
+   * Optional, for drawings anchored to the viewport (`space: 'viewport'`):
+   * the time axis, whose `width` is the plot width a viewport `x` is a
+   * fraction of. A host without it still paints them, since the layer reads
+   * the plot size from its render context, but cannot place, move or convert
+   * them.
+   */
+  readonly timeScale?: { readonly width: number; indexToX(index: number): number; xToIndex(x: number): number };
+  /**
+   * Optional: a pane's price columns in container px. On a chart with no bars
+   * to measure against, the innermost left column is where the plot, and so
+   * a viewport drawing's `x`, begins.
+   */
+  priceAxisLayout?(paneIndex?: number): readonly { side: 'left' | 'right'; x: number; width: number }[];
+  /**
    * Optional. It keeps a paste from a chart with more panes than this one
    * landing on a pane the user cannot see: adding a primitive creates the pane
    * it names, so without this a drawing copied out of an indicator pane would
@@ -91,6 +106,15 @@ export interface DrawingChartHost {
 interface PaneProjection {
   priceToY(price: number): number;
   yToPrice(y: number): number;
+  /** Its scale's height is the pane's plot height, what a viewport `y` is a fraction of. */
+  readonly priceScale?: { readonly height: number };
+}
+
+/** A pane's plot on screen: its top in container px, and its size. */
+interface PlotFrame {
+  top: number;
+  width: number;
+  height: number;
 }
 
 export interface DrawingControllerOptions {
@@ -133,6 +157,17 @@ export interface DrawingControllerOptions {
    */
   pasteOffsetBars?: number;
   pasteOffsetPixels?: number;
+}
+
+/** How `DrawingController.setTool` arms a tool. */
+export interface DrawingPlacementOptions {
+  /**
+   * The space the placed drawing is anchored in. `'viewport'` pins it to the
+   * screen: the anchors are placed where they are clicked, as usual, and kept
+   * as fractions of the pane's plot from then on. Only a tool that declares
+   * `viewport` accepts it. Default `'data'`.
+   */
+  space?: DrawingSpace;
 }
 
 /** What `drawing:change` reports happened to the listed ids. */
@@ -203,6 +238,8 @@ interface DragPayload extends PointerFacts {
   price: number;
   time: number;
   paneIndex: number;
+  /** Container x, pane-local y. What a viewport drag measures, where the bars cannot. */
+  point?: { x: number; y: number };
   /** Where the gesture was grabbed; deltas measure from here, not frame one. */
   fromPrice?: number;
   fromTime?: number;
@@ -329,6 +366,8 @@ export class DrawingController {
   private readonly _linkedPreviews = new Map<string, Drawing>();
   private _destroyed = false;
   private _tool: string | null = null;
+  /** The space the armed tool places in; data whenever no tool is armed. */
+  private _toolSpace: DrawingSpace = 'data';
   private _pending: DrawingPoint[] = [];
   private _pendingPane = 0;
   /** Selected ids, in the order they were picked. The first is the primary. */
@@ -361,7 +400,9 @@ export class DrawingController {
     id: string;
     handle: number | null;
     from: DrawingPoint;
-    items: { id: string; paneIndex: number; points: DrawingPoint[] }[];
+    /** The press on its pane's plot, in media px: what a viewport drawing moves by the pointer from. */
+    origin: ScreenPoint | null;
+    items: { id: string; paneIndex: number; points: DrawingPoint[]; viewportPoints?: ViewportPoint[] }[];
     undo: DrawingHistoryEntry[];
     redo: DrawingHistoryEntry[];
   } | null = null;
@@ -420,18 +461,37 @@ export class DrawingController {
 
   // ── public API ──────────────────────────────────────────────────────────
 
-  /** Arm a tool for placement, or pass null to return to the cursor. */
-  public setTool(toolId: string | null): void {
+  /**
+   * Arm a tool for placement, or pass null to return to the cursor. With
+   * `options.space` set to `'viewport'` the drawing it places is pinned to the
+   * screen; a tool that cannot be (see `DrawingTool.viewport`) throws.
+   */
+  public setTool(toolId: string | null, options: DrawingPlacementOptions = {}): void {
     if (toolId !== null && !hasDrawingTool(toolId)) {
       throw new Error(`openalgo-charts: unknown drawing tool "${toolId}"`);
     }
+    const space: DrawingSpace = toolId !== null && options.space === 'viewport' ? 'viewport' : 'data';
+    if (space === 'viewport' && !viewportDrawingTool(toolId as string)) {
+      throw new Error(`openalgo-charts: drawing tool "${toolId}" cannot be anchored to the viewport`);
+    }
     this.cancelDrag();
     this._tool = toolId;
+    this._toolSpace = space;
     this._pending = [];
     this._setPlacementMode(toolId !== null);
     this._syncPreview();
     this._syncSnapRing();
-    this._chart.emit('draw:tool', { tool: toolId });
+    this._emitTool();
+  }
+
+  /** The space the armed tool places in: `'data'` unless it was armed for the viewport. */
+  public activeToolSpace(): DrawingSpace {
+    return this._toolSpace;
+  }
+
+  /** `draw:tool`, carrying the space only when it is not the default, as the payload always has. */
+  private _emitTool(): void {
+    this._chart.emit('draw:tool', this._toolSpace === 'viewport' ? { tool: this._tool, space: 'viewport' } : { tool: this._tool });
   }
 
   /**
@@ -577,7 +637,7 @@ export class DrawingController {
     const drag = this._dragStart;
     if (drag) {
       this._dragStart = null;
-      for (const item of drag.items) { const drawing = this.get(item.id); if (drawing) drawing.points = item.points.map(point => ({ ...point })); }
+      for (const item of drag.items) { const drawing = this.get(item.id); if (drawing) this._restoreAnchors(drawing, item); }
       this._undo = drag.undo;
       this._redo = drag.redo;
       this._pendingHistory = null;
@@ -681,6 +741,9 @@ export class DrawingController {
     const drawing = this.get(id);
     if (!drawing || !hasDrawingTool(drawing.tool)) return { available: false, reason: 'Drawing is unavailable', levels: [] };
     const tool = getDrawingTool(drawing.tool);
+    // A pinned drawing sits over whatever price is under it at the moment,
+    // which changes with every pan: there is no level to watch.
+    if (drawing.space === 'viewport') return { available: false, reason: 'A drawing pinned to the screen has no price', paneIndex: drawing.paneIndex, levels: [] };
     if (!tool.alertValue) return { available: false, reason: 'This tool has no numeric alert value', paneIndex: drawing.paneIndex, levels: [] };
     const levels = tool.alertLevels?.(drawing) ?? [{ id: 'line', title: 'Line' }];
     if (!this._chart.timeToCoordinate || !this._chart.priceToCoordinate || !this._chart.coordinateToPrice) {
@@ -693,7 +756,7 @@ export class DrawingController {
   /** Numeric drawing value using the actual pane projection and collapsed time axis. */
   public valueAt(id: string, time: number, level?: string): AlertDrawingValue | undefined {
     const drawing = this.get(id);
-    if (!drawing || !hasDrawingTool(drawing.tool) || !Number.isFinite(time)) return undefined;
+    if (!drawing || drawing.space === 'viewport' || !hasDrawingTool(drawing.tool) || !Number.isFinite(time)) return undefined;
     const tool = getDrawingTool(drawing.tool);
     const toX = this._chart.timeToCoordinate;
     const toPrice = this._chart.coordinateToPrice;
@@ -724,6 +787,11 @@ export class DrawingController {
    * user can take back, so it is not recorded.
    */
   public add(drawing: DrawingInput): Drawing {
+    // Refused before anything is recorded: a bad viewport drawing is the
+    // caller's mistake, and leaves no undo step behind.
+    if (drawing.space === 'viewport' && (!viewportDrawingTool(drawing.tool) || readViewportPoints(drawing.viewportPoints) === null)) {
+      throw new Error(`openalgo-charts: a "${drawing.tool}" drawing cannot be anchored to the viewport with those viewportPoints`);
+    }
     this._begin(!Object.values(drawing.policy ?? {}).includes(false));
     const created = this._insert(drawing);
     this._sync();
@@ -752,6 +820,15 @@ export class DrawingController {
     };
     // A copy: the object the caller keeps is not a switch on this drawing.
     if (drawing.policy) created.policy = { ...drawing.policy };
+    // One space, one set of anchors: a viewport drawing keeps no data anchors
+    // that could be mistaken for its position, and data is never written out.
+    if (drawing.space === 'viewport') {
+      created.points = [];
+      created.viewportPoints = readViewportPoints(drawing.viewportPoints) ?? [];
+    } else {
+      delete created.space;
+      delete created.viewportPoints;
+    }
     if (created.props?.[DRAWING_LINK_METADATA_KEY] !== undefined) {
       created.props = { ...created.props };
       delete created.props[DRAWING_LINK_METADATA_KEY];
@@ -789,7 +866,11 @@ export class DrawingController {
   public updateMany(patches: ReadonlyArray<{ id: string; patch: DrawingPatch }>, options: DrawingEditOptions = {}): void {
     const live = patches
       .map((p) => ({ d: this.get(p.id), patch: p.patch }))
-      .filter((p): p is { d: Drawing; patch: DrawingPatch } => p.d !== undefined && (options.force === true || !pinned(p.d)));
+      .filter((p): p is { d: Drawing; patch: DrawingPatch } => p.d !== undefined && (options.force === true || !pinned(p.d)))
+      // A change of space the controller cannot make leaves nothing for that
+      // drawing to do, and it is not an edit to record.
+      .map(({ d, patch }) => ({ d, patch: this._spacePatch(d, patch), asked: Object.keys(patch).length }))
+      .filter(({ patch, asked }) => asked === 0 || Object.keys(patch).length > 0);
     if (live.length === 0) return;
     this._begin(!options.force && live.some(({ patch }) => !patch.policy));
     for (const { d, patch } of live) this._applyPatch(d, patch);
@@ -800,6 +881,8 @@ export class DrawingController {
       // a constraint run again on an older shape could put them elsewhere.
       const held = this._hostPatches.get(d.id) ?? {};
       this._applyPatch(held as Drawing, rest);
+      // Data is stored as an absent space, so the held patch names it outright.
+      if (rest.space !== undefined) held.space = rest.space;
       if (points) held.points = d.points;
       this._hostPatches.set(d.id, held);
       // History cannot reach a read-only drawing's content until its policy
@@ -814,15 +897,44 @@ export class DrawingController {
     this._emitChange(live.map((p) => p.d.id), 'update');
   }
 
+  /**
+   * A patch as it applies to `d`. A change of space comes out complete, with
+   * the anchors of the new space (converted at the view on screen unless the
+   * patch gives them), or is left out when it cannot be made; anchors of the
+   * space the drawing will not be in are left out too, so one drawing never
+   * carries two positions.
+   */
+  private _spacePatch(d: Drawing, patch: DrawingPatch): DrawingPatch {
+    const { space, points, viewportPoints, ...rest } = patch;
+    const from: DrawingSpace = d.space === 'viewport' ? 'viewport' : 'data';
+    let to: DrawingSpace = space === undefined ? from : space === 'viewport' ? 'viewport' : 'data';
+    if (to === 'viewport' && from === 'data' && !viewportDrawingTool(d.tool)) to = 'data';
+    if (to === 'viewport') {
+      const given = viewportPoints === undefined ? null : readViewportPoints(viewportPoints);
+      if (to === from) return given === null ? rest : { ...rest, viewportPoints: given };
+      const anchors = given ?? this._toViewport(points ?? d.points, d.paneIndex);
+      return anchors === null ? rest : { ...rest, space: 'viewport', points: [], viewportPoints: anchors };
+    }
+    if (to === from) return points === undefined ? rest : { ...rest, points };
+    const anchors = points ?? this._fromViewport(readViewportPoints(viewportPoints) ?? d.viewportPoints ?? [], d.paneIndex);
+    return anchors === null ? rest : { ...rest, space: 'data', points: anchors };
+  }
+
   private _applyPatch(d: Drawing, patch: DrawingPatch): void {
     if (patch.points !== undefined) {
       const points = patch.points.map((p) => ({ ...p }));
       const tool = hasDrawingTool(d.tool) ? getDrawingTool(d.tool) : undefined;
       // A patch that moved exactly one anchor (a price typed into a settings
       // field) is told which, so the constraint leaves that one where it was
-      // put, the same as a drag of its handle would.
-      d.points = tool?.constrain === undefined ? points : tool.constrain(points, changedAnchor(d.points, points));
+      // put, the same as a drag of its handle would. A move to the viewport
+      // empties the list, which leaves nothing to constrain.
+      d.points = tool?.constrain === undefined || points.length === 0 ? points : tool.constrain(points, changedAnchor(d.points, points));
     }
+    if (patch.space !== undefined) {
+      if (patch.space === 'viewport') d.space = 'viewport';
+      else { delete d.space; delete d.viewportPoints; }
+    }
+    if (patch.viewportPoints !== undefined) d.viewportPoints = patch.viewportPoints.map((p) => ({ x: p.x, y: p.y }));
     if (patch.style !== undefined) d.style = { ...d.style, ...patch.style };
     if (patch.text !== undefined) d.text = { ...d.text, ...patch.text };
     if (patch.props !== undefined) d.props = { ...d.props, ...patch.props };
@@ -1015,6 +1127,11 @@ export class DrawingController {
     if (list.length === 0) return;
     this._pushUndo();
     for (const d of list) {
+      if (d.space === 'viewport') {
+        const frame = this._plotFrame(d.paneIndex);
+        if (frame !== null) d.viewportPoints = shiftViewportPoints(d.viewportPoints ?? [], dxPx / frame.width, dyPx / frame.height);
+        continue;
+      }
       d.points = d.points.map((p) => ({
         time: this._offsetTime(p.time, dxPx),
         price: this._offsetPrice(p.price, d.paneIndex, dyPx),
@@ -1037,7 +1154,7 @@ export class DrawingController {
     const clones = sources.map((d) => {
       const { id: _id, createdAt: _createdAt, policy: _policy, ...rest } = cloneDrawing(d);
       void _id; void _createdAt; void _policy;
-      return this._insert({ ...rest, points: this._offsetPoints(d.points, d.paneIndex) });
+      return this._insert({ ...rest, ...this._offsetAnchors(d, d.paneIndex) });
     });
     this._sync();
     for (const c of clones) this._chart.emit('draw:add', { drawing: c });
@@ -1107,7 +1224,7 @@ export class DrawingController {
     }
     const prepared = entries.map((e) => {
       const paneIndex = this._clampPane(e.paneIndex);
-      return { ...e, paneIndex, points: this._offsetPoints(e.points, paneIndex) };
+      return { ...e, paneIndex, ...this._offsetAnchors(e, paneIndex) };
     });
     this._pushUndo();
     const created = prepared.map((p) => this._insert(p));
@@ -1137,6 +1254,22 @@ export class DrawingController {
     if (panes === undefined) return paneIndex;
     const n = panes.call(this._chart).length;
     return n === 0 ? 0 : Math.min(paneIndex, n - 1);
+  }
+
+  /**
+   * A copy's anchors, offset from the original's in its own space. A viewport
+   * copy moves the paste offset in pixels on both axes, as a fraction of the
+   * pane it lands on, so it reads the same on a chart of any size.
+   */
+  private _offsetAnchors(d: Pick<Drawing, 'points' | 'space' | 'viewportPoints'>, paneIndex: number): Pick<Drawing, 'points' | 'viewportPoints'> {
+    if (d.space !== 'viewport') return { points: this._offsetPoints(d.points, paneIndex) };
+    const anchors = d.viewportPoints ?? [];
+    const frame = this._plotFrame(paneIndex);
+    const px = this._opts.pasteOffsetPixels;
+    return {
+      points: [],
+      viewportPoints: frame === null ? anchors.map((p) => ({ x: p.x, y: p.y })) : shiftViewportPoints(anchors, px / frame.width, px / frame.height),
+    };
   }
 
   /** Nudge every anchor so a pasted copy is not hidden under its original. */
@@ -1510,16 +1643,24 @@ export class DrawingController {
   /** Commit `pts` as a drawing of the armed tool and leave placement. */
   private _commit(pts: DrawingPoint[]): void {
     const tool = getDrawingTool(this._tool as string);
-    const created = this.add({ tool: tool.id, points: pts, style: {}, paneIndex: this._pendingPane });
+    const pane = this._pendingPane;
+    // Placement runs in data space, where the preview and the magnet already
+    // work; a tool armed for the viewport converts at the moment it lands,
+    // which is exactly where each anchor was clicked.
+    const pinned = this._toolSpace === 'viewport' ? this._toViewport(pts, pane) : null;
+    const created = this.add(pinned === null
+      ? { tool: tool.id, points: pts, style: {}, paneIndex: pane }
+      : { tool: tool.id, points: [], space: 'viewport', viewportPoints: pinned.map(clampViewportPoint), style: {}, paneIndex: pane });
     this._pending = [];
     if (!this._opts.stayInDrawingMode) {
       this._tool = null;
+      this._toolSpace = 'data';
       this._setPlacementMode(false);   // hand panning back to the chart
     }
     this._syncPreview();
     this._syncSnapRing();
     this.select(created.id);
-    this._chart.emit('draw:tool', { tool: this._tool });
+    this._emitTool();
   }
 
   /**
@@ -1597,6 +1738,7 @@ export class DrawingController {
     this._pending = [];
     if (!hadPending || !this._opts.stayInDrawingMode) {
       this._tool = null;
+      this._toolSpace = 'data';
       this._setPlacementMode(false);
       this._syncPreview();
       this._syncSnapRing();
@@ -1754,7 +1896,11 @@ export class DrawingController {
         id: rawId, handle,
         undo, redo,
         from: { time: p.fromTime ?? p.time, price: p.fromPrice ?? p.price },
-        items: moving.map((m) => ({ id: m.id, paneIndex: m.paneIndex, points: m.points.map((q) => ({ ...q })) })),
+        origin: this._dragOrigin(p),
+        items: moving.map((m) => ({
+          id: m.id, paneIndex: m.paneIndex, points: m.points.map((q) => ({ ...q })),
+          ...(m.space === 'viewport' ? { viewportPoints: (m.viewportPoints ?? []).map((q) => ({ ...q })) } : {}),
+        })),
       };
       // Anything under the series rides on the top layer for the gesture, so
       // the frames that follow repaint the overlay alone. Lifting re-lists the
@@ -1787,7 +1933,7 @@ export class DrawingController {
     this._dragStart = null;
     for (const item of start.items) {
       const drawing = this.get(item.id);
-      if (drawing !== undefined) drawing.points = item.points.map(point => ({ ...point }));
+      if (drawing !== undefined) this._restoreAnchors(drawing, item);
     }
     this._undo = start.undo;
     this._redo = start.redo;
@@ -1808,15 +1954,35 @@ export class DrawingController {
       const dt = p.time - start.from.time;
       const dp = p.price - start.from.price;
       const dy = this._pixelDelta(start.from.price, p.price, p.paneIndex);
+      // A pinned shape takes the pointer's travel on screen, as a fraction of
+      // its own pane, so it moves with the hand whatever the scales say.
+      const at = this._gesturePlot(p, p.paneIndex);
+      const travel = at === null || start.origin === null ? null : { x: at.x - start.origin.x, y: at.y - start.origin.y };
       for (const item of start.items) {
         const m = this.get(item.id);
         if (m === undefined) continue;
+        if (item.viewportPoints !== undefined) {
+          const frame = this._plotFrame(item.paneIndex);
+          if (frame !== null && travel !== null) {
+            m.viewportPoints = shiftViewportPoints(item.viewportPoints, travel.x / frame.width, travel.y / frame.height);
+          }
+          continue;
+        }
         const samePane = item.paneIndex === p.paneIndex;
         m.points = item.points.map((q) => ({
           ...q,
           time: q.time + dt,
           price: samePane ? q.price + dp : this._offsetPrice(q.price, item.paneIndex, dy),
         }));
+      }
+    } else if (d.space === 'viewport') {
+      // A handle lands under the pointer, held inside the pane so the shape
+      // can always be reached again.
+      const anchors = start.items[0].viewportPoints ?? [];
+      const at = this._gesturePlot(p, d.paneIndex);
+      const frame = this._plotFrame(d.paneIndex);
+      if (handle >= 0 && handle < anchors.length && at !== null && frame !== null) {
+        d.viewportPoints = anchors.map((q, i) => (i === handle ? clampViewportPoint({ x: at.x / frame.width, y: at.y / frame.height }) : { ...q }));
       }
     } else if (handle >= 0 && handle < d.points.length) {
       const item = start.items[0];
@@ -1863,6 +2029,152 @@ export class DrawingController {
     const time = toTime.call(this._chart, at.x);
     const price = toPrice.call(this._chart, at.y, paneIndex);
     return price === null || !Number.isFinite(time) || !Number.isFinite(price) ? null : { time, price };
+  }
+
+  // ── viewport space ──────────────────────────────────────────────────────
+  //
+  // A viewport anchor is a fraction of its pane's plot. The layer scales it
+  // by the plot size in its render context; everything here goes through the
+  // same two numbers read off the chart (the time axis width and the pane
+  // scale's height, which the chart sets to exactly the plot's), and through
+  // the pane's own readout scale for y, the scale a gesture's price was read
+  // from. Plot-relative px therefore agree with what the layer painted.
+
+  /**
+   * The drawing's anchors in container media px, the space `timeToCoordinate`
+   * and `priceToCoordinate` answer in, whichever space it is anchored in. What
+   * a host places an overlay by (an inline editor, a popover). Null for an
+   * unknown id, or when the drawing's pane has no place on screen (folded to
+   * a strip, or hidden behind a maximized pane).
+   */
+  public screenPoints(id: string): ScreenPoint[] | null {
+    const d = this.get(id);
+    if (d === undefined) return null;
+    if (d.space !== 'viewport') {
+      const out: ScreenPoint[] = [];
+      for (const p of d.points) {
+        const at = this._toPixel(p, d.paneIndex);
+        if (at === null) return null;
+        out.push(at);
+      }
+      return out;
+    }
+    const frame = this._plotFrame(d.paneIndex);
+    if (frame === null) return null;
+    const left = this._plotLeft();
+    return (d.viewportPoints ?? []).map((p) => ({ x: left + p.x * frame.width, y: frame.top + p.y * frame.height }));
+  }
+
+  /** A pane's price projection, when the host exposes one. */
+  private _pane(paneIndex: number): PaneProjection | null {
+    const own = this._chart.panes?.()[paneIndex] as PaneProjection | undefined;
+    return typeof own?.priceToY === 'function' && typeof own.yToPrice === 'function' ? own : null;
+  }
+
+  /**
+   * Where a pane's plot is and how big, or null when it has none on screen:
+   * a folded pane maps no price, and a pane hidden by a maximize has no
+   * height. A fraction of either would be a fraction of nothing.
+   */
+  private _plotFrame(paneIndex: number): PlotFrame | null {
+    const pane = this._pane(paneIndex);
+    const toY = this._chart.priceToCoordinate;
+    const width = this._chart.timeScale?.width ?? 0;
+    const height = pane?.priceScale?.height ?? 0;
+    if (pane === null || toY === undefined || !(width > 0) || !(height > 0)) return null;
+    const price = pane.yToPrice(0);
+    const y = toY.call(this._chart, price, paneIndex);
+    if (y === null || !Number.isFinite(y)) return null;
+    return { top: y - pane.priceToY(price), width, height };
+  }
+
+  /**
+   * The plot's left edge in container px: the chart-wide left axis column.
+   * Any bar maps to both a container x and a plot x, and their gap is the
+   * column; a chart with no bars reads it off the left price columns.
+   */
+  private _plotLeft(): number {
+    const ts = this._chart.timeScale;
+    const toX = this._chart.timeToCoordinate;
+    const dl = this._chart.dataLayer;
+    const t = dl.length > 0 ? dl.indexToTime(0) : undefined;
+    if (ts !== undefined && toX !== undefined && t !== undefined) {
+      const left = toX.call(this._chart, t) - ts.indexToX(dl.timeToIndexFloat(t));
+      if (Number.isFinite(left)) return left;
+    }
+    let left = 0;
+    const panes = this._chart.panes?.().length ?? 1;
+    for (let i = 0; i < panes; i++) {
+      for (const slot of this._chart.priceAxisLayout?.(i) ?? []) if (slot.side === 'left') left = Math.max(left, slot.x + slot.width);
+    }
+    return left;
+  }
+
+  /**
+   * A gesture's position on its pane's plot, in media px. y reads the price
+   * back through the pane's readout scale, the exact inverse of how the chart
+   * read it; x is the pointer's container x less the left column, or, for a
+   * payload without one, the time through the time axis.
+   */
+  private _gesturePlot(p: { time: number; price: number; point?: { x: number } | null }, paneIndex: number): ScreenPoint | null {
+    const pane = this._pane(paneIndex);
+    const ts = this._chart.timeScale;
+    if (pane === null || !Number.isFinite(p.price)) return null;
+    const x = p.point !== undefined && p.point !== null ? p.point.x - this._plotLeft()
+      : ts === undefined ? Number.NaN : ts.indexToX(this._chart.dataLayer.timeToIndexFloat(p.time));
+    const y = pane.priceToY(p.price);
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+  }
+
+  /**
+   * Where a drag was pressed, on its pane's plot. Read from the press's time
+   * and price when the chart reports them, so the first move is measured from
+   * the press and not from itself; a chart with fewer than two bars has no
+   * time axis to read a position back from, so it measures from the first move.
+   */
+  private _dragOrigin(p: DragPayload): ScreenPoint | null {
+    if (p.fromTime !== undefined && p.fromPrice !== undefined && this._chart.dataLayer.length >= 2) {
+      return this._gesturePlot({ time: p.fromTime, price: p.fromPrice }, p.paneIndex);
+    }
+    return this._gesturePlot(p, p.paneIndex);
+  }
+
+  /** Data anchors as fractions of their pane's plot at the view on screen, or null when it has none. */
+  private _toViewport(points: readonly DrawingPoint[], paneIndex: number): ViewportPoint[] | null {
+    const frame = this._plotFrame(paneIndex);
+    const pane = this._pane(paneIndex);
+    const ts = this._chart.timeScale;
+    if (frame === null || pane === null || ts === undefined || points.length === 0) return null;
+    const out: ViewportPoint[] = [];
+    for (const p of points) {
+      const x = ts.indexToX(this._chart.dataLayer.timeToIndexFloat(p.time));
+      const y = pane.priceToY(p.price);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      out.push({ x: x / frame.width, y: y / frame.height });
+    }
+    return out;
+  }
+
+  /** The inverse of `_toViewport`: fractions back to time and price at the view on screen. */
+  private _fromViewport(points: readonly ViewportPoint[], paneIndex: number): DrawingPoint[] | null {
+    const frame = this._plotFrame(paneIndex);
+    const pane = this._pane(paneIndex);
+    const ts = this._chart.timeScale;
+    if (frame === null || pane === null || ts === undefined || points.length === 0) return null;
+    const out: DrawingPoint[] = [];
+    for (const p of points) {
+      const time = this._chart.dataLayer.indexToTimeFloat(ts.xToIndex(p.x * frame.width));
+      const price = pane.yToPrice(p.y * frame.height);
+      if (!Number.isFinite(time) || !Number.isFinite(price)) return null;
+      out.push({ time, price });
+    }
+    return out;
+  }
+
+  /** Put a drawing's anchors back as a gesture found them. */
+  private _restoreAnchors(d: Drawing, item: { points: readonly DrawingPoint[]; viewportPoints?: readonly ViewportPoint[] }): void {
+    d.points = item.points.map((point) => ({ ...point }));
+    if (item.viewportPoints !== undefined) d.viewportPoints = item.viewportPoints.map((point) => ({ ...point }));
   }
 
   /**

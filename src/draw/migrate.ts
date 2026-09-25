@@ -24,6 +24,11 @@
  * - An unregistered tool is not a reason to drop anything: a plugin tool may
  *   register after the layout is restored. This module never consults the
  *   registry, which also keeps it pure.
+ * - A viewport drawing keeps its `viewportPoints` and carries no data
+ *   anchors; one without usable viewport anchors is dropped, since falling
+ *   back to its data anchors would put it somewhere it never was. Data is the
+ *   default space and is never written out, so a document with no viewport
+ *   drawing comes back exactly as it went in.
  * - Garbage yields an empty document. This runs on the load path, where an
  *   exception would take the whole chart down with it.
  *
@@ -34,6 +39,7 @@ import type {
 } from './types';
 import { DRAWING_STATE_VERSION } from './types';
 import { cycleColor, levelColor } from './levels';
+import { readViewportPoints } from './viewport';
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -127,7 +133,9 @@ function migrateEntry(raw: unknown): Drawing | null {
   if (!isRecord(raw)) return null;
   const tool = raw.tool;
   if (typeof tool !== 'string' || tool === '') return null;
-  const points = migratePoints(raw.points);
+  const viewport = raw.space === 'viewport' ? readViewportPoints(raw.viewportPoints) : undefined;
+  if (viewport === null) return null;
+  const points = viewport === undefined ? migratePoints(raw.points) : [];
   if (points === null) return null;
   // An absent pane is pane zero; a pane that cannot exist is a drawing that
   // cannot be shown, so that entry goes.
@@ -139,6 +147,7 @@ function migrateEntry(raw: unknown): Drawing | null {
     id: typeof raw.id === 'string' ? raw.id : isNum(raw.id) ? String(raw.id) : '',
     tool,
     points,
+    ...(viewport === undefined ? {} : { space: 'viewport' as const, viewportPoints: viewport }),
     style: migrateStyle(style, tool),
     paneIndex,
     zIndex: isNum(raw.zIndex) ? raw.zIndex : 0,

@@ -14,6 +14,13 @@
  * {@link DrawingText}, made `levels` a list of {@link FibLevel} rather than bare
  * ratios, and gave every drawing a `zIndex`. A 1.9.x document is upgraded by
  * `migrateDrawings` on the way in; nothing downstream sees the old shape.
+ *
+ * The one exception to data space is a drawing whose `space` is `'viewport'`:
+ * a note or a box that belongs to the screen rather than to a bar. Its anchors
+ * are {@link ViewportPoint} fractions of its pane's plot, kept in a field of
+ * their own so a time or a price never has to mean a pixel. The field is
+ * optional and additive, which is why the document stays version 2: a save
+ * with no viewport drawing is byte for byte what it was.
  */
 import type { PrimitiveRenderContext, AlertDrawingValue, AlertDrawingLevel } from 'openalgo-charts';
 import type { SettingsSchema } from './schema';
@@ -29,6 +36,32 @@ export interface DrawingPoint {
    * a stroke's width is calibrated to, so a mouse stroke stores nothing here.
    */
   pressure?: number;
+}
+
+/**
+ * Which coordinates a drawing's anchors are in. `'data'`, the default, is time
+ * and price: the drawing moves with the bars when the chart pans or zooms.
+ * `'viewport'` pins it to the screen: its anchors are fractions of its pane's
+ * plot, so pan and zoom leave it where it is and a resize keeps it in
+ * proportion.
+ */
+export type DrawingSpace = 'data' | 'viewport';
+
+/**
+ * One anchor of a viewport drawing, as a fraction of the plot area of the pane
+ * that holds the drawing. Pane-relative, not whole-chart-relative: the pane's
+ * layer paints, clips and hit-tests the drawing, so these are the coordinates
+ * that follow the pane when it moves, resizes or folds.
+ *
+ * `x` is 0 at the plot's left edge and 1 at its right edge; the price axes are
+ * outside that span. `y` is 0 at the top of the pane and 1 at the bottom of its
+ * plot, which on the lowest pane is the top of the time axis. Sizes that a tool
+ * sets in pixels (a font size, a wrap width) stay in pixels: a resize moves a
+ * note in proportion without scaling its type.
+ */
+export interface ViewportPoint {
+  x: number;
+  y: number;
 }
 
 /**
@@ -158,7 +191,15 @@ export interface Drawing {
   id: string;
   /** Registered tool id. */
   tool: string;
+  /** Anchors in time and price. Empty on a viewport drawing, whose anchors are `viewportPoints`. */
   points: DrawingPoint[];
+  /**
+   * Which coordinates the anchors are in. Absent means `'data'`. Only a tool
+   * that declares {@link DrawingTool.viewport} can be anchored to the viewport.
+   */
+  space?: DrawingSpace;
+  /** The anchors of a viewport drawing, one per handle. Present only when `space` is `'viewport'`. */
+  viewportPoints?: ViewportPoint[];
   style: DrawingStyle;
   /** The label (or, for the text tool, the whole content). */
   text?: DrawingText;
@@ -203,8 +244,16 @@ export type DrawingInput = Omit<Drawing, 'id' | 'zIndex' | 'createdAt'> & {
 /**
  * The fields `DrawingController.update` and `updateMany` can change. `policy`
  * merges flag by flag, the way `style` does.
+ *
+ * `space` on its own converts the anchors at the view on screen, so the
+ * drawing stays exactly where it is and only stops (or starts) following the
+ * bars. With the new space's anchors in the same patch (`viewportPoints` for
+ * the viewport, `points` for data) they are taken as given. A conversion the
+ * controller cannot make (a tool without viewport support, a pane with no
+ * place on screen) is left out of the patch and the rest of it applies.
  */
-export type DrawingPatch = Partial<Pick<Drawing, 'points' | 'style' | 'text' | 'props' | 'locked' | 'visible' | 'zIndex' | 'policy'>>;
+export type DrawingPatch = Partial<Pick<Drawing,
+  'points' | 'style' | 'text' | 'props' | 'locked' | 'visible' | 'zIndex' | 'policy' | 'space' | 'viewportPoints'>>;
 
 /** The persisted shape's version; bumped when {@link Drawing} changes. */
 export const DRAWING_STATE_VERSION = 2;
@@ -308,6 +357,15 @@ export interface DrawingTool {
    * not what Shift means there.
    */
   angleLock?: boolean;
+  /**
+   * The tool can be anchored to the viewport (`Drawing.space`). Declare it
+   * only when `draw` and `distance` read the screen anchors (`pts`) and never
+   * `drawing.points`, which is empty in that space, and when nothing the tool
+   * prints is a price or a time: a label that reads the axis under a pinned
+   * shape would change every time the chart panned. `expand`, `constrain` and
+   * `alertValue` apply to data space only.
+   */
+  viewport?: boolean;
   /**
    * Turn the anchors actually clicked into the full anchor set. Lets a tool drop
    * a complete, immediately editable default from fewer clicks: the position

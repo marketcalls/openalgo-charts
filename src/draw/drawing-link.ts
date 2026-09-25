@@ -51,6 +51,14 @@ const sessionId = (() => {
 })();
 let nextLineage = 1;
 
+/**
+ * Whether a drawing can travel between linked charts: price pane only, and in
+ * data space. A viewport drawing is a place on this chart's screen, and the
+ * same fraction of another chart's pane would sit over different bars at a
+ * different size, so it stays on the chart it was drawn on.
+ */
+const linkable = (drawing: Drawing): boolean => drawing.paneIndex === 0 && drawing.space !== 'viewport';
+
 function lineageOf(drawing: Drawing, context: string): string | undefined {
   const value = drawing.props?.[DRAWING_LINK_METADATA_KEY] as { version?: unknown; id?: unknown; context?: unknown } | null | undefined;
   return value?.version === 1 && value.context === context && typeof value.id === 'string' && value.id.length > 0
@@ -61,6 +69,8 @@ function lineageOf(drawing: Drawing, context: string): string | undefined {
  * Existing local drawings stay local until `share` is called. Persisted shared
  * lineage reconnects across restores. Only price-pane drawings participate; time anchors
  * cross the boundary unchanged so each interval uses its own coordinate map.
+ * A drawing pinned to the viewport never participates, and pinning a shared one
+ * takes it out of the link on that chart alone: the other charts keep their copy.
  */
 export class DrawingLinkGroup {
   private readonly _members = new Map<DrawingLinkChart, Member>();
@@ -143,7 +153,7 @@ export class DrawingLinkGroup {
     let count = 0;
     for (const id of new Set(ids ?? member.controller.drawings().map(d => d.id))) {
       const drawing = member.controller.get(id);
-      if (drawing === undefined || drawing.paneIndex !== 0) continue;
+      if (drawing === undefined || !linkable(drawing)) continue;
       const shared = member.drawings.get(id) ?? this._create(member, drawing);
       this._commit(shared, member, drawing, true);
       count++;
@@ -199,14 +209,14 @@ export class DrawingLinkGroup {
     this._broadcasting = true;
     try {
       for (const drawing of [...member.controller.drawings()]) {
-        if (drawing.paneIndex !== 0 || member.drawings.has(drawing.id)) continue;
+        if (!linkable(drawing) || member.drawings.has(drawing.id)) continue;
         const lineage = lineageOf(drawing, context);
         if (lineage === undefined) continue;
         for (const peer of this._members.values()) {
           if (peer === member || !this._eligible(peer) || peer.context !== context) continue;
           let shared = [...peer.drawings.values()].find(value => value.context === context && value.lineage === lineage);
           if (shared === undefined) {
-            const copy = peer.controller.drawings().find(value => value.paneIndex === 0 && lineageOf(value, context) === lineage);
+            const copy = peer.controller.drawings().find(value => linkable(value) && lineageOf(value, context) === lineage);
             if (copy !== undefined) shared = this._create(peer, copy);
           }
           if (shared === undefined) continue;
@@ -225,10 +235,30 @@ export class DrawingLinkGroup {
 
   private _change(member: Member, drawing: Drawing, removed: boolean, added: boolean): void {
     if (this._broadcasting || !this._eligible(member) || drawing.paneIndex !== 0) return;
+    if (!removed && drawing.space === 'viewport') { this._unlink(member, drawing); return; }
     let shared = member.drawings.get(drawing.id);
     const first = shared === undefined && added;
     if (shared === undefined && added) shared = this._create(member, drawing);
     if (shared !== undefined) this._commit(shared, member, removed ? null : drawing, first);
+  }
+
+  /**
+   * A shared drawing pinned to the screen leaves the link on this chart. Its
+   * lineage mark goes too, or a restore would find the peers' copy by it and
+   * pull the drawing back to where they keep it.
+   */
+  private _unlink(member: Member, drawing: Drawing): void {
+    const shared = member.drawings.get(drawing.id);
+    if (shared !== undefined) {
+      this._clearPreview(shared);
+      shared.bindings.delete(member);
+      member.drawings.delete(drawing.id);
+    }
+    if (drawing.props?.[DRAWING_LINK_METADATA_KEY] === undefined) return;
+    const props = { ...drawing.props };
+    delete props[DRAWING_LINK_METADATA_KEY];
+    this._broadcasting = true;
+    try { member.controller.applyLinkedDrawing(drawing.id, { ...drawing, props }); } finally { this._broadcasting = false; }
   }
 
   private _commit(shared: SharedDrawing, from: Member, drawing: Drawing | null, includeNew: boolean): void {
@@ -247,7 +277,7 @@ export class DrawingLinkGroup {
         let binding = shared.bindings.get(target);
         if (binding === undefined) {
           if (drawing === null || !includeNew) continue;
-          const restored = target.controller.drawings().find(d => d.paneIndex === 0
+          const restored = target.controller.drawings().find(d => linkable(d)
             && !target.drawings.has(d.id) && lineageOf(d, shared.context) === shared.lineage);
           let id = restored?.id ?? shared.id;
           if (restored === undefined) {
