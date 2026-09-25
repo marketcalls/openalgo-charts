@@ -334,6 +334,7 @@ chart has a different interval loaded.
 | `copy(target?)` / `cut(target?)` / `paste()` | Clipboard, all async. See [Drawing Clipboard](/docs/drawing-clipboard). |
 | `clipboard()` | The `DrawingClipboard` behind those three, for reporting why a copy did not reach the OS clipboard. |
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A paste of several drawings is one step. `canUndo()` and `canRedo()` report only a step that still changes something. |
+| `historySteps()` | `{ undo, redo }`: the steps each branch holds, oldest first, by the number `drawing:change` reported them under. For a host that keeps one timeline across drawings and its own edits, such as [`ChartHistory`](/docs/undo-history): a step in neither branch was taken away by a reset, a trim or a host's forced edit. |
 | `toJSON()` / `fromJSON(data)` | Explicit serialisation: a `{ version: 2, drawings }` document out; a document or a 1.9.x bare array in, upgraded by `migrateDrawings`. |
 | `setOptions(patch)` | `magnet`, `stayInDrawingMode`, `historyLimit`, `defaultStyle`, `pasteOffsetBars`, `pasteOffsetPixels`, `clipboard`. |
 | `cancel()` / `popAnchor()` | Drop the anchors placed so far (the tool disarms unless `stayInDrawingMode` keeps it); remove the last anchor of a variable-anchor shape still being placed. Escape and Backspace, once the host wires them. |
@@ -346,7 +347,10 @@ chart has a different interval loaded.
 `draw:cut` and `draw:paste` all fire on `chart.on(...)`. The 2.0 pair `drawing:select`
 (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind }`, one per mutation)
 fire alongside them for a host that tracks a multi-selection, and `drawing:hover`
-(`{ id }`) when the unselected drawing under the pointer changes.
+(`{ id }`) when the unselected drawing under the pointer changes. A `drawing:change` that
+closes a recorded undo step carries that step's number as `step`; a host's forced edit, a
+linked chart's commit, a restore and a move along the branches carry none
+(`DrawingChangeEvent` names the payload).
 
 <Callout type="info">
 The controller listens on the **event bus** (`click`, `crosshair:move`, `drag`, `drag:end`),

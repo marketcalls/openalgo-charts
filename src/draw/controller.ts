@@ -180,6 +180,21 @@ export interface DrawingPlacementOptions {
 /** What `drawing:change` reports happened to the listed ids. */
 export type DrawingChangeKind = 'add' | 'update' | 'remove' | 'reorder' | 'undo' | 'redo';
 
+/** The `drawing:change` payload. */
+export interface DrawingChangeEvent {
+  ids: string[];
+  kind: DrawingChangeKind;
+  /** Set on a change another chart's link applied; it records no step here. */
+  linked?: true;
+  /**
+   * The undo step this change was recorded as, on the change that closes it.
+   * Absent for everything the history does not hold: a host's forced edit, a
+   * linked commit, a restore, and a move along the branches (`undo`, `redo`).
+   * {@link DrawingController.historySteps} lists the step by this number.
+   */
+  step?: number;
+}
+
 /** Options for a call that changes, groups or deletes drawings. */
 export interface DrawingEditOptions {
   /**
@@ -302,6 +317,9 @@ const STROKE_EPSILON_PX = 1.5;
 const REST_PRESSURE = 0.5;
 
 let nextId = 1;
+// Shared by every controller on the page, so a chart rebuilt with a new
+// controller never hands out a step a history still holds for the old one.
+let nextStep = 1;
 
 const sameIds = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((id, i) => id === b[i]);
@@ -359,7 +377,7 @@ const pointerKindOf = (p: PointerFacts): DrawingPointerKind =>
 type ControllerOptions = Required<Omit<DrawingControllerOptions, 'defaultStyle' | 'clipboard' | 'clipboardFallbackToMemory' | 'magnet'>>
   & { defaultStyle: DrawingStyle; magnet: MagnetMode };
 
-interface DrawingHistoryEntry { before: string; after: string }
+interface DrawingHistoryEntry { before: string; after: string; step: number }
 
 /** @internal Reserved persistence metadata; a duplicate is a new drawing lineage. */
 export const DRAWING_LINK_METADATA_KEY = 'openalgo-charts/drawing-link';
@@ -1068,11 +1086,16 @@ export class DrawingController {
   }
 
   private _emitChange(ids: readonly string[], kind: DrawingChangeKind): void {
-    if (this._pendingHistory !== null) {
-      this._pendingHistory.after = this._historyText();
+    const recorded = this._pendingHistory;
+    if (recorded !== null) {
+      recorded.after = this._historyText();
       this._pendingHistory = null;
     }
-    this._chart.emit('drawing:change', { ids: ids.slice(), kind });
+    const change: DrawingChangeEvent = { ids: ids.slice(), kind };
+    // A trim can push the step out of the branch while it is being recorded,
+    // and a step nothing holds is not one to report.
+    if (recorded !== null && this._undo.includes(recorded)) change.step = recorded.step;
+    this._chart.emit('drawing:change', change);
   }
 
   // ── z-order ─────────────────────────────────────────────────────────────
@@ -1477,6 +1500,19 @@ export class DrawingController {
 
   public canUndo(): boolean { return this._undo.length > 0; }
   public canRedo(): boolean { return this._redo.length > 0; }
+
+  /**
+   * The steps each branch holds, oldest first, by the number `drawing:change`
+   * reported them under. For a host that keeps one timeline across drawings
+   * and its own edits: a step missing from both branches has been taken away
+   * (a reset, a trim, a host edit that left it nothing to do), and pressing
+   * undo for it would reach an older step instead. A step still being
+   * recorded, a drag in progress, is not listed until its change closes it.
+   */
+  public historySteps(): { undo: number[]; redo: number[] } {
+    const closed = (entry: DrawingHistoryEntry): boolean => entry !== this._pendingHistory;
+    return { undo: this._undo.filter(closed).map(entry => entry.step), redo: this._redo.map(entry => entry.step) };
+  }
 
   /**
    * Serialisable document, the same shape `ChartState.drawings` carries.
@@ -2438,7 +2474,7 @@ export class DrawingController {
   private _pushUndo(): void {
     this._onDragEnd();
     const before = this._historyText();
-    this._pendingHistory = { before, after: before };
+    this._pendingHistory = { before, after: before, step: nextStep++ };
     this._undo.push(this._pendingHistory);
     if (this._undo.length > this._opts.historyLimit) this._undo.shift();
     this._redo = []; // a new edit invalidates the redo branch

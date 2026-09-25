@@ -109,6 +109,7 @@ export {
   DrawingController,
   type DrawingControllerOptions,
   type DrawingChangeKind,
+  type DrawingChangeEvent,
   type DrawingEditOptions,
   type DrawingPlacementOptions,
 } from './controller';

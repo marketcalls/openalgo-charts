@@ -284,7 +284,7 @@ describe('multi-drag', () => {
     expect(updated).toEqual([]);                 // nothing until release
     chart.emit('drag:end', {});
     expect(updated).toEqual([a.id, b.id]);
-    expect(changed).toEqual({ ids: [a.id, b.id], kind: 'update' });
+    expect(changed).toEqual({ ids: [a.id, b.id], kind: 'update', step: expect.any(Number) });
   });
 
   it('a handle drag moves that anchor only, whatever else is selected', () => {
