@@ -14,8 +14,8 @@ on:
 permissions:
   contents: read
 
-# A manual run started while the scheduled one is going waits for it rather
-# than timing frames on a runner the other is not sharing, or cancelling it.
+# A manual run started while another is going queues behind it instead of
+# cancelling it: a nightly cut short would leave half its reports.
 concurrency:
   group: nightly
   cancel-in-progress: false

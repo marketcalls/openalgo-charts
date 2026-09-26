@@ -138,7 +138,10 @@ jobs:
         # runner was every time. The baseline is the newest release tag this
         # commit descends from. A change that is meant to move pixels sets
         # PARITY_BASELINE_REF to the commit that paints them and says so in
-        # its message; everything else has to match the release exactly.
+        # its message; everything else has to match the release exactly. The
+        # ref has to stay reachable from master after the merge (a squashed
+        # branch's commits do not), and the release that ships the change
+        # empties it again, because its tag then paints the same pixels.
         env:
           PARITY_BASELINE_REF: ''
         run: |
