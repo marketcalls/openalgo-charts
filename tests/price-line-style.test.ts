@@ -3,8 +3,11 @@
  * has to keep producing exactly the pattern it always did, so its expectations
  * are pinned alongside the three-way style that supersedes it.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { Chart } from '../src/core/chart';
+import { registerIndicator } from '../src/model/indicator-registry';
 import { PriceLine, type PriceLineOptions } from '../src/primitives/price-line';
+import { fakeDocument } from './helpers/fake-dom';
 import type { PrimitiveRenderContext } from '../src/primitives/primitive';
 import { darkTheme } from '../src/theme';
 import { DataLayer } from '../src/model/data-layer';
@@ -61,5 +64,30 @@ describe('PriceLine line style', () => {
     expect(lineOps({ lineWidth: 3 }).width).toBe(3);
     expect(lineOps({ lineWidth: 3 }, 2).width).toBe(6);
     expect(lineOps({ lineWidth: 0.2 }).width).toBe(1);
+  });
+});
+
+describe('study levels the chart draws', () => {
+  it('take their dash from the resolved lineStyle alone, reading nothing from the deprecated host flag', () => {
+    registerIndicator({
+      id: 'price-line-style-levels', name: 'Levels', placement: 'pane', inputs: [],
+      plots: [{ key: 'v', type: 'line', title: 'V' }],
+      calc: bars => ({ v: bars.map(() => 50) }),
+      // The shorthand stays a descriptor's to use: the study resolves it before the host sees it.
+      levels: () => [{ price: 70 }, { price: 50, dashed: false }, { price: 30, lineStyle: 'dotted' }],
+    });
+    const doc = fakeDocument();
+    const chart = new Chart(doc.createElement('div'), {
+      document: doc, pixelRatio: () => 1, shortcuts: false, raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} },
+    });
+    chart.applySize(800, 600);
+    chart.addSeries('candlestick').setData(Array.from({ length: 40 }, (_, i) => (
+      { time: 1_700_000_000 + i * 60, open: 100, high: 101, low: 99, close: 100 })));
+    const added = vi.spyOn(chart, 'addPriceLine');
+    chart.addIndicator('price-line-style-levels');
+    chart.indicators();
+    const passed = added.mock.calls.map(([options]) => options);
+    expect(passed.map(options => options.lineStyle)).toEqual(['dashed', 'solid', 'dotted']);
+    expect(passed.filter(options => 'dashed' in options)).toEqual([]);
   });
 });

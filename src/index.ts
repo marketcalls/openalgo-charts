@@ -6,7 +6,7 @@ export { VERSION, version } from './version';
 export { createChart, Chart, compactVolume, PRICE_SCALE_MODES } from './core/chart';
 export type {
   ChartOptions, ChartNavigationOptions, ChartWatermarkOptions, BrandingChangedEvent, PlotRect, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
-  ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState,
+  ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState, LayoutChangeEvent, LayoutSetter,
   AxisChromeOptions, ZoomAnchor, DoubleClickAction, DoubleClickEvent, ExportSvgOptions,
   PointerModifiers, PointerKind, PointerSample, PointerInfo,
   ChartClickEvent, ChartEventClick, ChartDragEvent, ChartDragEndEvent, RendererFallbackEvent,

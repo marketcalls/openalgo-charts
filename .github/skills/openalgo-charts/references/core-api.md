@@ -67,8 +67,8 @@ does not need to be loaded again.
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `document` | `Document` | `container.ownerDocument` | Element factory (SSR / multi-window). |
-| `pixelRatio` | `() => number` | `window.devicePixelRatio ?? 1` | Called per frame; canvases resize to media x dpr. |
-| `raf` | `{ schedule, cancel? }` | `requestAnimationFrame` | Injectable frame scheduler (deterministic tests). |
+| `pixelRatio` | `() => number` | `window.devicePixelRatio ?? 1` | Called per frame; canvases resize to media x dpr. Read again whenever the device ratio changes: the chart watches a `(resolution: Xdppx)` query, made again for each new ratio, and the window's `resize`, and re-sizes and repaints every canvas at once. |
+| `raf` | `{ schedule, cancel? }` | `requestAnimationFrame` | Injectable frame scheduler (deterministic tests). Supplied, it runs every frame the chart paints, including the repaint after a resize or a new pixel ratio, which the default one paints at once inside the callback that reports it. |
 | `theme` | `ChartTheme` | `DEFAULT_THEME` | See [themes-and-styling](themes-and-styling.md). |
 | `priceAxisWidth` | `number` | `56` | Media px. Also the width reserved for a left axis when one exists. |
 | `timeAxisHeight` | `number` | `22` | Media px, bottom pane only. |
@@ -268,8 +268,9 @@ overrides and retains explicit price-overlay overrides. `IndicatorState.priceSca
 stores the whole-study override and `plotPriceScaleIds` stores explicit plot
 overrides. Omission restores descriptor defaults. See [scales-and-panes](scales-and-panes.md#reassign-a-whole-study)
 for shared formatting, fixed-range ownership and saved scales.
-`movePriceAxis` refuses mixed local study assignments and explicit price overlays;
-its `priceAxisState().movable` result reflects that conservative legacy-operation
+`movePriceAxis` (deprecated, removed in 3.0.0: use `setPriceAxisPlacement`) refuses
+mixed local study assignments and explicit price overlays;
+its `priceAxisState().movable` result (deprecated with it) reflects that conservative legacy-operation
 limit, even though saved state can represent mixed plot assignments. Uniform local and
 primitive-only studies adopt a successful whole-axis move. `setPriceScale` remains
 the operation for moving all local study resources while keeping overlays fixed.
@@ -297,7 +298,8 @@ and legacy template parsing retain structurally valid maps for later validation.
 ## Lifecycle and sizing
 
 - `chart.destroy()`: the only teardown method. **There is no `chart.remove()`.** It stops the render loop and kinetic animation, removes every indicator, disconnects the `ResizeObserver`, unbinds all pointer/wheel/keyboard listeners, destroys every pane, and clears the container's cursor hint.
-- `chart.applySize(width, height)`: media px; no-ops when unchanged. A `ResizeObserver` on the container calls it automatically, so manual calls are only needed in hosts without `ResizeObserver`.
+- `chart.applySize(width, height)`: media px; no-ops when unchanged. A `ResizeObserver` on the container calls it automatically, so manual calls are only needed in hosts without `ResizeObserver`. The chart paints inside that observer's callback, which runs after the frame's animation callbacks and before the browser paints, so a resize never shows a cleared canvas for a frame.
+- **Device pixels.** Pane boundaries land on whole device pixels: every boundary between panes is rounded onto one (within half a device pixel of its weighted share; the outer edge stays the container's), at the ratio the panes were laid out at, so each canvas covers whole device pixels, and where the browser reports a canvas's `devicePixelContentBoxSize` (Chromium, Firefox) the backing store takes exactly that size. At a whole-number ratio (1, 2, 3) the separator between panes is the pane's 1 px top border, the canvases starting under it, as in every earlier release; a chart whose panes share the height in whole pixels is laid out and painted exactly as before. At a fractional ratio (1.25, 1.5) it is a box one device pixel tall laid over the lower pane's first row, the canvases starting at the pane's own top. A pane's height can differ from its exact weighted share by up to one device pixel. `exportSVG` lays panes out at ratio 1 on every screen.
 - `chart.applyOptions(opts)` takes a runtime subset only: `theme`, `grid`, `canvas`, `statusLine`, `priceScale`, `priceFormatter`, `timeFormatter`, `timezone`, `crosshairMode`. Nothing else from `ChartOptions` is re-appliable.
 
 ## Object inventory and management
@@ -572,8 +574,8 @@ The getter returns null for an invalid ID, missing pane or destroyed chart;
 layout returns an empty array for a missing pane or destroyed chart. Successful
 changes emit `priceAxisPlacementChanged` with `{ paneIndex, scaleId, side, order }`
 and `objects:change`.
-`movePriceAxis` retains its legacy resource reassignment behavior; use placement
-to move a column while preserving IDs.
+`movePriceAxis` retains its legacy resource reassignment behavior and is
+deprecated, removed in 3.0.0; use placement to move a column while preserving IDs.
 
 Attached series, including hidden series, and explicitly bound primitives occupy
 columns. An unused configured scale retains placement but reserves no width.
@@ -589,7 +591,7 @@ do not yet preserve pane column placement.
 
 ## Option accessors
 
-Beyond `applyOptions`, the chart reads and writes its own option blocks so a settings dialog has something to bind to: `setCanvasOptions` / `canvasOptions`, `setNavigationOptions` / `navigationOptions`, `setGridOptions` / `gridOptions`, `setStatusLineOptions` / `statusLineOptions`, `setPriceScaleOptions` / `priceScaleOptions`, `setAutoScale`, `setAxisChromeOptions` / `axisChromeOptions`, `setEvents` / `setEventOptions` / `eventOptions`, `tradingSettings` / `setTradingSettings`, `primarySeries` / `primarySeriesInfo`, `theme`, `crosshairMode`, `setTimezone` / `timezone`. One axis at a time there is `priceAxisState`, `setPriceAxisOptions`, `setPriceAxisAutoFit`, `setPriceAxisLockRatio`, `priceAxisPlacement`, `setPriceAxisPlacement`, `priceAxisLayout` and the legacy `movePriceAxis`. The declarative schema over the settings is in [settings-and-menus](settings-and-menus.md).
+Beyond `applyOptions`, the chart reads and writes its own option blocks so a settings dialog has something to bind to: `setCanvasOptions` / `canvasOptions`, `setNavigationOptions` / `navigationOptions`, `setGridOptions` / `gridOptions`, `setStatusLineOptions` / `statusLineOptions`, `setPriceScaleOptions` / `priceScaleOptions` (the price pane's own scale) / `priceScaleDefaults` (the chart-wide defaults a new pane starts from, which a one-axis change leaves alone), `setAutoScale`, `setAxisChromeOptions` / `axisChromeOptions`, `setEvents` / `setEventOptions` / `eventOptions`, `tradingSettings` / `setTradingSettings`, `primarySeries` / `primarySeriesInfo`, `theme`, `crosshairMode`, `setTimezone` / `timezone`. One axis at a time there is `priceAxisState`, `setPriceAxisOptions`, `setPriceAxisAutoFit`, `setPriceAxisLockRatio`, `priceAxisPlacement`, `setPriceAxisPlacement`, `priceAxisLayout` and the deprecated `movePriceAxis`. Each of these setters that has no event of its own is followed by `layout:change` (see [events-and-state](events-and-state.md)). `chart.setSessionCalendar(calendar)` sets the trading hours the axis follows past the last bar and repaints; see [data-and-time](data-and-time.md). The declarative schema over the settings is in [settings-and-menus](settings-and-menus.md).
 
 ## Render model
 
@@ -628,7 +630,7 @@ interface IRenderBackend {
 
 `mount` takes the pane's existing 2D context as its second argument (the pane's base `CanvasLayer` already asked the canvas for one; a second `getContext` would split a frame across two contexts). A backend that owns its canvas ignores it.
 
-Choosing one: `chart.rendererKind` (a `RenderBackendKind`; `chart.renderer` is the same value under the name it first shipped with) reports what the chart actually paints with. It differs from the `renderer` option when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in, and from the moment a GPU backend degrades (see the fallback below). The registry behind the option is exported for a tier or host that brings a backend:
+Choosing one: `chart.rendererKind` (a `RenderBackendKind`; the deprecated `chart.renderer`, removed in 3.0.0, is the same value under the name it first shipped with) reports what the chart actually paints with. It differs from the `renderer` option when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in, and from the moment a GPU backend degrades (see the fallback below). The registry behind the option is exported for a tier or host that brings a backend:
 
 | Export | What it does |
 |---|---|

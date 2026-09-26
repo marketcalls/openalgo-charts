@@ -7,6 +7,7 @@
 import { InvalidateMask, InvalidationLevel } from './invalidate-mask';
 import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop';
 import { Pane, type PaneRenderContext } from './pane';
+import { alignToDevicePixels, type CanvasLayer } from './canvas';
 import type { PriceAxisPlacement, PriceAxisSide, PriceAxisSlot } from '../model/price-axis-layout';
 import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale, type TimeScaleOptions } from '../scale/time-scale';
@@ -19,7 +20,7 @@ import {
   resolveRenderBackend, type IRenderBackend, type RenderBackendFactory, type RenderBackendKind, type RendererChoice,
   type RendererFallbackReason,
 } from '../render/backend';
-import { DataLayer } from '../model/data-layer';
+import { DataLayer, type SessionCalendarSource } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type SeriesRecord, type PriceScaleId, type PriceFormat, type BarConfirmationOptions, type SeriesUpdateOptions } from '../model/series';
 import { bindSeriesProvenance, SeriesProvenance, validateSeriesOptions } from '../model/series-provenance';
 import { replayWindow, observeReplayWindow } from '../model/replay-window';
@@ -238,6 +239,12 @@ export interface ChartNavigationOptions {
 export interface ChartOptions {
   document?: Document;
   pixelRatio?: () => number;
+  /**
+   * The frame scheduler, for deterministic tests. Supplied, it runs every
+   * frame the chart paints, the one after a resize or a new pixel ratio
+   * included; with the default one the chart paints those inside the
+   * callback that reports them, so a resize never shows a cleared canvas.
+   */
   raf?: { schedule: RafScheduler; cancel?: RafCanceller };
   /** Full palette; pass `lightTheme` (the default), `darkTheme`, or a custom ChartTheme. */
   theme?: ChartTheme;
@@ -545,7 +552,10 @@ export interface PointerInfo {
   pressure: number;
 }
 
-/** Payload of the `click` event (`chart.on('click', ...)`). */
+/**
+ * Payload of the `click` event (`chart.on('click', ...)`). Its `pressure` is
+ * the pressure at the press, not the release, which always reads 0.
+ */
 export interface ChartClickEvent extends PointerInfo {
   /** `externalId` of the hit primitive, or null on empty plot. */
   id: string | null;
@@ -559,12 +569,15 @@ export interface ChartClickEvent extends PointerInfo {
   /** Set on the release half of a press-drag-release while a host is placing a shape. */
   viaDrag?: boolean;
   /**
-   * The same state as `modifiers`, in the flat form the draw tier has read
-   * since it shipped. `pressure` here is the pressure at the press, not the
-   * release, which always reads 0.
+   * Shift at the click: the same state as `modifiers.shift`, in the flat form
+   * the first click payloads carried.
+   *
+   * @deprecated Removed in 3.0.0. Read `modifiers.shift` (since 2.0.0), which carries the same state.
    */
   shiftKey: boolean;
+  /** @deprecated Removed in 3.0.0. Read `modifiers.ctrl` (since 2.0.0), which carries the same state. */
   ctrlKey: boolean;
+  /** @deprecated Removed in 3.0.0. Read `modifiers.meta` (since 2.0.0), which carries the same state. */
   metaKey: boolean;
 }
 
@@ -688,8 +701,36 @@ export interface PriceAxisState {
   /** False while the scale still sits on its 0..1 placeholder (nothing measured). */
   scaled: boolean;
   lockRatio: boolean;
-  /** Whether `movePriceAxis` would do anything: something to move, and a free side. */
+  /**
+   * Whether `movePriceAxis` would do anything: something to move, and a free side.
+   *
+   * @deprecated Removed in 3.0.0, with {@link Chart.movePriceAxis}, the only operation it describes. Placement
+   * through {@link Chart.setPriceAxisPlacement} (since 2.5.4) needs no such check.
+   */
   movable: boolean;
+}
+
+/**
+ * The setters that change what `getState` saves without an event of their
+ * own, and so announce it with `layout:change`.
+ */
+export type LayoutSetter =
+  | 'setPaneWeight' | 'setPriceAxisOptions' | 'setPriceAxisAutoFit' | 'setPriceAxisLockRatio'
+  | 'setPriceScaleOptions' | 'setAutoScale' | 'setGridOptions' | 'setCanvasOptions' | 'setStatusLineOptions'
+  | 'setWatermarkOptions' | 'setTradingSettings' | 'setAxisChromeOptions' | 'setEventOptions' | 'applyOptions';
+
+/**
+ * Payload of the `layout:change` event (`chart.on('layout:change', ...)`):
+ * a setter in {@link LayoutSetter} has run and the saved layout may differ.
+ * It fires once per outermost call, after the change is applied: the canvas
+ * block setting the grid on its way is one event, named `setCanvasOptions`.
+ * A call that names no pane or scale the chart has changes nothing and fires
+ * nothing, and neither does a restore, which announces itself with
+ * `state:restore:start` and `state:restore:end`. Compare what you read back
+ * if a no-op matters: setting a value to what it already was still fires.
+ */
+export interface LayoutChangeEvent {
+  setter: LayoutSetter;
 }
 
 /** Payload of the `contextmenu` event (`chart.on('contextmenu', ...)`). */
@@ -768,6 +809,8 @@ export class Chart {
   private readonly _loop: RenderLoop;
   /** The frame scheduler, kept for the one-shot re-measure after construction. */
   private readonly _raf: { schedule: RafScheduler; cancel: RafCanceller };
+  /** Whether the host supplied `raf`, and so owns every frame, the resize ones included. */
+  private readonly _rafInjected: boolean;
   private _remeasureHandle: number | null = null;
   private readonly _dataLayer = new DataLayer();
   private readonly _timeScale: TimeScale;
@@ -777,9 +820,19 @@ export class Chart {
   private _pending: InvalidateMask | null = null;
   private _scaleMutationDepth = 0;
   private _resizeObserver: ResizeObserver | null = null;
+  /** Watches the canvases' device-pixel boxes, where the browser reports them. */
+  private _deviceObserver: ResizeObserver | null = null;
+  /** Matches the device pixel ratio the canvases were last sized at; made again on every change. */
+  private _ratioQuery: MediaQueryList | null = null;
+  /** The window whose `resize` also re-checks the ratio. */
+  private _ratioView: Window | null = null;
+  /** The device pixel ratio the canvases were last sized at. */
+  private _layoutRatio = 0;
   private _width = 0;
   private _height = 0;
   private _hasFitContent = false;
+  /** Layout setters running inside another one, or inside a restore: only the outermost announces. */
+  private _layoutDepth = 0;
 
   // interaction state
   private _crosshairMode: CrosshairMode;
@@ -1122,12 +1175,14 @@ export class Chart {
     this._liveRegion = live;
 
     this._raf = resolveRaf(options.raf);
+    this._rafInjected = options.raf !== undefined;
     this._loop = new RenderLoop(() => this._onFrame(), this._raf.schedule, this._raf.cancel);
 
     this._addPane();
     this.setBranding(options.branding ?? true);
     this.setWatermarkOptions(options.watermark ?? false);
     this._observeSize();
+    this._watchPixelRatio();
     this._attachInput();
     // Direct navigation shares the chart's events; internal gestures and data
     // updates already own their repaint, animation and notification boundaries.
@@ -1161,6 +1216,24 @@ export class Chart {
 
   public get dataLayer(): DataLayer {
     return this._dataLayer;
+  }
+
+  /**
+   * Lay the time axis past the last bar out in these trading hours, or drop
+   * them with null, and repaint every pane, so a drawing already placed past
+   * the last bar moves to the time it now means.
+   *
+   * This is the call for a host setting hours on its own: a `SessionCalendar`
+   * or an `Instrument` it holds, or any object with `sessionFrom`.
+   * `Instrument.applyTo` and `SessionCalendar.applyTo` come here too.
+   * `chart.dataLayer.setSessionCalendar` sets the same hours and asks for no
+   * frame, for a host about to load bars or move the view anyway, either of
+   * which repaints.
+   */
+  public setSessionCalendar(calendar: SessionCalendarSource | null): void {
+    if (this._destroyed) return;
+    this._dataLayer.setSessionCalendar(calendar);
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
   /** Readonly source bars, without allocating a history copy on each live update. */
@@ -1344,6 +1417,22 @@ export class Chart {
   public setTradingSettings(patch: TradingSettings): void {
     Object.assign(this._tradingSettings, patch);
     this._trading?.setSettings(patch);
+    this._layoutChanged('setTradingSettings');
+  }
+
+  /**
+   * Announce that a setter changed the saved layout, unless it ran inside
+   * another one or inside a restore: the outer call is the one announced.
+   */
+  private _layoutChanged(setter: LayoutSetter): void {
+    if (this._layoutDepth > 0 || this._destroyed) return;
+    this.emit('layout:change', { setter } satisfies LayoutChangeEvent);
+  }
+
+  /** Run `fn` with the layout setters it calls counted as part of the caller's change. */
+  private _withinLayoutChange<T>(fn: () => T): T {
+    this._layoutDepth++;
+    try { return fn(); } finally { this._layoutDepth--; }
   }
 
   /** Add a series and return its data handle. */
@@ -1644,6 +1733,7 @@ export class Chart {
   public setEventOptions(patch: ChartEventOptions): void {
     Object.assign(this._eventVisible, patch);
     this._syncEvents();
+    this._layoutChanged('setEventOptions');
   }
 
   public eventOptions(): ChartEventOptions {
@@ -2148,6 +2238,7 @@ export class Chart {
     if (typeof patch.fontSize === 'number' && Number.isFinite(patch.fontSize)) o.fontSize = Math.max(10, Math.min(200, patch.fontSize));
     if (patch.zOrder === 'bottom' || patch.zOrder === 'normal' || patch.zOrder === 'top') o.zOrder = patch.zOrder;
     this._syncWatermark();
+    this._layoutChanged('setWatermarkOptions');
   }
 
   /** JSON-safe preferences. Automatic text remains blank in this snapshot. */
@@ -2257,11 +2348,11 @@ export class Chart {
           preservedFormats,
         ),
       addIndicatorLevel: (l, paneIndex): PriceLine => {
-        // `dashed` rides along beside `lineStyle` because a descriptor written
-        // before the three-way style existed still sets only the boolean, and
-        // PriceLine reads it when `lineStyle` is absent.
+        // The instance resolves `lineStyle` before calling the host, a
+        // descriptor's `dashed` boolean included, so the line needs nothing
+        // else to pick its dash.
         const opts: PriceLineOptions = {
-          price: l.price, color: l.color, lineWidth: l.lineWidth, dashed: l.dashed,
+          price: l.price, color: l.color, lineWidth: l.lineWidth,
           lineStyle: l.lineStyle, leftLabel: l.label, id: l.id,
         };
         return this.addPriceLine(opts, paneIndex);
@@ -2756,7 +2847,9 @@ export class Chart {
    * pane, the primary price pane when none is named, or to a chart anchor.
    */
   public addPrimitive(primitive: IPrimitive, where?: number | PrimitivePlacement): void {
-    if (where === undefined || typeof where === 'number') { this._addPrimitive(where ?? this._primaryIndex(), primitive); return; }
+    // `typeof` rather than `??` picks the index: the website compiles this file
+    // without strict null checks, where `=== undefined` narrows nothing.
+    if (where === undefined || typeof where === 'number') { this._addPrimitive(typeof where === 'number' ? where : this._primaryIndex(), primitive); return; }
     // Chart furniture: a brand mark, a corner clock. It belongs to the CHART,
     // not to whichever pane happens to be last, so the engine re-homes it as
     // panes come and go instead of every host writing its own placeWatermark().
@@ -2871,6 +2964,7 @@ export class Chart {
     if (opts.horzLines !== undefined) this._gridHorz = opts.horzLines;
     this._canvas.grid = { ...this._canvas.grid, ...opts };
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setGridOptions');
   }
 
   /** Current grid options, visibility first (it is the one field always set). */
@@ -2884,16 +2978,19 @@ export class Chart {
    * rest of the grid alone.
    */
   public setCanvasOptions(patch: CanvasOptions): void {
-    if (patch.grid) this.setGridOptions(patch.grid); // keeps the visibility pair in step
-    if (patch.crosshair) this._canvas.crosshair = { ...this._canvas.crosshair, ...patch.crosshair };
-    if (patch.scales) this._canvas.scales = { ...this._canvas.scales, ...patch.scales };
-    if (patch.margins) {
-      this._canvas.margins = { ...this._canvas.margins, ...patch.margins };
-      // No second margin state: the price scale already owns marginTop/Bottom
-      // as fractions, and this only converts the dialog's percentages.
-      this.setPriceScaleOptions(resolvePlotMargins(this._canvas.margins), 'axes');
-    }
+    this._withinLayoutChange(() => {
+      if (patch.grid) this.setGridOptions(patch.grid); // keeps the visibility pair in step
+      if (patch.crosshair) this._canvas.crosshair = { ...this._canvas.crosshair, ...patch.crosshair };
+      if (patch.scales) this._canvas.scales = { ...this._canvas.scales, ...patch.scales };
+      if (patch.margins) {
+        this._canvas.margins = { ...this._canvas.margins, ...patch.margins };
+        // No second margin state: the price scale already owns marginTop/Bottom
+        // as fractions, and this only converts the dialog's percentages.
+        this.setPriceScaleOptions(resolvePlotMargins(this._canvas.margins), 'axes');
+      }
+    });
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setCanvasOptions');
   }
 
   /** The Canvas option block as it stands (theme fallbacks are not folded in). */
@@ -2929,6 +3026,20 @@ export class Chart {
       for (const scale of scales) scale.setOptions(forPane);
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceScaleOptions');
+  }
+
+  /**
+   * The chart-wide price-scale defaults: every field `setPriceScaleOptions`,
+   * the `priceScale` construction option and the canvas margins have set, and
+   * what a pane added later starts from. `priceScaleOptions()` reads the price
+   * pane's own scale instead, which a change made to that one axis moves and
+   * this does not, so the two together tell a chart-wide change from a
+   * one-axis one. `minMove` here reaches only the panes that quote the
+   * instrument. A detached copy; empty when nothing was ever set.
+   */
+  public priceScaleDefaults(): Partial<PriceScaleOptions> {
+    return { ...this._priceScaleOptions };
   }
 
   /**
@@ -3001,6 +3112,7 @@ export class Chart {
       }
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setAutoScale');
   }
 
   /** Whether only the primary series contributes to autoscale on its current scale. */
@@ -3088,6 +3200,7 @@ export class Chart {
     if (pane === undefined) return;
     pane.scaleFor(scaleId).setOptions(patch);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisOptions');
   }
 
   /**
@@ -3101,6 +3214,7 @@ export class Chart {
     if (on) pane.setRatioLock(scaleId, false, 0, 0);
     pane.scaleFor(scaleId).setAutoScale(on);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisAutoFit');
   }
 
   /**
@@ -3119,6 +3233,7 @@ export class Chart {
     if (on) this._ensureScaledFor(paneIndex, scaleId);
     const ok = pane.setRatioLock(scaleId, on, this._timeScale.barSpacing, pane.scaleFor(scaleId).height);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisLockRatio');
     return ok;
   }
 
@@ -3127,6 +3242,10 @@ export class Chart {
    * it and everything the axis was set to. Returns false when that side carries
    * nothing, or when the other side is already occupied: one strip draws one
    * axis (see `Pane.moveSeriesScale`), which is what `movable` reports.
+   *
+   * @deprecated Removed in 3.0.0. Use {@link Chart.setPriceAxisPlacement} (since 2.5.4), which moves a scale's
+   * column and keeps its id; this method instead swaps the built-in side scales and reassigns their series and
+   * studies.
    */
   public movePriceAxis(paneIndex: number, from: 'right' | 'left', to: 'right' | 'left'): boolean {
     const pane = this._panes[paneIndex];
@@ -3186,6 +3305,7 @@ export class Chart {
     Object.assign(this._statusLine, patch);
     for (const entry of this._legends) entry.legend.setOptions({ statusLine: this._statusLine });
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setStatusLineOptions');
   }
 
   public statusLineOptions(): LegendStatusLineOptions {
@@ -3247,6 +3367,7 @@ export class Chart {
       this._wallClock = patch.clock;
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setAxisChromeOptions');
   }
 
   /** The axis-chrome switches as they stand. */
@@ -3338,8 +3459,13 @@ export class Chart {
     this._flushIndicators();
     const liveWidth = this._width;
     const liveHeight = this._height;
-    const resized = width !== liveWidth || height !== liveHeight;
-    if (resized) {
+    const liveRatio = this._layoutRatio;
+    // The document is at ratio 1 on every screen, so its panes are laid out at
+    // 1 too: laid out at the screen's ratio, the same chart would export other
+    // pane boundaries on a 1.5x laptop than on a 1x or 2x monitor.
+    const relaid = width !== liveWidth || height !== liveHeight || this._ratioForLayout() !== 1;
+    this._layoutRatio = 1;
+    if (relaid) {
       this._width = width;
       this._height = height;
       this._relayout(true);
@@ -3358,10 +3484,10 @@ export class Chart {
           ...this._renderContext(i),
           dpr: 1, hoverId: null, hoverKey: null, dragId: null, paintBackground: background,
         };
-        // The DOM draws the separator as a 1px border on the pane box and lets
-        // the canvas start below it, its last row hidden by the overflow clip.
-        // The export reproduces that box exactly, or the second pane would sit
-        // one pixel higher than it does on screen.
+        // At ratio 1 the DOM draws the separator as a 1px border on the pane
+        // box and lets the canvas start below it, its last row hidden by the
+        // overflow clip. The export reproduces that box exactly, or the second
+        // pane would sit one pixel higher than it does on screen.
         const first = i === topPane;
         const top = layout[i].top + (first ? 0 : 1);
         const paneHeight = layout[i].height - (first ? 0 : 1);
@@ -3380,7 +3506,8 @@ export class Chart {
         svg.popGroup();
       }
     } finally {
-      if (resized) {
+      this._layoutRatio = liveRatio;
+      if (relaid) {
         this._width = liveWidth;
         this._height = liveHeight;
         this._relayout(true);
@@ -3663,7 +3790,11 @@ export class Chart {
     return this._rendererKind ?? 'canvas2d';
   }
 
-  /** The name `rendererKind` shipped under; the same value. */
+  /**
+   * The name `rendererKind` shipped under; the same value.
+   *
+   * @deprecated Removed in 3.0.0. Use {@link Chart.rendererKind} (since 2.0.0), which reports the same backend.
+   */
   public get renderer(): RenderBackendKind {
     return this.rendererKind;
   }
@@ -3723,6 +3854,7 @@ export class Chart {
     if (this._priceScaleOptions) pane.priceScale.setOptions(this._scalePatchFor(pane, this._priceScaleOptions));
     this._panes.push(pane);
     this._container.appendChild(pane.element);
+    this._observeCanvases(pane, true);
     return pane;
   }
 
@@ -3831,6 +3963,8 @@ export class Chart {
   public setTheme(theme: ChartTheme): void {
     this._theme = theme;
     this._container.style.background = theme.background;
+    // The rules are DOM, not paint: a frame does not recolour them.
+    this._syncSeparators();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
@@ -3851,20 +3985,23 @@ export class Chart {
     crosshairMode?: CrosshairMode;
     crosshairSnapToBar?: boolean;
   }): void {
-    if (opts.theme) this.setTheme(opts.theme);
-    if (opts.grid) this.setGridOptions(opts.grid);
-    if (opts.canvas) this.setCanvasOptions(opts.canvas);
-    if (opts.statusLine) this.setStatusLineOptions(opts.statusLine);
-    if (opts.legendIconSize !== undefined) this.setLegendIconSize(opts.legendIconSize);
-    if (opts.priceScale) this.setPriceScaleOptions(opts.priceScale);
-    if (opts.priceFormatter !== undefined) this.setPriceFormatter(opts.priceFormatter);
-    if ('timeFormatter' in opts) this.setTimeFormatter(opts.timeFormatter);
-    if (opts.timezone !== undefined) this.setTimezone(opts.timezone);
-    if (opts.crosshairMode) this._crosshairMode = opts.crosshairMode;
-    if (typeof opts.crosshairSnapToBar === 'boolean') {
-      this._crosshairSnapToBar = opts.crosshairSnapToBar;
-      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
-    }
+    this._withinLayoutChange(() => {
+      if (opts.theme) this.setTheme(opts.theme);
+      if (opts.grid) this.setGridOptions(opts.grid);
+      if (opts.canvas) this.setCanvasOptions(opts.canvas);
+      if (opts.statusLine) this.setStatusLineOptions(opts.statusLine);
+      if (opts.legendIconSize !== undefined) this.setLegendIconSize(opts.legendIconSize);
+      if (opts.priceScale) this.setPriceScaleOptions(opts.priceScale);
+      if (opts.priceFormatter !== undefined) this.setPriceFormatter(opts.priceFormatter);
+      if ('timeFormatter' in opts) this.setTimeFormatter(opts.timeFormatter);
+      if (opts.timezone !== undefined) this.setTimezone(opts.timezone);
+      if (opts.crosshairMode) this._crosshairMode = opts.crosshairMode;
+      if (typeof opts.crosshairSnapToBar === 'boolean') {
+        this._crosshairSnapToBar = opts.crosshairSnapToBar;
+        this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
+      }
+    });
+    this._layoutChanged('applyOptions');
   }
 
   public panes(): readonly Pane[] {
@@ -4114,7 +4251,10 @@ export class Chart {
       if (generation !== this._restoreGeneration) {
         return { applied: false, series: [], indicators: 0, reason: 'superseded by a newer chart restore' };
       }
-      const report = this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats));
+      // The layout setters a restore calls are the restore, which the start
+      // and end events announce; they do not each fire `layout:change`.
+      const report = this._withinLayoutChange(() =>
+        this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats)));
       if (report.applied && generation === this._restoreGeneration && (previousPriceOnly !== this._priceOnlyAutoScale
         || previousLegendCollapsed !== this._indicatorLegendCollapsed)) {
         this.emit('objects:change', {});
@@ -4411,6 +4551,9 @@ export class Chart {
     const height = this._container.clientHeight;
     if (!(width > 0) || !(height > 0)) return;
     this.applySize(width, height);
+    // Inside an animation frame callback: a frame requested now runs in the
+    // next one, after this one has shown the canvases the resize cleared.
+    this._paintNow();
   }
 
   public applySize(width: number, height: number): void {
@@ -4441,8 +4584,8 @@ export class Chart {
       this._restackLegends();
     }
     const dpr = this._pixelRatio();
+    if (!geometryOnly) this._layoutRatio = dpr;
     const layout = this._paneLayout();
-    const topPane = this._topPaneIndex();
     const bottomPane = this._bottomPaneIndex();
     this._panes.forEach((pane, paneIndex) => {
       const h = layout[paneIndex].height;
@@ -4459,18 +4602,37 @@ export class Chart {
         // boundaries, legend buttons, and crosshair mapping all landed elsewhere.
         // Deriving both from one number makes layout == hit-test by construction.
         pane.element.style.flex = `0 0 ${h}px`;
-        // A hairline between stacked panes: every pane but the first. Drawn on
-        // the DOM box, so it sits exactly on the boundary the user drags.
-        const first = paneIndex === topPane;
-        pane.element.style.borderTopWidth = first ? '0px' : '1px';
-        pane.element.style.borderTopColor = first ? 'transparent' : this._theme.paneSeparator;
         pane.resize(this._width, h, dpr);
       }
       // Scale height is a layout property (see Pane.setScaleHeights). A strip's
       // scales span the strip, so nothing measured against them reaches below it.
       pane.setScaleHeights(Math.max(0, h - (paneIndex === bottomPane ? this._timeAxisHeight : 0)));
     });
+    if (!geometryOnly) this._syncSeparators();
     this._timeScale.setWidth(Math.max(0, this._width - this._rightAxisWidth - this._leftAxisWidth));
+  }
+
+  /**
+   * A hairline between stacked panes: on every pane but the one against the
+   * chart's top, whole device pixels tall, in the form `Pane.setSeparator`
+   * picks for the ratio the panes were laid out at. It sits on the DOM box,
+   * so it is exactly on the boundary the user drags.
+   */
+  private _syncSeparators(): void {
+    const ratio = this._ratioForLayout();
+    const topPane = this._topPaneIndex();
+    this._panes.forEach((pane, i) => pane.setSeparator(i === topPane ? null : this._theme.paneSeparator, ratio));
+  }
+
+  /**
+   * The device pixel ratio pane boundaries are rounded at: the one the panes
+   * were last laid out at, so hit testing, `priceToCoordinate` and the DOM
+   * boxes agree even when the ratio has moved with no event to say so (a
+   * scale-only emulation, a browser with neither signal) until the next
+   * relayout. Before the first layout, the ratio now.
+   */
+  private _ratioForLayout(): number {
+    return this._layoutRatio > 0 ? this._layoutRatio : this._pixelRatio();
   }
 
   /**
@@ -4575,6 +4737,7 @@ export class Chart {
     pane.weight = Math.max(0.05, weight);
     this._relayout();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPaneWeight');
   }
 
   public paneWeight(index: number): number {
@@ -4620,6 +4783,7 @@ export class Chart {
       this._seriesProvenance.delete(record.dataId);
       if (this._firstDataId.value === record.dataId) this._firstDataId.value = null;
     }
+    this._observeCanvases(pane, false);
     pane.destroy();
     this._panes.splice(index, 1);
     // Keep the maximize target on the pane it named. Removing the maximized
@@ -4891,8 +5055,19 @@ export class Chart {
    * strip one legend row tall, with the time axis under it when it is the
    * bottom pane, and the open panes share what is left by weight, so folding
    * one never rewrites a stored weight.
+   *
+   * Every boundary between panes sits on a device pixel (`alignToDevicePixels`)
+   * of the ratio the panes are laid out at (`_ratioForLayout`), so each canvas
+   * covers a whole number of device pixels and the separator gets rows of its
+   * own. It is done here rather than where the boxes are sized, so hit testing
+   * reads the same boxes the DOM shows.
    */
   private _paneLayout(): { top: number; height: number }[] {
+    return alignToDevicePixels(this._paneShares(), this._ratioForLayout());
+  }
+
+  /** The layout by weight and strip height alone, before device-pixel rounding. */
+  private _paneShares(): { top: number; height: number }[] {
     const bottom = this._bottomPaneIndex();
     const strip = paneLegendRowHeight({ iconSize: this._legendIconSize }) + 2 * DEFAULT_LEGEND_TOP;
     const strips = this._panes.map((_, i) => this._collapsedShown(i) ? strip + (i === bottom ? this._timeAxisHeight : 0) : 0);
@@ -5024,9 +5199,136 @@ export class Chart {
     if (typeof ResizeObserver === 'undefined') return;
     this._resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) this.applySize(entry.contentRect.width, entry.contentRect.height);
+      if (!entry) return;
+      this.applySize(entry.contentRect.width, entry.contentRect.height);
+      // Resizing a canvas clears it, and this callback runs after the
+      // frame's animation callbacks, just before the browser paints. Left
+      // to the next frame, the repaint would put one cleared frame on screen
+      // for every step of a window drag.
+      this._paintNow();
     });
     this._resizeObserver.observe(this._container);
+    if (typeof ResizeObserverEntry !== 'undefined' && 'devicePixelContentBoxSize' in ResizeObserverEntry.prototype) {
+      this._deviceObserver = new ResizeObserver(entries => this._onDevicePixels(entries));
+      for (const pane of this._panes) this._observeCanvases(pane, true);
+    }
+  }
+
+  /** Start or stop reading a pane's canvases' device-pixel boxes. */
+  private _observeCanvases(pane: Pane, on: boolean): void {
+    const observer = this._deviceObserver;
+    if (observer === null) return;
+    for (const layer of [pane.base, pane.top]) {
+      if (on) observer.observe(layer.element, { box: 'device-pixel-content-box' });
+      else observer.unobserve(layer.element);
+    }
+  }
+
+  /**
+   * Give each canvas the backing store the browser says its box covers. A
+   * canvas that starts part way into a device pixel is snapped to one pixel
+   * more or fewer than `media x dpr`, and a store one pixel off is stretched
+   * over the box, blurring every line on it.
+   */
+  private _onDevicePixels(entries: readonly ResizeObserverEntry[]): void {
+    if (this._destroyed || this._destroying) return;
+    let changed = false;
+    for (const entry of entries) {
+      const layer = this._canvasLayerOf(entry.target);
+      const device = entry.devicePixelContentBoxSize?.[0];
+      const box = entry.contentBoxSize?.[0];
+      if (layer === null || device === undefined || box === undefined) continue;
+      // Measured before a relayout in this same frame: the box it describes
+      // is gone, and the entry for the new one follows before the paint. What
+      // the canvas last heard is no longer known to be its box either.
+      if (Math.abs(box.inlineSize - layer.mediaWidth) > 0.05 || Math.abs(box.blockSize - layer.mediaHeight) > 0.05) {
+        layer.forgetDeviceSize();
+        continue;
+      }
+      if (layer.setDeviceSize(device.inlineSize, device.blockSize)) changed = true;
+    }
+    if (!changed) return;
+    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    this._paintNow();
+  }
+
+  private _canvasLayerOf(target: Element): CanvasLayer | null {
+    for (const pane of this._panes) {
+      if (pane.base.element === target) return pane.base;
+      if (pane.top.element === target) return pane.top;
+    }
+    return null;
+  }
+
+  /** The window the chart's document shows in, or null outside a browser. */
+  private _view(): Window | null {
+    const view = this._doc.defaultView;
+    if (view) return view;
+    return typeof window === 'undefined' ? null : window;
+  }
+
+  /**
+   * Follow the device pixel ratio. It changes with no box changing size when
+   * the window moves to a screen of another density, and no size observer
+   * hears of that, so the canvases would stay at the old ratio, stretched and
+   * blurred. A resolution query matches the one ratio it was made for, so
+   * each change makes a new one for the ratio now in force.
+   *
+   * The window's `resize` is heard too: a zoom fires it, and it is the one
+   * signal left in a browser whose query list takes no change listener. It
+   * costs a comparison when the ratio has not moved.
+   */
+  private _watchPixelRatio(): void {
+    this._unwatchPixelRatio();
+    const view = this._view();
+    if (view === null || this._destroying || this._destroyed) return;
+    if (typeof view.addEventListener === 'function') {
+      view.addEventListener('resize', this._checkPixelRatio);
+      this._ratioView = view;
+    }
+    if (typeof view.matchMedia !== 'function') return;
+    const query = view.matchMedia(`(resolution: ${view.devicePixelRatio || 1}dppx)`);
+    if (typeof query?.addEventListener !== 'function') return;
+    query.addEventListener('change', this._onPixelRatio);
+    this._ratioQuery = query;
+  }
+
+  private _unwatchPixelRatio(): void {
+    this._ratioQuery?.removeEventListener('change', this._onPixelRatio);
+    this._ratioQuery = null;
+    this._ratioView?.removeEventListener('resize', this._checkPixelRatio);
+    this._ratioView = null;
+  }
+
+  private readonly _onPixelRatio = (): void => {
+    if (this._destroyed || this._destroying) return;
+    this._watchPixelRatio();
+    this._checkPixelRatio();
+  };
+
+  /** Size the canvases again if the ratio is no longer the one they were sized at. */
+  private readonly _checkPixelRatio = (): void => {
+    if (this._destroyed || this._destroying || this._pixelRatio() === this._layoutRatio) return;
+    this._relayout();
+    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    this._paintNow();
+  };
+
+  /**
+   * Run the pending frame now rather than on the next animation frame, for
+   * the callbacks that clear a canvas once this frame's animation callbacks
+   * have run: a resize observed before the browser paints, a new pixel ratio.
+   * Waiting would show the cleared canvas for a frame.
+   *
+   * Not with a scheduler the host injected (`raf`): that host owns every frame
+   * the chart paints, as with the kinetic glide, so the frame already asked
+   * for runs when the host runs it.
+   */
+  private _paintNow(): void {
+    if (this._rafInjected) return;
+    if (this._destroyed || this._destroying || this._pending === null || this._scaleMutationDepth > 0) return;
+    this._loop.stop();
+    this._onFrame();
   }
 
   private _onFrame(): void {
@@ -5332,8 +5634,8 @@ export class Chart {
   private _clickInfo(e: PointerLike): PointerInfo & { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean } {
     const info = pointerInfo(e);
     info.pressure = this._downPressure;
-    // The flat flags predate `modifiers` and the draw tier reads them; both
-    // stay so a host typed against either keeps working.
+    // The flat flags predate `modifiers` and are deprecated, removed in 3.0.0;
+    // they stay until then so a host typed against either keeps working.
     return { ...info, shiftKey: info.modifiers.shift, ctrlKey: info.modifiers.ctrl, metaKey: info.modifiers.meta };
   }
 
@@ -6371,6 +6673,9 @@ export class Chart {
     for (const indicator of this._indicators.splice(0)) indicator.remove({ force: true });
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;
+    this._deviceObserver?.disconnect();
+    this._deviceObserver = null;
+    this._unwatchPixelRatio();
     if (typeof window !== 'undefined') {
       const el = this._container;
       el.removeEventListener('pointerdown', this._onPointerDown);

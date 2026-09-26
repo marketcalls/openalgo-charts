@@ -8,8 +8,17 @@
  *   base canvas (2D context, z 0): background, grid, the series pass, the
  *     normal-layer primitives, the axis strip (ladder, last-price tag, value
  *     tags, trading pills). Repainted on Light and Full.
- *   top canvas (2D context, z 1): crosshair, hover highlights, primitives
- *     being dragged. Repainted on Cursor.
+ *   top canvas (2D context, z 1): the crosshair and its tags, and the
+ *     top-layer primitives (drawings over the series or lifted for a drag,
+ *     legends, tables, trading buttons, trade markers). Repainted on Cursor.
+ *     Order and position lines are normal-layer price lines on the base canvas.
+ *
+ * Both canvases are the pane's height. Their backing store is `media x dpr`,
+ * or the device-pixel box the browser reports where it reports one
+ * (`CanvasLayer.setDeviceSize`), and the chart puts every pane boundary on a
+ * device pixel, so neither canvas is ever stretched by a fraction of a pixel.
+ * Under the rule between panes (`setSeparator`) they start one CSS pixel down
+ * at a whole-number ratio and at the pane's top at a fractional one.
  *
  * A GPU backend adds no canvas to the pile. It rasterises the series pass on
  * one page-wide offscreen surface shared by every pane of every chart and
@@ -21,7 +30,7 @@
  * browser's cap on live WebGL contexts never limits how many panes a page
  * can show.
  */
-import { CanvasLayer } from './canvas';
+import { CanvasLayer, hairlineHeight, separatorIsBorder } from './canvas';
 import { PriceScale } from '../scale/price-scale';
 import { type TimeScale } from '../scale/time-scale';
 import { type DataLayer } from '../model/data-layer';
@@ -148,6 +157,8 @@ export class Pane {
   public readonly element: HTMLElement;
   public readonly base: CanvasLayer;
   public readonly top: CanvasLayer;
+  /** The rule over the pane's top edge, shown on every pane but the one against the chart's top. */
+  private readonly _separator: HTMLElement;
   /**
    * What paints this pane's series onto `base`. Everything else on that canvas
    * (background, grid, axes, primitives) the pane draws itself on the 2D
@@ -198,9 +209,11 @@ export class Pane {
     this.element.style.width = '100%';
     this.element.style.flex = '1 1 auto';
     this.element.style.overflow = 'hidden';
-    // The rule between stacked panes. A CSS border rather than a canvas line:
-    // it lands on the DOM box boundary, so it cannot drift from the pane it
-    // separates when weights change, and costs nothing to repaint.
+    // The rule between stacked panes is DOM rather than a canvas line: it sits
+    // on the box boundary, so it cannot drift from the pane it separates when
+    // weights change, and costs nothing to repaint. At a whole-number ratio it
+    // is this 1 px border, the canvases starting under it and their last row
+    // clipped; see `setSeparator` for the fractional ones.
     this.element.style.borderTopStyle = 'solid';
     this.element.style.borderTopWidth = '0px';
     this.element.style.boxSizing = 'border-box';
@@ -208,6 +221,19 @@ export class Pane {
     this.top = new CanvasLayer(doc, 1);
     this.element.appendChild(this.base.element);
     this.element.appendChild(this.top.element);
+    // The rule at a fractional ratio: a box laid over the canvases' first rows.
+    const rule = doc.createElement('div');
+    const s = rule.style;
+    s.position = 'absolute';
+    s.left = '0';
+    s.top = '0';
+    s.width = '100%';
+    s.height = '0px';
+    s.zIndex = '2';
+    s.pointerEvents = 'none';
+    s.display = 'none';
+    this._separator = rule;
+    this.element.appendChild(rule);
     this._backend = backend;
     // The base canvas already holds a 2D context (CanvasLayer asks for it on
     // construction), so the backend is handed that one rather than left to ask
@@ -722,6 +748,31 @@ export class Pane {
       }
     }
     return best;
+  }
+
+  /**
+   * Draw the rule over this pane's top edge in `color` at device pixel ratio
+   * `dpr`, or none with a null colour.
+   *
+   * At a whole-number ratio it is the pane's 1 px top border, with the
+   * canvases starting under it: 1 px is whole device pixels there, and it is
+   * the layout, and the pane-local y, that every earlier release showed. At a
+   * fractional ratio a 1 px border is 1.25 or 1.5 device pixels, which starts
+   * the canvases part way into a pixel, and the browser then resamples the
+   * whole pane and blends the rule into it. There the rule is a box
+   * `hairlineHeight(dpr)` tall, one device pixel, laid over the canvases'
+   * first rows, and the canvases start on the pane's own top.
+   */
+  public setSeparator(color: string | null, dpr: number): void {
+    const border = separatorIsBorder(dpr) ? color : null;
+    const over = border === null ? color : null;
+    const box = this.element.style;
+    box.borderTopWidth = border === null ? '0px' : '1px';
+    box.borderTopColor = border ?? 'transparent';
+    const s = this._separator.style;
+    s.display = over === null ? 'none' : '';
+    s.height = `${over === null ? 0 : hairlineHeight(dpr)}px`;
+    s.background = over ?? 'transparent';
   }
 
   public resize(width: number, height: number, dpr: number): void {

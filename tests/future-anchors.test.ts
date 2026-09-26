@@ -399,4 +399,49 @@ describe('the calendar reaches the data layer', () => {
     expect(painted.length).toBeGreaterThan(before);
     expect(painted[painted.length - 1]).toBe(chart.timeScale.indexToX(times.length + 2));
   });
+
+  it('chart.setSessionCalendar moves what an idle chart already shows past the last bar', () => {
+    const { chart, flush } = idleChart();
+    const times = WEEK.flatMap(date => session(date));
+    chart.addSeries('candlestick').setData(times.map(bar));
+    const monday = ist('2026-02-09T09:25:00');
+    const painted = paintedAt(chart, monday);
+    flush();
+    const before = painted.length;
+    const where = painted[before - 1];
+    // A host setting hours it built itself, with no Instrument or applyTo involved.
+    chart.setSessionCalendar(nse());
+    flush();
+    expect(painted.length).toBeGreaterThan(before);
+    expect(painted[painted.length - 1]).toBe(chart.timeScale.indexToX(times.length + 2));
+    expect(painted[painted.length - 1]).not.toBe(where);
+    // And null drops them the same way: the anchor goes back to the median spacing.
+    const withHours = painted.length;
+    chart.setSessionCalendar(null);
+    flush();
+    expect(chart.dataLayer.sessionCalendar).toBeNull();
+    expect(painted.length).toBeGreaterThan(withHours);
+    expect(painted[painted.length - 1]).toBe(where);
+  });
+
+  it('dataLayer.setSessionCalendar stays the path that asks for no frame', () => {
+    const { chart, flush } = idleChart();
+    const times = WEEK.flatMap(date => session(date));
+    chart.addSeries('candlestick').setData(times.map(bar));
+    const painted = paintedAt(chart, ist('2026-02-09T09:25:00'));
+    flush();
+    const before = painted.length;
+    chart.dataLayer.setSessionCalendar(nse());
+    flush();
+    // Set, but not painted until something else asks for a frame.
+    expect(chart.dataLayer.sessionCalendar).not.toBeNull();
+    expect(painted.length).toBe(before);
+  });
+
+  it('chart.setSessionCalendar does nothing to a destroyed chart', () => {
+    const { chart } = idleChart();
+    chart.destroy();
+    expect(() => chart.setSessionCalendar(nse())).not.toThrow();
+    expect(chart.dataLayer.sessionCalendar).toBeNull();
+  });
 });

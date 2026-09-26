@@ -85,6 +85,24 @@ const tops = (chart: Chart): number[] => {
   return heights(chart).map((h) => { const t = top; top += h; return t; });
 };
 const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0);
+/**
+ * Heights once every boundary between panes is moved onto a whole pixel, as
+ * the chart lays panes out at a pixel ratio of 1. The outer edge stays put.
+ */
+const onPixels = (shares: number[]): number[] => {
+  let top = 0, running = 0;
+  return shares.map((share, i) => {
+    running += share;
+    const bottom = i === shares.length - 1 ? running : Math.round(running);
+    const height = bottom - top;
+    top = bottom;
+    return height;
+  });
+};
+const expectHeights = (actual: number[], expected: number[]): void => {
+  expect(actual).toHaveLength(expected.length);
+  actual.forEach((h, i) => expect(h, `pane ${i}`).toBeCloseTo(expected[i], 9));
+};
 const last = <T>(values: readonly T[]): T | undefined => values[values.length - 1];
 const fullFrame = (chart: Chart): void => chart.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
 const recorder = (ctx: CanvasRenderingContext2D): RecordingContext => ctx as unknown as RecordingContext;
@@ -127,8 +145,7 @@ describe('collapsing a pane', () => {
     expect(events).toEqual([{ paneIndex: 1, collapsed: true }]);
     const h = heights(chart);
     expect(h[1]).toBe(STRIP);
-    expect(h[0]).toBeCloseTo((H - STRIP) / 1.32, 9);
-    expect(h[2]).toBeCloseTo(((H - STRIP) * 0.32) / 1.32, 9);
+    expectHeights(h, onPixels([(H - STRIP) / 1.32, STRIP, ((H - STRIP) * 0.32) / 1.32]));
     expect(sum(h)).toBeCloseTo(H, 9);
     // The strip is layout: the weight it will expand back to is untouched.
     expect(chart.paneWeight(1)).toBe(0.32);
@@ -171,7 +188,8 @@ describe('collapsing a pane', () => {
     chart.setPaneWeight(1, 0.64);
     expect(heights(chart)).toEqual(folded);
     chart.setPaneCollapsed(1, false);
-    expect(heights(chart)[1]).toBeCloseTo((H * 0.64) / (1 + 0.64 + 0.32), 9);
+    const total = 1 + 0.64 + 0.32;
+    expectHeights(heights(chart), onPixels([H / total, (H * 0.64) / total, (H * 0.32) / total]));
   });
 });
 
@@ -200,7 +218,7 @@ describe('what a collapsed pane keeps', () => {
     // Open again, the scale is measured for the full pane with the new values in it.
     chart.setPaneCollapsed(1, false);
     const scale = chart.panes()[1].priceScale;
-    expect(scale.height).toBeCloseTo((H * 0.32) / 1.64, 9);
+    expect(scale.height).toBeCloseTo(onPixels([H / 1.64, (H * 0.32) / 1.64, (H * 0.32) / 1.64])[1], 9);
     expect(scale.priceRange().max).toBeGreaterThanOrEqual(after[after.length - 1] as number);
   });
 
@@ -514,7 +532,7 @@ describe('resizing around a strip', () => {
     chart.applySize(W, 900);
     const h = heights(chart);
     expect(h[1]).toBe(STRIP);
-    expect(h[0]).toBeCloseTo((900 - STRIP) / 1.32, 9);
+    expectHeights(h, onPixels([(900 - STRIP) / 1.32, STRIP, ((900 - STRIP) * 0.32) / 1.32]));
     expect(sum(h)).toBeCloseTo(900, 9);
     expect(chart.panes().map((pane) => pane.weight)).toEqual([1, 0.32, 0.32]);
   });

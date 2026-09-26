@@ -244,7 +244,7 @@ changed. Anchors map through `DataLayer.timeToIndexFloat`, which also resolves p
 forecasts live.
 
 The bar times past the last bar follow the chart's session calendar when the host set one,
-with `SessionCalendar.applyTo`, `Instrument.applyTo` or `chart.dataLayer.setSessionCalendar`: on an intraday chart an
+with `chart.setSessionCalendar`, `SessionCalendar.applyTo`, `Instrument.applyTo` or `chart.dataLayer.setSessionCalendar`: on an intraday chart an
 endpoint drawn two bars past Friday's last candle lands on Monday's second bar, not on Friday
 night. Without a calendar they continue at the median recent bar interval, never at the gap
 between the last two bars, which is so often a night or a weekend. See
