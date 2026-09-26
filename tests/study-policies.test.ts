@@ -12,7 +12,7 @@ import { parseIndicatorPolicy } from '../src/model/indicator-policy';
 import { parseIndicatorStates, parseWorkspaceDocument } from '../src/workspace/documents';
 import { planIndicatorTemplate } from '../src/workspace/templates';
 import { captureIndicatorTemplate, planIndicatorTemplateState } from '../src/workspace/template-layout';
-import { registeredIndicators } from '../src/model/indicator-registry';
+import { registerIndicator, registeredIndicators } from '../src/model/indicator-registry';
 import { fakeDocument } from './helpers/fake-dom';
 
 const charts: Chart[] = [];
@@ -160,6 +160,25 @@ describe('study policy flags', () => {
     expect(seen[seen.length - 1]).toBe(true);
     objects.destroy();
   });
+
+  it('keeps the buttons a host set on a study row through every restack, with the policy laid over them', () => {
+    const chart = makeChart();
+    const sma = chart.addIndicator('sma');
+    sma.legend()!.setOptions({ actions: ['hide'] });
+    chart.addIndicator('ema');
+    expect(legendActions(chart, sma.id)).toEqual(['hide']);
+    const rsi = chart.addIndicator('rsi');
+    rsi.legend()!.setOptions({ actions: ['settings'] });
+    chart.addIndicator('macd');
+    // The row leading a lower pane still gets the pane controls around what the host kept.
+    expect(legendActions(chart, rsi.id)).toEqual(['settings', 'up', 'down', 'collapse', 'maximize']);
+    // A button the host gave the row shows only while the policy allows it, and comes back after.
+    sma.legend()!.setOptions({ actions: ['hide', 'close'] });
+    sma.setPolicy({ removable: false });
+    expect(legendActions(chart, sma.id)).toEqual(['hide']);
+    sma.setPolicy(null);
+    expect(legendActions(chart, sma.id)).toEqual(['hide', 'close']);
+  });
 });
 
 describe('study policy persistence', () => {
@@ -194,7 +213,7 @@ describe('study policy persistence', () => {
     expect(chart.indicators().map(item => item.id)).toEqual(before);
   });
 
-  it('keeps policies in workspace chart state, and strips them from portable templates', () => {
+  it('keeps policies in workspace chart state, and leaves a host study out of a portable template', () => {
     const chart = makeChart();
     chart.addIndicator('rsi', {}, { policy: { removable: false, listed: false } });
     const state = JSON.parse(JSON.stringify(chart.getState()));
@@ -207,8 +226,59 @@ describe('study policy persistence', () => {
     });
     expect(document.panes[0].chart.indicators?.[0].policy).toEqual({ removable: false, listed: false });
     const template = captureIndicatorTemplate(chart);
-    expect(template.indicators[0].policy).toBeUndefined();
+    expect(template.indicators).toEqual([]);
     expect(() => parseIndicatorStates([{ indicatorId: 'rsi', settings: {}, paneIndex: 1, policy: { listed: 0 } }])).toThrow(/policy/i);
+  });
+
+  it('captures only the studies of the user in a template, so a replace neither copies nor loses those of the host', () => {
+    const chart = makeChart();
+    const pinned = chart.addIndicator('rsi', {}, { policy: { removable: false } });
+    const quiet = chart.addIndicator('ema', { length: 5 }, { policy: { listed: false } });
+    // A user study reading the unlisted one: its copy would read nothing, so it stays out too.
+    const reader = chart.addIndicator('sma', { length: 3, source: { kind: 'indicator', instanceId: quiet.id, plotKey: 'ma' } });
+    const own = chart.addIndicator('macd');
+    // Restricted in a way that leaves the study the user's: copied, without the restriction.
+    const locked = chart.addIndicator('sma', { length: 50 }, { policy: { configurable: false } });
+    const template = captureIndicatorTemplate(chart);
+    expect(template.indicators.map(item => item.indicatorId)).toEqual(['macd', 'sma']);
+    expect(template.indicators[1].settings.length).toBe(50);
+    expect(template.indicators.every(item => item.policy === undefined)).toBe(true);
+    const text = JSON.stringify(template);
+    for (const id of [pinned.id, quiet.id, reader.id]) expect(text).not.toContain(id);
+
+    const plan = planIndicatorTemplateState(chart, template, 'replace');
+    expect(plan.indicators.filter(item => item.indicatorId === 'rsi')).toHaveLength(1);
+    expect(plan.indicators.filter(item => item.indicatorId === 'ema')).toHaveLength(1);
+    expect(plan.indicators.slice(0, 2).map(item => item.instanceId)).toEqual([pinned.id, quiet.id]);
+    expect(chart.restoreState({ version: 1, indicators: plan.indicators, panes: plan.panes }, plan.restoreOptions).applied).toBe(true);
+    expect(chart.indicators().map(item => item.indicatorId)).toEqual(['rsi', 'ema', 'macd', 'sma']);
+    expect(chart.indicators()[0].policy()).toEqual({ removable: false });
+    expect(chart.indicators()[1].policy()).toEqual({ listed: false });
+    expect(chart.indicators().find(item => item.id === own.id)).toBeUndefined();
+    // The restricted study of the user was replaced by its copy, which the template holds unrestricted.
+    expect(chart.indicators().find(item => item.id === locked.id)).toBeUndefined();
+    expect(chart.indicators()[3].policy()).toEqual({});
+
+    // A host that hands its chart state over as the template gets the same answer.
+    const available = new Set(registeredIndicators().map(item => item.id));
+    const legacy = planIndicatorTemplate(chart.getState().indicators!, chart.getState().indicators!, 'replace', available, chart.panes().length);
+    expect(legacy.filter(item => item.indicatorId === 'rsi')).toHaveLength(1);
+    expect(legacy.filter(item => item.indicatorId === 'ema')).toHaveLength(1);
+  });
+
+  it('lets go of the scale range a host study owned when a template is captured without it', () => {
+    const chart = makeChart();
+    registerIndicator({ id: 'policy-band', name: 'Band', placement: 'pane', inputs: [],
+      plots: [{ key: 'v', type: 'line', title: 'V' }], range: () => ({ min: 0, max: 100 }), calc: bars => ({ v: bars.map(() => 50) }) });
+    const band = chart.addIndicator('policy-band', {}, { priceScaleId: 'left', policy: { removable: false } });
+    expect(chart.getState().panes![band.paneIndex].scales!.left!.indicatorRange!.instanceId).toBe(band.id);
+    chart.addIndicator('sma');
+    const template = captureIndicatorTemplate(chart);
+    expect(template.indicators.map(item => item.indicatorId)).toEqual(['sma']);
+    expect(JSON.stringify(template)).not.toContain(band.id);
+    const scale = template.layout!.panes[band.paneIndex].scales!.left!;
+    expect(scale.indicatorRange).toBeUndefined();
+    expect(scale.autoScale).toBe(true);
   });
 
   it('keeps a study the user cannot remove when a template replaces the others', () => {

@@ -4,7 +4,7 @@ import {
   type PaneState, type PriceScaleId, type PriceScaleState,
 } from 'openalgo-charts';
 import {
-  parseIndicatorStates, parseIndicatorTemplatePayload,
+  hostOwnedStudy, parseIndicatorStates, parseIndicatorTemplatePayload,
   type IndicatorTemplateInput, type IndicatorTemplateLayout, type IndicatorTemplatePayload, type IndicatorTemplatePlotBinding,
 } from './documents';
 import { choice, readJson, record, WorkspaceDocumentError } from './json';
@@ -223,8 +223,8 @@ function planTemplateOrder(chart: Chart, incoming: IndicatorTemplateInput, mode:
     return { indicators: planIndicatorTemplate(current.indicators, incomingState.indicators, mode, available, current.panes.length) };
   }
   const layout = incomingState.layout, additions = incomingState.indicators, previous = parseIndicatorStates(current.indicators ?? []);
-  // A study the user may not remove survives a replace, and its pane is kept out of the template's way.
-  const kept = mode === 'replace' ? previous.filter(study => study.policy?.removable === false) : [];
+  // A study the host keeps from the user survives a replace, and its pane is kept out of the template's way.
+  const kept = mode === 'replace' ? previous.filter(study => hostOwnedStudy(study.policy)) : [];
   const planned = mode === 'append' ? [...previous, ...additions] : [...kept, ...additions];
   if (planned.length > 256) throw new WorkspaceDocumentError('At most 256 indicator instances are supported');
   const missing = [...new Set(planned.filter(study => !available.has(study.indicatorId)).map(study => study.indicatorId))];

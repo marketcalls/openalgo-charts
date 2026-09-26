@@ -136,7 +136,7 @@ Access via `chart.trading`.
 | `getPositions()` / `getOrders()` / `getTrades()` | current state |
 | `clear()` | remove everything |
 | `setSettings(colors)` / `getSettings()` | global trading colors |
-| `setTickSchedule(schedule)` | snap dragged order and bracket lines to a `TickSchedule`; `null` (the default) keeps raw pointer prices; anything else throws a `TypeError` |
+| `setTickSchedule(schedule)` | snap dragged order and bracket lines to a `TickSchedule`; `null` (the default) keeps raw pointer prices; anything else throws a `TypeError`. `chart.setTickSchedule` sets it too, and the price alerts with it |
 | `on(event, cb)` / `off(event, cb)` | subscribe / unsubscribe (`on` returns an unsubscribe fn) |
 
 ## Events
@@ -155,23 +155,29 @@ Subscribe with `chart.trading.on(event, cb)`.
 ## Price ticks while dragging
 
 Without a schedule, a drag reports the price under the pointer, unrounded. Hand the
-controller the instrument's ticks and the dragged line previews, and both modify events
+chart the instrument's ticks and the dragged line previews, and both modify events
 carry, the nearest price the instrument can trade at, on the band the price is in:
 
 ```ts
 import { TickSchedule } from 'openalgo-charts';
 
 // Host-supplied rules for this instrument (synthetic here): 0.01 below 100, 0.05 from 100.
-chart.trading.setTickSchedule(new TickSchedule([{ tick: 0.01 }, { from: 100, tick: 0.05 }]));
+chart.setTickSchedule(new TickSchedule([{ tick: 0.01 }, { from: 100, tick: 0.05 }]));
 ```
 
 A release at 100.33 then emits `newPrice: 100.35`, and one at 99.874 emits `99.87`.
+`chart.setTickSchedule` is the call for a host that keeps its own instrument metadata:
+the chart passes the schedule on to `chart.trading`, whether the layer exists yet or is
+built later, and dragged [price alerts](/docs/alerts#tick-snapping-and-keyboard-removal)
+and `chart.snapPrice` on the price pane round with it too. `chart.trading.setTickSchedule`
+sets the trading layer's drags alone, so on its own it leaves a dragged alert rounding on
+the scale's single tick.
 
 With validated metadata there is nothing to call: `instrument.applyTo(chart, interval)`
-hands the controller the instrument's `tickSchedule`, whether the controller exists yet
-or is built later, and a constant-tick instrument clears it, so a symbol switch never
-leaves the previous instrument's bands on a drag. Call `setTickSchedule` after
-`applyTo` to override it.
+hands the chart, and through it the controller, the instrument's `tickSchedule`, and a
+constant-tick instrument clears it, so a symbol switch never leaves the previous
+instrument's bands on a drag. Call `chart.setTickSchedule` after `applyTo` to override
+it.
 
 A one-band schedule, `[{ tick: 0.05 }]`, snaps a constant tick. Give `validatePrice` the
 same schedule as `tickSchedule`: its constant `tickSize` path returns

@@ -775,7 +775,10 @@ registerIndicator({
   drawings, so the host's Undo and Redo (`draw.undo()`, Ctrl+Z) take it back and
   forward; a step whose study has been removed, or edited since, is passed over.
   Recording it and walking it emit `drawing:change` with empty `ids`, so a host's
-  Undo control refreshes.
+  Undo control refreshes. A host control that sets the point another way (its own
+  point pick) calls `draw.moveInputAnchor(studyId, key, point)` so that move is a
+  step too; a plain `setSettings` is not recorded, and the drags before it are then
+  passed over.
 - **Conflicts.** An active drawing tool takes the press (the anchor gives no hit
   while placing), a pick in progress takes the click, and choosing a tool, starting
   a pick or replacing the data context cancels a drag in hand. A hidden study shows

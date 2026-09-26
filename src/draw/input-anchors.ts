@@ -297,6 +297,22 @@ export class InputAnchors {
     return { time: bound(handle.timeKey, bar), price: bound(handle.priceKey, price) };
   }
 
+  /**
+   * Move one anchor to a point the way a drag release does, for a control of
+   * the host's that sets the point another way (a pick): snapped, held in
+   * bounds, refused for a study the user may not configure, and recorded as
+   * one step. False when there is no such anchor, the move is refused, or the
+   * study already holds the point.
+   */
+  public move(studyId: string, key: string, time: number, price: number): boolean {
+    const handle = this._handles.get(`${PREFIX}${studyId}:${key}`);
+    if (handle === undefined || !handle.editable || this._drag?.handle === handle) return false;
+    const from = { time: handle.time, price: handle.price }, to = this._point(handle, time, price);
+    if (to === null || (to.time === from.time && to.price === from.price) || !this._apply(handle, from, to)) return false;
+    this._hooks.record({ undo: () => this._apply(handle, to, from), redo: () => this._apply(handle, from, to) });
+    return true;
+  }
+
   private _onDragStart(p: { id?: unknown }): void {
     const handle = this._handle(p.id);
     if (handle === undefined || !handle.editable || !this._live()) return;

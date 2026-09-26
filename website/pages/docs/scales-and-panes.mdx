@@ -214,7 +214,9 @@ and above the time axis, the size a primitive on that pane paints into. Lay an H
 overlay against it instead of working the rectangle out from the axes. It returns
 `null` for a pane collapsed to its header strip, one hidden behind a maximized pane,
 or an index with no pane. Drawings pinned to the screen are placed by the same
-rectangle, so a host overlay and a pinned drawing agree.
+rectangle, so a host overlay and a pinned drawing agree. Asking scales the pane first,
+the way a price conversion does, so a pane no frame has painted yet (one just added or
+just moved) already answers in its own prices.
 
 ```ts
 const rect = chart.plotRect(1);                 // the second pane

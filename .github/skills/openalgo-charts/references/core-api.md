@@ -765,9 +765,11 @@ px: `{ left, top, width, height }`, inside the price axis columns and above the
 time axis strip, the same size a primitive on that pane paints into. Lay an HTML
 overlay against it rather than working the rectangle out from `priceToCoordinate`,
 the axis layout and the time scale. It is null for a pane collapsed to its header
-strip, one hidden behind a maximized pane, and an index with no pane. The draw
-tier measures viewport drawings by it, so a pinned drawing and a host overlay read
-one rectangle.
+strip, one hidden behind a maximized pane, and an index with no pane. It scales
+the pane first, as `priceToCoordinate` does, so a pane no frame has painted yet
+(just added or moved) answers with its own prices, not the 0..1 placeholder. The
+draw tier measures viewport drawings by it, so a pinned drawing and a host overlay
+read one rectangle.
 
 ```ts
 const rect = chart.plotRect(0)!;
@@ -778,7 +780,8 @@ badge.style.top = `${rect.top + 8}px`;
 ## Tick schedule on the chart
 
 `chart.setTickSchedule(schedule | null)` hands the chart the instrument's
-price-dependent ticks (a `TickSchedule`; anything else throws a `TypeError`), and
+price-dependent ticks (a `TickSchedule`; anything without `round` and `step`
+throws a `TypeError` there, not on the first drag), and
 `chart.tickSchedule()` reads it back, null for a constant tick, the default.
 `Instrument.applyTo` sets it from `instrument.tickSchedule`; a host keeping its
 own instrument metadata calls it directly. `chart.snapPrice(paneIndex, price)`
@@ -845,9 +848,18 @@ Every restricted call treats its caller as the user and returns `false` with not
 changed; the owning host passes `{ force: true }` (`IndicatorEditOptions`). `setSettings`
 and `remove` now return a boolean. A restore is the host's act and replaces a protected
 study. Hiding stays allowed. `IndicatorState.policy` saves only the restrictions, so an
-unrestricted layout is unchanged; a malformed policy refuses the restore. Workspace
-documents keep policies; portable templates drop them, and a `replace` template plan keeps
-every study that is not `removable`.
+unrestricted layout is unchanged; a malformed policy refuses the restore. A legend row
+whose buttons the host set (`indicator.legend().setOptions({ actions })`) keeps them
+through every restack; the policy only withholds close and settings from them. Workspace
+documents keep policies. Portable templates leave out every study the host keeps from
+the user (not `removable` or not `listed`) and the studies reading its output, and copy
+any other study without its policy; a `replace` template plan keeps the host's studies.
+
+`chart.addIndicator(indicatorId, settings?, { instanceId })` gives a new study that id
+instead of a fresh one, so a host bringing a removed study back (an undo) restores its
+identity for the studies reading its output and the alerts naming it. An id a study on
+the chart holds throws; a removed study's id is free to take back. A new study without
+one never reuses a removed study's id.
 
 ## Draw order
 
@@ -868,8 +880,15 @@ and each study living on the pane that plots a series there:
 - `chart.setPrimitiveStackAbove(primitive, entry | null)`: paint an attached primitive
   right after that entry's last series on its pane; a batching backend flushes first.
   While the entry plots nothing there the primitive paints in its own band.
-- Context menus rank a drawing against a series by paint order: a hit whose
-  `PrimitiveHit.paintedBy` paints under the series under the pointer gives way to it.
+- Hits rank by paint band first: whatever paints over the series (`'normal'` and
+  `'top'` primitives in their own bands) beats whatever paints with or behind it (a
+  primitive or drawing placed in the series band, a drawing behind the series, a
+  `'bottom'` primitive) wherever both answer, whatever the distance; on either side
+  the nearest wins, then the higher band. Press, hover, click and the context menu
+  all use it, so a box placed under an order line gives the line the press.
+- Context menus rank a drawing or placed primitive against a series by paint order: a
+  hit whose `PrimitiveHit.paintedBy` paints under the series under the pointer gives
+  way to it (the pane sets `paintedBy` on a hit from a primitive placed in the band).
 
 `ChartObjects.stack(paneIndex)` joins them: drawings behind the series, each entry followed
 by the drawings placed on it, then drawings in front. Rows gain `band` (`ChartObjectBand`:

@@ -1,5 +1,5 @@
 import type { IndicatorState } from 'openalgo-charts';
-import { parseIndicatorStates, parseTemplateIndicatorStates } from './documents';
+import { hostOwnedStudy, parseIndicatorStates, parseTemplateIndicatorStates } from './documents';
 import { WorkspaceDocumentError } from './json';
 
 export type IndicatorTemplateMode = 'replace' | 'append';
@@ -41,9 +41,10 @@ export function planIndicatorTemplate(
     // chart's, and its study panes take the chart's slots in order around it.
     for (const item of additions) item.paneIndex = fromTemplatePane(item.paneIndex, primaryPaneIndex);
   }
-  // Replacing is the user's act, so a study they may not remove stays, on its
-  // own pane, and the template's pane groups take the free slots after it.
-  const kept = mode === 'replace' ? previous.filter(item => item.policy?.removable === false) : [];
+  // Replacing is the user's act, so a study the host keeps from the user (one
+  // they may not remove, or cannot see) stays, on its own pane, and the
+  // template's pane groups take the free slots after it.
+  const kept = mode === 'replace' ? previous.filter(item => hostOwnedStudy(item.policy)) : [];
   const occupied = new Set(kept.map(item => item.paneIndex).filter(index => index !== primaryPaneIndex));
   if (occupied.size) {
     const groups = [...new Set(additions.map(item => item.paneIndex).filter(index => index !== primaryPaneIndex))].sort((a, b) => a - b);

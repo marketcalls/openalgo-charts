@@ -889,8 +889,12 @@ export class Chart {
    * the study it paints directly above.
    */
   private _sourceAbove: string | null | undefined = undefined;
-  /** Each study legend row's own buttons, before its study's policy withholds any. */
-  private readonly _legendActions = new WeakMap<PaneLegend, readonly PaneLegendAction[]>();
+  /**
+   * Each study legend row's own buttons, before its study's policy withholds
+   * any, and the list the chart last gave the row. A row showing any other
+   * list was set by the host since, and that list becomes its own.
+   */
+  private readonly _legendActions = new WeakMap<PaneLegend, [own: readonly PaneLegendAction[], shown: readonly PaneLegendAction[] | undefined]>();
   private _restoreGeneration = 0;
   private readonly _indicatorRanges = new Map<string, {
     pane: Pane; scaleId: PriceScaleId; range: { min: number; max: number };
@@ -1690,15 +1694,24 @@ export class Chart {
    *
    * `options.policy` restricts what the user may do with the study (see
    * `IndicatorPolicy`); the host keeps changing it with `{ force: true }`.
+   *
+   * `options.instanceId` gives the study that id instead of a new one, so a
+   * host that brings a removed study back (an undo) brings back its identity:
+   * the studies that read its output and the alerts that name it find it
+   * again. An id a study on this chart holds now throws, since two studies
+   * cannot answer to one id; the id of a removed study is free to take back.
    */
   public addIndicator(
     indicatorId: string,
     settings: Readonly<IndicatorSettings> = {},
     options: {
       paneIndex?: number; priceScaleId?: PriceScaleId; plotPriceScaleIds?: Readonly<Record<string, PriceScaleId>>;
-      policy?: IndicatorPolicy;
+      policy?: IndicatorPolicy; instanceId?: string;
     } = {},
   ): IndicatorApi {
+    const instanceId = options.instanceId;
+    if (instanceId !== undefined && (typeof instanceId !== 'string' || !instanceId.trim())) throw new TypeError('Invalid indicator instance id');
+    if (instanceId !== undefined && this._indicators.some(item => item.id === instanceId)) throw new Error(`Indicator instance id already in use: ${instanceId}`);
     if (options.priceScaleId !== undefined && !this._validPriceScaleId(options.priceScaleId)) throw new TypeError('Invalid indicator price scale');
     const policy = options.policy === undefined ? undefined : parseIndicatorPolicy(options.policy);
     const descriptor = getIndicator(indicatorId);
@@ -1717,7 +1730,7 @@ export class Chart {
       descriptor,
       this._distinctColors(descriptor, validatedSettings),
       options.paneIndex,
-      undefined,
+      instanceId,
       reserved,
       options.priceScaleId,
       plotPriceScaleIds,
@@ -2218,7 +2231,7 @@ export class Chart {
         // _syncLegendOffsets decides which pane wears the offset, and runs on
         // every relayout; this is just the initial placement.
         const legend = new PaneLegend({ ...o, actions: paneActions });
-        this._legendActions.set(legend, paneActions);
+        this._legendActions.set(legend, [paneActions, legend.options().actions]);
         this._studyLegends.add(legend);
         this._addPrimitive(o.paneIndex, legend);
         return legend;
@@ -2823,10 +2836,16 @@ export class Chart {
    * overlay against, and what a drawing pinned to the screen is a fraction of.
    * Null for a pane with no plot on screen: one collapsed to its header
    * strip, one hidden behind a maximized pane, or no pane at that index.
+   *
+   * The pane is scaled first, the way a price conversion scales it: a caller
+   * that places something on the plot reads the pane's prices next, and a
+   * pane no frame has painted yet (just made, or just moved) still holds its
+   * placeholder range.
    */
   public plotRect(paneIndex: number): PlotRect | null {
     const layout = this._destroyed || this._collapsedShown(paneIndex) ? undefined : this._paneLayout()[paneIndex];
     if (!layout || !Number.isSafeInteger(paneIndex)) return null;
+    this._ensureScaled(paneIndex);
     const width = this._width - this._leftAxisWidth - this._rightAxisWidth;
     const height = layout.height - (paneIndex === this._bottomPaneIndex() ? this._timeAxisHeight : 0);
     return width > 0 && height > 0 ? { left: this._leftAxisWidth, top: layout.top, width, height } : null;
@@ -3460,11 +3479,6 @@ export class Chart {
     // button on a study the user may not remove, no gear on one they may not
     // configure. The pane controls act on the pane and stay.
     const policies = new Map(this._indicators.map(study => [study.legend(), study.policy()]));
-    const own = (legend: PaneLegend): PaneLegendAction[] => {
-      const policy = policies.get(legend);
-      return (this._legendActions.get(legend) ?? legend.options().actions ?? []).filter(action =>
-        !(action === 'close' && policy?.removable === false) && !(action === 'settings' && policy?.configurable === false));
-    };
     let reserved = false;
     for (const entry of [...this._legends.filter(strip), ...this._legends.filter(entry => !strip(entry))]) {
       let row = rowByPane.get(entry.paneIndex) ?? 0;
@@ -3477,8 +3491,16 @@ export class Chart {
       }
       const pane = this._panes[entry.paneIndex];
       const collapsed = this._collapsed.has(pane);
-      entry.legend.setOptions(owned ? { row, collapsed, actions: leadActions(own(entry.legend),
-        pane !== undefined && pane !== this._primaryPane && leads.get(entry.paneIndex) === entry.legend) } : { row });
+      if (owned) {
+        // A host that rewrote the row since (`legend().setOptions({ actions })`) keeps what it wrote.
+        const kept = this._legendActions.get(entry.legend), shown = entry.legend.options().actions;
+        const base = kept === undefined || kept[1] !== shown ? shown ?? [] : kept[0], policy = policies.get(entry.legend);
+        const allowed = base.filter(action => !(action === 'close' && policy?.removable === false)
+          && !(action === 'settings' && policy?.configurable === false));
+        const actions = leadActions(allowed, pane !== undefined && pane !== this._primaryPane && leads.get(entry.paneIndex) === entry.legend);
+        entry.legend.setOptions({ row, collapsed, actions });
+        this._legendActions.set(entry.legend, [base, actions]);
+      } else entry.legend.setOptions({ row });
       rowByPane.set(entry.paneIndex, row + (!folded && entry.legend.options().visible !== false ? 1 : 0));
     }
     if (!reserved) this._indicatorLegendRow = rowByPane.get(top) ?? 0;
@@ -4328,8 +4350,11 @@ export class Chart {
    * describes the loaded instrument, so it is not part of the saved state.
    */
   public setTickSchedule(schedule: TickSchedule | null): void {
-    // Refused here, where the host made the mistake, rather than on the first drag.
-    if (schedule != null && typeof (schedule as Partial<TickSchedule>).round !== 'function') {
+    // Refused here, where the host made the mistake, rather than on the first
+    // drag: a dragged price rounds with `round`, and a range bound pushed past
+    // the opposite one backs off with `step`.
+    const given = schedule as Partial<TickSchedule> | null | undefined;
+    if (given != null && (typeof given.round !== 'function' || typeof given.step !== 'function')) {
       throw new TypeError('chart.setTickSchedule takes a schedule built with new TickSchedule(bands), or null');
     }
     this._tickSchedule = schedule ?? null;

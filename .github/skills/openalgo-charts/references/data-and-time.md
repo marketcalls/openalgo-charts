@@ -14,8 +14,8 @@ that is the `minMove` `applyTo` gives the price scale. `applyTo` also hands the
 schedule to the chart (`chart.setTickSchedule`, read with `chart.tickSchedule()`),
 which rounds dragged price alerts and `chart.snapPrice` on the price pane by band,
 and to `chart.trading` (a layer built later starts from it, and a constant-tick
-instrument clears it on a symbol switch); call `chart.trading.setTickSchedule` after
-`applyTo` to override the drag snap of order lines alone. See [instrument rules](../../../../docs/instruments.md)
+instrument clears it on a symbol switch); call `chart.setTickSchedule` after
+`applyTo` to override it for the alerts and the order lines together. See [instrument rules](../../../../docs/instruments.md)
 for breaks, DST, validation, quantity units and safe host source transitions.
 
 `OpenAlgoConfig.hasOpenInterest(request)` optionally supplies instrument

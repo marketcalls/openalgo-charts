@@ -41,7 +41,7 @@ import {
 } from '../render/axis';
 import { drawCrosshair, drawCrosshairTag, resolveCrosshairStyle } from '../render/crosshair';
 import { isInvisible } from '../render/pill';
-import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
+import type { IPrimitive, PrimitiveHit, PrimitiveHost, PrimitiveRenderContext, ZOrder } from '../primitives/primitive';
 import { PaneLegend } from '../primitives/pane-legend';
 import { backendDegradation, type IRenderBackend, type RendererFallbackReason } from '../render/backend';
 import { Canvas2dBackend } from '../render/canvas2d-backend';
@@ -140,6 +140,9 @@ function seriesTagColor(style: SeriesStyle, up: boolean): string | undefined {
   if (typeof style.closeColor === 'string') return style.closeColor;
   return undefined;
 }
+
+/** Where a z-order band paints, back to front; the series band sits between 1 and 2. */
+const HIT_RANK: Record<ZOrder, number> = { bottom: 0, normal: 2, top: 3 };
 
 export class Pane {
   public readonly element: HTMLElement;
@@ -689,15 +692,36 @@ export class Pane {
    * Topmost primitive hit at media-px (x,y) relative to this pane's plot.
    * `except` is left out, for the chart's corner mark, which yields to
    * anything else at the point.
+   *
+   * What paints over the series (the overlay band and the front) beats what
+   * paints with or behind it (a drawing or a primitive placed in the series
+   * band, a drawing sent behind the series, a bottom primitive), whatever the
+   * distance: a box under an order line gives the press to the line, as the
+   * eye does. On either side the nearest wins, then the one painted later in
+   * band order, as `bestHit` ranks them. A hit painted by a primitive placed
+   * in the series band names it (`paintedBy`), so the chart can rank it
+   * against a series painted over it too.
    */
   public hitTestPrimitives(x: number, y: number, ctx: PaneRenderContext, except?: IPrimitive | null): PrimitiveHit | null {
-    const prc = this._primitiveContext(ctx);
-    return bestHit(this._live(ctx).map((p) => {
-      if (!p.hitTest || p === except) return null;
+    const prc = this._primitiveContext(ctx), live = this._live(ctx), slotted = this._slotted(live, ctx);
+    let best: PrimitiveHit | null = null, bestRank = 0;
+    for (const p of live) {
+      if (!p.hitTest || p === except) continue;
       const context = this._boundPrimitiveContext(p, prc, ctx);
-      const hit = p.hitTest(x, y, context);
-      return hit !== null && this._primitiveScales.has(p) ? { ...hit, priceScale: context.priceScale } : hit;
-    }));
+      let hit = p.hitTest(x, y, context);
+      if (hit === null) continue;
+      if (this._primitiveScales.has(p)) hit = { ...hit, priceScale: context.priceScale };
+      const painter = hit.paintedBy ?? p, after = slotted?.get(painter);
+      if (after !== undefined) hit = { ...hit, paintedBy: painter };
+      const rank = after !== undefined ? 1 + (this._series.indexOf(after) + 1) / (this._series.length + 1)
+        : HIT_RANK[painter === p ? hit.zOrder : painter.zOrder()];
+      // Over the series (rank 2 and up) first, then the nearest, then the higher band.
+      const side = +(rank >= 2) - +(bestRank >= 2);
+      if (best === null || side > 0 || side === 0 && (hit.distance < best.distance || hit.distance === best.distance && rank > bestRank)) {
+        best = hit; bestRank = rank;
+      }
+    }
+    return best;
   }
 
   public resize(width: number, height: number, dpr: number): void {

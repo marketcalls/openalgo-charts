@@ -75,7 +75,10 @@ registerIndicator({
 - **Undo takes a drag back.** Each drag is one step of the drawing undo history, in
   the order it was made among the drawings, so Ctrl+Z, the rail's Undo and the phone
   bar reverse it in the widget and the reference host. A step whose study was
-  removed or edited since is passed over.
+  removed or edited since is passed over. A host control that sets the point another
+  way, a point pick of its own, calls `draw.moveInputAnchor(studyId, key, point)`:
+  the move is snapped, held in bounds and refused exactly as a drag is, and is one
+  step too, so Undo takes it back.
 - **Drawing placement comes first.** While a drawing tool is active, a press on the
   anchor places the drawing, and while a pick is waiting, a click on it answers the
   pick.
@@ -972,6 +975,20 @@ absent filter means every day. Whitespace around the parts is ignored.
 Removing an indicator also prunes the pane it emptied, so a host UI cannot strand a blank
 pane under the chart.
 
+A new study takes an id nothing has used on this chart, even one a removed study
+held. A host that brings a removed study back, as an undo does, passes that id with
+`addIndicator(indicatorId, settings, { instanceId })`, and the study comes back as
+itself: the studies reading its output and the alerts naming it find it again. An id
+a study on the chart holds now throws, since two studies cannot answer to one id.
+
+```ts
+const rsi = chart.addIndicator('rsi', { length: 14 });
+const saved = { id: rsi.id, settings: rsi.settings(), paneIndex: rsi.paneIndex };
+chart.removeIndicator(rsi.id);
+// Undo: the same study, the same identity.
+chart.addIndicator('rsi', saved.settings, { instanceId: saved.id, paneIndex: saved.paneIndex });
+```
+
 ### Study policies
 
 A host that places a study of its own (a strategy's signal line, a session band, a
@@ -1002,6 +1019,9 @@ its caller as the user, because host controls make exactly these calls, and retu
 with nothing changed when the policy forbids it. The owning host passes `{ force: true }`
 (`IndicatorEditOptions`) to make the change anyway. `setPolicy` is always the host's act:
 it is never restricted and applies at once to the legend buttons and the inventory. A
+legend row whose buttons the host set with `indicator.legend().setOptions({ actions })`
+keeps them through every restack, and the policy only withholds the close button and
+the gear from what the host set. A
 restore (`chart.restoreState`, a workspace load) is also the host's act and replaces a
 protected study like any other. Hiding a study is the user's view of the chart and stays
 available under every flag.
@@ -1011,9 +1031,14 @@ so an unrestricted study saves exactly what it always did and a layout from an o
 release restores its studies unrestricted. A malformed policy refuses the whole restore
 before anything changes; `parseIndicatorPolicy(input)` is the same validation for a host
 of its own, and keeps only the four boolean flags. Workspace documents keep policies.
-Portable indicator templates drop them, since a template is the user's own copy, and a
-template applied in `replace` mode keeps every study the user may not remove, on its own
-pane, with the template's panes taking the free slots around it.
+
+A portable indicator template is the user's own copy of the user's own studies. It
+leaves out every study the host keeps from the user, one that is not `removable` or
+not `listed`, and every study that reads the output of one, and a scale range such a
+study owned is let go; a study with other restrictions is copied without them. A
+template applied in `replace` mode keeps the host's studies, on their own panes, with
+the template's panes taking the free slots around them, so a replace neither copies a
+host study nor takes it away.
 
 ### Plot scale assignments
 

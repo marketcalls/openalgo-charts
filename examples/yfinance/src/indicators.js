@@ -376,11 +376,20 @@ export function renderSettingsTab(draft) {
   if (controls) formPickers.get(host).push(controls);
 }
 
+/** Say that the host locked the study since its settings opened: the write changed nothing. */
+function refused(inst) {
+  const message = `${inst.name} settings are protected by the host`;
+  el('status').textContent = message;
+  toast('error', message);
+  return false;
+}
+
 export function collectSettings() {
   if (!currentSettings()) return false;
   if (!validateTypedRows(el('set-body'))) return false;
-  try { settingsFor.setSettings(collectInputRows(el('set-body'))); }
-  catch (error) {
+  try {
+    if (settingsFor.setSettings(collectInputRows(el('set-body'))) === false) return refused(settingsFor);
+  } catch (error) {
     const message = error instanceof Error ? error.message : 'The study settings could not be applied';
     el('status').textContent = message;
     toast('error', message);
@@ -460,7 +469,7 @@ export function initIndicators(a) {
     if (!currentSettings()) return;
     const d = getIndicator(settingsFor.indicatorId);
     const defaults = indicatorDefaults(d);
-    settingsFor.setSettings(defaults);
+    if (settingsFor.setSettings(defaults) === false) { refused(settingsFor); return; }
     rememberSettings();
     renderIndicatorChips();
     closeSettings();

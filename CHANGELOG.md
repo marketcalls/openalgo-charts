@@ -20,18 +20,26 @@ All notable changes to OpenAlgo Charts.
   `movable` covers `chart.moveIndicator`, `chart.reorderIndicator` and
   `chart.moveInSeriesStack`. `setSettings` and `remove` now return a boolean. The
   legend row drops its close button and gear (and a stale press on either does
-  nothing), `ChartObjects` withholds remove, settings, reorder, move and place and
-  leaves an unlisted study out, and the widget greys its settings and remove menu
-  rows and the picker's remove button with the note "protected", declines the
-  settings dialog with the reason, and leaves an unlisted study out of the picker
-  and the alert source lists. Hiding a study stays the user's choice. A restore is
-  the host's act and replaces a protected study. The chart state saves only the
-  restrictions (`IndicatorState.policy`), so an unrestricted layout is written
-  exactly as before and older layouts restore unrestricted; a malformed policy
-  refuses the restore. Workspace documents keep policies, portable templates drop
-  them, and a template applied in `replace` mode keeps every study the user may not
-  remove, on its own pane. `parseIndicatorPolicy` validates a policy. The yfinance
-  host adds **Add Protected VWAP** to its chart menu, and removes it with `force`.
+  nothing); a row whose buttons the host set with `legend().setOptions({ actions })`
+  keeps them through every restack, with the policy laid over them. `ChartObjects`
+  withholds remove, settings, reorder, move and place and leaves an unlisted study
+  out, and the widget greys its settings and remove menu rows and the picker's
+  remove button with the note "protected", declines the settings dialog with the
+  reason, reports a write the host refused after locking the study while the
+  dialog was open, and leaves an unlisted study out of the picker and the alert
+  source lists. Hiding a study stays the user's choice. A restore is the host's act
+  and replaces a protected study. The chart state saves only the restrictions
+  (`IndicatorState.policy`), so an unrestricted layout is written exactly as before
+  and older layouts restore unrestricted; a malformed policy refuses the restore.
+  Workspace documents keep policies. A portable template is the user's copy of the
+  user's own studies: it leaves out every study the host keeps from the user (one
+  that is not `removable` or not `listed`) and every study reading the output of
+  one, lets go of a scale range such a study owned, and copies a study with other
+  restrictions without them. A template applied in `replace` mode keeps the host's
+  studies, on their own panes, so it neither copies nor removes them.
+  `parseIndicatorPolicy` validates a policy. The yfinance host adds **Add Protected
+  VWAP** to its chart menu and removes it with `force`; importing or loading a
+  layout keeps it, and a layout file's own restricted studies are left out.
 - Draw order across sources, studies and drawings. A pane paints in bands, back
   to front: behind the series, the series band, the overlay band (price lines,
   markers, study levels) and in front. The series band holds the price source and
@@ -52,9 +60,15 @@ All notable changes to OpenAlgo Charts.
   `stackAbove` and the `place` capability (`ChartObjectBand`,
   `ChartObjectDrawingSource.placeInStack`, `DrawingStackTarget`). The pointer takes
   what is painted on top: the front drawing layer answers for every layer of its
-  pane front to back, and a right-click over a drawing and a series painted over it
-  targets the series (`PrimitiveHit.paintedBy`), which also applies to a drawing
-  sent behind the series. The price source stays the pane's instrument wherever it
+  pane front to back; whatever paints over the series (the overlay band and the
+  front) takes a press, a hover, a click or the context menu from whatever paints
+  with or behind it (a drawing or primitive placed in the series band, a drawing
+  behind the series, a bottom primitive) wherever it answers, whatever the
+  distance, so a box placed under an order line gives the line the press; and a
+  right-click over a drawing or placed primitive and a series painted over it
+  targets the series (`PrimitiveHit.paintedBy`). A bottom primitive, such as a
+  bracket's stop line, now yields the same way to a primitive over the series
+  within reach, where it used to win by being nearer. The price source stays the pane's instrument wherever it
   paints: the crosshair readout, the last-price line and a rebased axis describe it.
   A moved source saves `ChartState.sourceAbove`; a drawing's slot is saved in the
   drawing document and carried by duplicate and the clipboard; a drawing whose
@@ -81,11 +95,15 @@ All notable changes to OpenAlgo Charts.
   `configurable: false` keeps it still. Each drag is one step of the drawing undo
   history, in order with the drawings, so Ctrl+Z, the rail and the phone bar take it
   back in both hosts; the step emits `drawing:change` with empty `ids` so Undo
-  controls refresh. `new DrawingController(chart, { inputAnchors: false })` draws
+  controls refresh. `draw.moveInputAnchor(studyId, key, point)` moves an anchor the
+  way a drag does, as one step, for a host control that sets the point another way
+  (a point pick). `new DrawingController(chart, { inputAnchors: false })` draws
   none. The reference host adds the Anchored growth sample.
 - `chart.plotRect(paneIndex)` returns a pane's plot in container px (`PlotRect`:
   `left`, `top`, `width`, `height`), inside the price axis columns and above the
-  time axis, or null for a collapsed, hidden or missing pane. The draw tier now
+  time axis, or null for a collapsed, hidden or missing pane. It scales the pane
+  first, as a price conversion does, so a pane no frame has painted yet (just made
+  or just moved) answers in its prices and not its placeholder range. The draw tier now
   places, moves and converts drawings pinned to the screen by it rather than
   working the rectangle out from the scales, so `draw.screenPoints` and a host
   overlay laid against `plotRect` agree. `DrawingChartHost` gains the optional
@@ -96,8 +114,13 @@ All notable changes to OpenAlgo Charts.
   when that layer is built. `chart.snapPrice` on the price pane then rounds with the
   band the price falls in, and a dragged price alert lands on that band's tick, a
   range bound stopping a band tick inside an off-tick opposite bound. With no
-  schedule every rounding is unchanged. `AlertChartHost` gains the optional
+  schedule every rounding is unchanged. A schedule without `round` and `step` is
+  refused when it is set, not on the first drag. `AlertChartHost` gains the optional
   `tickSchedule()`. The reference host hands its `BANDED` schedule to both charts.
+- `chart.addIndicator(id, settings, { instanceId })` gives the study that id, so a
+  host that brings a removed study back (an undo) brings back its identity and the
+  studies reading its output and the alerts naming it find it again. An id a study
+  on the chart holds now throws; the id of a removed study is free to take back.
 
 ### Fixed
 

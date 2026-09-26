@@ -157,7 +157,9 @@ function bestHit(hits: readonly (PrimitiveHit | null)[]): PrimitiveHit | null
 
 Smallest `distance` wins; on a tie the higher z-order wins (`top` > `normal` > `bottom`). `null` entries are skipped. Use it directly inside a composite primitive that delegates to sub-objects.
 
-A primitive answering for others sets `PrimitiveHit.paintedBy` to the primitive that painted the hit (the draw tier's front layer does for the layers under it). For the context menu target the chart then compares paint order: where that primitive paints under the series under the pointer, the series is the target. A hit without `paintedBy` keeps the menu, as before.
+The pane ranks its primitives' hits by paint band before distance: a hit painted over the series (a `'normal'` or `'top'` primitive in its own band) beats one painted with or behind the series (a primitive placed with `chart.setPrimitiveStackAbove`, a drawing layer under the front one, a `'bottom'` primitive) wherever both answer. Within each side it is `bestHit`'s order: nearest, then the higher band.
+
+A primitive answering for others sets `PrimitiveHit.paintedBy` to the primitive that painted the hit (the draw tier's front layer does for the layers under it), and the pane sets it on a hit from a primitive placed in the series band. The band ranking reads it, and for the context menu target the chart compares paint order: where that primitive paints under the series under the pointer, the series is the target. A hit without `paintedBy` keeps the menu, as before.
 
 Routing, from `src/core/chart.ts`:
 

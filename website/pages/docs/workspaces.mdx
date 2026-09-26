@@ -117,11 +117,12 @@ and check its restore report. See [chart state](/docs/state),
 ## Reusable indicator templates
 
 Capture the whole template to retain pane weights, scale settings and effective
-plot assignments. A template is the user's own copy, so it carries no
-[study policy](/docs/indicators#study-policies); applying one in `replace` mode
-keeps every study the user may not remove, on its own pane, and the template's
-panes take the free slots around it. Workspace documents keep policies with the
-rest of each chart's state. `createTemplate(name, input)` and `saveTemplate(id, input)` accept
+plot assignments. A template is the user's own copy of the user's own studies, so
+it carries no [study policy](/docs/indicators#study-policies) and leaves out the
+studies the host keeps from the user (not `removable` or not `listed`) and any study
+reading their output; applying one in `replace` mode keeps those host studies, on
+their own panes, and the template's panes take the free slots around them. Workspace
+documents keep policies with the rest of each chart's state. `createTemplate(name, input)` and `saveTemplate(id, input)` accept
 this payload or a legacy `IndicatorState[]`. Repeated descriptors remain separate
 studies, and an empty template is valid.
 

@@ -14,8 +14,10 @@ import { ChartObjects } from '../src/model/chart-objects';
 import { getChartType } from '../src/model/chart-type-registry';
 import { getIndicator, plotStyleKeys, registerIndicator } from '../src/model/indicator-registry';
 import { DrawingController, getDrawingTool, migrateDrawings, type Drawing } from '../src/draw/index';
+import type { IPrimitive, PrimitiveHost } from '../src/primitives/primitive';
 import { parseWorkspaceDocument } from '../src/workspace/documents';
 import { fakeDocument, type FakeElement } from './helpers/fake-dom';
+import { RecordingContext } from './helpers/fake-ctx';
 
 const T0 = 1700000000;
 beforeAll(() => {
@@ -119,6 +121,19 @@ describe('series band', () => {
     expect(chart.getState()).not.toHaveProperty('sourceAbove');
   });
 
+  it('keeps the source where it paints when the study it sits on moves to another pane', () => {
+    const { chart } = rig();
+    const a = sma(chart, '#aa0000');
+    const b = sma(chart, '#00aa00');
+    expect(chart.moveInSeriesStack('source:primary', 'indicator:' + b.id, 'above')).toBe(true);
+    expect(chart.seriesStack(0)).toEqual(['indicator:' + a.id, 'indicator:' + b.id, 'source:primary']);
+    expect(chart.moveIndicator(b.id, chart.panes().length)).toBe(true);
+    // Over the study that was under the one that left, not dropped to the back of the band.
+    expect(chart.seriesStack(0)).toEqual(['indicator:' + a.id, 'source:primary']);
+    expect(chart.getState().sourceAbove).toBe(a.id);
+    expect(paintLog(chart).slice(0, 2)).toEqual(['series:#aa0000', 'source']);
+  });
+
   it('keeps the price source the instrument wherever it paints: the readout and the price it reads', () => {
     const { chart } = rig();
     // A study on the left axis that paints first once the source moves over it.
@@ -134,6 +149,35 @@ describe('series band', () => {
     expect(chart.seriesStack(0)).toEqual(['indicator:' + far.id, 'source:primary']);
     expect(pane.readoutScale()).toBe(pane.priceScale);
     expect(chart.coordinateToPrice(200)).toBe(before);
+  });
+
+  it('keeps the price source the instrument on its own scale too: the last-price line, a rebased axis and the bars primitives read', () => {
+    const { chart } = rig();
+    // A study on the price scale itself, well away from the candles, that paints first once the source moves over it.
+    registerIndicator({ id: 'stack-level', name: 'Level', placement: 'onchart', inputs: [],
+      plots: [{ key: 'v', title: 'Level', type: 'line' }], calc: bars => ({ v: bars.map(() => 400) }) });
+    const level = chart.addIndicator('stack-level');
+    let read: readonly { close: number }[] = [];
+    chart.addPrimitive({ zOrder: () => 'normal', draw: (_ctx, rc) => { read = rc.bars?.() ?? []; } }, 0);
+    expect(chart.moveInSeriesStack('source:primary', 'indicator:' + level.id, 'above')).toBe(true);
+    const pane = chart.panes()[0];
+    const ctx = (chart as unknown as { _renderContext(i: number): never })._renderContext(0);
+    const texts = (): string[] => {
+      const rec = new RecordingContext();
+      pane.paintBase(ctx, rec as unknown as CanvasRenderingContext2D);
+      return rec.ops.filter(op => op.type === 'fillText').map(op => op.text ?? '');
+    };
+    // The last-price tag quotes the candles' last close, not the level painted before them.
+    const shown = texts();
+    expect(shown).toContain(pane.priceScale.format(179));
+    expect(read).toHaveLength(80);
+    expect(read[79].close).toBe(179);
+    // A rebased axis quotes against the candles' first visible close.
+    pane.priceScale.setOptions({ mode: 'percentage' });
+    chart.setVisibleLogicalRange({ from: 20, to: 79 });
+    chart.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    const first = chart.getVisibleLogicalRange()!.from;
+    expect(pane.priceScale.baseline).toBe(100 + Math.max(0, Math.ceil(first)));
   });
 
   it('refuses a malformed source placement and carries a valid one through a workspace document', () => {
@@ -223,6 +267,51 @@ describe('drawings in the series band', () => {
     // Over the series is the back of the front band, beside a drawing that was already there.
     expect(paintLog(chart)).toEqual(['drawing:#00aaaa', 'source', 'series:#aa0000', 'drawing:#0000aa', 'drawing:#aaaa00']);
     expect(front.stackAbove).toBeUndefined();
+  });
+});
+
+describe('a drawing keeps its series-band slot', () => {
+  it('through send to back, and in a duplicate and a pasted copy', async () => {
+    const { chart, draw } = rig();
+    const a = sma(chart, '#aa0000');
+    const one = box(draw, '#0000aa');
+    const two = box(draw, '#00aaaa');
+    box(draw, '#aaaa00');
+    draw.placeInStack(one.id, { entry: 'indicator:' + a.id }, 'above');
+    draw.placeInStack(two.id, { drawing: one.id }, 'above');
+    expect(paintLog(chart)).toEqual(['source', 'series:#aa0000', 'drawing:#0000aa', 'drawing:#00aaaa', 'drawing:#aaaa00']);
+    // To the back of its own slot, not behind the series.
+    draw.sendToBack(two.id);
+    expect(draw.get(two.id)!.stackAbove).toBe('indicator:' + a.id);
+    expect(paintLog(chart)).toEqual(['source', 'series:#aa0000', 'drawing:#00aaaa', 'drawing:#0000aa', 'drawing:#aaaa00']);
+    const [copy] = draw.duplicate([one.id]);
+    expect(copy.stackAbove).toBe('indicator:' + a.id);
+    expect(await draw.copy(two.id)).toBe(true);
+    const [pasted] = await draw.paste();
+    expect(pasted.stackAbove).toBe('indicator:' + a.id);
+    // Both copies paint in the slot, under the drawing in front.
+    const log = paintLog(chart);
+    expect(log.slice(0, 2)).toEqual(['source', 'series:#aa0000']);
+    expect(log[log.length - 1]).toBe('drawing:#aaaa00');
+    expect(log).toHaveLength(7);
+  });
+
+  it('ranks send to back and bring to front against its own slot only, which shows once the study is gone', () => {
+    const { chart, draw } = rig();
+    const a = sma(chart, '#aa0000');
+    const one = box(draw, '#0000aa');
+    const two = box(draw, '#00aaaa');
+    const front = box(draw, '#aaaa00');
+    draw.update(front.id, { zIndex: 5 });
+    draw.placeInStack(one.id, { entry: 'indicator:' + a.id }, 'above');
+    draw.placeInStack(two.id, { drawing: one.id }, 'above');
+    draw.bringToFront(one.id);
+    draw.sendToBack(two.id);
+    expect(paintLog(chart)).toEqual(['source', 'series:#aa0000', 'drawing:#00aaaa', 'drawing:#0000aa', 'drawing:#aaaa00']);
+    // Without the study both paint in front by their numbers: still under the
+    // drawing that was in front of their slot all along.
+    chart.removeIndicator(a.id);
+    expect(paintLog(chart)).toEqual(['source', 'drawing:#00aaaa', 'drawing:#0000aa', 'drawing:#aaaa00']);
   });
 });
 
@@ -334,5 +423,94 @@ describe('hit precedence follows paint order', () => {
     expect(pane.hitTestPrimitives(x, y, ctx)?.externalId).toBe('draw:' + upper.id);
     r.draw.placeInStack(lower.id, { drawing: upper.id }, 'above');
     expect(pane.hitTestPrimitives(x, y, ctx)?.externalId).toBe('draw:' + lower.id);
+  });
+
+  /** A thin line in the overlay band that answers within 4 px, the way an order line does. */
+  const overlayLine = (chart: Chart, price: number): IPrimitive => {
+    const line: IPrimitive = {
+      zOrder: () => 'normal',
+      draw: () => {},
+      hitTest: (_x, y, rc) => {
+        const distance = Math.abs(y - rc.priceScale.priceToY(price));
+        return distance <= 4 ? { externalId: 'order-line', zOrder: 'normal', distance } : null;
+      },
+    };
+    chart.addPrimitive(line, 0);
+    return line;
+  };
+  const hitAt = (r: Rig, time: number, price: number, dy = 0): string | undefined => {
+    const ctx = (r.chart as unknown as { _renderContext(i: number): never })._renderContext(0);
+    const y = r.chart.priceToCoordinate(price)! + dy;
+    return r.chart.panes()[0].hitTestPrimitives(r.chart.timeToCoordinate(time), y, ctx)?.externalId;
+  };
+
+  it('gives a line in the overlay band the press over a box painted under it, and the box when it is in front', () => {
+    const r = rig();
+    const d = r.draw.add({ tool: 'rectangle', paneIndex: 0, style: { color: '#0000aa', fill: true },
+      points: [{ time: T0, price: 90 }, { time: T0 + 79 * 60, price: 190 }] });
+    overlayLine(r.chart, 150);
+    const at = T0 + 70 * 60;
+    // In front, the filled box covers the line, and takes the press 2 px from it.
+    expect(hitAt(r, at, 150, 2)).toBe('draw:' + d.id);
+    for (const place of [
+      () => r.draw.placeInStack(d.id, { entry: 'source:primary' }, 'above'),
+      () => r.draw.sendBehindSeries(d.id),
+    ]) {
+      place();
+      // Painted under the line now: the line takes the press wherever it answers.
+      expect(hitAt(r, at, 150, 2)).toBe('order-line');
+      expect(hitAt(r, at, 150)).toBe('order-line');
+      // Away from the line the box is what is there.
+      expect(hitAt(r, at, 120)).toBe('draw:' + d.id);
+    }
+    r.draw.bringAboveSeries(d.id);
+    expect(hitAt(r, at, 150, 2)).toBe('draw:' + d.id);
+  });
+
+  it('ranks a host primitive placed in the series band by where it paints, and back in its own band after', () => {
+    const r = rig();
+    const a = sma(r.chart, '#aa0000');
+    a.values();
+    let host: PrimitiveHost | null = null;
+    // A shaded zone that answers anywhere inside it, in front by default.
+    const zone: IPrimitive = {
+      zOrder: () => 'top',
+      draw: () => {},
+      attached: h => { host = h; },
+      hitTest: () => ({ externalId: 'zone', zOrder: 'top', distance: 0 }),
+    };
+    r.chart.addPrimitive(zone, 0);
+    overlayLine(r.chart, 150);
+    const at = T0 + 70 * 60;
+    expect(hitAt(r, at, 150, 2)).toBe('zone');
+    const levels: number[] = [];
+    const spy = vi.spyOn(r.chart, 'invalidate').mockImplementation(fn => {
+      fn({ invalidatePane: (_index: number, options: { level: number }) => { levels.push(options.level); } } as never);
+    });
+    host!.requestUpdate();
+    expect(r.chart.setPrimitiveStackAbove(zone, 'source:primary')).toBe(true);
+    host!.requestUpdate();
+    spy.mockRestore();
+    // In front it repaints with the cursor layer; in the series band it is on the base canvas.
+    expect(levels[0]).toBe(InvalidationLevel.Cursor);
+    expect(levels[levels.length - 1]).toBe(InvalidationLevel.Light);
+    expect(r.chart.panes()[0].primitiveStackAbove(zone)).toBe('source:primary');
+    expect(hitAt(r, at, 150, 2)).toBe('order-line');
+    expect(hitAt(r, at, 120)).toBe('zone');
+    // The study painted over it takes the context menu where both are under the pointer.
+    const x = r.chart.timeToCoordinate(T0 + 40 * 60);
+    const y = r.chart.priceToCoordinate(a.values().ma![40] as number)!;
+    const menu = (): ContextMenuEvent => {
+      const seen: ContextMenuEvent[] = [];
+      const off = r.chart.on('contextmenu', p => seen.push(p as ContextMenuEvent));
+      r.el.dispatch('contextmenu', { clientX: x, clientY: y, defaultPrevented: false, preventDefault() {} });
+      off();
+      return seen[0];
+    };
+    expect(menu().target.kind).toBe('indicator');
+    expect(r.chart.setPrimitiveStackAbove(zone, null)).toBe(true);
+    expect(r.chart.panes()[0].primitiveStackAbove(zone)).toBeNull();
+    expect(menu().target).toMatchObject({ kind: 'primitive', id: 'zone' });
+    expect(hitAt(r, at, 150, 2)).toBe('zone');
   });
 });

@@ -36,7 +36,7 @@ async function mount(page: Page, surface: Surface, width: number) {
     let chart: Chart, open: (id: string) => void;
     if (kind === 'widget') {
       const widget = widgets.createWidget(document.getElementById('host')!, {
-        persist: false, rail: false, symbol: 'PRIMARY', interval: '1m',
+        persist: false, rail: window.innerWidth > 640, symbol: 'PRIMARY', interval: '1m',
         branding: false, timeNavigator: false, animZoom: false, animAutoscale: false,
         mobile: window.innerWidth <= 640 ? 'auto' : 'never',
       });
@@ -152,11 +152,18 @@ for (const surface of ['widget', 'demo'] as const) for (const width of [1100, 39
     await paint(page);
     expect(await settings(page)).toMatchObject({ at: moved.at, level: moved.level });
 
-    // The host's own Undo key takes the drag back, both halves at once.
-    await page.keyboard.press('Control+z');
+    // The host's Undo control takes the drag back, both halves at once: the
+    // rail's button, the phone bar's on a phone, and the key where there is neither.
+    const control = (name: 'Undo' | 'Redo') => surface === 'demo'
+      ? page.locator(width < 640 ? `#mobile-${name.toLowerCase()}` : `#rail button[aria-label="${name}"]`)
+      : width < 640 ? null : page.locator(`.oac-rail button[aria-label="${name}"]`);
+    const undo = control('Undo'), redo = control('Redo');
+    if (undo === null) await page.keyboard.press('Control+z');
+    else await undo.click();
     await paint(page);
     expect(await settings(page)).toMatchObject({ at: T0 + 12 * 60, level: 206 });
-    await page.keyboard.press('Control+Shift+z');
+    if (redo === null) await page.keyboard.press('Control+Shift+z');
+    else await redo.click();
     await paint(page);
     expect(await settings(page)).toMatchObject({ at: moved.at, level: moved.level });
     await page.screenshot({ path: info.outputPath(`${surface}-${width}-anchor-redone.png`) });

@@ -368,7 +368,12 @@ step of this controller's undo history, in order with the drawings; `undo()` and
 `redo()` walk it, and a step whose study has gone or moved on is passed over. The
 step emits `drawing:change` with `ids: []` (and again on undo and redo), so a
 control showing whether Undo is available refreshes. An active drawing tool or a pick takes
-the press instead. See [indicators](indicators.md#paired-time-and-price-inputs).
+the press instead, and choosing a tool, starting a pick or a `data:context` change drops a
+drag in hand. `draw.moveInputAnchor(studyId, key, { time, price })` moves an anchor the way
+a drag release does (snapped, bounded, refused for a study that is not `configurable`) as
+one step, for a host control that sets the point another way such as its own point pick;
+false for no such anchor, a refusal, or the point already held. See
+[indicators](indicators.md#paired-time-and-price-inputs).
 
 | Member | Behaviour |
 |---|---|

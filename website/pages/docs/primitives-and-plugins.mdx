@@ -524,8 +524,11 @@ chart.setPrimitiveStackAbove(shade, null);
 It paints right after that entry's last series on the pane, and a renderer that batches
 series (the WebGL2 backend) flushes first, so the order holds on every backend. While the
 entry plots no series on that pane the primitive paints in its own `zOrder()` band. A
-placed primitive repaints with the base canvas whatever its `zOrder()`. This is how the
-draw tier puts a drawing between studies; see [Draw order](/docs/drawing-tools#draw-order).
+placed primitive repaints with the base canvas whatever its `zOrder()`, and the pointer
+ranks it by where it paints: a primitive painted over the series (a `'normal'` or
+`'top'` one in its own band) takes the press wherever it answers, and a study painted
+over it takes the context menu. This is how the draw tier puts a drawing between
+studies; see [Draw order](/docs/drawing-tools#draw-order).
 The call returns false for a primitive that is on no pane.
 
 ## `bestHit` helper

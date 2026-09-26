@@ -1480,6 +1480,20 @@ export class DrawingController {
     return time + (px / FALLBACK_BAR_SPACING_PX) * this._barSeconds();
   }
 
+  /**
+   * Move a study's input anchor (a price input declared with `timeKey` and
+   * `anchor: true`) to `point` as the user, the way dragging its handle does:
+   * the time snaps to the bar under it, both halves stay inside the bounds the
+   * inputs declare, a study the user may not configure refuses it, and the move
+   * is one undo step in this history. For a host control that sets the point
+   * another way, such as a point pick on the chart, so Undo takes it back like
+   * a drag. False when the study has no anchor for `key` (or the controller was
+   * built without input anchors), the study refuses, or it already holds the point.
+   */
+  public moveInputAnchor(studyId: string, key: string, point: { time: number; price: number }): boolean {
+    return this._anchors?.move(studyId, key, point.time, point.price) ?? false;
+  }
+
   // ── history and persistence ─────────────────────────────────────────────
 
   public undo(): boolean {

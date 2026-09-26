@@ -109,10 +109,14 @@ Do not execute imported text or assume namespace names provide authorization.
 ## Study policies in documents
 
 Workspace chart states keep each study's `policy` (validated, restrictions only) and a
-moved source's `sourceAbove`. Portable indicator templates drop `policy`: a template is
-the user's own copy. `planIndicatorTemplate` and `planIndicatorTemplateState` in
-`replace` mode keep every current study whose policy is not `removable`, with its identity
-and policy, and give the template's pane groups the free slots around its pane.
+moved source's `sourceAbove`. A portable indicator template is the user's own copy of the
+user's own studies: parsing and `captureIndicatorTemplate` leave out every study the host
+keeps from the user (policy not `removable` or not `listed`), every study reading the
+output of one, their plot bindings and the scale ranges they owned, and drop `policy` from
+the rest. `planIndicatorTemplate` and `planIndicatorTemplateState` in `replace` mode keep
+every current host study (not `removable` or not `listed`), with its identity and policy,
+and give the template's pane groups the free slots around its pane, so a replace neither
+copies nor removes one.
 
 ## Named watchlists (2.5.5)
 

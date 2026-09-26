@@ -113,9 +113,15 @@ describe('Chart.beginPick for a point', () => {
     expect(scalar).toHaveBeenCalledExactlyOnceWith(1120);
   });
 
-  it('refuses a point pick during drawing placement', () => {
-    const { chart } = fixture();
+  it('refuses a point pick during drawing placement, and answers one with a point once placement ends', () => {
+    const { chart, element } = fixture();
     chart.setPlacementMode(true);
     expect(() => chart.beginPick('point', vi.fn())).toThrow(/placement/);
+    chart.setPlacementMode(false);
+    const selected = vi.fn<(value: PickPoint) => void>();
+    chart.beginPick('point', selected);
+    tap(element, chart.timeToCoordinate(1060)!, 140);
+    expect(selected).toHaveBeenCalledOnce();
+    expect(selected.mock.calls[0][0]).toMatchObject({ time: 1060 });
   });
 });

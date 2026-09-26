@@ -419,10 +419,17 @@ describe('a paired time and price in the settings dialog', () => {
 
   it('writes neither half when the point pick is cancelled', () => {
     const h = fixture({ inputs: paired }), write = vi.spyOn(h.inst, 'setSettings');
+    const start = vi.spyOn(h.chart, 'beginPick'), ends: unknown[] = [];
+    h.chart.on('pick:end', payload => ends.push(payload));
     h.root.querySelector('[data-input-action="level"]')!.click();
+    // The pick under way is the paired one, for both halves at once.
+    expect(start.mock.calls.map(call => call[0])).toEqual(['point']);
     h.button('Cancel pick').click();
+    expect(ends).toEqual([{ kind: 'point', value: null }]);
     h.chart.emit('click', { paneIndex: 0, point: { x: 250, y: 80 }, price: 3, time: 1700000060, id: null });
     expect(write).not.toHaveBeenCalled();
+    expect(h.inst.settings()).toMatchObject({ level: 2, at: 1700000000 });
+    expect(h.field('at').value).toBe('1700000000');
     expect(h.panel.el.hidden).toBe(false);
   });
 });

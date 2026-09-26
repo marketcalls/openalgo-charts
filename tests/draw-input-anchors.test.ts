@@ -180,6 +180,60 @@ describe('a study input anchor', () => {
     expect(handle.price).toBe(study.settings().level);
   });
 
+  it.each([
+    ['a drawing tool is chosen', (m: ReturnType<typeof mount>) => m.draw.setTool('horizontal-line')],
+    ['a pick starts', (m: ReturnType<typeof mount>) => { m.chart.beginPick('price', () => {}); }],
+    ['the data context changes', (m: ReturnType<typeof mount>) => { m.chart.emit('data:context', { symbol: 'OTHER' }); }],
+  ])('drops a drag in hand when %s, and the release writes nothing', (_name, interrupt) => {
+    const m = mount();
+    const study = m.chart.addIndicator(register());
+    m.chart.exportSVG();
+    const write = vi.spyOn(study, 'setSettings');
+    const from = pointOf(m.chart, study);
+    m.dragTo(from.x, from.y, from.x + 120, from.y - 50, false);
+    const handle = handleOf(m.chart, study) as unknown as { time: number; price: number };
+    expect(handle.time).not.toBe(study.settings().at);
+    interrupt(m);
+    // Back at the stored point at once, before the pointer is even let go.
+    expect(handle.time).toBe(study.settings().at);
+    expect(handle.price).toBe(study.settings().level);
+    m.move(from.x + 160, from.y - 70, true);
+    m.el.dispatch('pointerup', pointer('up', from.x + 160, from.y - 70));
+    expect(write).not.toHaveBeenCalled();
+    expect(m.draw.canUndo()).toBe(false);
+  });
+
+  it('takes a point a host control picked as one step, so undo walks it with the drags', () => {
+    const m = mount();
+    const study = m.chart.addIndicator(register());
+    m.chart.exportSVG();
+    const start = { ...study.settings() };
+    const from = pointOf(m.chart, study);
+    m.dragTo(from.x, from.y, m.chart.timeToCoordinate(T0 + 20 * 60)!, from.y - 30);
+    const dragged = { ...study.settings() };
+    // A point pick, the way a host button offers one, then Undo and Redo.
+    m.chart.beginPick('point', p => m.draw.moveInputAnchor(study.id, 'level', p));
+    const x = m.chart.timeToCoordinate(T0 + 30 * 60)! + 3, y = from.y + 20;
+    m.move(x, y);
+    m.el.dispatch('pointerdown', pointer('down', x, y));
+    m.el.dispatch('pointerup', pointer('up', x, y));
+    expect(study.settings().at).toBe(T0 + 30 * 60);
+    expect(m.draw.undo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: dragged.at, level: dragged.level });
+    expect(m.draw.undo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: start.at, level: start.level });
+    expect(m.draw.redo()).toBe(true);
+    expect(m.draw.redo()).toBe(true);
+    expect(study.settings().at).toBe(T0 + 30 * 60);
+    // Held in bounds like a drag, refused for a study the user may not configure, and false for no anchor.
+    expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 5 * 60, price: 999 })).toBe(true);
+    expect(study.settings().level).toBe(150);
+    study.setPolicy({ configurable: false });
+    expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 6 * 60, price: 90 })).toBe(false);
+    expect(m.draw.moveInputAnchor(study.id, 'at', { time: T0 + 6 * 60, price: 90 })).toBe(false);
+    expect(m.draw.moveInputAnchor('missing', 'level', { time: T0 + 6 * 60, price: 90 })).toBe(false);
+  });
+
   it('gives the press to an active drawing tool, and a pick the click', () => {
     const { chart, draw, press, el } = mount();
     const study = chart.addIndicator(register());

@@ -220,10 +220,11 @@ inputs: [
 The growth path starts at one point: a bar time and a price that belong together. The
 price input names its time (`timeKey`), so **Pick point** sets both from one click, and
 `anchor: true` puts the orange ring on the chart. Drag the ring to move both at once, then
-use **Undo** and **Redo**; Escape during a drag cancels it. See
+use **Undo** and **Redo**: a drag and a pick are one step each, because the pick goes
+through `draw.moveInputAnchor`. Escape during a drag cancels it. See
 [a time and a price that belong together](/docs/indicators#a-time-and-a-price-that-belong-together).
 
-<RunnableExample height={400} tiers={['draw']} caption="Drag the ring, or press Pick point and click a bar. Each drag is one undo step." code={`const bar = document.createElement('div');
+<RunnableExample height={400} tiers={['draw']} caption="Drag the ring, or press Pick point and click a bar. Each drag and each pick is one undo step." code={`const bar = document.createElement('div');
 bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px;font-size:12px';
 el.appendChild(bar);
 const host = document.createElement('div');
@@ -266,8 +267,9 @@ const button = (label, run) => {
   b.onclick = run;
   bar.appendChild(b);
 };
-// One click answers with the bar time and the price together.
-button('Pick point', () => chart.beginPick('point', p => study.setSettings({ from: p.time, price: p.price })));
+// One click answers with the bar time and the price together, and moving the
+// anchor through the drawing controller makes the pick an undo step like a drag.
+button('Pick point', () => chart.beginPick('point', p => draw.moveInputAnchor(study.id, 'price', p)));
 button('Undo', () => draw.undo());
 button('Redo', () => draw.redo());
 bar.appendChild(readout);
@@ -708,7 +710,8 @@ const bars = Array.from({ length: 90 }, (_, i) => {
 chart.addSeries('candlestick').setData(bars);
 chart.addPriceLine({ price: 100, color: '#8892a6', lineStyle: 'dotted', id: 'boundary',
   leftLabel: 'tick 0.05 from here, 0.01 below' }, 0);
-chart.trading.setTickSchedule(ticks);
+// The chart hands it to its trading layer, and rounds dragged alerts with it too.
+chart.setTickSchedule(ticks);
 const order = { id: 'entry', type: 'limit', side: 'buy', price: 99.62, size: 10 };
 chart.trading.setOrders([order]);
 chart.trading.on('trading:order_modify', (event) => {

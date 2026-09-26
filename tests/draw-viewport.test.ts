@@ -686,15 +686,49 @@ describe('panes', () => {
     expect(moved.paneIndex).toBe(2);
     expect(moved.viewportPoints).toEqual([{ x: 0.25, y: 0.5 }]);
     const [at] = draw.screenPoints(note.id)!;
-    // Read off the chart's rectangle, not worked out from the pane's scales:
-    // the moved pane is not scaled until something asks, so a top taken as
-    // priceToCoordinate(yToPrice(0)) reads its range once before scaling and
-    // once after, and comes out below the chart.
+    // Placed by the chart's rectangle, and asking for it scaled the moved
+    // pane, so the pane's own scale puts its top at the same place.
     const rect = chart.plotRect(2)!;
     expect(rect.width).toBe(size(2).w);
     expect(at.x).toBeCloseTo(rect.left + 0.25 * rect.width, 6);
     expect(at.y).toBeCloseTo(rect.top + 0.5 * rect.height, 6);
     expect(at.y).toBeLessThan(700);
+    const top = chart.priceToCoordinate(chart.panes()[2].yToPrice(0), 2)!;
+    expect(at.y).toBeCloseTo(top + 0.5 * size(2).h, 6);
+  });
+
+  it('converts on a pane no frame has painted yet at the prices that pane shows, both ways', () => {
+    // A moved pane, and a pane just made, keep their placeholder scale until
+    // something asks for a price there: pinning or unpinning in code is such
+    // an ask, or it stores the placeholder's 0..1 as prices.
+    const { chart, draw } = mount(800, 700, { panes: 3 });
+    const box = draw.add({ tool: 'rectangle', paneIndex: 1, style: {}, points: [], space: 'viewport',
+      viewportPoints: [{ x: 0.2, y: 0.25 }, { x: 0.6, y: 0.75 }] });
+    expect(chart.movePane(1, 1)).toBe(true);
+    expect(draw.update(box.id, { space: 'data' })).toBe(true);
+    const rect = chart.plotRect(2)!;
+    const prices = draw.get(box.id)!.points.map(p => p.price);
+    expect(prices[0]).toBeCloseTo(chart.coordinateToPrice(rect.top + 0.25 * rect.height, 2)!, 6);
+    expect(prices[1]).toBeCloseTo(chart.coordinateToPrice(rect.top + 0.75 * rect.height, 2)!, 6);
+    expect(Math.min(...prices)).toBeGreaterThan(90);
+
+    const fresh = mount(800, 700);
+    fresh.chart.addSeries('line', { paneIndex: 1 }).setData(bars.map(b => ({ time: b.time, value: b.close })));
+    const note = fresh.draw.add({ tool: 'rectangle', paneIndex: 1, style: {}, points: [], space: 'viewport',
+      viewportPoints: [{ x: 0.2, y: 0.25 }, { x: 0.6, y: 0.75 }] });
+    expect(fresh.draw.update(note.id, { space: 'data' })).toBe(true);
+    expect(Math.min(...fresh.draw.get(note.id)!.points.map(p => p.price))).toBeGreaterThan(90);
+
+    const other = mount(800, 700, { panes: 3 });
+    expect(other.chart.movePane(1, 1)).toBe(true);
+    const data = other.draw.add({ tool: 'rectangle', paneIndex: 2, style: {},
+      points: [{ time: bars[20].time, price: 99 }, { time: bars[40].time, price: 102 }] });
+    expect(other.draw.update(data.id, { space: 'viewport' })).toBe(true);
+    const frame = other.chart.plotRect(2)!;
+    const ys = other.draw.get(data.id)!.viewportPoints!.map(p => p.y);
+    expect(ys[0]).toBeCloseTo((other.chart.priceToCoordinate(99, 2)! - frame.top) / frame.height, 6);
+    expect(ys[1]).toBeCloseTo((other.chart.priceToCoordinate(102, 2)! - frame.top) / frame.height, 6);
+    expect(ys[0]).toBeGreaterThan(ys[1]);
   });
 
   it('survives a pane collapse and comes back where it was', () => {

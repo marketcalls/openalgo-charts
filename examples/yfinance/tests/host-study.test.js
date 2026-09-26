@@ -8,7 +8,7 @@ vi.mock('../src/persist.js', () => ({ autosave: vi.fn() }));
 import '../../../src/indicators/index.ts';
 import { Chart, ChartObjects } from '../../../src/index.ts';
 import { fakeDocument } from '../../../tests/helpers/fake-dom';
-import { HOST_STUDY_POLICY, addHostStudy, hostStudy, removeHostStudy, studyAllows } from '../src/host-study.js';
+import { HOST_STUDY_POLICY, addHostStudy, hostStudy, keepHostStudy, removeHostStudy, studyAllows } from '../src/host-study.js';
 
 const charts = [];
 afterEach(() => charts.splice(0).forEach((chart) => chart.destroy()));
@@ -48,6 +48,33 @@ describe('the protected VWAP', () => {
     expect(hostStudy(chart)).toBeUndefined();
     expect(removeHostStudy(chart)).toBe(false);
     objects.destroy();
+  });
+
+  it('stays on the chart through a layout the user applies, once, and a chart without it stays without', () => {
+    const chart = mount();
+    const other = mount();
+    other.addIndicator('sma');
+    other.addIndicator('rsi');
+    // A layout from elsewhere, holding two ordinary studies and none of the host's.
+    const layout = JSON.parse(JSON.stringify(other.getState()));
+    expect(keepHostStudy(chart, layout)).toBe(layout);
+    const study = addHostStudy(chart);
+    const applied = keepHostStudy(chart, layout);
+    expect(chart.restoreState(applied).applied).toBe(true);
+    expect(chart.indicators().map((item) => item.indicatorId)).toEqual(['sma', 'rsi', 'vwap']);
+    expect(hostStudy(chart)?.id).toBe(study.id);
+    expect(hostStudy(chart)?.policy()).toEqual(HOST_STUDY_POLICY);
+    // The host's own save already holds it: nothing is added.
+    const own = JSON.parse(JSON.stringify(chart.getState()));
+    expect(keepHostStudy(chart, own)).toBe(own);
+    expect(chart.restoreState(keepHostStudy(chart, own)).applied).toBe(true);
+    expect(chart.indicators().filter((item) => item.indicatorId === 'vwap')).toHaveLength(1);
+    // An id a study in the layout already has goes to that study; the host's takes a new one.
+    const clash = { ...layout, indicators: [...layout.indicators, { indicatorId: 'ema', settings: {}, paneIndex: 0, instanceId: study.id }] };
+    const merged = keepHostStudy(chart, clash);
+    expect(chart.restoreState(merged).applied).toBe(true);
+    expect(chart.indicators().map((item) => item.indicatorId)).toEqual(['sma', 'rsi', 'ema', 'vwap']);
+    expect(hostStudy(chart)?.policy()).toEqual(HOST_STUDY_POLICY);
   });
 
   it('treats an engine without policies as allowing everything', () => {

@@ -124,5 +124,5 @@ passes it on to [`chart.trading`](/docs/trading-api#price-ticks-while-dragging),
 bracket lines snap in their band. It never builds the trading layer itself, which would
 take the host's drag subscription; a layer built later starts from the schedule.
 Applying a constant-tick instrument clears it, so after a symbol switch no drag snaps to
-the previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to
+the previous instrument's bands. Call `chart.setTickSchedule` after `applyTo` to
 override it, and pass the schedule as a `DomLadder`'s `tickSchedule` for a depth ladder.

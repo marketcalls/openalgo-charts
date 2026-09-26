@@ -111,5 +111,5 @@ the price pane round in the band a price falls in; a host with its own metadata 
 order and bracket lines snap to it. It does not build the trading layer (that would take the
 host's drag subscription); a layer built later starts from it. Applying a
 constant-tick instrument clears it, so after a symbol switch no drag snaps to the
-previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to
+previous instrument's bands. Call `chart.setTickSchedule` after `applyTo` to
 override it. For a depth ladder, pass the schedule as `DomLadder`'s `tickSchedule`.

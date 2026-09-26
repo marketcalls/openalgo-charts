@@ -514,7 +514,7 @@ Every trading event is mirrored onto the main bus, so
 | `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` |
 
 `newPrice` is the pointer's price unless the chart has a tick schedule, from
-[`chart.trading.setTickSchedule`](/docs/trading-api#price-ticks-while-dragging) or from
+[`chart.setTickSchedule`](/docs/trading-api#price-ticks-while-dragging) or from
 an instrument with `tickBands` applied with `applyTo`, in which case it is the nearest
 price on the instrument's ticks.
 

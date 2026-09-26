@@ -491,9 +491,13 @@ there lands in front. Older documents have no `stackAbove` and paint exactly as 
 
 The pointer takes what is painted on top. The front layer answers for every layer of its
 pane, front to back: a click lands on the uppermost drawing under it wherever each one
-paints, and the selected drawing's handles always paint in front. Where a drawing and a
-source or study both lie under a right-click, the one painted on top is the menu's target,
-so a drawing behind the series or under a study gives way to that series there.
+paints, and the selected drawing's handles always paint in front. Whatever paints over
+the series (price lines, order lines, markers, drawings in front) takes the press, the
+hover and the menu from a drawing placed in the series band or sent behind the series
+wherever it answers, whatever the distance, so a box placed under an order line gives
+the line the press. Where a drawing and a source or study both lie under a right-click,
+the one painted on top is the menu's target, so a drawing behind the series or under a
+study gives way to that series there.
 
 A study or the price source moves in the series band with `chart.moveInSeriesStack(id,
 target, where)`. The drawings placed on it move with it, since nothing can paint between an

@@ -770,6 +770,8 @@ describe('a dragged alert lands on the band of the instrument tick schedule', ()
   it('refuses a schedule that was never validated', () => {
     const { chart } = setup();
     expect(() => chart.setTickSchedule([{ tick: 0.01 }] as unknown as TickSchedule)).toThrow(/new TickSchedule/);
+    // A lookalike with `round` alone would throw inside the drag that pushes a range bound past the other.
+    expect(() => chart.setTickSchedule({ round: (price: number) => price } as unknown as TickSchedule)).toThrow(/new TickSchedule/);
     expect(chart.tickSchedule()).toBeNull();
   });
 
