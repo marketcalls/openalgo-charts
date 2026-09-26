@@ -39,6 +39,12 @@ All notable changes to OpenAlgo Charts.
   writes `rgba()` with the alpha as given, for canvas, and the widget's writes
   `#rrggbb` for an opaque colour and clamps and rounds the alpha, for a token
   value.
+- `npm run test:script-engine` draws a compiled study with two grids and a band
+  whose colour the script computes per bar, built with
+  `descriptorFor(program, { id, chartVersion: VERSION })`, on a real chart, and
+  checks both grids and each run of the band's colour. Against an engine older
+  than 0.8.0, whose adapter refuses such a study, the case is skipped with a
+  note saying so; the engine's version is read from its own `package.json`.
 
 ### Sizes
 
@@ -351,9 +357,11 @@ import by 43.
   to both axes and writes both settings in one patch on release, Escape cancels, an
   active drawing tool or a waiting pick takes the press, and a study whose policy is
   `configurable: false` keeps it still. Each drag is one step of the drawing undo
-  history, in order with the drawings, so Ctrl+Z, the rail and the phone bar take it
-  back in both hosts; the step emits `drawing:change` with empty `ids` so Undo
-  controls refresh. `draw.moveInputAnchor(studyId, key, point)` moves an anchor the
+  history, in order with the drawings, and emits `drawing:change` with empty `ids`
+  so Undo controls refresh; a host keeping one timeline of its own takes the steps
+  with `draw.delegateInputAnchorSteps(record)`, as the chart-wide `ChartHistory`
+  below does, so Ctrl+Z, the rail and the phone bar take a drag back once in both
+  hosts. `draw.moveInputAnchor(studyId, key, point)` moves an anchor the
   way a drag does, as one step, for a host control that sets the point another way
   (a point pick). `new DrawingController(chart, { inputAnchors: false })` draws
   none. The reference host adds the Anchored growth sample.
@@ -429,18 +437,39 @@ import by 43.
   chart's. It records its chart-type rebuild as a command, makes each chart
   settings and study settings session one step, and keeps comparisons, the volume
   row and loaded layouts out of it.
+- A study input anchor's move is one step of the chart-wide timeline, taken back
+  once. `DrawingController.delegateInputAnchorSteps(record)` hands the step each
+  anchor move makes (a drag, `moveInputAnchor`) to a host's own timeline, with its
+  own `undo` and `redo` (`InputAnchorStep`), until the returned function gives the
+  steps back, and records none of them itself. `ChartHistory` takes them from its
+  drawing controller, and from one it is attached to later, and records the
+  settings patch the move wrote as the move ends, so the rail's Undo is on the
+  moment a drag is released. A drag, `moveInputAnchor` and a settings dialog's
+  **Pick point on chart** are each one step, walked in order with the drawings:
+  an undo after a pick takes the pick back, never a drawing made before it. A
+  press that grabs something starts a step of its own, so a change made earlier
+  in the same turn is not taken back with the drag. A move made inside
+  `untracked`, and so inside `ignore`, is the host's own and a step nowhere.
+- Undo and redo never override a study's policy. A press leaves a study as its
+  policy keeps it: not removed while `removable: false`, its settings and scales
+  as they are while `configurable: false`, its pane and its row in the stack
+  while `movable: false`. The rest of the step still applies, and a step left
+  with nothing to do (removing a study the host has protected since) is dropped
+  and the press goes on to the one before, as the drawing history treats a
+  read-only drawing, so `canUndo`, `canRedo` and the peeks say what a press would
+  do, and `subscribe` hears when a policy changes that. A change only the host
+  could make, adding a protected study or a forced write or remove on one, is no
+  step, and a study brought back returns with the restrictions it had.
+- A study brought back by an undo or redo takes back the instance id it had, so
+  the studies reading it and the alerts naming it find it again. If a study the
+  host placed under that id since holds it, the one brought back takes a fresh id
+  instead, the later steps and the studies reading it follow it there, and the
+  host's study keeps the id and is never taken for the one a step means.
 
 ### Changed
 
 - The widget's Undo and Redo chords are listed with the widget's shortcuts
   rather than the drawing ones, since they now reach every step on the chart.
-
-### Known limits
-
-- `addIndicator` cannot yet re-create a study under the instance id it had, so
-  a study brought back by an undo answers to a new id. The history follows it
-  for every later step and rewrites the study-source settings of studies that
-  read it; an indicator alert keyed to the old id does not follow.
 ### Added
 
 - Conditional study inputs. Every `IndicatorInput` (and a chart settings colour

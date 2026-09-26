@@ -228,12 +228,56 @@ describe('studies', () => {
     await settle();
     expect(alerts.availability(alert.id).available).toBe(false);
     history.undo();
-    // Red on this branch alone: green once addIndicator honours options.instanceId (the core change).
     expect(studyIds(chart)).toEqual([study.id]);
     expect(alerts.availability(alert.id).available).toBe(true);
     history.redo();
     history.undo();
     expect(studyIds(chart)).toEqual([study.id]);
+  });
+
+  it('brings a removed study back under a fresh id when another study holds its id by then, and leaves that one to the host', async () => {
+    const { chart, history, errors } = rig();
+    const source = chart.addIndicator('hist-osc', { length: 3 });
+    const reader = chart.addIndicator('hist-osc', { source: { kind: 'indicator', instanceId: source.id, plotKey: 'value' } });
+    await settle();
+    history.clear();
+    chart.removeIndicator(source.id);
+    await settle();
+    // The id came free, and the host placed a study of its own under it.
+    const holder = history.ignore(() => chart.addIndicator('hist-overlay', { length: 7 }, { instanceId: source.id }));
+    const add = vi.spyOn(chart, 'addIndicator');
+
+    expect(history.undo()).toBe(true);
+    expect(errors).toEqual([]);
+    expect(add.mock.calls[0][2]).toMatchObject({ instanceId: source.id });
+    const back = (): ReturnType<Chart['indicators']>[number] | undefined =>
+      chart.indicators().find(s => s.indicatorId === 'hist-osc' && s.id !== reader.id);
+    expect(back()?.id).toBeDefined();
+    expect(back()!.id).not.toBe(source.id);
+    expect(back()!.settings().length).toBe(3);
+    expect(back()!.paneIndex).toBe(1);
+    expect((reader.settings().source as { instanceId: string }).instanceId).toBe(back()!.id);
+    // The host's study keeps the id, its pane and its settings.
+    expect(chart.indicators().find(s => s.id === source.id)).toBe(holder);
+    expect(holder.paneIndex).toBe(0);
+    expect(holder.settings().length).toBe(7);
+
+    // From here on each step reaches each study as itself.
+    expect(history.redo()).toBe(true);
+    expect(back()).toBeUndefined();
+    expect(chart.indicators()).toContain(holder);
+    expect(history.undo()).toBe(true);
+    expect(back()!.settings().length).toBe(3);
+    holder.setSettings({ length: 9 });
+    await settle();
+    back()!.setSettings({ length: 4 });
+    await settle();
+    expect(history.undo()).toBe(true);
+    expect(back()!.settings().length).toBe(3);
+    expect(holder.settings().length).toBe(9);
+    expect(history.undo()).toBe(true);
+    expect(holder.settings().length).toBe(7);
+    expect(back()!.settings().length).toBe(3);
   });
 
   it('records study settings, visibility, scale assignment and stacking as steps', async () => {
@@ -1234,6 +1278,168 @@ describe('host control', () => {
   });
 });
 
+describe('study policies', () => {
+  it('drops a step that would remove a study the host has protected since, and keeps canUndo and canRedo true', async () => {
+    const { chart, draw, history, errors } = rig();
+    const level = draw.add(line(99));
+    const study = chart.addIndicator('hist-osc');
+    await settle();
+    expect(history.peekUndo()?.changes).toEqual(['study-add']);
+    const heard = vi.fn();
+    history.subscribe(heard);
+    study.setPolicy({ removable: false });
+    await settle();
+    // Nothing is left of the add that a press may do, and the controls hear so.
+    expect(heard).toHaveBeenCalled();
+    expect(history.peekUndo()?.changes).toEqual(['drawing']);
+
+    expect(history.undo()).toBe(true);
+    expect(chart.indicators()).toEqual([study]);
+    expect(draw.get(level.id)).toBeUndefined();
+    expect(history.canUndo()).toBe(false);
+    expect(errors).toEqual([]);
+    // Dropped for good: redo brings back the line and nothing else.
+    expect(history.redo()).toBe(true);
+    expect(draw.get(level.id)).toBeDefined();
+    expect(history.canRedo()).toBe(false);
+    expect(chart.indicators()).toEqual([study]);
+  });
+
+  it('leaves the settings of a study the host locked since, and walks the rest of the step both ways', async () => {
+    const { chart, history, errors } = rig();
+    const locked = chart.addIndicator('hist-osc', { length: 3 });
+    const free = chart.addIndicator('hist-overlay', { length: 4 });
+    await settle();
+    history.clear();
+    const end = history.group('Both');
+    locked.setSettings({ length: 30 });
+    free.setSettings({ length: 40 });
+    await settle();
+    end();
+    locked.setSettings({ length: 31 });
+    await settle();
+    locked.setPolicy({ configurable: false });
+    await settle();
+    // The step that changed the locked study alone has nothing left to do.
+    expect(history.peekUndo()).toEqual({ label: 'Both', changes: ['study-settings'] });
+    expect(history.undo()).toBe(true);
+    expect(locked.settings().length).toBe(31);
+    expect(free.settings().length).toBe(4);
+    expect(history.redo()).toBe(true);
+    expect(free.settings().length).toBe(40);
+    expect(history.canRedo()).toBe(false);
+    // Unlocked again, the step reaches it as recorded.
+    locked.setPolicy(null);
+    await settle();
+    expect(history.undo()).toBe(true);
+    expect(locked.settings().length).toBe(3);
+    expect(errors).toEqual([]);
+  });
+
+  it('never gives a study that may not move another pane or row, and never fails a press over it', async () => {
+    const { chart, history, errors } = rig();
+    const first = chart.addIndicator('hist-osc');
+    const pinned = chart.addIndicator('hist-osc');
+    const other = chart.addIndicator('hist-overlay');
+    const second = chart.addIndicator('hist-overlay');
+    await settle();
+    history.clear();
+    chart.moveIndicator(pinned.id, first.paneIndex);
+    await settle();
+    chart.reorderIndicator(pinned.id, -1);
+    await settle();
+    // A row two studies the host leaves free trade, beside the pinned one.
+    chart.reorderIndicator(second.id, -1);
+    await settle();
+    pinned.setPolicy({ movable: false });
+    await settle();
+    const rows = (): string[] => chart.indicators().map(s => s.id);
+    expect(rows()).toEqual([pinned.id, first.id, second.id, other.id]);
+
+    expect(history.peekUndo()?.changes).toEqual(['study-order']);
+    expect(history.undo()).toBe(true);
+    expect(rows()).toEqual([pinned.id, first.id, other.id, second.id]);
+    // The two steps that moved the pinned study leave nothing to do.
+    expect(history.canUndo()).toBe(false);
+    expect(history.undo()).toBe(false);
+    expect(pinned.paneIndex).toBe(first.paneIndex);
+    expect(rows()).toEqual([pinned.id, first.id, other.id, second.id]);
+    expect(errors).toEqual([]);
+    expect(history.redo()).toBe(true);
+    expect(rows()).toEqual([pinned.id, first.id, second.id, other.id]);
+    expect(history.canRedo()).toBe(false);
+  });
+
+  it('puts back a stack around a study that may not move without giving it another row', async () => {
+    const { chart, history, errors } = rig();
+    const top = chart.addIndicator('hist-overlay');
+    const pinned = chart.addIndicator('hist-overlay');
+    const bottom = chart.addIndicator('hist-overlay');
+    await settle();
+    history.clear();
+    // Top and bottom trade ends, passing the study between them twice.
+    chart.reorderIndicator(bottom.id, -1);
+    chart.reorderIndicator(bottom.id, -1);
+    chart.reorderIndicator(top.id, 1);
+    chart.reorderIndicator(top.id, 1);
+    await settle();
+    pinned.setPolicy({ movable: false });
+    await settle();
+    const rows = (): string[] => chart.indicators().map(s => s.id);
+    expect(rows()).toEqual([bottom.id, pinned.id, top.id]);
+    expect(history.undo()).toBe(true);
+    expect(rows()).toEqual([top.id, pinned.id, bottom.id]);
+    expect(history.redo()).toBe(true);
+    expect(rows()).toEqual([bottom.id, pinned.id, top.id]);
+    expect(errors).toEqual([]);
+  });
+
+  it('records no step for what the host does to a study it protects', async () => {
+    const { chart, history } = rig();
+    const owned = chart.addIndicator('hist-osc', { length: 3 }, { policy: { configurable: false, removable: false } });
+    await settle();
+    expect(history.canUndo()).toBe(false);
+    owned.setSettings({ length: 8 }, { force: true });
+    await settle();
+    expect(history.canUndo()).toBe(false);
+    chart.addIndicator('hist-overlay');
+    await settle();
+    expect(history.undo()).toBe(true);
+    expect(chart.indicators()).toEqual([owned]);
+    expect(owned.settings().length).toBe(8);
+    expect(history.canUndo()).toBe(false);
+    // Lifted later, the policy still leaves the host's own change where it is.
+    owned.setPolicy(null);
+    await settle();
+    expect(history.canUndo()).toBe(false);
+    expect(owned.settings().length).toBe(8);
+    // Taken away by the host's hand while protected, it is not the user's to bring back.
+    owned.setPolicy({ removable: false });
+    await settle();
+    chart.removeIndicator(owned.id, { force: true });
+    await settle();
+    expect(history.canUndo()).toBe(false);
+    expect(history.undo()).toBe(false);
+    expect(chart.indicators()).toEqual([]);
+  });
+
+  it('brings a study back with the restrictions the host had set on it', async () => {
+    const { chart, history } = rig();
+    const study = chart.addIndicator('hist-osc', { length: 6 }, { policy: { configurable: false, movable: false } });
+    await settle();
+    history.clear();
+    chart.removeIndicator(study.id);
+    await settle();
+    expect(history.undo()).toBe(true);
+    const back = chart.indicators()[0];
+    expect(back.id).toBe(study.id);
+    expect(back.policy()).toEqual({ configurable: false, movable: false });
+    expect(back.setSettings({ length: 9 })).toBe(false);
+    expect(history.redo()).toBe(true);
+    expect(chart.indicators()).toEqual([]);
+  });
+});
+
 describe('settings the history leaves alone', () => {
   it('does not record a view change: a zoom, an axis drag, a pinned range', async () => {
     const { chart, history } = rig();
@@ -1290,5 +1496,117 @@ describe('linked charts', () => {
     history.redo();
     expect(chart.priceAxisState(0, 'right')?.mode).toBe('logarithmic');
     expect(heard).toEqual([]);
+  });
+});
+
+registerIndicator({
+  id: 'hist-anchored', name: 'History anchored', placement: 'onchart',
+  inputs: [
+    { key: 'at', type: 'timestamp', label: 'Anchor time', default: T0 + 10 * 60, pick: true },
+    { key: 'level', type: 'price', label: 'Anchor price', default: 100, pick: true, timeKey: 'at', anchor: true },
+  ],
+  plots: [{ key: 'value', title: 'Value', type: 'line' }],
+  calc: (b, s) => ({ value: b.map(x => (x.time >= (s.at as number) ? s.level as number : null)) }),
+});
+
+describe('study input anchors', () => {
+  const anchorOf = (study: { id: string }): string => `input-anchor:${study.id}:level`;
+  /** A drag of the anchor handle, pressed and released at two bars. */
+  const dragAnchor = (chart: Chart, study: { id: string }, from: { at: number; level: number }, to: { at: number; level: number }): void => {
+    const id = anchorOf(study);
+    chart.emit('drag:start', { id, time: from.at, price: from.level, paneIndex: 0 });
+    chart.emit('drag', { id, time: to.at, price: to.level, paneIndex: 0 });
+    chart.emit('drag:end', { id, time: to.at, price: to.level, paneIndex: 0 });
+  };
+
+  it('takes back an anchor pick made outside the drawing history first, and never an unrelated drawing for it', async () => {
+    const { chart, draw, history } = rig();
+    const study = chart.addIndicator('hist-anchored');
+    await settle();
+    history.clear();
+    const level = draw.add(line(97));
+    const start = { at: T0 + 10 * 60, level: 100 };
+    const dragged = { at: T0 + 20 * 60, level: 104 };
+    const picked = { at: T0 + 30 * 60, level: 108 };
+    dragAnchor(chart, study, start, dragged);
+    expect(study.settings()).toMatchObject(dragged);
+    await settle();
+    // What a settings dialog's Pick point writes: the settings, not a drag.
+    study.setSettings(picked);
+    await settle();
+
+    expect(history.undo()).toBe(true);
+    expect(study.settings()).toMatchObject(dragged);
+    expect(draw.get(level.id)).toBeDefined();
+    expect(history.undo()).toBe(true);
+    expect(study.settings()).toMatchObject(start);
+    expect(draw.get(level.id)).toBeDefined();
+    expect(history.undo()).toBe(true);
+    expect(draw.get(level.id)).toBeUndefined();
+    expect(study.settings()).toMatchObject(start);
+    expect(history.canUndo()).toBe(false);
+    // The drawing controller held the line's step alone, and a press straight
+    // at it after the history walked back finds nothing more to take.
+    expect(draw.canUndo()).toBe(false);
+
+    expect(history.redo()).toBe(true);
+    expect(draw.get(level.id)).toBeDefined();
+    expect(study.settings()).toMatchObject(start);
+    expect(history.redo()).toBe(true);
+    expect(study.settings()).toMatchObject(dragged);
+    expect(history.redo()).toBe(true);
+    expect(study.settings()).toMatchObject(picked);
+    expect(history.canRedo()).toBe(false);
+  });
+
+  it('holds a drag and a moveInputAnchor as one step each, at once, and takes each back exactly once', () => {
+    const { chart, draw, history } = rig();
+    const study = chart.addIndicator('hist-anchored');
+    const start = { at: T0 + 10 * 60, level: 100 };
+    const dragged = { at: T0 + 20 * 60, level: 104 };
+    // The study came in the same turn: a press on its handle is an action of its own.
+    dragAnchor(chart, study, start, dragged);
+    // Recorded as the release ends, so a control asking right after sees it.
+    expect(history.peekUndo()?.changes).toEqual(['study-settings']);
+    expect(draw.moveInputAnchor(study.id, 'level', { time: T0 + 30 * 60, price: 108 })).toBe(true);
+    expect(history.peekUndo()?.changes).toEqual(['study-settings']);
+    // One owner: the drawing history holds neither move.
+    expect(draw.historySteps()).toEqual({ undo: [], redo: [] });
+    expect(draw.canUndo()).toBe(false);
+
+    expect(history.undo()).toBe(true);
+    expect(study.settings()).toMatchObject(dragged);
+    expect(history.undo()).toBe(true);
+    expect(study.settings()).toMatchObject(start);
+    expect(history.peekUndo()?.changes).toEqual(['study-add']);
+    expect(draw.undo()).toBe(false);
+    expect(history.redo()).toBe(true);
+    expect(history.redo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: T0 + 30 * 60, level: 108 });
+    expect(history.canRedo()).toBe(false);
+    expect(draw.historySteps()).toEqual({ undo: [], redo: [] });
+  });
+
+  it('records a move the host makes inside ignore nowhere, and gives the steps back to the drawing history when it goes', () => {
+    const { chart, draw, history } = rig();
+    const study = chart.addIndicator('hist-anchored');
+    history.clear();
+    history.ignore(() => draw.moveInputAnchor(study.id, 'level', { time: T0 + 20 * 60, price: 104 }));
+    expect(study.settings()).toMatchObject({ at: T0 + 20 * 60, level: 104 });
+    expect(history.canUndo()).toBe(false);
+    expect(draw.canUndo()).toBe(false);
+
+    // A controller the history follows takes the steps; the one it left keeps its own again.
+    const next = new DrawingController(chart);
+    history.attach(chart, next);
+    expect(draw.moveInputAnchor(study.id, 'level', { time: T0 + 25 * 60, price: 106 })).toBe(true);
+    expect(draw.canUndo()).toBe(true);
+    draw.destroy();
+    history.destroy();
+    expect(next.moveInputAnchor(study.id, 'level', { time: T0 + 30 * 60, price: 108 })).toBe(true);
+    expect(next.canUndo()).toBe(true);
+    expect(next.undo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: T0 + 25 * 60, level: 106 });
+    next.destroy();
   });
 });

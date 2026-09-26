@@ -234,6 +234,48 @@ describe('a study input anchor', () => {
     expect(m.draw.moveInputAnchor('missing', 'level', { time: T0 + 6 * 60, price: 90 })).toBe(false);
   });
 
+  it('hands each move to a host timeline that took the steps, and records none of its own', () => {
+    const m = mount();
+    const study = m.chart.addIndicator(register());
+    m.chart.exportSVG();
+    const start = { ...study.settings() };
+    const changes: unknown[] = [];
+    m.chart.on('drawing:change', event => changes.push(event));
+    const steps: { undo(): boolean; redo(): boolean }[] = [];
+    const giveBack = m.draw.delegateInputAnchorSteps(step => steps.push(step));
+    const from = pointOf(m.chart, study);
+    m.dragTo(from.x, from.y, m.chart.timeToCoordinate(T0 + 20 * 60)!, from.y - 30);
+    const dragged = { ...study.settings() };
+    expect(dragged.at).toBe(T0 + 20 * 60);
+    expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 30 * 60, price: 120 })).toBe(true);
+    expect(steps).toHaveLength(2);
+    expect(m.draw.canUndo()).toBe(false);
+    expect(m.draw.historySteps()).toEqual({ undo: [], redo: [] });
+    expect(changes).toEqual([]);
+    // The steps walk the settings back and forth for the host.
+    expect(steps[1].undo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: dragged.at, level: dragged.level });
+    expect(steps[0].undo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: start.at, level: start.level });
+    expect(steps[0].undo()).toBe(false);
+    expect(steps[0].redo()).toBe(true);
+    // A move inside `untracked` is the host's own: no step here or there.
+    m.draw.untracked(() => m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 5 * 60, price: 90 }));
+    expect(steps).toHaveLength(2);
+    expect(m.draw.canUndo()).toBe(false);
+    // A later owner takes them; giving back an earlier one's leaves it be.
+    const later: unknown[] = [];
+    const giveBackLater = m.draw.delegateInputAnchorSteps(step => later.push(step));
+    giveBack();
+    expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 6 * 60, price: 91 })).toBe(true);
+    expect(later).toHaveLength(1);
+    giveBackLater();
+    expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 7 * 60, price: 92 })).toBe(true);
+    expect(later).toHaveLength(1);
+    expect(m.draw.canUndo()).toBe(true);
+    expect(changes).toEqual([{ ids: [], kind: 'update' }]);
+  });
+
   it('gives the press to an active drawing tool, and a pick the click', () => {
     const { chart, draw, press, el } = mount();
     const study = chart.addIndicator(register());

@@ -828,8 +828,11 @@ registerIndicator({
   Recording it and walking it emit `drawing:change` with empty `ids`, so a host's
   Undo control refreshes. A host control that sets the point another way (its own
   point pick) calls `draw.moveInputAnchor(studyId, key, point)` so that move is a
-  step too; a plain `setSettings` is not recorded, and the drags before it are then
-  passed over.
+  step too; to the drawing history alone a plain `setSettings` is not a step, and
+  the drags before it are then passed over. With the widget tier's `ChartHistory`
+  on the chart (the widget and the reference host build one), the history takes
+  these steps instead (`draw.delegateInputAnchorSteps`) and records every settings
+  patch, a dialog's pick included, so each move is undone once, in order.
 - **Conflicts.** An active drawing tool takes the press (the anchor gives no hit
   while placing), a pick in progress takes the click, and choosing a tool, starting
   a pick or replacing the data context cancels a drag in hand. A hidden study shows

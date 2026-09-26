@@ -42,6 +42,18 @@ controller holds under one the history does not (a controller that recorded a ho
 is taken back from the drawings either side of it instead, so a press never takes another
 drawing with it.
 
+A study input anchor (a price input with `anchor: true`) is a settings patch like any other.
+The history takes the steps its drawing controller would record for it
+(`delegateInputAnchorSteps`) and records the patch as the drag or `moveInputAnchor` ends, so
+each move is one step, undone once and in order with the drawings, and a settings dialog's
+**Pick point on chart** is part of that dialog's step. The drawing controller holds none of
+them while the history is attached.
+
+A study brought back is re-created under the instance id it had, so the studies reading it and
+the alerts naming it find it again. If a study the host placed under that id since holds it,
+the study comes back under a fresh id instead: every later step and every study reading it
+follows it there, and the host's study keeps the id and is left alone.
+
 A pane is a step of its own when it comes or goes with no study bringing or taking it: a
 pane left with only drawings and removed with `removePane` comes back with them, and an
 empty one comes back empty, each with its height, fold and axes. With nothing plotted to
@@ -58,6 +70,15 @@ removes it nor makes it again, since that would take away or leave behind plotte
   are not history at all.
 - **It never places an order.** Order entry is not a step, and nothing in the history reaches
   an order route.
+- **It never overrides a study's policy.** A press leaves a study the way its
+  [policy](/docs/indicators#study-policies) keeps it: on the chart while `removable: false`, with its settings
+  and scales while `configurable: false`, in its pane and its row while `movable: false`. The
+  rest of the step still applies. A step left with nothing to do, such as removing a study the
+  host has protected since, is dropped and the press goes on to the one before, the way the
+  drawing history treats a read-only drawing, so `canUndo`, `canRedo` and the peeks always say
+  what a press would do, and `subscribe` hears when a policy changes that. Adding a protected
+  study, and a forced write or remove on one, are the host's and never steps; a study brought
+  back returns with the restrictions it had.
 
 ## Grouping and live edits
 
@@ -133,8 +154,3 @@ behind it, and keeps the redo branch, so it never describes a chart that is not 
 The widget exposes its timeline as `widget.history` and `ctx.history`. `historyPress(ctx, 'undo')`
 and `historyReady(ctx, 'undo')` are what its own controls call; they fall back to the drawing
 controller for a custom context built without a history.
-
-Until the chart can re-create a study under the id it had, a study brought back answers to a
-new id: the history maps its old id to the new one for every later step, and rewrites the
-study-source reference of any study reading it. An indicator alert keyed to the old id does not
-follow it.

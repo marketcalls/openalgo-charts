@@ -3,7 +3,7 @@
  * time (`timeKey`) and declared with `anchor: true`. It sits at the point the
  * two settings name, on the pane and scale a pick of that price reads, and a
  * drag moves both halves as one settings change that the drawing history
- * holds as one undo step.
+ * holds as one undo step, or hands to a host's own timeline.
  *
  * The drawing controller owns the anchors because the two share everything
  * that makes an edit on the chart safe: an active drawing tool takes the press
@@ -40,7 +40,12 @@ export interface InputAnchorHost {
   panes?(): readonly unknown[];
 }
 
-/** One recorded change the drawing history walks: false when it no longer applies. */
+/**
+ * One anchor move as an undo step, walked by the drawing history or by the
+ * host's timeline it was handed to (`DrawingController.delegateInputAnchorSteps`).
+ * Each call writes the other side's point, and is false, writing nothing, once
+ * the study no longer holds the point it starts from.
+ */
 export interface InputAnchorStep {
   undo(): boolean;
   redo(): boolean;

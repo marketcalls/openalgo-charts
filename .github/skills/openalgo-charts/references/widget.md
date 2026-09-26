@@ -262,7 +262,9 @@ hint reads "Pick {time} and {price} on the chart" (message keys
 `Pick point on chart` and `Pick {time} and {price} on the chart`). The target is
 `studyInputTarget` from the draw tier, the same one the chart's anchor uses. The
 widget's `DrawingController` draws an `anchor: true` pair's handle, and Mod+Z,
-the rail's Undo and the phone bar take a drag of it back.
+the rail's Undo and the phone bar take a drag of it back, once: the widget's
+`ChartHistory` holds the step, and a pick in the settings dialog is part of the
+dialog's step on the same timeline.
 Context changes, study removal and chart destruction cancel pending controls.
 
 Alert panels use optional `WidgetContext.alerts`, supplied automatically by
@@ -901,9 +903,23 @@ history.subscribe(refreshButtons); history.clear(); history.destroy();
 - **Failure**: a step that cannot be applied is rolled back, dropped with every step behind
   it, and reported to `onError`; the redo branch is kept. A new action clears redo.
 - **Layouts**: `chart.restoreState` and `widget.restoreState` start a new timeline.
-- **Study ids**: `addIndicator` does not yet re-create a study under a given id, so a study
-  brought back answers to a new one; the history maps the old id to it for every later step
-  and rewrites the study-source settings of studies reading it.
+- **Study ids**: a study brought back is re-created under the instance id it had
+  (`addIndicator(id, settings, { instanceId })`), so its readers and the alerts naming it find
+  it again. When a study the host placed under that id since holds it (`addIndicator` throws on
+  an id in use), it comes back under a fresh id: later steps and the studies reading it follow
+  it, and the host's study keeps the id. A study of another kind under a step's id is never
+  taken for the one the step means.
+- **Study policies**: no press overrides one. A study stays on the chart while `removable:
+  false`, keeps its settings and scales while `configurable: false` and its pane and row while
+  `movable: false`; the rest of the step applies, and a step left with nothing to do is dropped
+  and the press goes on, so `canUndo`, `canRedo` and the peeks stay true (`subscribe` hears a
+  policy change that moves them). Adding a protected study and a forced write or remove on one
+  are the host's and never steps; a study brought back returns with its restrictions.
+- **Study input anchors**: `ChartHistory` takes the anchor steps of its drawing controller
+  (`DrawingController.delegateInputAnchorSteps`) and records the settings patch a drag or a
+  `moveInputAnchor` wrote as the move ends, so each is one step, undone once and in order with
+  the drawings, and a settings dialog's Pick point on chart is part of that dialog's step. The
+  drawing controller holds none of them while the history is attached.
 - Types: `ChartHistoryOptions` (`draw`, `limit` default 100, `series`, `setChartType`,
   `onError`), `ChartHistoryCommand`, `ChartHistoryStep`, `ChartHistoryChange` (`study-add`,
   `study-remove`, `study-settings`, `study-visibility`, `study-scale`, `study-pane`,

@@ -93,3 +93,39 @@ test('the protected VWAP keeps every user control from removing, configuring or 
   await expect.poll(() => study(page)).toBeNull();
   expect(errors).toEqual([]);
 });
+
+test('undo and redo leave the protected VWAP to the host, and walk the user\'s own studies around it', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  // A restored layout starts a new timeline.
+  await page.evaluate(() => { (window as any).__oac.app.chart.restoreState({ version: 1, indicators: [] }); });
+  await paint(page);
+  const undo = page.locator('#rail button[aria-label="Undo"]'), redo = page.locator('#rail button[aria-label="Redo"]');
+  await expect(undo).toHaveAttribute('aria-disabled', 'true');
+  await menuAt(page, 300, 200);
+  const hostRow = page.locator('#ctxmenu [data-act="hoststudy"]');
+  await hostRow.click();
+  await expect.poll(() => study(page)).not.toBeNull();
+  // Placing it was the host's act, not a step.
+  await expect(undo).toHaveAttribute('aria-disabled', 'true');
+  const ids = () => page.evaluate(() => (window as any).__oac.app.chart.indicators().map((item: any) => item.indicatorId as string));
+  await page.evaluate(() => { (window as any).__oac.app.chart.addIndicator('sma'); });
+  await expect(undo).toHaveAttribute('aria-disabled', 'false');
+  await undo.click();
+  await paint(page);
+  expect(await ids()).toEqual(['vwap']);
+  await expect(undo).toHaveAttribute('aria-disabled', 'true');
+  await redo.click();
+  await paint(page);
+  expect(await ids()).toEqual(['vwap', 'sma']);
+  await page.screenshot({ path: info.outputPath('protected-undo.png') });
+  // Taken away by the host row, which passes force: no step brings it back.
+  await menuAt(page, 300, 200);
+  await hostRow.click();
+  await expect.poll(() => study(page)).toBeNull();
+  await undo.click();
+  await paint(page);
+  expect(await ids()).toEqual([]);
+  await expect(undo).toHaveAttribute('aria-disabled', 'true');
+  expect(errors).toEqual([]);
+});

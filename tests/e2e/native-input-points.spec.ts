@@ -8,9 +8,10 @@ import type * as Widgets from '../../src/widget/index';
 // the chart drags both, and the host's Undo takes a drag back.
 test.use({ screenshot: 'only-on-failure', trace: 'retain-on-failure' });
 type Surface = 'widget' | 'demo';
-type DemoWindow = Window & { __oac: { app: { chart: Chart; loading: boolean } } };
+type Draw = { add(drawing: object): { id: string }; get(id: string): unknown; historySteps(): { undo: number[]; redo: number[] } };
+type DemoWindow = Window & { __oac: { app: { chart: Chart; draw: Draw; loading: boolean } } };
 declare global { interface Window { __points: {
-  chart: Chart; study: IndicatorApi; patches: IndicatorSettings[]; open(): void;
+  chart: Chart; draw: Draw; study: IndicatorApi; patches: IndicatorSettings[]; open(): void;
 } } }
 
 const T0 = 1700000000;
@@ -33,7 +34,7 @@ async function mount(page: Page, surface: Surface, width: number) {
   await page.evaluate(async ({ kind, t0 }) => {
     const lib = await import('/dist/openalgo-charts.mjs' as string) as typeof Charts;
     const widgets = await import('/dist/openalgo-charts.widget.mjs' as string) as typeof Widgets;
-    let chart: Chart, open: (id: string) => void;
+    let chart: Chart, draw: Draw, open: (id: string) => void;
     if (kind === 'widget') {
       const widget = widgets.createWidget(document.getElementById('host')!, {
         persist: false, rail: window.innerWidth > 640, symbol: 'PRIMARY', interval: '1m',
@@ -41,9 +42,11 @@ async function mount(page: Page, surface: Surface, width: number) {
         mobile: window.innerWidth <= 640 ? 'auto' : 'never',
       });
       chart = widget.chart;
+      draw = widget.draw as unknown as Draw;
       open = id => { widgets.mountIndicatorSettings(widget.context, undefined, { instanceId: id }); };
     } else {
       chart = (window as DemoWindow).__oac.app.chart;
+      draw = (window as DemoWindow).__oac.app.draw;
       const host = await import('/examples/yfinance/src/indicators.js' as string) as { openSettings(id: string): void };
       open = id => host.openSettings(id);
     }
@@ -65,7 +68,7 @@ async function mount(page: Page, surface: Surface, width: number) {
     chart.panes()[0].priceScale.setFixedRange({ min: 190, max: 240 });
     const patches: IndicatorSettings[] = [], write = study.setSettings.bind(study);
     study.setSettings = (patch, options) => { patches.push({ ...patch }); return write(patch, options); };
-    window.__points = { chart, study, patches, open: () => open(window.__points.study.id) };
+    window.__points = { chart, draw, study, patches, open: () => open(window.__points.study.id) };
   }, { kind: surface, t0: T0 });
   await paint(page);
   return errors;
@@ -167,6 +170,58 @@ for (const surface of ['widget', 'demo'] as const) for (const width of [1100, 39
     await paint(page);
     expect(await settings(page)).toMatchObject({ at: moved.at, level: moved.level });
     await page.screenshot({ path: info.outputPath(`${surface}-${width}-anchor-redone.png`) });
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const surface of ['widget', 'demo'] as const) {
+  test(`${surface} walks a line, a drag and a pick back one step each with the rail's Undo`, async ({ page }, info) => {
+    const errors = await mount(page, surface, 1100), c = dialog(page, surface);
+    const line = await page.evaluate(t0 => window.__points.draw.add({
+      tool: 'horizontal-line', paneIndex: 0, style: { color: '#38bdf8' }, points: [{ time: t0 + 6 * 60, price: 196 }],
+    }).id, T0);
+    const from = await at(page, T0 + 12 * 60, 206), to = await at(page, T0 + 24 * 60, 226);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x + 2, to.y, { steps: 8 });
+    await page.mouse.up();
+    await paint(page);
+    const dragged = await settings(page);
+    expect(dragged.at).toBe(T0 + 24 * 60);
+
+    await page.evaluate(() => window.__points.open());
+    await c.root.locator('[data-input-action="level"]').click();
+    const pick = await at(page, T0 + 36 * 60, 232);
+    await page.mouse.click(pick.x + 2, pick.y);
+    await expect(c.root).toBeVisible();
+    await c.accept.click();
+    await expect(c.root).toBeHidden();
+    await paint(page);
+    const picked = await settings(page);
+    expect(picked.at).toBe(T0 + 36 * 60);
+    // One owner: the drawing history holds the line and nothing of the study.
+    expect((await page.evaluate(() => window.__points.draw.historySteps())).undo).toHaveLength(1);
+    await page.screenshot({ path: info.outputPath(`${surface}-timeline-picked.png`) });
+
+    const rail = surface === 'demo' ? '#rail' : '.oac-rail';
+    const undo = page.locator(`${rail} button[aria-label="Undo"]`), redo = page.locator(`${rail} button[aria-label="Redo"]`);
+    const hasLine = () => page.evaluate(id => window.__points.draw.get(id) !== undefined, line);
+    await undo.click();
+    await paint(page);
+    expect(await settings(page)).toMatchObject({ at: dragged.at, level: dragged.level });
+    expect(await hasLine()).toBe(true);
+    await undo.click();
+    await paint(page);
+    expect(await settings(page)).toMatchObject({ at: T0 + 12 * 60, level: 206 });
+    expect(await hasLine()).toBe(true);
+    await page.screenshot({ path: info.outputPath(`${surface}-timeline-undone-twice.png`) });
+    await undo.click();
+    await paint(page);
+    expect(await hasLine()).toBe(false);
+    for (let i = 0; i < 3; i++) { await redo.click(); await paint(page); }
+    expect(await hasLine()).toBe(true);
+    expect(await settings(page)).toMatchObject({ at: picked.at, level: picked.level });
+    await page.screenshot({ path: info.outputPath(`${surface}-timeline-redone.png`) });
     expect(errors).toEqual([]);
   });
 }
