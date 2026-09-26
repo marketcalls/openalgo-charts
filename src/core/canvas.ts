@@ -186,9 +186,13 @@ export class CanvasLayer {
     return Number.isInteger(device) && device > 0 && Math.abs(device - estimate) <= 1 ? device : null;
   }
 
-  /** A device size last reported, if a box of `estimate` device pixels can still snap to it. */
+  /**
+   * A device size last reported, if a box of `estimate` device pixels can
+   * still snap to it: the floor or the ceiling of the estimate, which for a
+   * whole size is the one less than a pixel away.
+   */
   private _snapsTo(device: number, estimate: number): number | null {
-    return device > 0 && device >= Math.floor(estimate) && device <= Math.ceil(estimate) ? device : null;
+    return device > 0 && Math.abs(device - estimate) < 1 ? device : null;
   }
 
   /** Clear the whole bitmap and reset the transform to bitmap (device-px) scope. */
