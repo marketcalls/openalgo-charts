@@ -38,9 +38,11 @@ in CI holds frame budgets per bar count.
   a pan, a frame with every loaded bar in view and a forming-bar tick with ten
   studies, at 10,000, 50,000 and 200,000 bars, on the `canvas2d` and `webgl2`
   backends in Chromium. Each step is timed from the input to painted pixels, and
-  the run fails when a p95 exceeds its budget. The budgets are one table,
-  `scripts/render-bench-budgets.mjs`: the lowest p95 of five reference runs
-  times four, never under 17 ms. CI runs the bench in a job of its own, and
+  the run fails when a p95 exceeds its budget. The budgets live in
+  `scripts/render-bench-budgets.mjs` as two measured tables, never under 17 ms:
+  local runs use the lowest p95 of five desktop runs times four, and CI uses
+  the hosted runner's own p95 times 2.5, because the runner measured up to five
+  times the desktop figures. CI runs the bench in a job of its own, and
   `docs/performance-notes.md` records the measurements, the margin and why the
   bench's fast results can be trusted.
 - Nightly workflow (`.github/workflows/nightly.yml`): the soak for a 6.25-hour
