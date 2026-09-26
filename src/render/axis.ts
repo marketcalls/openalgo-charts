@@ -16,7 +16,7 @@ import type { DataLayer } from '../model/data-layer';
 import { contrastText } from './pill';
 import {
   DEFAULT_TIMEZONE, IST_OFFSET_SECONDS, formatIstDate, formatIstTime, formatIstTimeSeconds,
-  formatZonedDate, formatZonedTime, formatZonedTimeSeconds, isNewIstDay, isNewZonedDay,
+  formatZonedDate, formatZonedTime, formatZonedTimeSeconds, isNewZonedDay,
   isNewZonedMonth, isNewZonedYear, isValidTimezone, utcSecondsToIstParts, zoneOffsetSeconds,
 } from '../feed/time';
 import { roundRectPath } from './pill';
@@ -336,6 +336,24 @@ function tickMarkBetween(
 }
 
 /**
+ * Whether two instants fall on different IST dates, as `isNewIstDay` answers it
+ * but without its two dates and two part objects per call: the time axis asks
+ * for every bar in view on every frame of a pan. IST keeps one offset all
+ * year, so the date is the day count of the shifted instant, taken the way a
+ * `Date` takes it (whole milliseconds, then days); an instant a `Date` cannot
+ * hold is a new day, as it is there.
+ */
+export function isNewIstDayCount(prevUtcSeconds: number, utcSeconds: number): boolean {
+  const a = istDayCount(prevUtcSeconds);
+  return a !== a || a !== istDayCount(utcSeconds);
+}
+
+function istDayCount(utcSeconds: number): number {
+  const ms = Math.trunc((utcSeconds + IST_OFFSET_SECONDS) * 1000);
+  return Math.abs(ms) <= 8.64e15 ? Math.floor(ms / 86_400_000) : NaN;
+}
+
+/**
  * Draw time tick labels along the bottom axis strip (bitmap scope).
  *
  * `timezone` is the IANA zone the labels read in; absent means the shipped
@@ -394,7 +412,7 @@ export function drawTimeAxis(
   // cannot move, and that they never depend on the host's ICU build.
   const defaultZone = zone === DEFAULT_TIMEZONE;
   const isNewDay = defaultZone
-    ? isNewIstDay
+    ? isNewIstDayCount
     : (prev: number, t: number): boolean => isNewZonedDay(prev, t, zone);
   const dateLabel = defaultZone ? formatIstDate : (t: number): string => formatZonedDate(t, zone);
   const timeLabel = defaultZone ? formatIstTime : (t: number): string => formatZonedTime(t, zone);

@@ -224,9 +224,25 @@ export interface ChartOptions {
    * tool is being placed a double-click finishes the shape whatever this says.
    */
   doubleClick?: DoubleClickAction;
-  /** Enable OHLC-preserving conflation when zoomed out (§4.4). Default false. */
+  /**
+   * Level of detail for a zoomed-out chart (§4.4). Default true: once bars are
+   * narrower than the stick a candle is drawn with (about one CSS px; exactly
+   * one at a whole pixel ratio), the bars sharing a device-pixel column are
+   * drawn as one OHLC-preserving stick (open of the first, close of the last,
+   * the column's high and low), and line and histogram series keep each
+   * column's first, lowest, highest and last values. A frame then costs the
+   * plot's width, not the number of bars in view. Above that spacing nothing
+   * changes. Data, autoscale, indicators and the crosshair still see every
+   * bar. `false` draws every bar at every zoom.
+   *
+   * The default time scale never zooms out past one bar per CSS px
+   * (`timeScale.minBarSpacing: 1`), so it matters once a host lowers that floor.
+   */
   conflate?: boolean;
-  /** Conflation aggressiveness (default 1). */
+  /**
+   * Column width in sticks (default 1). Higher merges into wider columns, and
+   * from spacings that many times wider, for a coarser, cheaper picture.
+   */
   conflationFactor?: number;
   /**
    * Which backend paints the series. `'canvas2d'` (the default) is the 2D

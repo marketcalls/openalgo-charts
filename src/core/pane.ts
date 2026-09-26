@@ -38,9 +38,10 @@ import type { SeriesRecord, PriceScaleId } from '../model/series';
 import type { PriceScaleState } from '../model/chart-state';
 import { PriceAxisLayout, type PriceAxisPlacement, type PriceAxisSide, type PriceAxisSlot } from '../model/price-axis-layout';
 import { computeGridLines, drawGrid, resolveGridStyle, resolveScaleStyle, type CanvasOptions } from '../render/grid';
-import { getChartType, type DrawItem, type SeriesRenderContext } from '../model/chart-type-registry';
+import { getChartType, type SeriesRenderContext } from '../model/chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
-import { conflationGroupSize, conflateItems } from '../model/conflation';
+import { lodActive, lodColumnWidth, lodKind } from '../model/conflation';
+import { createSeriesDrawItems, visibleSpan, type LodRequest, type SeriesDrawItems, type VisibleSpan } from '../render/draw-items';
 import {
   drawPriceAxis, drawLeftPriceAxis, drawTimeAxis, drawLastPriceLabel, drawSessionClock,
   drawTimeAxisPill, lastPriceTagHeight, AXIS_LABEL_PRIORITY, resolveAxisLabels, drawSeriesValueTag,
@@ -81,9 +82,12 @@ export interface PaneRenderContext {
    * neither paint nor hit-test until it opens again.
    */
   collapsed?: boolean;
-  /** Enable OHLC-preserving conflation when bars fall below ~0.5px (§4.4). */
+  /**
+   * Draw one OHLC-preserving stick per device-pixel column once bars are
+   * narrower than a column (§4.4); false draws every bar at every zoom.
+   */
   conflate: boolean;
-  /** Conflation aggressiveness (1 = perf only; higher = more smoothing). */
+  /** Columns this many sticks wide (1 = one stick, the default; higher = coarser). */
   conflationFactor: number;
   /** Active palette — drives chrome, series defaults, and trade colors. */
   theme: ChartTheme;
@@ -153,6 +157,14 @@ function seriesTagColor(style: SeriesStyle, up: boolean): string | undefined {
 /** Where a z-order band paints, back to front; the series band sits between 1 and 2. */
 const HIT_RANK: Record<ZOrder, number> = { bottom: 0, normal: 2, top: 3 };
 
+/**
+ * Scratch for the pane's visible-bar walks and its level-of-detail request, so
+ * a frame allocates nothing per bar or per series for them. Shared by every
+ * pane: a frame paints one pane at a time and nothing here outlives a call.
+ */
+const SPAN: VisibleSpan = { start: 0, lastTime: 0 };
+const LOD: LodRequest = { kind: 'ohlc', dpr: 1, factor: 1 };
+
 export class Pane {
   public readonly element: HTMLElement;
   public readonly base: CanvasLayer;
@@ -197,6 +209,8 @@ export class Pane {
   private _destroyed = false;
   private _width = 0;
   private _height = 0;
+  /** Each series' draw items, reused from frame to frame (src/render/draw-items.ts). */
+  private readonly _drawItems = new Map<SeriesRecord, SeriesDrawItems>();
 
   /**
    * `backend` defaults to the 2D one so a pane built on its own (tests, a host
@@ -499,6 +513,7 @@ export class Pane {
     const i = this._series.indexOf(record);
     if (i < 0) return false;
     this._series.splice(i, 1);
+    this._drawItems.delete(record);
     // A scale with nothing left on it keeps describing what just left, and a
     // pane is reused when one indicator replaces another. Forget the range so
     // the next occupant is measured on its own terms, or not labelled at all.
@@ -667,6 +682,7 @@ export class Pane {
     this._destroyed = true;
     this._primitiveScales.clear();
     this._stackAbove.clear();
+    this._drawItems.clear();
     for (const p of this._primitives) p.detached?.();
     this._primitives.length = 0;
     this._backend.destroy();
@@ -854,7 +870,7 @@ export class Pane {
     scale.setHeight(plotHeight);
     // Before the manual-range early-out on purpose: an axis-dragged scale still
     // has to label itself, and the gather loop below never runs for it. Guarded
-    // on the mode because visibleBars allocates per series.
+    // on the mode: only the rebasing modes quote against the first visible bar.
     const mode = scale.options.mode;
     if (mode === 'percentage' || mode === 'indexed-to-100') {
       scale.setBaseline(this._firstVisibleValue(match, ctx, range, primaryOnly));
@@ -866,9 +882,16 @@ export class Pane {
       if (s.style.visible === false || !match(s)) continue;
       const entry = getChartType(s.type);
       // The same shift the paint pass applies, so the range fits what is drawn.
+      // Walked in place rather than through `visibleBars`, which builds a pair
+      // per bar, every frame of a pan.
       const shift = s.style.barOffset ?? 0;
-      for (const ib of ctx.dataLayer.visibleBars(s.dataId, range.from - shift, range.to - shift)) {
-        const ext = entry.extents(ib.bar, s.style);
+      const layer = ctx.dataLayer, bars = layer.seriesBars(s.dataId), span = SPAN;
+      if (!visibleSpan(layer, bars, range.from - shift, range.to - shift, span)) continue;
+      for (let i = span.start; i < bars.length; i++) {
+        const bar = bars[i];
+        if (bar.time > span.lastTime) break;
+        if (layer.timeToIndex(bar.time) === undefined) continue;
+        const ext = entry.extents(bar, s.style);
         if (ext.min < low) low = ext.min;
         if (ext.max > high) high = ext.max;
       }
@@ -936,8 +959,13 @@ export class Pane {
     for (const s of source ? [source, ...this._series] : this._series) {
       if (s.style.visible === false || !match(s)) continue;
       const shift = honorOffset ? s.style.barOffset ?? 0 : 0;
-      for (const ib of ctx.dataLayer.visibleBars(s.dataId, range.from - shift, range.to - shift)) {
-        if (isFinite(ib.bar.close)) return ib.bar.close; // whitespace bars are NaN
+      const layer = ctx.dataLayer, bars = layer.seriesBars(s.dataId), span = SPAN;
+      if (!visibleSpan(layer, bars, range.from - shift, range.to - shift, span)) continue;
+      for (let i = span.start; i < bars.length; i++) {
+        const bar = bars[i];
+        if (bar.time > span.lastTime) break;
+        if (layer.timeToIndex(bar.time) === undefined) continue;
+        if (isFinite(bar.close)) return bar.close; // whitespace bars are NaN
       }
     }
     return null;
@@ -1020,34 +1048,49 @@ export class Pane {
     // Every visible axis describes its own sources, even when the pane's main
     // readout belongs to the other side or a hidden scale.
     const valueTags: { price: number; color: string; scaleId: PriceScaleId }[] = [];
-    const groupSize = ctx.conflate
-      ? conflationGroupSize(ctx.timeScale.barSpacing, dpr, 0.5, ctx.conflationFactor)
-      : 1;
+    // The level of detail is decided once for the frame: every series shares
+    // the time scale, so they all cross the threshold together.
+    const spacing = ctx.timeScale.barSpacing;
+    const columnWidth = lodColumnWidth(dpr, ctx.conflationFactor);
+    const lodOn = ctx.conflate && lodActive(spacing, dpr, columnWidth);
+    const lod = LOD;
+    lod.dpr = dpr;
+    lod.factor = ctx.conflationFactor;
     for (const s of this._series) {
       // What sits directly above this series paints right after it, hidden or
       // not: the slot belongs to the entry, not to whether it is showing.
       if (s.style.visible === false || !open) { this._paintSlot(slotted, s, g, prc, ctx, target); continue; }
       const scale = this._scaleFor(s.scaleId);
-      const priceToY = (p: number): number => scale.priceToY(p);
       const entry = getChartType(s.type);
       // A shifted series is painted `barOffset` bars from where its data sits,
       // so the bars in view are the ones whose shifted position lands in range.
       const shift = s.style.barOffset ?? 0;
-      const visible = ctx.dataLayer.visibleBars(s.dataId, range.from - shift, range.to - shift);
-      let items: DrawItem[] = visible.map((ib) => ({ x: ctx.timeScale.indexToX(ib.index + shift), bar: ib.bar }));
-      if (groupSize > 1) items = conflateItems(items, groupSize);
+      const kind = lodOn ? lodKind(s.type) : null;
+      if (kind !== null) lod.kind = kind;
+      let buffer = this._drawItems.get(s);
+      if (buffer === undefined) this._drawItems.set(s, buffer = createSeriesDrawItems());
+      const priceToY = buffer.priceToY;
+      const items = buffer.build(ctx.dataLayer, s.dataId, range.from - shift, range.to - shift, shift, ctx.timeScale,
+        scale, kind === null ? null : lod);
+      // A merged stick stands for its whole column, so the renderer sizes it
+      // for the column rather than for one of the bars inside it.
+      const drawSpacing = kind === 'ohlc' ? Math.max(spacing, columnWidth / dpr) : spacing;
       // Previous-close colouring needs the bar left of the visible range to
       // colour the first drawn one; nothing else does, so only that mode pays
       // for the lookup, and only a series with no bar there falls back.
       if (s.style.colorByPreviousClose === true && items.length > 0) {
-        const before = ctx.dataLayer.visibleBars(s.dataId, visible[0].index - 1, visible[0].index - 1);
+        const at = buffer.firstIndex() - 1;
+        const before = ctx.dataLayer.visibleBars(s.dataId, at, at);
         if (before.length > 0) items[0].prevClose = before[0].bar.close;
       }
       let maxVolume = 0;
-      for (const it of items) if ((it.bar.volume ?? 0) > maxVolume) maxVolume = it.bar.volume ?? 0;
+      for (let i = 0; i < items.length; i++) {
+        const volume = items[i].bar.volume ?? 0;
+        if (volume > maxVolume) maxVolume = volume;
+      }
       const rc: SeriesRenderContext = { plotHeight: layout.plotHeight, maxVolume, theme: ctx.theme };
-      if (target === undefined) this._backend.drawSeries(entry, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
-      else entry.draw(g, items, priceToY, ctx.timeScale.barSpacing, dpr, s.style, rc);
+      if (target === undefined) this._backend.drawSeries(entry, items, priceToY, drawSpacing, dpr, s.style, rc);
+      else entry.draw(g, items, priceToY, drawSpacing, dpr, s.style, rc);
       const last = ctx.dataLayer.lastIndexedBar(s.dataId);
       if (last !== null) {
         const color = seriesTagColor(s.style, last.bar.close >= last.bar.open);
