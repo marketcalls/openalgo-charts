@@ -155,7 +155,56 @@ async function sample(page: Page, paneIndex: number) {
 
 const same = (a: number[][], b: number[][]): number => a.filter((colour, k) => colour.join() === b[k].join()).length;
 
-test('the routed signal sample shades the candles by momentum and Momentum shading moves it', async ({ page }, info) => {
+/** The study's settings and its legend summary, which names every select input's value. */
+async function shading(page: Page, id: string): Promise<{ shade: unknown; summary: string | undefined }> {
+  return page.evaluate(studyId => {
+    const study = (window as unknown as DemoWindow).__oac.app.chart.indicators().find(item => item.id === studyId)!;
+    return { shade: study.settings().shade, summary: (study.legend() as unknown as { _opts: { params?: string } })._opts.params };
+  }, id);
+}
+
+/**
+ * Pick a Momentum shading option the way a user does: hover the study's legend row, press
+ * its gear, choose the option by its label in the host's settings dialog, and apply.
+ */
+async function chooseShading(page: Page, id: string, label: string, info?: TestInfo): Promise<void> {
+  const gear = () => page.evaluate(studyId => {
+    const { chart } = (window as unknown as DemoWindow).__oac.app;
+    const study = chart.indicators().find(item => item.id === studyId)!;
+    const buttons = (study.legend() as unknown as { _buttons: { id: string; x: number; y: number }[] })._buttons;
+    const button = buttons.find(item => item.id.endsWith('::settings'));
+    const pane = chart.panes()[study.paneIndex].element.getBoundingClientRect();
+    return { row: { x: pane.left + 40, y: pane.top + 15 }, at: button ? { x: pane.left + button.x + 8, y: pane.top + button.y + 8 } : null };
+  }, id);
+  await page.mouse.move((await gear()).row.x, (await gear()).row.y);
+  await paint(page);
+  let at = (await gear()).at;
+  expect(at).not.toBeNull();
+  // The controls reveal on hover and can shift as they do; follow them until they hold still.
+  for (let tries = 0; tries < 4; tries++) {
+    await page.mouse.move(at!.x, at!.y);
+    await paint(page);
+    const next = (await gear()).at;
+    expect(next).not.toBeNull();
+    const settled = Math.abs(next!.x - at!.x) < 0.5 && Math.abs(next!.y - at!.y) < 0.5;
+    at = next;
+    if (settled) break;
+  }
+  await page.mouse.click(at!.x, at!.y);
+  const dialog = page.locator('#setmodal');
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('#set-title')).toHaveText('Routed signal sample settings');
+  const field = dialog.locator('#set-body [data-key="shade"]');
+  await expect(field.locator('option')).toHaveText(['On price', 'In study pane', 'Off']);
+  await field.selectOption({ label });
+  if (info) await shot(page, info, 'routed-shading-dialog');
+  await dialog.locator('#set-ok').click();
+  await expect(dialog).toBeHidden();
+  await page.mouse.move(5, 5);
+  await paint(page);
+}
+
+test('the routed signal sample shades the candles by momentum and its settings dialog moves it', async ({ page }, info) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   expect(SAMPLED.length).toBeGreaterThan(8);
@@ -172,16 +221,13 @@ test('the routed signal sample shades the candles by momentum and Momentum shadi
     return { id: found[found.length - 1].id, pane: found[found.length - 1].paneIndex };
   }, SAMPLE_ID);
   expect(study.pane).toBeGreaterThan(0);
-  const set = async (shade: string): Promise<void> => {
-    await page.evaluate(([id, value]) => {
-      (window as unknown as DemoWindow).__oac.app.chart.indicators().find(item => item.id === id)!.setSettings({ shade: value });
-    }, [study.id, shade]);
-    await paint(page);
-  };
+  // A select input's value is part of the legend summary, the way every select is summarised.
+  expect(await shading(page, study.id)).toEqual({ shade: 'price', summary: '10 price' });
   const shaded = await sample(page, 0);
   await shot(page, info, 'routed-shading-on-candles');
   // The same layout with the shading off is what the candles look like without it.
-  await set('off');
+  await chooseShading(page, study.id, 'Off');
+  expect(await shading(page, study.id)).toEqual({ shade: 'off', summary: '10 off' });
   const plain = await sample(page, 0);
   const studyPlain = await sample(page, study.pane);
   await shot(page, info, 'routed-shading-off');
@@ -198,12 +244,14 @@ test('the routed signal sample shades the candles by momentum and Momentum shadi
   expect(same(await sample(page, study.pane), studyPlain)).toBe(SAMPLED.length);
 
   // In the study pane: the candles are as they were and the histogram pane is tinted.
-  await set('study');
+  await chooseShading(page, study.id, 'In study pane', info);
+  expect(await shading(page, study.id)).toEqual({ shade: 'study', summary: '10 study' });
   expect(await sample(page, 0)).toEqual(plain);
   expect(same(await sample(page, study.pane), studyPlain)).toBeLessThan(SAMPLED.length / 2);
   await shot(page, info, 'routed-shading-in-study-pane');
   // Back on the candles exactly as before; the study pane is clear again.
-  await set('price');
+  await chooseShading(page, study.id, 'On price');
+  expect(await shading(page, study.id)).toEqual({ shade: 'price', summary: '10 price' });
   expect(await sample(page, 0)).toEqual(shaded);
   expect(await sample(page, study.pane)).toEqual(studyPlain);
   // Removing the study takes the shading with it.
