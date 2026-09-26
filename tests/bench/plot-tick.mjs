@@ -187,7 +187,7 @@ const summary = Object.fromEntries(Object.entries(samples).map(([kind, xs]) => [
 }]));
 
 const result = { build: dir, version: base.VERSION ?? base.version, bars: BARS, studies: STUDIES.length, ticks: TICKS, ...summary };
-chart.remove?.();
+chart.destroy();
 
 if (JSON_OUT) {
   console.log(JSON.stringify(result, null, 2));

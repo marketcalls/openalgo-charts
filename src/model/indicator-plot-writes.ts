@@ -9,14 +9,17 @@
  * the forming bar and perhaps opens one more. So each plot keeps a record of
  * what its series holds, and a pass whose bars begin with the times the last
  * pass wrote sends the few points that differ through `update`. Anything else
- * (new history, a gap filled, new settings, more than `IN_PLACE` points) is a
- * whole write through `setData`, as before.
+ * (new history, a gap filled, a plot the pass before did not write, more than
+ * `IN_PLACE` moved points, which new settings usually are) is a whole write
+ * through `setData`, as before.
  *
  * The record is never output. Every pass computes every point afresh, colours
  * included, and compares it with the record, so the forming bar is written
  * whenever it moved and nothing a reader sees comes from the record (CLAUDE.md,
  * never cache the forming bar). A pass that stops part way leaves its records
  * stamped with the pass before, and the next pass writes those plots whole.
+ * The record describes the series only while the study is its one writer,
+ * which is why `IndicatorApi.series` hands a plot out for styling alone.
  */
 import type { Bar, SeriesDataItem } from './bar';
 import type { SeriesApi } from './series';
