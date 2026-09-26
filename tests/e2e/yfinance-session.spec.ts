@@ -66,3 +66,24 @@ test('extended hours load as the source serves them and an interval without them
   await expect(page.locator('.menu button', { hasText: 'Extended hours' })).toBeDisabled();
   expect(errors).toEqual([]);
 });
+
+test('an extended-hours chart names the pre and post market on its status line', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.locator('#shellbar .pills').getByRole('button', { name: '5M', exact: true }).click();
+  await expect.poll(() => app(page, 'app.req.interval + ":" + Boolean(app.loading)')).toBe('5m:false');
+  // 07:30 in New York on a Wednesday: the regular market is shut, the extended session trading.
+  await page.clock.setFixedTime(new Date('2024-01-10T12:30:00Z'));
+  const legend = (): Promise<string> => page.evaluate(() => (window as any).__oac.chart.exportSVG());
+  await expect.poll(async () => (await legend()).includes('Market closed')).toBe(true);
+  await page.locator('#session-menu').click();
+  await page.locator('.menu button', { hasText: 'Extended hours' }).click();
+  await expect.poll(() => app(page, 'app.req.session === "extended" && !app.loading')).toBe(true);
+  await expect.poll(async () => (await legend()).includes('Pre-market')).toBe(true);
+  await page.screenshot({ path: info.outputPath('host-pre-market.png') });
+  await page.clock.setFixedTime(new Date('2024-01-10T22:30:00Z'));
+  await expect.poll(async () => (await legend()).includes('Post-market')).toBe(true);
+  await page.clock.setFixedTime(new Date('2024-01-11T02:30:00Z'));
+  await expect.poll(async () => (await legend()).includes('Market closed')).toBe(true);
+  expect(errors).toEqual([]);
+});

@@ -3,6 +3,10 @@ import {
   dataVariantKey, normalizeDataVariant, publishDataContext, unsupportedDataVariant,
 } from '../src/feed/data-variant';
 import { inheritedDataVariant } from '../src/indicators/index';
+import { createRequestedIndicator } from '../src/indicators/requested-indicator';
+import { createTier2Indicator, type Tier2Context } from '../src/indicators/external';
+import { AlertController } from '../src/alerts/controller';
+import type { ChartDataContext, IndicatorDataStatus, IndicatorSnapshotRequest } from '../src/index';
 import { Chart } from '../src/core/chart';
 import { registerIndicator, type IndicatorAttachContext, type IndicatorBarsRequest } from '../src/model/indicator-registry';
 import { OpenAlgoLiveDataFeed } from '../src/feed/openalgo-live';
@@ -116,6 +120,55 @@ describe('publishing a variant to a chart', () => {
     expect(changes.length).toBeGreaterThan(settled);
     await settle();
     expect(requests).toHaveLength(1);
+  });
+
+  it('reaches studies and alerts once when only the variant changes', async () => {
+    const chart = mount();
+    const snapshots: IndicatorSnapshotRequest[] = [];
+    chart.setBarsProvider({
+      requestBars: async () => [],
+      requestSnapshot: request => { snapshots.push(request); return new Promise(() => {}); },
+    });
+    publishDataContext(chart, { symbol: 'AAPL', exchange: 'US', interval: '1m' });
+    chart.addSeries('candlestick').setData([bar(60), bar(120)]);
+    // A requested study that asks in the chart's own interval, the usual shape.
+    registerIndicator(createRequestedIndicator({
+      id: 'variant-once-requested', name: 'Requested', placement: 'pane', inputs: [], plots: [{ key: 'v', type: 'line', title: 'V' }],
+      request: ctx => ({ symbol: 'SPY', interval: ctx.dataContext?.interval ?? '', from: 0, to: 120 }),
+      expression: requested => ({ v: requested.map(value => value.close) }),
+    }));
+    const fetched: Tier2Context[] = [];
+    registerIndicator(createTier2Indicator({
+      id: 'variant-once-external', name: 'External', placement: 'pane', inputs: [], plots: [{ key: 'v', type: 'line', title: 'V' }],
+      fetch: context => { fetched.push(context); return new Promise(() => {}); },
+    }));
+    const requested = chart.addIndicator('variant-once-requested');
+    chart.addIndicator('variant-once-external');
+    const alerts = new AlertController(chart);
+    alerts.add({ source: { kind: 'price', price: 100 }, condition: 'crossingUp' });
+    await settle();
+    const statuses: IndicatorDataStatus['state'][] = [];
+    requested.subscribeDataStatus(status => statuses.push(status.state));
+    const contexts: (ChartDataContext | undefined)[] = [];
+    chart.on('data:context', context => contexts.push({ ...(context as ChartDataContext) }));
+    let checkpoints = 0;
+    chart.on('alerts:checkpoint', () => { checkpoints++; });
+    const before = { snapshots: snapshots.length, fetched: fetched.length };
+
+    publishDataContext(chart, { symbol: 'AAPL', exchange: 'US', interval: '1m', variant: { session: 'extended' } });
+
+    // Until the chart compares variants itself, a variant-only change passes
+    // through a context with the interval cleared, and hosts see both.
+    expect(contexts.map(context => context?.interval)).toEqual([undefined, '1m']);
+    // The library's own studies and alerts wait for the real one: nothing
+    // asks a provider for the interval-less context, reports an error for it
+    // or saves the alerts twice.
+    expect(snapshots.slice(before.snapshots).map(request => [request.interval, request.variant])).toEqual([['1m', { session: 'extended' }]]);
+    expect(fetched.slice(before.fetched).map(context => [context.dataContext?.interval, context.dataContext?.variant]))
+      .toEqual([['1m', { session: 'extended' }]]);
+    expect(statuses).not.toContain('error');
+    expect(checkpoints).toBe(1);
+    alerts.destroy();
   });
 
   it('works for a context without an interval', () => {

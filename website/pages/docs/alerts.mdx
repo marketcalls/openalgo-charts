@@ -128,6 +128,20 @@ This chart-owned controller only evaluates the chart data it receives. To keep
 alerts running on an unseen timeframe, your application needs a separate
 evaluator receiving that timeframe's data, and one owner for delivery.
 
+## Data variants
+
+An alert also belongs to the [data variant](/docs/data-variants) the chart
+showed when it was set: extended hours, raw prices, a quote currency or a unit.
+`alert.scope.variant` records it, and an alert set on the provider's default
+series has no `variant` field at all, so its scope is the same as before
+variants existed. It evaluates only on that series, the way it evaluates only on
+its own timeframe, and `availability(id)` asks you to switch back to it.
+
+A fixed price stays visible, paused, on another session or adjustment of the
+same instrument, because the price means the same there. In another currency or
+unit it is a different price, so the level is not drawn. A saved document naming
+a variant this build cannot read is refused by `parseAlertsDocument`.
+
 ## Finished alert lines
 
 From 2.5.1, custom hosts can hide triggered and expired lines without deleting

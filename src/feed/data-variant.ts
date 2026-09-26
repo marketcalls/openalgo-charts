@@ -118,6 +118,25 @@ export function dataVariantError(dimension: DataVariantDimension, variant?: Data
   return error;
 }
 
+/**
+ * Marks the context `publishDataContext` passes through on its way to a
+ * variant-only change. The chart copies it with the context, so a listener
+ * sees it on the `data:context` payload and on `getDataContext()` while that
+ * event runs, and the real context follows at once without it. A registered
+ * symbol, so the indicators tier, bundled apart from this one, reads the same
+ * key; JSON never carries it.
+ */
+const PASSING = Symbol.for('openalgo-charts.data-context.passing');
+
+/**
+ * Whether a context is the one `publishDataContext` passes through, which
+ * the library's own listeners skip: asking a provider for it, publishing a
+ * status for it or saving alerts for it is work thrown away a moment later.
+ */
+export function passingDataContext(context: unknown): boolean {
+  return typeof context === 'object' && context !== null && (context as Record<symbol, unknown>)[PASSING] === true;
+}
+
 /** The two chart members `publishDataContext` needs. */
 export interface DataContextTarget {
   getDataContext(): Readonly<ChartDataContext> | undefined;
@@ -137,6 +156,12 @@ export interface DataContextTarget {
  * instrument never changes on the way, so event markers, linked drawings and
  * news stay with it. A chart that already compares variants takes the first
  * call and the detour never runs.
+ *
+ * On the detour the chart emits `data:context` twice: once for the passing
+ * context, whose interval is cleared, then for the real one. That context is
+ * marked, and the library's requested studies, Tier 2 studies and alert
+ * controller wait for the real one rather than fetch, report or save for it.
+ * A host's own listener sees both.
  */
 export function publishDataContext(chart: DataContextTarget, context: ChartDataContext | undefined): void {
   const variant = normalizeDataVariant(context?.variant);
@@ -144,7 +169,7 @@ export function publishDataContext(chart: DataContextTarget, context: ChartDataC
   if (next) { delete next.variant; if (variant) next.variant = variant; }
   chart.setDataContext(next);
   if (next && dataVariantKey(chart.getDataContext()?.variant) !== dataVariantKey(variant)) {
-    chart.setDataContext({ ...next, interval: next.interval === undefined ? '' : undefined });
+    chart.setDataContext({ ...next, interval: next.interval === undefined ? '' : undefined, [PASSING]: true } as ChartDataContext);
     chart.setDataContext(next);
   }
 }

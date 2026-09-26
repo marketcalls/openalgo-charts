@@ -75,6 +75,20 @@ describe('chart grid carries data variants', () => {
     expect(reopened.filter(request => request.variant !== undefined).map(request => request.variant)).toEqual([extended]);
   });
 
+  it('reopens a chart saved on the default series as the default, whatever the cell showed', async () => {
+    const saved = makeGrid(feed([])).getWorkspace();
+    expect(saved.panes.some(pane => pane.variant !== undefined)).toBe(false);
+    const requests: BarsRequest[] = [];
+    const target = makeGrid(feed(requests));
+    target.cells()[0].widget.setDataVariant(extended);
+    await flush();
+    const count = requests.length;
+    expect(target.applyWorkspace(saved)).toEqual({ applied: true });
+    await flush();
+    expect(target.cells().map(cell => cell.widget.variant())).toEqual([undefined, undefined]);
+    expect(requests.slice(count).map(request => request.variant)).toEqual([undefined]);
+  });
+
   it('gives a new cell the active chart variant', async () => {
     const grid = makeGrid(feed([]));
     grid.setPreset('1x1');

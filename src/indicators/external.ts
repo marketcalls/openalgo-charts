@@ -29,7 +29,7 @@ import type {
   IndicatorStore,
   IndicatorValues,
 } from 'openalgo-charts';
-import { inheritedDataVariant } from './inherited-variant';
+import { inheritedDataVariant, passingContext } from './inherited-variant';
 
 /** One external observation: a timestamp plus a value per plot key. */
 export interface Tier2Point {
@@ -401,7 +401,9 @@ export function createTier2Indicator(d: Tier2Descriptor): IndicatorDescriptor {
         start(request);
       };
       const refresh = (retry = false): void => {
-        if (!current()) return;
+        // The context a variant-only change passes through is replaced at
+        // once: fetching or subscribing for it would be torn down unused.
+        if (!current() || passingContext(ctx.dataContext?.())) return;
         const revision = ++refreshRevision;
         const fresh = (): boolean => current() && refreshRevision === revision;
         const c = context();

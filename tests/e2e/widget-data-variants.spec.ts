@@ -51,3 +51,47 @@ test('extended hours load as their own series, and an undeclared variant is repo
   expect(sent[sent.length - 1]).toEqual({ interval: '1d', variant: null });
   expect(errors).toEqual([]);
 });
+
+test('a layout saved on regular hours restores as regular hours, and an extended-hours alert waits for its series', async ({ page }, info) => {
+  const errors = await mount(page);
+  await expect.poll(() => count(page)).toBe(40);
+  const saved = await page.evaluate(() => {
+    const { widget } = (window as any).fixture;
+    widget.chart.setVisibleLogicalRange({ from: 5, to: 25 });
+    return widget.getState();
+  });
+  expect(saved).not.toHaveProperty('variant');
+  await page.evaluate(() => (window as any).fixture.widget.setDataVariant({ session: 'extended' }));
+  await expect.poll(() => count(page)).toBe(60);
+  const label = page.locator('.oac-statusline__variant');
+  await expect(label).toHaveText('Extended hours');
+
+  // The saved state names no variant, so it is the regular series again,
+  // whatever the widget showed, and the view taken on regular bars is not
+  // laid over the extended ones on the way.
+  const report = await page.evaluate(state => (window as any).fixture.widget.restoreState(state), saved);
+  expect(report.applied).toBe(true);
+  await expect.poll(() => count(page)).toBe(40);
+  await expect(label).toBeHidden();
+  expect(await page.evaluate(() => (window as any).fixture.widget.variant())).toBeUndefined();
+  const sent = await requests(page);
+  expect(sent[sent.length - 1]).toEqual({ interval: '1m', variant: null });
+  const view = await page.evaluate(() => (window as any).fixture.widget.chart.getVisibleLogicalRange());
+  expect(view).not.toEqual({ from: 5, to: 25 });
+  await page.screenshot({ path: info.outputPath('widget-restored-regular.png') });
+
+  // An alert set on extended hours waits for them: on regular hours it stays
+  // in view, paused, labelled with where it evaluates, and says why.
+  await page.evaluate(() => (window as any).fixture.widget.setDataVariant({ session: 'extended' }));
+  await expect.poll(() => count(page)).toBe(60);
+  const id = await page.evaluate(() => (window as any).fixture.widget.alerts.add({
+    source: { kind: 'price', price: 104 }, condition: 'crossingUp', title: 'Extended level' }).id);
+  await page.screenshot({ path: info.outputPath('widget-extended-alert.png') });
+  await page.evaluate(() => (window as any).fixture.widget.setDataVariant(undefined));
+  await expect.poll(() => count(page)).toBe(40);
+  expect(await page.evaluate(() => (window as any).fixture.widget.chart.exportSVG().includes('Extended level (1m, extended)'))).toBe(true);
+  expect(await page.evaluate(alert => (window as any).fixture.widget.alerts.availability(alert), id))
+    .toMatchObject({ available: false, reason: expect.stringContaining('data variant') });
+  await page.screenshot({ path: info.outputPath('widget-regular-with-extended-alert.png') });
+  expect(errors).toEqual([]);
+});

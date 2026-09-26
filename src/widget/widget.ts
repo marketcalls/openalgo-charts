@@ -256,11 +256,12 @@ export interface Widget {
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
- * A stored variant, or nothing. One this build cannot read falls back to the
- * default series, and the saved view with it, rather than failing the widget.
+ * A stored variant: undefined for the default series, null for one this build
+ * cannot read. That one falls back to the default series rather than failing
+ * the widget, and its saved view is dropped, since it was taken on other bars.
  */
-function savedVariant(value: unknown): { variant?: Readonly<DataVariant> } {
-  try { const variant = normalizeDataVariant(value); return variant ? { variant } : {}; } catch { return {}; }
+function savedVariant(value: unknown): Readonly<DataVariant> | undefined | null {
+  try { return normalizeDataVariant(value); } catch { return null; }
 }
 
 /** The options the shell consumes; the rest of `WidgetOptions` is the chart's. */
@@ -1050,12 +1051,13 @@ class WidgetImpl implements Widget {
     }
     // Read before anything is applied: a variant this build cannot name would
     // be served as some other series, so the whole state is refused. A state
-    // that names none predates variants and keeps the current one.
-    let variant = this._variant;
-    if (state.variant !== undefined) {
-      try { variant = normalizeDataVariant(state.variant); }
-      catch (error) { return { applied: false, reason: error instanceof Error ? error.message : 'invalid data variant' }; }
-    }
+    // that names none was saved on the feed's default series (getState leaves
+    // the default out, and nothing saved before variants could name another),
+    // so it restores onto the default whatever this widget shows now. Keeping
+    // the current variant instead would land its view on bars it never saw.
+    let variant: Readonly<DataVariant> | undefined;
+    try { variant = normalizeDataVariant(state.variant); }
+    catch (error) { return { applied: false, reason: error instanceof Error ? error.message : 'invalid data variant' }; }
     if (state.theme === 'dark' || state.theme === 'light') this.setTheme(state.theme);
     if (typeof state.chartType === 'string' && registeredChartTypes().includes(state.chartType)) this.setChartType(state.chartType);
     if (state.rail !== undefined && this._rail !== null) this._rail.restorePrefs(state.rail);
@@ -1107,6 +1109,8 @@ class WidgetImpl implements Widget {
   private _readSaved(): WidgetState | null {
     const raw = this._storage.get(STATE_KEY);
     if (!isRecord(raw) || raw.version !== WIDGET_STATE_VERSION) return null;
+    const variant = savedVariant(raw.variant);
+    const chart = isRecord(raw.chart) ? (raw.chart as unknown as WidgetChartState) : undefined;
     const out: WidgetState = {
       version: WIDGET_STATE_VERSION,
       symbol: typeof raw.symbol === 'string' ? raw.symbol : '',
@@ -1114,8 +1118,8 @@ class WidgetImpl implements Widget {
       interval: typeof raw.interval === 'string' && raw.interval !== '' ? raw.interval : '1d',
       chartType: typeof raw.chartType === 'string' ? raw.chartType : 'candlestick',
       theme: raw.theme === 'light' ? 'light' : 'dark',
-      ...savedVariant(raw.variant),
-      chart: isRecord(raw.chart) ? (raw.chart as unknown as WidgetChartState) : (undefined as unknown as WidgetChartState),
+      ...(variant ? { variant } : {}),
+      chart: (chart && variant === null ? stripView(chart) : chart) as WidgetChartState,
       rail: isRecord(raw.rail) ? (raw.rail as unknown as RailPrefs) : null,
       panels: sanitizePanelDockState(raw.panels),
     };

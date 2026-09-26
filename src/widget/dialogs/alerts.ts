@@ -1,5 +1,6 @@
 import { widgetText } from '../localization';
-import { alertSettingsSchema, getBarCondition, utcSecondsToZonedParts, zoneOffsetSeconds, zonedWallClockToUtcSeconds, type Alert, type AlertCondition, type AlertInput, type AlertPatch, type AlertSource } from 'openalgo-charts';
+import { alertSettingsSchema, dataVariantKey, getBarCondition, utcSecondsToZonedParts, zoneOffsetSeconds, zonedWallClockToUtcSeconds, type Alert, type AlertCondition, type AlertInput, type AlertPatch, type AlertSource, type DataVariant } from 'openalgo-charts';
+import { dataVariantLabel } from '../data-status';
 import type { WidgetContext } from '../context';
 import { button, controlsFromInputs, dialogFrame, el, openPanel, renderForm, type FormHandle, type PanelHandle } from '../form';
 import { alertSourceFields } from './alert-source';
@@ -86,6 +87,9 @@ function defaultExpiry(existing: Alert | undefined, zone: string): string {
   return expiryText(seconds, zone);
 }
 
+/** A series key that cannot throw inside a listener; a malformed variant never matches a readable one. */
+const variantKey = (variant: DataVariant | undefined): string => { try { return dataVariantKey(variant); } catch { return 'invalid'; } };
+
 /** Draft edits never arm an alert until Save. Closing always discards the draft. */
 export function mountAlertEditor(ctx: WidgetContext, anchor?: HTMLElement, opts: AlertEditorOptions = {}): PanelHandle {
   const alerts = ctx.alerts;
@@ -93,7 +97,9 @@ export function mountAlertEditor(ctx: WidgetContext, anchor?: HTMLElement, opts:
   // Keep the labelled reading stable if a host changes the chart's zone while editing.
   const expiryZone = ctx.chart.timezone();
   const initialContext = ctx.chart.getDataContext();
-  const scope = (value: typeof initialContext): string => JSON.stringify([value?.symbol, value?.exchange, value?.interval]);
+  // The variant is part of the series an alert is set on, like the interval.
+  const scope = (value: { symbol?: string; exchange?: string; interval?: string; variant?: DataVariant } | undefined): string =>
+    JSON.stringify([value?.symbol, value?.exchange, value?.interval, variantKey(value?.variant)]);
   const initialScope = scope(initialContext);
   const bars = ctx.chart.primaryBars();
   const source = existing?.source ?? opts.source ?? { kind: 'price', price: bars[bars.length - 1]?.close };
@@ -287,7 +293,8 @@ export function mountAlertsPanel(ctx: WidgetContext, anchor?: HTMLElement, opts:
           row = { el: node, summary, status, toggle };
           rows.set(alert.id, row);
         }
-        const scope = [alert.scope.symbol, alert.scope.exchange, alert.scope.interval].filter(Boolean).join(' / ');
+        const scope = [alert.scope.symbol, alert.scope.exchange, alert.scope.interval, dataVariantLabel(ctx, alert.scope.variant)]
+          .filter(Boolean).join(' / ');
         row.summary.textContent = `${alert.title}\n${scope}\n${sourceText(alert)}`;
         row.el.dataset.state = alert.state;
         const available = alerts!.availability(alert.id);

@@ -5,6 +5,7 @@ import { barCacheKey, withBarCache } from '../src/feed/cache';
 import { HistoryRequestPool } from '../src/feed/request-pool';
 import { DataLoadingController } from '../src/feed/data-controller';
 import { OpenAlgoDataFeed } from '../src/feed/openalgo-rest';
+import { FakeDataFeed } from '../src/feed/fake-feed';
 import { Instrument } from '../src/feed/instrument';
 import { Chart } from '../src/core/chart';
 import { fakeDocument } from './helpers/fake-dom';
@@ -208,6 +209,55 @@ describe('data variants in the loading controller', () => {
     expect(controller.getState().request?.symbol).toBe('MSFT');
   });
 
+  it('never refreshes or pages a variant the provider has not answered for, and asks again on retry', async () => {
+    let answer: 'fail' | 'none' | 'both' = 'fail';
+    let queries = 0;
+    const feed = variantFeed({
+      dataVariants: async () => {
+        queries++;
+        if (answer === 'fail') throw new Error('capabilities endpoint down');
+        return { sessions: answer === 'both' ? ['regular', 'extended'] : ['regular'] };
+      },
+    });
+    const controller = make(feed);
+    await controller.load({ ...base, variant: extended });
+    expect(controller.getState()).toMatchObject({ status: 'error' });
+    expect(controller.getState().error?.message).toBe('capabilities endpoint down');
+    // Older history for a series nobody said exists is not fetched either.
+    await controller.loadMore(T0 - 86_400);
+    expect(feed.calls).toHaveLength(0);
+    // A retry asks the provider again before anything else, and takes its answer.
+    await controller.refresh();
+    expect(queries).toBe(2);
+    expect(feed.calls).toHaveLength(0);
+    expect(controller.getState().status).toBe('error');
+    answer = 'none';
+    await controller.refresh();
+    expect(queries).toBe(3);
+    expect(controller.getState()).toMatchObject({ status: 'unsupported', unsupported: 'session' });
+    expect(feed.calls).toHaveLength(0);
+    // Unsupported is an answer, not a failure: only a new load asks again.
+    answer = 'both';
+    await controller.load({ ...base, variant: extended });
+    expect(controller.getState()).toMatchObject({ status: 'ready' });
+    expect(feed.calls.map(call => call.variant)).toEqual([extended]);
+  });
+
+  it('retries a declared variant whose history failed without asking about it again', async () => {
+    let queries = 0, fail = true;
+    const feed = variantFeed({ dataVariants: () => { queries++; return { sessions: ['regular', 'extended'] }; } });
+    const plain = feed.getBars;
+    feed.getBars = req => (fail ? Promise.reject(new Error('history down')) : plain(req));
+    const controller = make(feed);
+    await controller.load({ ...base, variant: extended });
+    expect(controller.getState().status).toBe('error');
+    fail = false;
+    await controller.refresh();
+    expect(queries).toBe(1);
+    expect(controller.getState()).toMatchObject({ status: 'ready' });
+    expect(controller.bars()[0].close).toBe(500);
+  });
+
   it('reports a malformed variant as an error and fetches nothing', async () => {
     const feed = variantFeed({ dataVariants: () => ({ sessions: ['regular', 'extended'] }) });
     const controller = make(feed);
@@ -223,6 +273,14 @@ describe('data variants in the loading controller', () => {
     await controller.load({ ...base, variant: {} });
     expect(controller.getState().request).not.toHaveProperty('variant');
     expect(feed.calls[0]).not.toHaveProperty('variant');
+    // It is the default series, which needs no declaration to page or refresh.
+    await controller.loadMore(T0 - 3600);
+    const paged = feed.calls.length;
+    expect(paged).toBeGreaterThan(1);
+    expect(feed.calls.slice(1).every(call => call.to !== undefined && call.to < T0)).toBe(true);
+    await controller.refresh();
+    expect(feed.calls.slice(paged).map(call => call.noCache)).toEqual([true]);
+    expect(feed.calls.every(call => !('variant' in call))).toBe(true);
   });
 });
 
@@ -232,6 +290,22 @@ describe('data variants at the OpenAlgo adapter', () => {
     const feed = new OpenAlgoDataFeed({ baseUrl: 'http://x', apiKey: 'k', fetchImpl: (async () => { fetched++; throw new Error('no'); }) as unknown as typeof fetch });
     await expect(feed.getBars({ ...base, variant: extended })).rejects.toMatchObject({ name: 'DataVariantUnsupportedError' });
     expect(fetched).toBe(0);
+  });
+});
+
+describe('data variants at the synthetic feed', () => {
+  it('serves its one series as the default and refuses any other variant', async () => {
+    const ticks: (() => void)[] = [];
+    const feed = new FakeDataFeed(60, cb => { ticks.push(cb); return () => {}; });
+    expect((await feed.getBars({ ...base })).length).toBeGreaterThan(0);
+    expect(await feed.getBars({ ...base, variant: {} })).toEqual(await feed.getBars({ ...base }));
+    await expect(feed.getBars({ ...base, variant: extended })).rejects.toMatchObject({ name: 'DataVariantUnsupportedError' });
+    expect(() => feed.subscribeBars({ ...base, variant: { adjustment: 'raw' } }, () => {})).toThrow(/adjustment raw/);
+    expect(ticks).toHaveLength(0);
+    feed.subscribeBars({ ...base, variant: {} }, () => {});
+    expect(ticks).toHaveLength(1);
+    // Behind the bar cache too, the default series is never handed out under another label.
+    await expect(withBarCache(feed).getBars({ ...base, variant: { currency: 'EUR' } })).rejects.toMatchObject({ name: 'DataVariantUnsupportedError' });
   });
 });
 

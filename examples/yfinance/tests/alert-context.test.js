@@ -58,6 +58,14 @@ describe('reference alert context actions', () => {
     expect(ui.openEditor).not.toHaveBeenCalled();
     expect(ui.openList).not.toHaveBeenCalled();
   });
+  it('treats a session change after the menu opened as a change of scope', () => {
+    const { app, ui, context } = host();
+    const rows = alertContextEntries(app, event());
+    context.variant = { session: 'extended' };
+    rows[0].onSelect(); rows[1].onSelect();
+    expect(ui.openEditor).not.toHaveBeenCalled();
+    expect(ui.openList).not.toHaveBeenCalled();
+  });
   it('offers only the list for empty oscillator space, time scales and unavailable chart UI', () => {
     const { app } = host();
     expect(alertContextEntries(app, event({ paneIndex: 1 })).map(row => row.label)).toEqual(['Alerts']);

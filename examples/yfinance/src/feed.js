@@ -6,7 +6,7 @@ import { venueLive, exchangeOf } from './status.js';
 import { popupMenu } from './menus.js';
 import { renderToolbar } from './toolbar.js';
 import { el, toast } from './ui.js';
-import { extendedSessionAvailable, requestVariant } from './session.js';
+import { extendedSessionAvailable, requestVariant, sessionOf } from './session.js';
 
 // 1.3 surfaces: chart linking, the bar cache and the interval registry.
 // Same namespace read for the same reason: this page must still draw
@@ -304,7 +304,8 @@ export function barsRequest(symbol, interval, period, variant) {
   const now = Math.floor(Date.now() / 1000);
   let to = Math.floor(now / sec) * sec + sec - 1;
   const seen = lastBarSeen.get(seenKey(symbol, interval, variant));
-  if (seen !== undefined && !venueLive(symbol)) to = Math.min(to, seen + sec - 1);
+  // An extended series trades before and after the regular one, so its own hours decide.
+  if (seen !== undefined && !venueLive(symbol, sessionOf(variant))) to = Math.min(to, seen + sec - 1);
   // `max` is 1e6 days in the picker's table, which as a `from` is an epoch
   // far enough back to be meaningless; a century is as much as any of this
   // data goes, and it keeps the value readable in a debugger.
@@ -430,9 +431,9 @@ export const STALE_GRACE_SEC = 60;
  * close. Otherwise `{ stale, overdueSec }`, where `overdueSec` is how long
  * ago the newest bar closed (negative while it is still forming).
  */
-export function staleness(symbol, wireInterval, newestSec, nowSec, zone) {
+export function staleness(symbol, wireInterval, newestSec, nowSec, zone, session = 'regular') {
   if (newestSec === undefined || newestSec === null) return null;
-  if (!venueLive(symbol)) return null;
+  if (!venueLive(symbol, session)) return null;
   let closeSec = barCloseSec ? barCloseSec(wireInterval, newestSec, zone) : null;
   if (closeSec == null) {
     const sec = intervalSeconds(wireInterval);
@@ -448,7 +449,7 @@ export function currentStaleness(nowSec = Math.floor(Date.now() / 1000)) {
   if (!app || !app.req || !app.req.symbol) return null;
   const seen = newestSeen.get(seenKey(app.req.symbol, app.req.interval, requestVariant(app.req)));
   if (!seen) return null;
-  return staleness(app.req.symbol, seen.wire, seen.time, nowSec, app.chartTimezone);
+  return staleness(app.req.symbol, seen.wire, seen.time, nowSec, app.chartTimezone, sessionOf(app.req));
 }
 
 const overdueText = (sec) => (sec >= 3600 ? `${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min` : `${Math.max(1, Math.round(sec / 60))} min`);

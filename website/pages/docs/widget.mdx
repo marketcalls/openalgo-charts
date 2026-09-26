@@ -12,7 +12,7 @@ import { Callout } from 'nextra/components'
 with a top bar (symbol, interval, chart type, theme, settings, indicators, objects, alerts), a drawing rail
 down the left, a status line, the dialogs behind each of those buttons, keyboard shortcuts
 with a `?` panel that lists them, and optional persistence of the layout. It is one of nine
-loadable tiers (**82.30 kB** Brotli in 2.5.5) and the only tier that supplies
+loadable tiers (**82.66 kB** Brotli in the current build) and the only tier that supplies
 application controls.
 
 The drawing rail includes Anchored VWAP and fixed-range Volume Profile. They use
@@ -288,9 +288,10 @@ widget.isDestroyed;
 `restoreState` applies a saved viewport only when the state was captured on the same
 symbol, interval and [data variant](/docs/data-variants); on any other dataset the
 indicators, drawings and panes still land and the view is dropped, because a range of bar
-indices means nothing on different bars. A state without `variant` (one saved before
-variants existed) keeps the widget's current variant; one this build cannot read is
-refused before anything is applied.
+indices means nothing on different bars. A state without `variant` was saved on the
+feed's default series (so was every state saved before variants existed), and it restores
+onto the default series whatever the widget shows at the time; one this build cannot read
+is refused before anything is applied.
 
 A `Widget` is a thin owner. Anything the chrome does not expose, do on `widget.chart` or
 `widget.draw` directly; the chrome observes the chart and stays in step.
@@ -575,13 +576,13 @@ widget: a tier loaded beside it would import its own second engine. See
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.5.5 build, decimal
+Budgets from `.size-limit.json` and measurements from the current build, decimal
 Brotli kB, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 82.31 kB | 82.30 kB |
-| Widget terminal | base + draw + indicators + widget | 282.67 kB | 282.67 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 82.66 kB | 82.66 kB |
+| Widget terminal | base + draw + indicators + widget | 284.14 kB | 284.14 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.

@@ -546,12 +546,17 @@ interface DataVariantCapabilities { sessions?; adjustments?; currencies?; units?
   carries no `variant` field at all), asks the feed's declaration before the cache or the
   network, and publishes status `'unsupported'` with `snapshot.unsupported` (the
   dimension) and a `DataVariantUnsupportedError` when it is not declared: nothing is
-  fetched, streamed, refreshed or paged. A new `load` with another variant is a new
+  fetched, streamed, refreshed or paged. A declaration that rejects or times out is
+  status `'error'`, and until the provider answers nothing fetches or pages the variant
+  either: `loadMore` does nothing and `refresh` (the widget's Retry) asks the
+  declaration again through a new load. A new `load` with another variant is a new
   source: the previous request is aborted, the stream released and the bars cleared.
   Hosts that switch exhaustively on `DataLoadingStatus` gain the `'unsupported'` case.
 - **OpenAlgo adapters.** `OpenAlgoDataFeed.getBars` and `OpenAlgoLiveDataFeed.subscribeBars`
   refuse any non-default variant with `dataVariantError` (name
   `DataVariantUnsupportedError`): the history API has one series per instrument.
+  `FakeDataFeed.getBars` and `subscribeBars` refuse the same way, since the synthetic
+  feed has one series too, whether it is called directly or through `withBarCache`.
 - **Chart data context.** `ChartDataContext.variant` carries the variant to studies and
   hosts. Set it with `publishDataContext(chart, context)`, not `chart.setDataContext`:
   `setDataContext` compares symbol, exchange, interval and OI only, so a change of
@@ -559,6 +564,14 @@ interface DataVariantCapabilities { sessions?; adjustments?; currencies?; units?
   the chart treats the change as a new source (requested bars aborted, source revisions
   restarted, studies told `'context'`), without changing the instrument, so event
   markers, linked drawings and news stay. `Instrument.applyTo` keeps the context variant.
+  On that detour the chart emits `data:context` twice (the passing context with its
+  interval cleared, then the real one). The passing context is marked, and requested
+  studies, Tier 2 studies and `AlertController` skip it, so nothing is fetched, reported
+  or saved for it; a host listener sees both and should act on the context current once
+  the call returns.
+- **Alerts.** `AlertScope.variant` records a non-default variant (the default adds no
+  field); an alert evaluates only on its own variant, and a fixed price is not drawn in
+  another currency or unit. See [alerts](alerts.md).
 - **Requested contexts.** `IndicatorBarsRequest.variant` names the series another
   instrument is asked in. `createRequestedIndicator` and `createTier2Indicator`'s
   `requestBars` inherit `inheritedDataVariant(chart variant)`, the session and the

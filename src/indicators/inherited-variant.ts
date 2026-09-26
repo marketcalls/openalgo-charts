@@ -1,4 +1,13 @@
-import { normalizeDataVariant, type DataVariant } from 'openalgo-charts';
+import { normalizeDataVariant, type ChartDataContext, type DataVariant } from 'openalgo-charts';
+
+/**
+ * Whether the chart's context is the one `publishDataContext` passes through
+ * on a variant-only change, which the real one replaces at once. The same
+ * registered symbol the base tier marks it with (see data-variant.ts), read
+ * here because this tier is bundled apart from that module.
+ */
+export const passingContext = (context: Readonly<ChartDataContext> | undefined): boolean =>
+  (context as Record<symbol, unknown> | undefined)?.[Symbol.for('openalgo-charts.data-context.passing')] === true;
 
 /**
  * The part of a chart's data variant that a request for another instrument

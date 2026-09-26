@@ -5,7 +5,7 @@ import {
   type IndicatorSnapshotRequest, type IndicatorStore, type IndicatorValues, type RequestedBarsSnapshot,
 } from 'openalgo-charts';
 import { alignRequestedExpression, type RequestedAlignmentOptions } from './requested-context';
-import { inheritedDataVariant } from './inherited-variant';
+import { inheritedDataVariant, passingContext } from './inherited-variant';
 
 /** Source and settings visible to request selection and requested calculation. */
 export interface RequestedIndicatorContext {
@@ -243,7 +243,9 @@ export function createRequestedIndicator(d: RequestedIndicatorDescriptor): Indic
         start(request);
       };
       const refresh = (retry = false): void => {
-        if (!current()) return;
+        // A context a variant-only change passes through is replaced before
+        // anything could answer for it, so nothing is selected or asked for it.
+        if (!current() || passingContext(ctx.dataContext?.())) return;
         const revision = ++refreshRevision;
         const fresh = (): boolean => current() && refreshRevision === revision;
         const previous = state.context?.requestState?.replay;

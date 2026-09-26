@@ -122,6 +122,12 @@ export class DataLoadingController {
   private _poll: ReturnType<typeof setTimeout> | null = null;
   private _visible = true;
   private _destroyed = false;
+  /**
+   * Whether the provider has said it serves the current request's variant, or
+   * the request names none. Until it has, nothing fetches, refreshes or pages
+   * that variant: a declaration that failed is not a declaration.
+   */
+  private _declared = true;
   /** Seconds per bar of the current request, null when the interval is not fixed-length. */
   private _seconds: number | null = null;
   /** Bucket whose open is only the first tick a builder saw, until history covers it. */
@@ -185,6 +191,7 @@ export class DataLoadingController {
       else delete request.variant;
     } catch { /* reported by _load */ }
     this._state = { request, bars: [], status: 'loading', historyStatus: 'idle', hasMore: null, reason: 'load', paused: false };
+    this._declared = request.variant === undefined;
     let complete!: (bars: readonly Bar[]) => void;
     const work = new Promise<readonly Bar[]>(resolve => { complete = resolve; });
     this._loadWork = work;
@@ -214,6 +221,7 @@ export class DataLoadingController {
           this._publish('state', { status: 'unsupported', unsupported, error: dataVariantError(unsupported, req.variant) });
           return this._bars;
         }
+        this._declared = true;
       }
       let cached: Bar[] | undefined;
       if (!req.noCache && this._feed.getCachedBars) {
@@ -255,6 +263,10 @@ export class DataLoadingController {
   private async _refresh(repair?: Repair): Promise<readonly Bar[]> {
     if (this._destroyed || !this._state.request || this._state.status === 'unsupported') return this._bars;
     if (this._loadWork) return this._loadWork;
+    // The provider never answered for this variant (its declaration failed or
+    // timed out), so a retry asks it again, through a load, rather than
+    // fetching a series it may not serve.
+    if (!this._declared) return this.load(this._state.request);
     const generation = this._generation;
     const id = ++this._refreshId;
     const previous = this._refreshAbort;
@@ -435,7 +447,7 @@ export class DataLoadingController {
   public loadMore(until?: number): Promise<readonly Bar[]> {
     if (this._pageWork) return this._pageWork;
     if (this._destroyed || !this._state.request || this._loadWork || this._state.paused || this._state.hasMore === false
-      || this._state.status === 'unsupported') return Promise.resolve(this._bars);
+      || !this._declared) return Promise.resolve(this._bars);
     if (this._bars.length >= this._options.maxBars!) {
       this._publish('state', { historyStatus: 'limited' });
       return Promise.resolve(this._bars);

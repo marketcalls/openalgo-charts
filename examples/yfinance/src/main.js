@@ -221,7 +221,7 @@ function render({ keepView = true, state } = {}) {
   // legend draws nothing for a field with no data, so these switches are live
   // only because this hands them something.
   app.symbolLegend = new PaneLegend({ id: 'symbol', title: '', params: '', row: 0, actions: [],
-    status: () => symbolStatus({ symbol: app.req.symbol, bars: app.chart.primaryBars(), timezone: app.chart.timezone() }),
+    status: () => symbolStatus({ symbol: app.req.symbol, bars: app.chart.primaryBars(), timezone: app.chart.timezone(), session: sessionOf(app.req) }),
   });
   app.chart.addPrimitive(app.symbolLegend);
 

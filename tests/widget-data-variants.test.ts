@@ -26,21 +26,26 @@ function make(options: WidgetOptions = {}) {
   return { widget, root: widget.root as unknown as FakeElement, doc };
 }
 /** Extended hours is a different series: its bars close at 50, the regular ones at 10. */
-function sessionFeed(extra: Partial<DataFeed> = {}): DataFeed & { requests: BarsRequest[] } {
+function sessionFeed(extra: Partial<DataFeed> & { count?: number } = {}): DataFeed & { requests: BarsRequest[] } {
   const requests: BarsRequest[] = [];
+  const { count = 2, ...rest } = extra;
   return {
     requests,
     dataVariants: () => ({ sessions: ['regular', 'extended'] }),
     getBars: async request => {
       requests.push(request);
-      return [bar(60, request.variant?.session === 'extended' ? 50 : 10), bar(120, request.variant?.session === 'extended' ? 51 : 11)];
+      const base = request.variant?.session === 'extended' ? 50 : 10;
+      return Array.from({ length: count }, (_, i) => bar(60 * (i + 1), base + i));
     },
-    ...extra,
+    ...rest,
   };
 }
+/** Enough bars that a saved view is told apart from the one a fresh load picks. */
+const manyBars = { count: 100 };
+const SAVED_VIEW = { from: 20, to: 40 };
 function memoryStorage() {
   const entries = new Map<string, string>();
-  return { getItem: (key: string) => entries.get(key) ?? null,
+  return { getItem: (key: string) => entries.get(key) ?? null, keys: () => entries.keys(),
     setItem: (key: string, value: string) => { entries.set(key, value); }, removeItem: (key: string) => { entries.delete(key); } };
 }
 
@@ -100,25 +105,52 @@ describe('widget data variants', () => {
   });
 
   it('restores a saved variant as another dataset, so the old view is dropped', async () => {
-    const feed = sessionFeed();
+    const feed = sessionFeed(manyBars);
     const { widget } = make({ feed });
     await flush();
+    widget.chart.setVisibleLogicalRange(SAVED_VIEW);
     const saved = { ...widget.getState(), variant: extended };
     const report = widget.restoreState(saved);
     expect(report.applied).toBe(true);
     await flush();
     expect(last(feed.requests)?.variant).toEqual(extended);
     expect(widget.variant()).toEqual(extended);
-    // A state from before variants existed names none and keeps the current one.
-    const { variant: _dropped, ...older } = widget.getState();
-    const count = feed.requests.length;
-    expect(widget.restoreState(older).applied).toBe(true);
-    await flush();
-    expect(widget.variant()).toEqual(extended);
-    expect(feed.requests).toHaveLength(count);
+    // The view was taken on the regular bars, which are not these.
+    expect(widget.chart.getVisibleLogicalRange()).not.toEqual(SAVED_VIEW);
     // One this build cannot read is refused before anything else is applied.
-    expect(widget.restoreState({ ...older, theme: 'light', variant: { session: 'overnight' } })).toMatchObject({ applied: false });
+    expect(widget.restoreState({ ...saved, theme: 'light', variant: { session: 'overnight' } })).toMatchObject({ applied: false });
     expect(widget.theme()).toBe('dark');
+    expect(widget.variant()).toEqual(extended);
+  });
+
+  it('restores a state that names no variant onto the default series, whatever the widget shows', async () => {
+    const feed = sessionFeed(manyBars);
+    const { widget } = make({ feed });
+    await flush();
+    widget.chart.setVisibleLogicalRange(SAVED_VIEW);
+    // Saved on the default series, so it names no variant: that is also every
+    // state saved before variants existed.
+    const saved = widget.getState();
+    expect(saved).not.toHaveProperty('variant');
+    widget.setDataVariant(extended);
+    await flush();
+    const announced: unknown[] = [];
+    widget.on('variant', payload => announced.push(payload));
+    const report = widget.restoreState(saved);
+    expect(report).toMatchObject({ applied: true, chart: { applied: true } });
+    await flush();
+    expect(widget.variant()).toBeUndefined();
+    expect(announced).toEqual([{ variant: undefined }]);
+    expect(last(feed.requests)).not.toHaveProperty('variant');
+    expect(widget.chart.getDataContext()).toEqual({ symbol: 'AAA', exchange: 'X', interval: '1m' });
+    expect(widget.series.getData()[0].close).toBe(10);
+    // The saved view belongs to the regular bars and the widget was showing
+    // extended ones, so it is not carried across the switch.
+    expect(widget.chart.getVisibleLogicalRange()).not.toEqual(SAVED_VIEW);
+    // Restored again on the series it was saved on, the view does land.
+    expect(widget.restoreState(saved).applied).toBe(true);
+    await flush();
+    expect(widget.chart.getVisibleLogicalRange()).toEqual(SAVED_VIEW);
   });
 
   it('keeps the variant between visits', async () => {
@@ -132,6 +164,42 @@ describe('widget data variants', () => {
     await flush();
     expect(second.variant()).toEqual(extended);
     expect(feed.requests[0].variant).toEqual(extended);
+  });
+
+  it('opens a persisted view only on the variant it was saved on', async () => {
+    const storage = memoryStorage();
+    const first = make({ feed: sessionFeed(manyBars), persist: 'views', storage }).widget;
+    await flush();
+    first.chart.setVisibleLogicalRange(SAVED_VIEW);
+    first.destroy();
+    // The same series: the view comes back.
+    const same = make({ feed: sessionFeed(manyBars), persist: 'views', storage }).widget;
+    await flush();
+    expect(same.chart.getVisibleLogicalRange()).toEqual(SAVED_VIEW);
+    same.destroy();
+    // Asked for extended hours, the layout lands and the regular-hours view does not.
+    const feed = sessionFeed(manyBars);
+    const other = make({ feed, persist: 'views', storage, variant: extended }).widget;
+    await flush();
+    expect(feed.requests.map(request => request.variant)).toEqual([extended]);
+    expect(other.chart.getVisibleLogicalRange()).not.toEqual(SAVED_VIEW);
+  });
+
+  it('opens a persisted layout whose variant it cannot read on the default series, without its view', async () => {
+    const storage = memoryStorage();
+    const first = make({ feed: sessionFeed(manyBars), persist: 'unread', storage }).widget;
+    await flush();
+    first.chart.setVisibleLogicalRange(SAVED_VIEW);
+    first.destroy();
+    // A later build saved a variant this one cannot name.
+    const key = [...storage.keys()].find(name => name.endsWith(':state'))!;
+    storage.setItem(key, JSON.stringify({ ...JSON.parse(storage.getItem(key)!), variant: { session: 'overnight' } }));
+    const feed = sessionFeed(manyBars);
+    const widget = make({ feed, persist: 'unread', storage }).widget;
+    await flush();
+    expect(widget.variant()).toBeUndefined();
+    expect(feed.requests[0]).not.toHaveProperty('variant');
+    expect(widget.chart.getVisibleLogicalRange()).not.toEqual(SAVED_VIEW);
   });
 
   it('shows a variant the provider does not declare as unsupported, fetches nothing and offers no retry', async () => {

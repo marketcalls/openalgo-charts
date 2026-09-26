@@ -164,7 +164,13 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // the indicator gap recovery measure 75.07 KiB (76874 bytes); allow 75.08 KiB.
 // Watchlists, news, account state and viewport drawings live in the optional
 // tiers; the widget check below keeps the panels out of this import.
-const LIMIT_BYTES = 75.08 * 1024;
+// An alert scope names the data variant it was set on, and alert documents
+// round-trip on charts without a controller, so the parser that refuses a
+// variant this build cannot name ships here too: normalizeDataVariant and the
+// scope check. Measured 76874 to 77076 bytes (75.07 to 75.27 KiB); allow
+// 75.27 KiB. The alert controller and the loading controller's variant
+// handling still shake out.
+const LIMIT_BYTES = 75.27 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.
