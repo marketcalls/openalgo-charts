@@ -5,8 +5,9 @@
  * Internal to the indicator tier: `./index` does not export it, and no base
  * module imports it, so none of it reaches a chart-only build. It exists so
  * the alignment rule and the Smoothing block are written once. Private copies
- * of these helpers and of the block's option list sat in eight study modules,
- * where one copy could be corrected and its siblings left behind.
+ * of these helpers and of the block's option list, some under other names and
+ * one written inline, sat across the study modules, where one copy could be
+ * corrected and its siblings left behind.
  */
 import { sma, wma, rma, vwma, smaSeededEma } from './calc';
 

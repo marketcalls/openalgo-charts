@@ -18,9 +18,10 @@ All notable changes to OpenAlgo Charts.
 
 - The indicator tier's warmup-gap alignment and its Smoothing block are
   written once, in an internal module the tier does not export, instead of as
-  private copies in eight study modules: four of the gapped EMA, four of the
-  Smoothing kernel switch (the moving-average ribbon's among them), three of
-  the first-value alignment and three of the Smoothing option list. The canvas
+  private copies spread across the study modules: five of the gapped EMA, four
+  of the Smoothing kernel switch (the moving-average ribbon's among them), four
+  of the first-value alignment (one written inline in ADX) and three of the
+  Smoothing option list. The canvas
   colour helpers and the widget's tokens share one luminance calculation, each
   still reading colours through its own parser, because the two parsers
   disagree on malformed input and merging them would move a colour. The
@@ -32,7 +33,7 @@ All notable changes to OpenAlgo Charts.
   Ichimoku fix above is the only change in study output).
   `tests/shared-helpers.test.ts` checks the merged helpers bitwise against
   independent copies of the ones they replaced, and fails if a private copy
-  comes back.
+  comes back, by name or as the alignment pattern under another name.
 - The two public `withAlpha` functions share a name, not a behaviour, and stay
   separate on purpose; their declarations now say so. The base package's
   writes `rgba()` with the alpha as given, for canvas, and the widget's writes

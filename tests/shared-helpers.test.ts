@@ -248,6 +248,10 @@ describe('one copy of each shared indicator helper', () => {
     ['the gapped EMA', /function emaOfGapped\b/],
     ['the Smoothing kernel switch', /case 'SMMA \(RMA\)'/],
     ['the Smoothing option list and its Bollinger choice', /'SMA \+ Bollinger Bands'/],
+    // The alignment itself, whatever a copy is called: writing a smoothed tail
+    // back from its first finite bar. A renamed private copy would pass the
+    // name checks above and drift from the shared one just the same.
+    ['the tail written back from the first value', /\[\w+ \+ i\] = \w+\[i\]/],
   ])('%s lives only in smoothing.ts', (_name, pattern) => {
     expect(definedIn(pattern)).toEqual(['smoothing.ts']);
   });

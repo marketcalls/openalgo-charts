@@ -244,12 +244,7 @@ export const ADX: IndicatorDescriptor = {
       dx[i] = sum > 0 ? (Math.abs(plusDi[i] - minusDi[i]) / sum) * 100 : 0;
     }
     // The DX series is NaN during DI warmup; smooth only the finite tail.
-    const start = dx.findIndex((v) => Number.isFinite(v));
-    const adx = new Array<number>(n).fill(NaN);
-    if (start >= 0) {
-      const smoothed = rma(dx.slice(start), num(s, 'adxPeriod', 14));
-      for (let i = 0; i < smoothed.length; i++) adx[start + i] = smoothed[i];
-    }
+    const adx = fromFirstValue(dx, (tail) => rma(tail, num(s, 'adxPeriod', 14)));
     return { plusDi: nulls(plusDi), minusDi: nulls(minusDi), adx: nulls(adx) };
   },
   levels: () => [{ price: 25, color: '#5a6b8c', title: '25', dashed: true }],
