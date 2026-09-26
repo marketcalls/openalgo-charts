@@ -210,6 +210,8 @@ const allShading = (chart: Chart): number => chart.panes().reduce((sum, _, i) =>
 const fills = (ops: unknown[]): string[] => (ops as { type: string; fillStyle?: string }[])
   .filter(op => op.type === 'fillRect').map(op => op.fillStyle!);
 const bound = (chart: Chart, study: IndicatorApi): string[] => placed(chart, study).map(layer => `${layer.pane}:${layer.scale}`);
+/** A list with holes at every index `entries` leaves out, the shape a list built by index has. */
+const holed = (length: number, entries: Record<number, unknown>): unknown[] => Object.assign(new Array<unknown>(length), entries);
 
 describe('shading targets', () => {
   it('sends a price-pane column to the price pane, bound to no axis, and keeps its own column in the study pane', () => {
@@ -298,6 +300,21 @@ describe('shading targets', () => {
     study.setVisible(true);
     expect(painted()).toEqual([true, true]);
     expect(layersOf(study)).toEqual(kept);
+  });
+
+  it('makes a target layer hidden when the study is hidden, and shows it with the study', () => {
+    const chart = mount();
+    const study = chart.addIndicator(routedShade(), { shade: 'none' });
+    study.setVisible(false);
+    // A pass while hidden routes a column somewhere new: its layer must not paint yet.
+    study.setSettings({ shade: 'price' });
+    expect(placed(chart, study)).toEqual([
+      { pane: 1, scale: null, overlay: false },
+      { pane: 0, scale: null, overlay: true },
+    ]);
+    expect(shading(chart, study).map(layer => fills(layer.ops))).toEqual([[], []]);
+    study.setVisible(true);
+    expect(shading(chart, study).map(layer => [...new Set(fills(layer.ops))])).toEqual([[OWN], [SENT]]);
   });
 
   it('keeps price-pane shading on the price pane through moves and releases it with the study or its pane', () => {
@@ -418,6 +435,9 @@ describe('shading targets', () => {
     ['two columns with no target', [{ colors: ['#fff'] }, { colors: ['#000'] }], /one column per target/],
     ['a column without colours', [{ overlay: true }], /colours or a list of columns/],
     ['colours mixed with columns', ['#fff', { colors: ['#000'], overlay: true }], /colours or a list of columns/],
+    // Holes are what `every` and `some` skip, so the check has to visit every index.
+    ['a hole before a column', holed(2, { 1: { colors: ['#fff'], overlay: true } }), /colours or a list of columns/],
+    ['a hole between columns', holed(3, { 0: { colors: ['#fff'] }, 2: { colors: ['#000'], overlay: true } }), /colours or a list of columns/],
   ])('rejects %s before any shading layer changes', (_, bad, message) => {
     const id = `bg-invalid-${seq++}`;
     registerIndicator({

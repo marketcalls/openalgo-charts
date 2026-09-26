@@ -317,6 +317,22 @@ describe('drawing targets', () => {
     expect(painted()).toEqual([true, true]);
   });
 
+  it('makes a target layer hidden when the study is hidden, and shows it with the study', () => {
+    const { chart } = mount();
+    const study = chart.addIndicator(routedDraws(), { zone: 'study' });
+    study.setVisible(false);
+    // A pass while hidden routes a shape somewhere new: its layer must not paint yet.
+    study.setSettings({ zone: 'price' });
+    expect(drawLayers(chart, study)).toEqual([
+      { pane: 1, scale: 'right', overlay: false, ids: ['ray'] },
+      { pane: 0, scale: null, overlay: true, ids: ['zone'] },
+    ]);
+    const painted = () => ownedLayers(chart, study).filter(layer => layer.kind === 'IndicatorDrawings').map(layer => layer.ops.length > 0);
+    expect(painted()).toEqual([false, false]);
+    study.setVisible(true);
+    expect(painted()).toEqual([true, true]);
+  });
+
   it('keeps price-pane layers on pane zero through moves and releases them with the study or its pane', () => {
     const id = routedDraws();
     const { chart } = mount();
