@@ -121,6 +121,17 @@ everything 352,964 to 354,089; the chart-only import grows from 80,041 to
 81,172 bytes. No other tier moved. The budgets are set once for the merged
 build, which already measured over several of them before this change.
 
+The chart-wide undo reconciliation (study anchor steps on one timeline, the
+study policies, instance identity, `layout:change` and the scale defaults, and
+the drawing controller holding a picked point) adds, measured on the merged
+build before and after, Brotli bytes: draw tier 48,058 to 48,420, widget tier
+91,334 to 92,413, widget terminal 301,077 to 302,518 and everything 354,089 to
+355,530. The base engine, base + trade and the chart-only import do not move.
+Each budget is the smallest two-decimal value that passes on the merged build:
+base 125.25 kB, base + trade 141.94 kB, draw 48.42 kB, widget 92.42 kB,
+terminal 302.52 kB, everything 355.53 kB, workspace 10.47 kB and the
+chart-only import 79.27 KiB.
+
 ### Deprecated
 
 - `mapOrder` is deprecated in favour of `decodeOrder`, which returns the reason a

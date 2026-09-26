@@ -210,9 +210,12 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // The notes above were measured branch by branch. Merged, they measure 80041
 // bytes (78.17 KiB). Handing study anchor steps to the chart-wide undo history
 // and keeping that history to the study policies live in the draw and widget
-// tiers and add nothing here (80041 bytes with and without them); allow
-// 78.17 KiB.
-const LIMIT_BYTES = 78.17 * 1024;
+// tiers and add nothing here (80041 bytes with and without them). The
+// device-pixel layout, layout:change, priceScaleDefaults and
+// setSessionCalendar take the merged build to 81172 bytes (79.27 KiB), and the
+// undo history's reconciliation on top of them, again in the draw and widget
+// tiers, leaves it there; allow 79.27 KiB.
+const LIMIT_BYTES = 79.27 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.
