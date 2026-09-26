@@ -83,6 +83,11 @@ describe('layout:change', () => {
     chart.setPriceAxisAutoFit(9, 'right', true);
     chart.setPriceAxisLockRatio(9, 'right', true);
     expect(heard).toEqual([]);
+    // The same calls on a pane the chart has are heard, once each, so the
+    // silence above is the pane check and not an event that never fires.
+    chart.setPaneWeight(1, 0.6);
+    chart.setPriceAxisAutoFit(1, 'right', false);
+    expect(heard).toEqual(['setPaneWeight', 'setPriceAxisAutoFit']);
   });
 
   it('stays quiet through a restore, which announces itself', () => {
