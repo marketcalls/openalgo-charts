@@ -2838,7 +2838,9 @@ export class Chart {
    * pane, the primary price pane when none is named, or to a chart anchor.
    */
   public addPrimitive(primitive: IPrimitive, where?: number | PrimitivePlacement): void {
-    if (where === undefined || typeof where === 'number') { this._addPrimitive(where ?? this._primaryIndex(), primitive); return; }
+    // `typeof` rather than `??` picks the index: the website compiles this file
+    // without strict null checks, where `=== undefined` narrows nothing.
+    if (where === undefined || typeof where === 'number') { this._addPrimitive(typeof where === 'number' ? where : this._primaryIndex(), primitive); return; }
     // Chart furniture: a brand mark, a corner clock. It belongs to the CHART,
     // not to whichever pane happens to be last, so the engine re-homes it as
     // panes come and go instead of every host writing its own placeWatermark().

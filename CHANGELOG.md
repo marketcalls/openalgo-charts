@@ -147,6 +147,11 @@ import by 43.
 
 ### Documentation
 
+- The examples page carries the undo example's code again. Merging the data
+  variants example had cut it off after its first line, which left the page
+  unparseable and stopped the website building. Two library lines the website
+  compiles without strict null checks (`addPrimitive`'s pane index and an
+  instrument's open-interest flag) now type there too; neither changes behaviour.
 - README and ARCHITECTURE.md now describe the engine as it is: two canvases per
   pane with the axes painted on the base canvas, a data write (a study
   recompute or a live tick) repainting every pane, a time-scale operation queue
