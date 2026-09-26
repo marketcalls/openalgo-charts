@@ -179,10 +179,13 @@ export function renderInputRows(host, inputs, values, onChange, unavailable) {
   live.setAttribute('aria-live', 'polite');
   host.appendChild(live);
   for (const m of members) { m.shown = true; m.enabled = true; }
-  formRules.set(host, { inputs, values, members, live, unavailable, refreshers: [] });
+  // Committed edits only, the way the widget's form reads them: a box counts
+  // once it is left, not at every keystroke. Every open renders into the same
+  // host, so destroyInputRows takes the listener off again.
   const changed = event => refreshInputRows(host, event.target?.dataset?.key);
-  host.addEventListener('input', changed);
   host.addEventListener('change', changed);
+  formRules.set(host, { inputs, values, members, live, unavailable, refreshers: [], taken: {},
+    detach: () => host.removeEventListener('change', changed) });
   refreshInputRows(host, undefined, false);
 }
 
@@ -216,11 +219,19 @@ export function refreshInputRows(host, cause, announce = true) {
   const rules = formRules.get(host);
   if (!rules) return;
   const before = document.activeElement;
-  const draft = { ...rules.values, ...formDrafts.get(host) };
-  for (const m of rules.members) for (const field of m.fields) draft[field.dataset.key] = fieldValue(field);
+  // What the widget's form would hold: a number as its last commit left it,
+  // and a typed draft it would refuse is no edit, so the last accepted value
+  // still decides.
+  const draft = { ...rules.values, ...formDrafts.get(host), ...rules.taken };
+  for (const m of rules.members) for (const field of m.fields) {
+    if (typedFieldProblem(field)) continue;
+    draft[field.dataset.key] = rules.taken[field.dataset.key] = field._committed ? field._committed() : fieldValue(field);
+  }
   const states = inputStates(rules.inputs, draft);
   const said = { shown: [], hidden: [], on: [], off: [] };
-  const labelOf = key => rules.inputs.find(input => input.key === key)?.label;
+  // A pair's switch and swatches are named by the pair, as the reader counts them.
+  const labelOf = key => rules.inputs.find(input => input.key === key
+    || [input.enabled, input.up, input.down].some(part => part?.key === key))?.label;
   for (const m of rules.members) {
     const state = states.get(m.input.key);
     const visible = state?.visible ?? true;
@@ -278,6 +289,7 @@ export function refreshInputRows(host, cause, announce = true) {
 
 export function destroyInputRows(host) {
   for (const picker of formPickers.get(host) || []) picker.destroy();
+  formRules.get(host)?.detach();
   formPickers.delete(host);
   formDrafts.delete(host);
   formRules.delete(host);
@@ -353,6 +365,7 @@ function inputField(host, key, kind, spec, value, onChange, unavailable) {
       if (spec.step !== undefined) field.step = spec.step;
     }
     field.value = String(value ?? '');
+    if (kind === 'number') commitNumber(field, spec, value);
   }
   // Namespaced by host, so both dialogs can exist in the document at once
   // without two fields claiming the same id.
@@ -369,6 +382,22 @@ function inputField(host, key, kind, spec, value, onChange, unavailable) {
     }
   }
   return field;
+}
+
+/**
+ * Commit a number box the way the widget's form does, so a condition that
+ * reads it answers alike in both: clamped to its bounds, and a blank or
+ * unparseable box is no edit and gets the last good value back. Registered
+ * before the form's own change listener, so that reads the committed value.
+ */
+function commitNumber(field, spec, value) {
+  let good = value;
+  field._committed = () => good;
+  field.addEventListener('change', () => {
+    const raw = field.value.trim(), n = raw === '' ? NaN : Number(raw);
+    if (Number.isFinite(n)) good = Math.min(spec.max ?? Infinity, Math.max(spec.min ?? -Infinity, n));
+    if (!Number.isFinite(n) || n !== good) field.value = typeof good === 'number' && Number.isFinite(good) ? String(good) : '';
+  });
 }
 
 /**

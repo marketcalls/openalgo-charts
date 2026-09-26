@@ -104,6 +104,24 @@ async function fits(page: Page, surface: Surface) {
       .every(rect => rect.left >= dialog.left - 1 && rect.right <= dialog.right + 1);
   }, surface === 'widget' ? '.oac-indset' : '#setmodal .set-card')).toBe(true);
 }
+/**
+ * How many passes over the rules one committed edit makes, counted from the
+ * title every pass writes on a field. Setting an attribute queues a mutation
+ * record even when the value is unchanged, so each pass counts once.
+ */
+async function passes(page: Page, surface: Surface) {
+  const c = controls(page, surface);
+  await c.field('smoothLength').evaluate(node => {
+    const w = window as unknown as { __passes: number; __observer?: MutationObserver };
+    w.__observer?.disconnect(); w.__passes = 0;
+    w.__observer = new MutationObserver(records => { w.__passes += records.length; });
+    w.__observer.observe(node, { attributes: true, attributeFilter: ['title'] });
+  });
+  await c.field('smoothing').selectOption('sma');
+  await c.field('smoothing').selectOption('none');
+  return page.evaluate(() => (window as unknown as { __passes: number }).__passes);
+}
+
 /** Ids of the fields keyboard focus visits, pressing Tab from `start`. */
 async function tabOrder(page: Page, start: ReturnType<Page['locator']>, presses: number) {
   await start.focus();
@@ -113,6 +131,28 @@ async function tabOrder(page: Page, start: ReturnType<Page['locator']>, presses:
     seen.push(await page.evaluate(() => document.activeElement?.id ?? ''));
   }
   return seen;
+}
+
+for (const surface of ['widget', 'demo'] as const) {
+  test(`${surface} re-reads the rules once per edit however often the dialog opens, and commits numbers alike`, async ({ page }, info) => {
+    const errors = await mount(page, surface, 1100), c = controls(page, surface);
+    const first = await passes(page, surface);
+    expect(first).toBeGreaterThan(0);
+    for (let i = 0; i < 3; i++) { await c.cancel.click(); await expect(c.dialog).toBeHidden(); await open(page); }
+    expect(await passes(page, surface)).toBe(first);
+
+    // A number counts as its commit leaves it: a blank box is no edit, and a
+    // value past its bound is clamped, in the widget and the reference host alike.
+    await c.field('mode').selectOption('bands');
+    await c.field('width').fill(''); await c.field('width').press('Tab');
+    await expect(c.field('width')).toHaveValue('2');
+    await expect(c.field('width')).toBeVisible();
+    await c.field('width').fill('9'); await c.field('width').press('Tab');
+    await expect(c.field('width')).toHaveValue('5');
+    await page.screenshot({ path: info.outputPath(`${surface}-committed.png`) });
+    await c.cancel.click();
+    expect(errors).toEqual([]);
+  });
 }
 
 for (const surface of ['widget', 'demo'] as const) for (const width of [1100, 390]) {

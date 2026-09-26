@@ -7,8 +7,9 @@ vi.mock('../src/persist.js', () => ({ autosave: vi.fn() }));
 import { Chart, darkTheme, registerIndicator } from '../../../src/index.ts';
 import { DrawingController } from '../../../src/draw/index.ts';
 import { createOverlayStack, WidgetBus, WidgetStorage } from '../../../src/widget/context.ts';
+import { controlsFromInputs, renderForm } from '../../../src/widget/form.ts';
 import { installDom } from '../../../tests/widget-form.test.ts';
-import { renderInputRows, collectInputRows, initIndicators, openSettings, closeSettings, collectSettings } from '../src/indicators.js';
+import { renderInputRows, destroyInputRows, collectInputRows, initIndicators, openSettings, closeSettings, collectSettings } from '../src/indicators.js';
 import { validateTypedRows } from '../src/indicator-input-controls.js';
 import { openOverlay } from '../src/ui.js';
 
@@ -42,18 +43,33 @@ function shown(node, host) {
   return true;
 }
 
-function form(list = inputs, values = defaults) {
+function form(list = inputs, values = defaults, unavailable = undefined) {
   const dom = installDom(); vi.stubGlobal('document', dom.doc); vi.stubGlobal('window', dom.win);
   const host = dom.doc.createElement('div'); host.id = 'set-body'; dom.root.appendChild(host);
-  renderInputRows(host, list, values);
+  renderInputRows(host, list, values, undefined, unavailable);
   const field = key => host.querySelector('#set-body_' + key);
   const choose = (key, value) => { field(key).value = value; field(key).fire('change'); };
   const live = () => host.querySelector('[role="status"][aria-live="polite"]');
   return { dom, host, field, choose, live, visible: key => shown(field(key), host) };
 }
 
-function fixture() {
-  const h = form(), { dom } = h, doc = dom.doc;
+/** The widget's own generated form over the same inputs, driven the same way, for answers both must share. */
+function widgetForm(list, values) {
+  const dom = installDom();
+  const host = dom.doc.createElement('div'); dom.root.appendChild(host);
+  renderForm(host, controlsFromInputs(list), { values, idPrefix: 'w', onChange() {} });
+  const field = key => host.querySelector('#w-' + key);
+  const live = () => host.querySelector('[role="status"][aria-live="polite"]');
+  return { host, field, live, visible: key => shown(field(key), host) };
+}
+
+/** How many listeners of one event type the host element itself carries, from the test document's bookkeeping. */
+function listeners(host, type) {
+  return host._listeners.get(type)?.length ?? 0;
+}
+
+function fixture(list = inputs) {
+  const h = form(list, Object.fromEntries(list.map(input => [input.key, input.default]))), { dom } = h, doc = dom.doc;
   const modal = doc.createElement('div'); modal.id = 'setmodal'; modal.hidden = true;
   dom.root.appendChild(modal); modal.appendChild(h.host);
   for (const id of ['set-title', 'set-ok', 'set-x', 'set-reset']) {
@@ -67,7 +83,7 @@ function fixture() {
   chart.applySize(900, 600);
   chart.addSeries('line').setData([1, 2, 3].map((close, i) => ({ time: 1700000000 + 60 * i, open: close, high: close, low: close, close })));
   const id = `reference-conditional-${++serial}`;
-  registerIndicator({ id, name: 'Reference conditional', placement: 'onchart', inputs,
+  registerIndicator({ id, name: 'Reference conditional', placement: 'onchart', inputs: list,
     plots: [{ key: 'value', type: 'line' }], calc: bars => ({ value: bars.map(bar => bar.close) }) });
   const inst = chart.addIndicator(id), draw = new DrawingController(chart), overlays = createOverlayStack(dom.root, doc);
   const ctx = { chart, draw, root: dom.root, document: doc, theme: 'dark', chartTheme: darkTheme,
@@ -174,6 +190,95 @@ describe('reference host conditional inputs', () => {
   it('adds no live region and no listeners to a form without conditions', () => {
     const h = form([{ key: 'n', type: 'number', label: 'N', default: 1 }], { n: 1 });
     expect(h.live()).toBeNull();
+    expect([listeners(h.host, 'input'), listeners(h.host, 'change')]).toEqual([0, 0]);
+  });
+
+  it('runs one refresh per edit however many times a form is rendered into the same host', () => {
+    const unavailable = vi.fn(() => null);
+    const h = form(inputs, defaults, unavailable);
+    for (let i = 0; i < 4; i++) renderInputRows(h.host, inputs, defaults, undefined, unavailable);
+    unavailable.mockClear();
+    h.choose('mode', 'bands');
+    // The refresh asks the host once per field; a listener left by an earlier render would ask again.
+    expect(unavailable).toHaveBeenCalledTimes(h.host.querySelectorAll('[data-key]').length);
+    expect([listeners(h.host, 'input'), listeners(h.host, 'change')]).toEqual([0, 1]);
+    destroyInputRows(h.host);
+    expect(listeners(h.host, 'change')).toBe(0);
+  });
+
+  it('keeps one form listener across every open of the settings dialog, and none once it closes', () => {
+    const h = fixture();
+    expect([listeners(h.host, 'input'), listeners(h.host, 'change')]).toEqual([0, 1]);
+    for (let i = 0; i < 4; i++) h.open();
+    expect([listeners(h.host, 'input'), listeners(h.host, 'change')]).toEqual([0, 1]);
+    closeSettings();
+    expect(listeners(h.host, 'change')).toBe(0);
+  });
+
+  it('reads a number and a price the way the widget form does: once committed, clamped, and a refused draft is no edit', () => {
+    const list = [
+      { key: 'width', type: 'number', label: 'Band width', default: 2, min: 0.5, max: 5 },
+      { key: 'fill', type: 'boolean', label: 'Fill', default: false, visibleWhen: { key: 'width', isNot: 0 } },
+      { key: 'wide', type: 'boolean', label: 'Wide', default: false, visibleWhen: { key: 'width', is: 5 } },
+      { key: 'level', type: 'price', label: 'Anchor', default: 10, min: 0, max: 100 },
+      { key: 'near', type: 'boolean', label: 'Near', default: false, visibleWhen: { key: 'level', is: 20 } },
+    ];
+    const values = Object.fromEntries(list.map(input => [input.key, input.default]));
+    for (const [surface, s] of [['host', form(list, values)], ['widget', widgetForm(list, values)]]) {
+      const type = (key, text, ...events) => { s.field(key).value = text; for (const event of events) s.field(key).fire(event); };
+      // Mid-typing, a blank box is not a width of 0.
+      type('width', '', 'input');
+      expect([surface, s.visible('fill'), s.live().textContent]).toEqual([surface, true, '']);
+      // Committed blank: no edit, and the last good value comes back.
+      s.field('width').fire('change');
+      expect([surface, s.field('width').value, s.visible('fill'), s.live().textContent]).toEqual([surface, '2', true, '']);
+      type('width', '9', 'input', 'change');
+      expect([surface, s.field('width').value, s.visible('wide'), s.live().textContent]).toEqual([surface, '5', true, 'Shown: Wide']);
+      type('level', '20', 'input', 'change');
+      expect([surface, s.visible('near')]).toEqual([surface, true]);
+      // A price the form refuses is not written, so the last accepted one still decides.
+      type('level', '-3', 'input', 'change');
+      expect([surface, s.visible('near')]).toEqual([surface, true]);
+    }
+  });
+
+  it('hides a row that reads the switch of a hidden colour pair, and names the pair for one that reads its swatch', () => {
+    const list = [
+      { key: 'on', type: 'boolean', label: 'On', default: false },
+      { key: 'borders', type: 'colorPair', label: 'Borders', visibleWhen: { key: 'on', is: true },
+        enabled: { key: 'pe', default: true },
+        up: { key: 'pu', label: 'Up', default: '#00ff00' }, down: { key: 'pd', label: 'Down', default: '#ff0000' } },
+      { key: 'w', type: 'number', label: 'Border width', default: 1, visibleWhen: { key: 'pe', is: true } },
+      { key: 'shade', type: 'number', label: 'Shade', default: 1, activeWhen: { key: 'pu', isNot: '' } },
+    ];
+    const h = form(list, { on: false, pe: true, pu: '#00ff00', pd: '#ff0000', w: 1, shade: 1 });
+    expect(h.visible('pe')).toBe(false);
+    expect(h.visible('w')).toBe(false);
+    expect(h.field('shade').disabled).toBe(true);
+    expect(h.field('shade').title).toBe('Depends on Borders');
+    h.field('on').checked = true; h.field('on').fire('change');
+    expect(h.visible('w')).toBe(true);
+    expect(h.field('shade').disabled).toBe(false);
+    h.field('pe').checked = false; h.field('pe').fire('change');
+    expect(h.visible('w')).toBe(false);
+  });
+
+  it('turns a chart pick and a symbol search off with the field they fill, and back on with it', () => {
+    const h = fixture([
+      { key: 'anchored', type: 'boolean', label: 'Anchor', default: false },
+      { key: 'level', type: 'price', label: 'Anchor price', default: 2, pick: true, activeWhen: { key: 'anchored', is: true } },
+      { key: 'other', type: 'symbol', label: 'Other symbol', default: 'AAA', activeWhen: { key: 'anchored', is: true } },
+    ]);
+    const pick = h.modal.querySelector('[data-input-action="level"]');
+    const search = h.modal.querySelector('[data-input-action="other"]');
+    for (const action of [pick, search]) {
+      expect(action.disabled).toBe(true);
+      expect(action.title).toBe('Depends on Anchor');
+    }
+    h.field('anchored').checked = true; h.field('anchored').fire('change');
+    for (const action of [pick, search]) expect(action.disabled).toBe(false);
+    h.field('anchored').checked = false; h.field('anchored').fire('change');
+    for (const action of [pick, search]) expect(action.disabled).toBe(true);
   });
 
   it('applies the drafts, a hidden valid one included, and Close discards them', () => {
