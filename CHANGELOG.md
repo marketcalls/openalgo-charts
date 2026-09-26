@@ -2,6 +2,49 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.5.7
+
+2026-09-26
+
+An internal release: the chart's code is reorganised and nothing a host calls,
+receives or sees changes.
+
+### Internal
+
+- `src/core/chart.ts` is split by responsibility. The `Chart` class keeps every
+  public method, overload and doc comment, the state its concerns share, the
+  frame, the event bus and the lifecycle; the logic moved into collaborators in
+  `src/core/chart-*.ts`: series, studies, panes, legends, price scales,
+  primitives and the draw order, appearance and export, input routing,
+  navigation motion, pixel-ratio tracking, and state capture and restore, with
+  the public option and event types in `chart-types.ts`, re-exported from
+  `chart.ts` so every import path is unchanged. The file went from 6,729 lines
+  to 2,577. ARCHITECTURE.md lists the modules under Chart internals.
+- Each collaborator reaches the chart through a host interface typed member by
+  member from the chart (`Chart['_panes']`), and the chart itself is passed as
+  that host, so the compiler rejects a member the chart lacks and no forwarding
+  object is built. Private members stay private: the published declarations
+  name the collaborators only as `private` fields.
+- The move is proved by the suites as they were: no test assertion changed (one
+  compatibility inventory now names the file three moved comments live in), the
+  render-parity spec paints the same pixels as the 2.5.6 build at all seven
+  zoom levels, and the browser suite passes in Chromium, Firefox and WebKit.
+- ESLint holds every source file to 1,500 lines (`max-lines`). The five files
+  already over it are capped at their size in `scripts/line-caps.json`, and
+  `tests/line-caps.test.ts` makes a file that comes under the limit leave the
+  list, so the exemptions can only shrink.
+
+Sizes, measured on this release and against 2.5.6 (Brotli, decimal kB): base
+engine 125.39 to 126.91, base plus trade 142.07 to 143.60, widget terminal
+302.96 to 304.49 and every tier together 355.97 to 357.50; the trade,
+indicator, draw, widget and workspace tiers are unchanged. The chart-only
+import grows from 79.25 to 80.87 KiB. The 1.52 kB on the base engine is the
+cost of the class shells and the delegates the chart keeps for its public
+methods; a first cut that built a forwarding object per collaborator cost
+3.66 kB and was replaced before release. Saved layouts, drawings and workspace
+documents from 2.5.6 load unchanged, and no runtime dependencies or package
+tiers were added.
+
 ## 2.5.6
 
 2026-09-26

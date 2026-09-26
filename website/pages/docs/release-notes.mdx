@@ -8,6 +8,28 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.5.7
+
+2026-09-26
+
+An internal release. Nothing a host calls, receives or sees changes.
+
+### Internal
+
+- The chart's code is split by responsibility: `Chart` keeps every public method
+  and its documentation, and the logic for series, studies, panes, legends,
+  scales, primitives, appearance, input, motion, pixel tracking and state lives in
+  internal collaborators. The render-parity check paints the same pixels as 2.5.6,
+  and every test assertion is unchanged.
+- Every source file is held to 1,500 lines by lint, with the few older files over
+  it capped so they can only shrink.
+
+The base engine grows by 1.52 kB Brotli (125.39 to 126.91 kB) for the class
+structure. Saved layouts, drawings and workspace documents from 2.5.6 load
+unchanged.
+
+See [Upgrading to 2.5.7](/docs/upgrading).
+
 ## 2.5.6
 
 2026-09-26

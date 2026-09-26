@@ -68,6 +68,11 @@ the draw order, data variants, the session calendar and the widget's undo timeli
 change no box or arrow: they live inside the base engine, draw and widget chips the
 diagram already has.
 
+Rechecked on 2.5.7: base 126.91 kB, indicators 36.44 kB, draw 48.42 kB, profile
+14.96 kB, transform 4.50 kB, trade 16.69 kB, workspace 10.47 kB, webgl 6.39 kB and
+widget 92.72 kB; all tiers 357.50 kB. The release splits the chart's internals into
+collaborator modules inside the base engine and changes no box, arrow or chip.
+
 Source references: `src/index.ts`, `src/feed/data-controller.ts`,
 `src/feed/instrument.ts`, `src/model/bar.ts`, `src/core/pane.ts`,
 `src/alerts/controller.ts`, `src/replay/group.ts`, `src/link/group.ts`,

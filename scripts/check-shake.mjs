@@ -217,7 +217,11 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // tiers, leaves it there; allow 79.27 KiB. Keeping a canvas's reported device
 // size only while its new box can snap to it moves it to 81148 bytes
 // (79.25 KiB); the budget follows it down to 79.25 KiB.
-const LIMIT_BYTES = 79.25 * 1024;
+// 2.5.7 splits chart.ts into collaborator classes (ARCHITECTURE.md, Chart
+// internals) with no change in behaviour. The class shells, the delegates the
+// chart keeps for its public methods and the extra member reads cost 1661
+// bytes: 82809 bytes (80.87 KiB) at 2.5.7; allow 80.87 KiB.
+const LIMIT_BYTES = 80.87 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.
