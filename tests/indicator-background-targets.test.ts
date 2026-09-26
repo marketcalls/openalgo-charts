@@ -13,6 +13,7 @@
  * digests were recorded before background targets existed, so any change to
  * the default path fails here rather than in someone's chart.
  */
+/// <reference types="vite/client" />
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Chart } from '../src/core/chart';
 import type { Pane, PaneRenderContext } from '../src/core/pane';
@@ -25,6 +26,13 @@ import { IndicatorBackground } from '../src/primitives/indicator-background';
 import { IndicatorDrawings } from '../src/primitives/indicator-draws';
 import { makeCtx } from './helpers/fake-ctx';
 import { fakeDocument, type FakeElement } from './helpers/fake-dom';
+import changelog from '../CHANGELOG.md?raw';
+import skillIndicators from '../.github/skills/openalgo-charts/references/indicators.md?raw';
+import skillCore from '../.github/skills/openalgo-charts/references/core-api.md?raw';
+import skillScales from '../.github/skills/openalgo-charts/references/scales-and-panes.md?raw';
+import siteIndicators from '../website/pages/docs/indicators.mdx?raw';
+import siteScales from '../website/pages/docs/scales-and-panes.mdx?raw';
+import examples from '../website/pages/examples.mdx?raw';
 
 const T0 = 1700000000;
 const BARS: Bar[] = Array.from({ length: 40 }, (_, i) => {
@@ -585,5 +593,26 @@ describe('shading stacked with the other targets', () => {
     const base = run(false);
     expect(base).toEqual(['U PaneLegend', 'V PaneLegend', 'V IndicatorBackground', 'U IndicatorBackground']);
     expect(run(true)).toEqual([...base, 'R IndicatorBackground']);
+  });
+});
+
+describe('the documented background targets', () => {
+  // The changelog heading the list form is described under: Unreleased until a release names it.
+  const release = changelog.split(/\n## /).find(entry => entry.includes('IndicatorBackgroundSpec'))?.split('\n')[0] ?? '';
+  const marker = release === 'Unreleased' ? 'unreleased' : release;
+  const anchor = `background-targets-${marker.replace(/[^0-9a-z]/g, '')}`;
+  const docs = { skillIndicators, skillCore, skillScales, siteIndicators, siteScales, examples };
+
+  it('mark their section with the release that ships them, and unreleased until one does', () => {
+    expect(release).not.toBe('');
+    for (const text of [skillIndicators, siteIndicators]) expect(text).toContain(`\n### Background targets (${marker})\n`);
+  });
+
+  it('send every page that mentions the list form to that section by the anchor it has', () => {
+    for (const [name, text] of Object.entries(docs)) {
+      const links = text.match(/#background-targets[\w-]*/g) ?? [];
+      expect(links.length, name).toBeGreaterThan(0);
+      expect(links.filter(link => link !== `#${anchor}`), name).toEqual([]);
+    }
   });
 });

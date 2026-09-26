@@ -758,7 +758,7 @@ registerIndicator({
 chart.addIndicator('my-momentum', { length: 14 });
 ```
 
-Optional descriptor members: `fills`, `markers`, `markerAnchor` / `hasSource` (2.4.6), `levels`, `range`, `attach`, `calcTail`, `table`, `tables`, `draws` (1.7.1), and `background` / `barColors` / `alerts` (1.7.1), plus `colorBy` (per-bar colour), `priceScaleId` / `overlay`, and `ohlc` (1.8.1) on an individual plot. Returned drawings and markers, and the columns of `background`'s list form (`IndicatorBackgroundSpec`), can carry `overlay` / `plot` output targets (see the markers, drawings and pane shading sections).
+Optional descriptor members: `fills`, `markers`, `markerAnchor` / `hasSource` (2.4.6), `levels`, `range`, `attach`, `calcTail`, `table`, `tables`, `draws` (1.7.1), and `background` / `barColors` / `alerts` (1.7.1), plus `colorBy` (per-bar colour), `priceScaleId` / `overlay`, and `ohlc` (1.8.1) on an individual plot. Returned drawings and markers, and the columns of `background`'s list form (`IndicatorBackgroundSpec`), can carry `overlay` / `plot` output targets (see the markers and drawings sections, and [background targets](#background-targets-unreleased) for shading).
 
 ### Assigning scales to study plots
 
@@ -1118,7 +1118,7 @@ barColors: ({ values }) => values.bias.map((v) =>
 - Contributes nothing to autoscale, is anchored to the first bar's **time** (so a page of history does not slide it off its bars), coalesces adjacent same-colour bars into one fill, and culls everything outside the visible range. Return `[]` to clear the layer.
 - `IndicatorBackground` is exported and works as a plain primitive: `new IndicatorBackground()`, `chart.addPrimitive(p, paneIndex)`, `setColors(colors, bars)`, `setVisible(on)`.
 
-### Background targets
+### Background targets (unreleased)
 
 `background` may instead return a list of `IndicatorBackgroundSpec` columns: `{ colors, overlay?, plot? }`, `colors` being the plain form's one entry per bar. The runtime tells the forms apart by their entries (the plain form holds only colours and gaps).
 
