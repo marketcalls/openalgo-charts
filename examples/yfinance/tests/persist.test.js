@@ -387,6 +387,15 @@ describe('applying a layout', () => {
 
   it('recovers an unambiguous legacy request and keeps state-only layouts usable', () => {
     expect(primaryLayoutSelection(V1_DOC).request).toEqual({ symbol: 'AAPL', interval: '1d', period: '1y' });
+    // A session is part of the dataset: a regular view does not land on extended bars.
+    expect(datasetKey({ symbol: 'AAPL', interval: '5m', period: '1mo' })).toBe('AAPL|5m|1mo');
+    expect(datasetKey({ symbol: 'AAPL', interval: '5m', period: '1mo', session: 'regular' })).toBe('AAPL|5m|1mo');
+    expect(datasetKey({ symbol: 'AAPL', interval: '5m', period: '1mo', session: 'extended' })).toBe('AAPL|5m|1mo|extended');
+    expect(primaryLayoutSelection({ request: { symbol: 'AAPL', interval: '5m', period: '1mo', session: 'extended' } }).request)
+      .toEqual({ symbol: 'AAPL', interval: '5m', period: '1mo', session: 'extended' });
+    expect(primaryLayoutSelection({ dataset: 'AAPL|5m|1mo|extended' }).request)
+      .toEqual({ symbol: 'AAPL', interval: '5m', period: '1mo', session: 'extended' });
+    expect(() => primaryLayoutSelection({ request: { symbol: 'AAPL', interval: '5m', period: '1mo', session: 'overnight' } })).toThrow();
     expect(primaryLayoutSelection({ version: 1 }).request).toBeNull();
     expect(primaryLayoutSelection({ dataset: 'A|B|1d|1y' }).request).toBeNull();
     expect(primaryLayoutSelection({ dataset: 'AAPL|unsupported|1y' }).request).toBeNull();

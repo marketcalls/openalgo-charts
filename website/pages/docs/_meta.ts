@@ -62,6 +62,7 @@ export default {
   'performance-and-operations': 'Performance & Operations',
   'data-feeds': 'Custom Data Feeds',
   'bar-cache': 'Bar Cache',
+  'data-variants': 'Data Variants',
   'custom-intervals': 'Custom Intervals',
 
   '-- reference': { type: 'separator', title: 'Reference' },

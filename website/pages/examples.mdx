@@ -582,6 +582,15 @@ again with the buttons, or with Ctrl+Z and Ctrl+Y over the chart. The line besid
 says what Undo would take back. See [Undo and Redo](/docs/undo-history).
 
 <RunnableExample height={520} tiers={['widget']} caption="Simulated prices. Undo never touches the bars: a study brought back computes from the prices on the chart and fires none of its alerts." code={`${STOCK_BARS_SOURCE}
+## Regular and extended hours
+
+Extended hours are the provider's own pre and post market bars, a different series from
+regular hours, so the chart asks for them by name and never makes them from the regular
+bars. The simulated provider below declares both sessions and no price adjustment, so
+**Raw prices** shows the unsupported state instead of relabelling the regular series.
+See [Data Variants](/docs/data-variants).
+
+<RunnableExample height={500} tiers={['widget']} caption="Simulated prices on New York time. Extended hours add the 04:00 to 09:30 and 16:00 to 20:00 bars around the same regular session." code={`${STOCK_BARS_SOURCE}
 el.style.display = 'flex';
 el.style.flexDirection = 'column';
 const controls = document.createElement('div');
@@ -622,6 +631,47 @@ const show = () => {
 };
 widget.history.subscribe(show);
 show();
+// One provider series per session. Regular hours are the same bars as the
+// middle of the extended day: the provider serves both, the chart derives neither.
+const monday = 1767571200; // Monday 5 January 2026, 00:00 UTC; New York is UTC-5 in January
+const day = 86400, preOpen = 9 * 3600, open = 14.5 * 3600, close = 21 * 3600, postClose = 25 * 3600;
+const extended = [];
+for (let d = 0; d < 3; d++) {
+  extended.push(...stockBars(monday + d * day + preOpen, (postClose - preOpen) / 300, 300, 100 + d * 1.5, 17 + d));
+}
+const regular = extended.filter(bar => {
+  const t = (bar.time - monday) % day;
+  return t >= open && t < close;
+});
+const feed = {
+  dataVariants: () => ({ sessions: ['regular', 'extended'] }),
+  getBars: async request => (request.variant && request.variant.session === 'extended' ? extended : regular),
+  subscribeBars: () => () => {},
+};
+const widget = lib.createWidget(host, {
+  symbol: 'NOVA', exchange: 'DEMO', interval: '5m', intervals: ['5m'], timezone: 'America/New_York',
+  persist: false, rail: false, feed, navigation: { defaultVisibleBars: 400 },
+});
+const note = document.createElement('span');
+note.style.cssText = 'color:#94a3b8;font:12px system-ui, sans-serif;margin-left:6px';
+const show = state => {
+  if (state.status === 'unsupported') note.textContent = 'Not served by this provider: nothing was fetched';
+  else if (state.status === 'ready') note.textContent = state.bars.length + ' bars';
+};
+widget.dataController.subscribe(show);
+for (const [label, variant] of [
+  ['Regular hours', undefined],
+  ['Extended hours', { session: 'extended' }],
+  ['Raw prices', { adjustment: 'raw' }],
+]) {
+  const button = document.createElement('button');
+  button.textContent = label;
+  button.style.cssText = 'padding:5px 10px;border:1px solid #334155;border-radius:4px;background:#172033;color:#e2e8f0;cursor:pointer';
+  button.onpointerdown = event => event.stopPropagation();
+  button.onclick = () => widget.setDataVariant(variant);
+  controls.appendChild(button);
+}
+controls.appendChild(note);
 return widget;`} />
 
 ## Watchlists and news

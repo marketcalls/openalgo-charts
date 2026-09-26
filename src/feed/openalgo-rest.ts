@@ -11,6 +11,7 @@ import type { Bar } from '../model/bar';
 import type { BarsRequest, DataFeed } from './types';
 import { epochMsToUtcSeconds, istStringToUtcSeconds, utcSecondsToIstDateString } from './time';
 import { withHistoryDeadline } from './request-pool';
+import { dataVariantError, unsupportedDataVariant } from './data-variant';
 
 export interface OpenAlgoConfig {
   baseUrl: string;
@@ -96,6 +97,10 @@ export class OpenAlgoDataFeed implements DataFeed {
   }
 
   public async getBars(req: BarsRequest): Promise<Bar[]> {
+    // The history API has one series per instrument. Another variant would be
+    // that series under the wrong label, so it is refused before any request.
+    const unsupported = unsupportedDataVariant(undefined, req.variant);
+    if (unsupported) throw dataVariantError(unsupported, req.variant);
     const hasOpenInterest = this._config.hasOpenInterest?.(req);
     // OpenAlgo /api/v1/history requires start_date/end_date as IST YYYY-MM-DD
     // (mandatory). Convert the internal UTC-seconds range to IST date strings.

@@ -455,6 +455,27 @@ describe('chart state', () => {
     expect(chartState()).toBe('ready');
   });
 
+  it('the unsupported state names the missing session and offers the choice that loads', () => {
+    const host = chartStateMarkup();
+    const back = vi.fn();
+    initShell({ load: vi.fn() });
+    setChartState('unsupported', { symbol: 'aapl', interval: '1d', retry: back });
+    expect(chartState()).toBe('unsupported');
+    expect(host.hidden).toBe(false);
+    expect(host.dataset.state).toBe('unsupported');
+    expect(doc.getElementById('cs-card').getAttribute('role')).toBe('status');
+    expect(doc.getElementById('cs-title').textContent).toBe('Extended hours are not available for AAPL 1D');
+    expect(doc.getElementById('cs-text').textContent).toMatch(/intraday bars of US listed stocks/);
+    const retry = doc.getElementById('cs-retry');
+    expect(retry.textContent).toBe('Use regular hours');
+    expect(doc.getElementById('cs-dismiss').hidden).toBe(false);
+    retry.click();
+    expect(back).toHaveBeenCalledTimes(1);
+    // Any other state puts the ordinary retry back.
+    setChartState('error', { symbol: 'AAPL', message: 'offline' });
+    expect(retry.textContent).toBe('Try again');
+  });
+
   it('shows the dots for a load and never for an empty or failed one', () => {
     const host = chartStateMarkup();
     const dots = host.children[0];

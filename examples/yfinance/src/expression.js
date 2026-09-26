@@ -13,16 +13,22 @@ import {
   parseExpression, evaluateExpression, isPlainSymbol, ExpressionError,
 } from '/dist/openalgo-charts.transform.mjs';
 import { fetchBars } from './feed.js';
+import { requestVariant } from './session.js';
 
 export { ExpressionError, isPlainSymbol };
 
-/** Preserve supplied metadata for one instrument; an expression has no position level. */
+/**
+ * Preserve supplied metadata for one instrument; an expression has no
+ * position level. The session is the request's, as the engine's variant.
+ */
 export function referenceDataContext(request, previous) {
   const context = { symbol: request.symbol, interval: request.interval };
   if (isExpression(request.symbol)) context.hasOpenInterest = false;
   else if (previous?.symbol === request.symbol && previous.hasOpenInterest !== undefined) {
     context.hasOpenInterest = previous.hasOpenInterest;
   }
+  const variant = requestVariant(request);
+  if (variant) context.variant = variant;
   return context;
 }
 

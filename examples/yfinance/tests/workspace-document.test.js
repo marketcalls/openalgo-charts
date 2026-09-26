@@ -33,6 +33,29 @@ function layout() {
 }
 
 describe('reference workspace documents', () => {
+  it('saves a chart on extended hours as the engine variant and reopens it on extended hours', () => {
+    const original = layout();
+    original.secondary.request = { ...original.secondary.request, session: 'extended' };
+    const saved = workspaceFromLayout(original);
+    expect(saved.panes[0]).not.toHaveProperty('variant');
+    expect(saved.panes[1].variant).toEqual({ session: 'extended' });
+    const restored = layoutFromWorkspace(saved);
+    expect(restored.request).not.toHaveProperty('session');
+    expect(restored.secondary.request.session).toBe('extended');
+  });
+  it('refuses a variant this source cannot serve instead of reopening another series', () => {
+    const saved = workspaceFromLayout(layout());
+    const secondary = saved.panes[1];
+    for (const variant of [{ adjustment: 'raw' }, { session: 'extended', currency: 'USD' }]) {
+      expect(() => validateReferenceWorkspace({ ...saved, panes: [saved.panes[0], { ...secondary, variant }] }), JSON.stringify(variant)).toThrow();
+    }
+    // Regular hours by name are this source's default series.
+    expect(layoutFromWorkspace({ ...saved, panes: [saved.panes[0], { ...secondary, variant: { session: 'regular' } }] }).secondary.request)
+      .not.toHaveProperty('session');
+    // Extended hours for a daily chart, which this source has none of.
+    expect(() => validateReferenceWorkspace({ ...saved, panes: [{ ...saved.panes[0], interval: '1d', variant: { session: 'extended' } }, secondary] }))
+      .toThrow(/not available/);
+  });
   it.each(['priceOnlyAutoScale', 'indicatorLegendCollapsed'])('retains independent %s choices in both chart slots', preference => {
     const original = layout();
     original[preference] = true;

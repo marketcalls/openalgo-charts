@@ -12,7 +12,7 @@
  * overlay stack, the tooltip, the storage wrapper and the dialog registry
  * through which the dialog tier makes its mount functions known.
  */
-import type { AlertController, Chart, ChartObjects, ChartTheme } from 'openalgo-charts';
+import type { AlertController, Chart, ChartObjects, ChartTheme, DataVariant } from 'openalgo-charts';
 import type { DrawingController } from 'openalgo-charts/draw';
 import type { Keymap } from './keymap';
 import type { ToastHandle, ToastKind } from './toast';
@@ -669,6 +669,8 @@ export function createTipController(root: HTMLElement, layer: HTMLElement, doc: 
 export interface WidgetBusEvents {
   symbol: { symbol: string; exchange: string };
   interval: { interval: string };
+  /** The data variant changed; undefined is the feed's default series. */
+  variant: { variant?: Readonly<DataVariant> };
   theme: { theme: WidgetThemeName; chartTheme: ChartTheme };
   /** Something about the workspace changed: the chart type, a restored layout, a pane. */
   layout: { reason: string; chartType?: string };

@@ -30,6 +30,11 @@
       <select id="period" class="field" title="history range">
         <option>1mo</option><option selected>1y</option><option>6mo</option><option>5y</option><option>max</option>
       </select>
+      <!-- The primary chart's trading session, like the interval and period above:
+           the shell's session menu writes it and load() reads it. -->
+      <select id="session" class="field" title="trading session">
+        <option value="regular" selected>Regular hours</option><option value="extended">Extended hours</option>
+      </select>
       <select id="ctype" class="field" title="chart type">
         <optgroup label="Time-indexed">
           <option value="candlestick">Candles</option>

@@ -134,21 +134,21 @@ An import map is optional here. Because the tier bundles reference `./openalgo-c
 
 ## Size budgets
 
-Enforced by `npm run size` (`size-limit`, Brotli, `@size-limit/file`), from `.size-limit.json`. Current measurements are from 2.5.5 and use decimal kB:
+Enforced by `npm run size` (`size-limit`, Brotli, `@size-limit/file`), from `.size-limit.json`. Current measurements are from the current build (unreleased changes after 2.5.5) and use decimal kB:
 
 | Budget row | Files measured | Limit | Measured |
 |---|---|---|---|
-| Base engine | `openalgo-charts.mjs` | 119.15 kB | 119.15 kB |
-| Base + trade layer | base + `trade.mjs` | 135.79 kB | 135.79 kB |
-| Indicator tier | `indicators.mjs` | 36.35 kB | 36.34 kB |
+| Base engine | `openalgo-charts.mjs` | 119.98 kB | 119.98 kB |
+| Base + trade layer | base + `trade.mjs` | 136.62 kB | 136.62 kB |
+| Indicator tier | `indicators.mjs` | 36.64 kB | 36.63 kB |
 | Draw tier | `draw.mjs` | 44.87 kB | 44.87 kB |
 | Transform tier | `transform.mjs` | 6 kB | 4.50 kB |
 | Profile tier | `profile.mjs` | 15 kB | 14.96 kB |
 | WebGL2 tier | `webgl.mjs` | 7 kB | 6.39 kB |
-| Widget tier | `widget.mjs` | 82.31 kB | 82.30 kB |
-| Widget terminal | base + `draw.mjs` + `indicators.mjs` + `widget.mjs` | 282.67 kB | 282.67 kB |
-| Workspace tier | `workspace.mjs` | 9.99 kB | 9.99 kB |
-| Everything | all nine bundles | 335.15 kB | 335.15 kB |
+| Widget tier | `widget.mjs` | 82.66 kB | 82.66 kB |
+| Widget terminal | base + `draw.mjs` + `indicators.mjs` + `widget.mjs` | 284.14 kB | 284.14 kB |
+| Workspace tier | `workspace.mjs` | 10.04 kB | 10.04 kB |
+| Everything | all nine bundles | 336.68 kB | 336.67 kB |
 
 Version 2.1.2 raises the full-package budget from 187 KB to 188 KB for the feed, indicator lifecycle and recovery fixes. Version 2.1.3 raises base, widget and widget-terminal ceilings to 68 KB, 37 KB and 157 KB for navigation controls, and the chart-only tree-shaking ceiling to 45 KiB. Version 2.1.6 raises the base, base-plus-trade, widget-terminal and total ceilings
 to 73 KB, 81 KB, 165 KB and 197 KB for shared loading, resilient caching and
@@ -274,3 +274,5 @@ The 2.5.3 chart-only import measures 55.58 KiB, compared with 54.67 KiB at the 2
 Version 2.5.4 adds pane collapse, study output targets and drawing policies to the engine, go-to-date navigation (`DateNavigator` and its panel) and `createChartGrid` to the widget, together with CSV study export, navigation policies, typed study inputs, styled study text, smooth polylines, table cell details, primary-only fit and collapsible study legends. The measured base is 117.42 kB, the widget 71.33 kB and all tiers 310.09 kB. Budgets are 117.42 kB base, 125.43 kB base plus trade, 42.53 kB draw, 71.34 kB widget, 267.56 kB terminal and 310.09 kB for all tiers. The chart-only import measures 74.43 KiB under a 74.44 KiB ceiling; the grid, the go-to panel and every optional controller are still checked as absent from it.
 
 Version 2.5.5 adds an opt-in movable price pane and the indicator gap recovery to the engine, viewport-pinned drawings to the draw tier, account state, order preview, durations and native position commands plus price tick schedules to the trade tier, named watchlists to the workspace tier, and Watchlist, News and account panels to the widget. The trade tier roughly doubles (8.01 to 16.64 kB standalone), which only a host that imports it pays. The measured base is 119.15 kB, the widget 82.30 kB and all tiers 335.15 kB; the chart-only import measures 75.07 KiB under a 75.08 KiB ceiling, and the widget tier, which holds the new panels, is still checked as absent from it.
+
+Unreleased: data variants (session, adjustment, currency and unit as provider series) add the variant module, the loading controller's declaration check, variant-scoped alerts and the widget and workspace plumbing. The measured base is 119.98 kB, base plus trade 136.62 kB, indicators 36.63 kB, the widget 82.66 kB, the terminal 284.14 kB, the workspace tier 10.04 kB and all tiers 336.67 kB. The chart-only import measures 75.27 KiB (77076 bytes, up from 76874) under a 75.27 KiB ceiling: alert documents round-trip on chart-only hosts, so the parser that refuses an unreadable scope variant ships there, while the alert controller and the loading controller still shake out.

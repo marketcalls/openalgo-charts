@@ -11,6 +11,7 @@ import { OpenAlgoWsFeed, type OpenAlgoWsConfig, type SocketFactory, type LtpEven
 import { CandleBuilder, type VolumeMode } from './candle-builder';
 import { resolveInterval, isTimeBucketed, type Bucketing, type IntervalBucketing } from './intervals';
 import { TickBarAggregator } from './tick-aggregator';
+import { dataVariantError, unsupportedDataVariant } from './data-variant';
 
 export interface OpenAlgoLiveConfig extends OpenAlgoConfig {
   /** WS proxy URL, e.g. ws://127.0.0.1:8765. */
@@ -193,7 +194,10 @@ export class OpenAlgoLiveDataFeed implements DataFeed {
     opts?: BarSubscriptionOptions,
   ): UnsubscribeFn {
     // Resolve up front: a bad interval code fails here, at subscribe time, and
-    // not silently on every tick for the life of the subscription.
+    // not silently on every tick for the life of the subscription. The stream
+    // carries one series per instrument, so another variant fails here too.
+    const unsupported = unsupportedDataVariant(undefined, req.variant);
+    if (unsupported) throw dataVariantError(unsupported, req.variant);
     const { bucketing } = resolveInterval(req.interval);
     const onEvent = bucketing.mode === 'interval'
       ? this._candleReader(bucketing, onBar, opts)

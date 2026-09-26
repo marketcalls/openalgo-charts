@@ -195,6 +195,12 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // scales the pane it answers for, addIndicator takes back a removed study's
 // id, and a tick schedule must round and step. Measured 76.90 to just over
 // 77.07 KiB, with the base bundle 121.76 to 121.97 kB; allow 77.08 KiB.
+// An alert scope names the data variant it was set on, and alert documents
+// round-trip on charts without a controller, so the parser that refuses a
+// variant this build cannot name ships here too: normalizeDataVariant and the
+// scope check. Measured 76874 to 77076 bytes (75.07 to 75.27 KiB); allow
+// 75.27 KiB. The alert controller and the loading controller's variant
+// handling still shake out.
 const LIMIT_BYTES = 77.08 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter

@@ -29,6 +29,7 @@ import type {
   IndicatorStore,
   IndicatorValues,
 } from 'openalgo-charts';
+import { inheritedDataVariant, passingContext } from './inherited-variant';
 
 /** One external observation: a timestamp plus a value per plot key. */
 export interface Tier2Point {
@@ -55,7 +56,9 @@ export interface Tier2Context {
   /**
    * The host's bar provider, when the runtime supplies one, so a `fetch` that
    * needs another instrument's candles asks the host rather than carrying its
-   * own transport and credentials. Rejects when the host registered none.
+   * own transport and credentials. Rejects when the host registered none. A
+   * request that names no `variant` is sent in the chart's session and
+   * adjustment (see `inheritedDataVariant`); naming one, `{}` included, wins.
    */
   requestBars?(request: IndicatorBarsRequest): Promise<readonly Bar[]>;
 }
@@ -283,7 +286,10 @@ export function createTier2Indicator(d: Tier2Descriptor): IndicatorDescriptor {
           dataContext: { ...market },
           requestState, asOf: requestState?.replay?.asOf,
           from: bars[0]?.time ?? 0, to: bars[bars.length - 1]?.time ?? 0,
-          requestBars: ctx.requestBars,
+          requestBars: ctx.requestBars && ((request: IndicatorBarsRequest) => {
+            const variant = request.variant === undefined ? inheritedDataVariant(market.variant) : request.variant;
+            return ctx.requestBars!(variant === undefined ? request : { ...request, variant });
+          }),
         };
       };
       const cancel = (): void => {
@@ -395,7 +401,9 @@ export function createTier2Indicator(d: Tier2Descriptor): IndicatorDescriptor {
         start(request);
       };
       const refresh = (retry = false): void => {
-        if (!current()) return;
+        // The context a variant-only change passes through is replaced at
+        // once: fetching or subscribing for it would be torn down unused.
+        if (!current() || passingContext(ctx.dataContext?.())) return;
         const revision = ++refreshRevision;
         const fresh = (): boolean => current() && refreshRevision === revision;
         const c = context();
@@ -407,7 +415,9 @@ export function createTier2Indicator(d: Tier2Descriptor): IndicatorDescriptor {
         const source = native?.source;
         const oldSource = previous?.requestState?.source;
         const oldReplay = previous?.requestState?.replay;
-        const key = JSON.stringify([cacheKey(d, c.settings), market?.symbol, market?.exchange, market?.interval,
+        // A change of variant alone is a change of source: the chart's bars are
+        // another series. Read as plain JSON, which cannot throw inside a listener.
+        const key = JSON.stringify([cacheKey(d, c.settings), market?.symbol, market?.exchange, market?.interval, market?.variant ?? null,
           native?.providerRevision, source?.sourceId, replay !== undefined]);
         const offset = c.bars.length - (previous?.bars.length ?? 0);
         const safePrepend = previous !== undefined && oldSource !== undefined && source !== undefined

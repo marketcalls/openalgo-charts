@@ -4,7 +4,7 @@ import type { ControlledTransport } from './controlled-transport';
 
 export interface AdapterSnapshot {
   readonly bars: readonly Bar[];
-  readonly status: 'idle' | 'loading' | 'ready' | 'empty' | 'refreshing' | 'stale' | 'error';
+  readonly status: 'idle' | 'loading' | 'ready' | 'empty' | 'refreshing' | 'stale' | 'error' | 'unsupported';
   readonly interval: string;
   readonly error?: string;
 }

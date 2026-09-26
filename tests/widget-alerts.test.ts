@@ -164,6 +164,25 @@ describe('widget alert editor', () => {
     expect(w.alerts.list()[1].expiresAt).toBeUndefined();
   });
 
+  it('treats a change of data variant under an open editor as a change of context', () => {
+    const { w, root } = make({ symbol: 'AAA', exchange: 'X', interval: '1m' });
+    widget.mountAlertEditor(w.context);
+    expect((root.querySelector('[data-action="save-alert"]') as FakeElement).disabled).toBe(false);
+    w.setDataVariant({ session: 'extended' });
+    const save = root.querySelector('[data-action="save-alert"]') as FakeElement;
+    expect(save.disabled).toBe(true);
+    expect(root.textContent).toContain('The instrument context changed');
+    click(root, 'save-alert');
+    expect(w.alerts.list()).toHaveLength(0);
+  });
+
+  it('names the series of an alert set on a non-default variant in the list', () => {
+    const { w, root } = make({ symbol: 'AAA', exchange: 'X', interval: '1m', variant: { session: 'extended', currency: 'USD' } });
+    w.alerts.add({ source: { kind: 'price', price: 105 }, title: 'Pre-market level' });
+    widget.mountAlertsPanel(w.context);
+    expect(root.querySelector('.oac-alerts__summary')!.textContent).toContain('AAA / X / 1m / Extended hours USD');
+  });
+
   it('keeps keyboard focus on a selector when its dependent fields change', () => {
     const { w, root } = make();
     widget.mountAlertEditor(w.context);

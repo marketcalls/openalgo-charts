@@ -479,6 +479,10 @@ select.field { cursor: pointer; padding-right: 24px; }
 .chartstate__text:empty { display: none; }
 .chartstate__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .chartstate__actions .btn { height: 28px; padding: 0 12px; }
+/* `.btn` sets a display, which beats the hidden attribute: say it again here,
+   or a card shows the actions its state hid. */
+.chartstate__actions .btn[hidden] { display: none; }
+.chartstate[data-state="unsupported"] .chartstate__card { border-left-color: var(--amber); }
 .chartstate[data-state="empty"] .chartstate__card { border-left-color: var(--amber); }
 .chartstate[data-state="error"] .chartstate__card { border-left-color: var(--sell); }
 /* A load in flight is the dots alone. The card would only repeat the status

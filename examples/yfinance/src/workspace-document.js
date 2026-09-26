@@ -1,7 +1,8 @@
 import { parseWorkspacePayload, WorkspaceDocumentError } from '/dist/openalgo-charts.workspace.mjs';
 import { stripView } from '/dist/openalgo-charts.widget.mjs';
 import { primaryLayoutSelection, datasetKey, LAYOUT_SCHEMA } from './persist.js';
-import { clampPeriod, PERIODS } from './intervals.js';
+import { clampPeriod, foldedInterval, PERIODS } from './intervals.js';
+import { EXTENDED, extendedSessionAvailable } from './session.js';
 import { VOLUME_DEFAULTS, volumeValues } from './volume.js';
 import { normalizeLegendIconSize } from './chart-settings.js';
 
@@ -35,6 +36,7 @@ function paneFromLayout(saved, state, id, rail, whenMissing) {
   }));
   return { id, symbol: selection.request.symbol, interval: selection.request.interval,
     historyPeriod: selection.request.period, exchange: '',
+    ...(selection.request.session === 'extended' ? { variant: { ...EXTENDED } } : {}),
     chartType: selection.chartType || 'candlestick', chart: chartFields(state), settings,
     volume: settings['volume.visible'], magnet: rail.magnet, stay: rail.stay, comparisons,
     comparisonMode: settings['reference.compareMode'] === 'none' ? 'price' : 'percent' };
@@ -125,6 +127,17 @@ export function validateReferenceWorkspace(input) {
   for (const pane of payload.panes) {
     if (pane.exchange) fail('This reference feed uses ticker symbols, not separate exchange identifiers');
     const period = pane.historyPeriod ?? clampPeriod(pane.interval, '1y');
+    // This source serves a session and nothing else: regular hours, which are
+    // its default series, and extended hours where it has them. A saved
+    // adjustment, currency or unit, or extended hours it does not have, would
+    // reopen as some other series.
+    if (pane.variant !== undefined) {
+      if (Object.keys(pane.variant).some(key => key !== 'session')) fail('This reference feed serves only regular or extended trading hours');
+      if (pane.variant.session === 'extended'
+        && !extendedSessionAvailable(pane.symbol, foldedInterval(pane.interval)?.foldFrom || pane.interval)) {
+        fail(`Extended hours are not available for ${pane.symbol} ${pane.interval}`);
+      }
+    }
     primaryLayoutSelection({ request: { symbol: pane.symbol, interval: pane.interval, period },
       chartType: pane.chartType, pfmode: pane.settings['reference.pfmode'], timezone: pane.chart.timezone });
     if (clampPeriod(pane.interval, period) !== period) fail('The saved history period is unavailable at this interval');
@@ -175,7 +188,8 @@ export function validateReferenceWorkspace(input) {
 }
 
 function paneToLayout(pane) {
-  const request = { symbol: pane.symbol, interval: pane.interval, period: pane.historyPeriod };
+  const request = { symbol: pane.symbol, interval: pane.interval, period: pane.historyPeriod,
+    ...(pane.variant?.session === 'extended' ? { session: 'extended' } : {}) };
   return { request, chartType: pane.chartType, pfmode: pane.settings['reference.pfmode'] || 'atr',
     legendIconSize: normalizeLegendIconSize(pane.settings['reference.legendIconSize']),
     volume: pane.volume, volumeSettings: volumeValues({ 'volume.visible': pane.volume, ...pane.settings }),

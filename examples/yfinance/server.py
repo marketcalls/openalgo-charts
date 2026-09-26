@@ -17,6 +17,10 @@ Then open:  http://127.0.0.1:8000/examples/yfinance/index.html
 History endpoint:
     GET /api/history?symbol=AAPL&interval=1d&period=1y
     GET /api/history?symbol=AAPL&interval=5m&from=<utc_seconds>&to=<utc_seconds>
+    GET /api/history?symbol=AAPL&interval=5m&period=5d&session=extended
+`session` is `regular` (the default) or `extended`, which adds the pre and post
+market bars. Extended hours are served only for intraday bars of a US listed
+stock (a plain ticker such as AAPL or BRK-B), the one place the source has them.
 A success is the Bar array the chart consumes directly:
     [{ "time": <utc_seconds>, "open", "high", "low", "close", "volume" }, ...]
 
@@ -30,7 +34,8 @@ Without --fixture both answer 501 not_available: this server has no live quote
 or news source, and a quote is never made up from the last bar.
 
 A failure is { "error": <message>, "code": <token> } with the matching status:
-    400 bad_symbol, bad_interval, bad_period, bad_range, bad_limit, bad_cursor
+    400 bad_symbol, bad_interval, bad_period, bad_range, bad_session, bad_limit, bad_cursor
+    400 unsupported_session (extended hours asked of an instrument or interval without them)
     404 no_data (the source has no bars for that ask), not_found (no such endpoint)
     429 rate_limited (the source is throttling; Retry-After says when to retry)
     501 not_available (quotes and news without --fixture)
@@ -80,6 +85,17 @@ INTERVALS = {
     "1h": 3600, "1d": 86400, "5d": 5 * 86400, "1wk": 7 * 86400, "1mo": 31 * 86400, "3mo": 92 * 86400,
 }
 INTRADAY = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"}
+SESSIONS = ("regular", "extended")
+# A US listed stock as the source spells it: one to five letters, and an
+# optional share class (BRK-B). The source has pre and post market bars for
+# these and for nothing else it serves, so this is where extended hours exist.
+# The reference host's feed declares the same rule (src/feed.js).
+US_STOCK_RE = re.compile(r"^[A-Za-z]{1,5}(?:-[A-Za-z])?$")
+
+
+def extended_session_available(symbol: str, interval: str) -> bool:
+    """Whether the source serves pre and post market bars for this ask."""
+    return interval in INTRADAY and bool(US_STOCK_RE.match(symbol))
 # Period tokens and their length in days. `ytd` and `max` have no fixed
 # length and are resolved against the end of the window when one is needed.
 PERIOD_DAYS = {
@@ -120,12 +136,14 @@ class ApiError(Exception):
 class HistoryRequest:
     """A validated /api/history ask. `start` and `end` are UTC seconds or None."""
 
-    def __init__(self, symbol: str, interval: str, period: str, start: int | None, end: int | None):
+    def __init__(self, symbol: str, interval: str, period: str, start: int | None, end: int | None,
+                 session: str = "regular"):
         self.symbol = symbol
         self.interval = interval
         self.period = period
         self.start = start
         self.end = end
+        self.session = session
 
     def describe(self) -> str:
         if self.start is not None or self.end is not None:
@@ -167,7 +185,15 @@ def parse_history_query(q: dict) -> HistoryRequest:
     end = _epoch_param(q, "to")
     if start is not None and end is not None and start >= end:
         raise ApiError(400, "bad_range", f"from ({start}) must be before to ({end})")
-    return HistoryRequest(symbol, interval, period, start, end)
+    session = _first(q, "session") or "regular"
+    if session not in SESSIONS:
+        raise ApiError(400, "bad_session", f"session {session[:20]!r} is not one of " + ", ".join(SESSIONS))
+    # Refused rather than answered with regular hours: the chart would label
+    # the regular series extended, and nothing on screen could tell.
+    if session == "extended" and not extended_session_available(symbol, interval):
+        raise ApiError(400, "unsupported_session",
+                       f"extended hours are served only for intraday bars of US listed stocks, not {interval} bars of {symbol}")
+    return HistoryRequest(symbol, interval, period, start, end, session)
 
 
 def period_days(period: str, at: int) -> int | None:
@@ -206,8 +232,10 @@ def yfinance_bars(req: HistoryRequest, now: int) -> list:
                        "yfinance is not installed: pip install -r requirements.txt, or start with --fixture") from None
     try:
         ticker = yf.Ticker(req.symbol)
+        # The source's own pre and post market bars; nothing is derived here.
+        prepost = req.session == "extended"
         if req.start is None and req.end is None:
-            df = ticker.history(period=req.period, interval=req.interval)
+            df = ticker.history(period=req.period, interval=req.interval, prepost=prepost)
         else:
             # A pinned window. The source ignores `end` when a period is given,
             # so the period is turned into a start here; `max` leaves the start
@@ -221,6 +249,7 @@ def yfinance_bars(req: HistoryRequest, now: int) -> list:
                 start=None if start is None else datetime.fromtimestamp(start, tz=timezone.utc),
                 end=datetime.fromtimestamp(end, tz=timezone.utc),
                 interval=req.interval,
+                prepost=prepost,
             )
     except Exception as exc:  # noqa: BLE001 (the source's failures all become one status)
         raise upstream_error(exc) from None
@@ -288,6 +317,11 @@ def banded_price(v: float) -> float:
 # same number every day of the year.
 SESSION_OPEN = 3 * 3600 + 45 * 60
 SESSION_CLOSE = 10 * 3600
+# Extended hours in the fixture: two hours either side of the regular
+# session, on the same grid, so the regular bars are the same observations in
+# both series and only the pre and post market bars differ.
+EXTENDED_OPEN = SESSION_OPEN - 2 * 3600
+EXTENDED_CLOSE = SESSION_CLOSE + 2 * 3600
 DAY = 86400
 
 
@@ -300,16 +334,17 @@ def _month_start(year: int, month: int) -> int:
     return int(datetime(year, month, 1, tzinfo=timezone.utc).timestamp())
 
 
-def fixture_grid(interval: str, start: int, end: int) -> list:
+def fixture_grid(interval: str, start: int, end: int, extended: bool = False) -> list:
     """Ascending bar start times in [start, end) on the interval's calendar."""
     out = []
     if interval in INTRADAY:
         step = INTERVALS[interval]
+        opens, closes = (EXTENDED_OPEN, EXTENDED_CLOSE) if extended else (SESSION_OPEN, SESSION_CLOSE)
         day = (start // DAY) * DAY
         while day < end:
             if _weekday(day) < 5:
-                t = day + SESSION_OPEN
-                while t < day + SESSION_CLOSE and t < end:
+                t = day + opens
+                while t < day + closes and t < end:
                     if t >= start:
                         out.append(t)
                     t += step
@@ -383,7 +418,7 @@ def fixture_bars(req: HistoryRequest, now: int) -> list:
     # One bar before the window, so the first bar's open is the close of the
     # bar before it rather than a number the chart never saw.
     lead = INTERVALS[req.interval] * (10 if req.interval in INTRADAY else 2)
-    grid = fixture_grid(req.interval, start - lead, end + 1)
+    grid = fixture_grid(req.interval, start - lead, end + 1, getattr(req, "session", "regular") == "extended")
     bars = []
     prev_close = None
     for t in grid:
@@ -856,6 +891,52 @@ class SelfTest(unittest.TestCase):
         self.assertEqual(period_days("ytd", mid_feb), 45)
         self.assertIsNone(period_days("max", mid_feb))
         self.assertEqual(period_days("1y", mid_feb), 366)
+
+    # -- sessions --------------------------------------------------------------
+    def test_extended_session_adds_bars_around_the_same_regular_closes(self):
+        window = "&from=1700000000&to=1700600000"
+        _, _, regular = self.json("/api/history?symbol=AAPL&interval=5m" + window)
+        _, _, extended = self.json("/api/history?symbol=AAPL&interval=5m&session=extended" + window)
+        self.assertGreater(len(extended), len(regular))
+        closes = {b["time"]: b["close"] for b in extended}
+        # The regular hours are the same observations in both series; extended
+        # hours add bars before the open and after the close, nothing else.
+        for b in regular:
+            self.assertEqual(closes[b["time"]], b["close"])
+        extra = [b for b in extended if b["time"] not in {r["time"] for r in regular}]
+        self.assertTrue(any(b["time"] % DAY < SESSION_OPEN for b in extra))
+        self.assertTrue(any(b["time"] % DAY >= SESSION_CLOSE for b in extra))
+        for b in extra:
+            self.assertGreaterEqual(b["time"] % DAY, EXTENDED_OPEN)
+            self.assertLess(b["time"] % DAY, EXTENDED_CLOSE)
+            self.assertLess(_weekday(b["time"]), 5)
+        again = self.get("/api/history?symbol=AAPL&interval=5m&session=extended" + window)[2]
+        self.assertEqual(json.loads(again), extended)
+
+    def test_an_explicit_regular_session_is_the_default_series(self):
+        window = "&from=1700000000&to=1700600000"
+        self.assertEqual(self.get("/api/history?symbol=AAPL&interval=5m&session=regular" + window)[2],
+                         self.get("/api/history?symbol=AAPL&interval=5m" + window)[2])
+
+    def test_session_is_validated_and_served_only_where_the_source_has_it(self):
+        status, _, body = self.json("/api/history?symbol=AAPL&interval=5m&session=overnight")
+        self.assertEqual((status, body["code"]), (400, "bad_session"))
+        for q in ("symbol=RELIANCE.NS&interval=5m", "symbol=AAPL&interval=1d", "symbol=%5EGSPC&interval=5m", "symbol=BTC-USD&interval=5m"):
+            status, _, body = self.json("/api/history?" + q + "&session=extended")
+            self.assertEqual((status, body["code"]), (400, "unsupported_session"), q)
+        self.assertTrue(extended_session_available("BRK-B", "15m"))
+        self.assertFalse(extended_session_available("BRK-B", "1wk"))
+
+    def test_the_session_reaches_the_source(self):
+        seen = []
+        server, thread, base = _start(source=lambda req, now: seen.append(req.session) or [{"time": 1700000000, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}])
+        try:
+            _get(base, "/api/history?symbol=AAPL&interval=5m&session=extended&from=1700000000&to=1700600000")
+            _get(base, "/api/history?symbol=AAPL&interval=5m&from=1700000000&to=1700600000")
+            self.assertEqual(seen, ["extended", "regular"])
+        finally:
+            server.shutdown()
+            server.server_close()
 
     # -- validation ------------------------------------------------------------
     def test_symbol_is_validated(self):

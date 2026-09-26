@@ -27,7 +27,7 @@
  */
 import {
   applyChartSettings, createLinkGroup, isKnownInterval, readChartSettings, registeredChartTypes, registeredIndicators,
-  type ChartTheme, type DataFeed, type LinkChart, type LinkOptions, type ResolvedLinkOptions,
+  type ChartTheme, type DataFeed, type DataVariant, type LinkChart, type LinkOptions, type ResolvedLinkOptions,
 } from 'openalgo-charts';
 import type { WorkspaceChartState, WorkspacePane, WorkspacePayload } from 'openalgo-charts/workspace';
 import { WidgetBus, WidgetStorage, defaultStorage, h, type StorageLike } from './context';
@@ -153,7 +153,7 @@ interface Cell {
   span: number;
 }
 
-interface Source { symbol?: string; exchange?: string; interval?: string; chartType?: string; historyPeriod?: string }
+interface Source { symbol?: string; exchange?: string; interval?: string; variant?: DataVariant; chartType?: string; historyPeriod?: string }
 type Axis = 'row' | 'column';
 
 /** Pixels between tracks, and the track a splitter sits in. */
@@ -472,7 +472,7 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
     try {
       cell.widget = createWidget(element, {
         ...cellOptions, theme: cellTheme, symbol: source.symbol, exchange: source.exchange, interval: source.interval,
-        chartType: source.chartType, keyboardRoute: () => route(cell),
+        variant: source.variant, chartType: source.chartType, keyboardRoute: () => route(cell),
         feed: typeof feed === 'function' ? feed({ id, historyPeriod }) : feed,
       });
     } catch (error) {
@@ -573,6 +573,7 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
       widget.on('theme', ({ chartTheme }) => { if (!themeSync) grid.setTheme(chartTheme); }),
       widget.on('symbol', changed),
       widget.on('interval', changed),
+      widget.on('variant', changed),
       widget.on('layout', scheduleSave),
       chart.on('pan', moved),
       chart.on('zoom', moved),
@@ -632,7 +633,7 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
       const before = active;
       const from = active?.widget;
       const source: Source = from === undefined ? options
-        : { symbol: from.symbol(), exchange: from.exchange(), interval: from.interval(), chartType: from.chartType(), historyPeriod: active?.historyPeriod };
+        : { symbol: from.symbol(), exchange: from.exchange(), interval: from.interval(), variant: from.variant(), chartType: from.chartType(), historyPeriod: active?.historyPeriod };
       const made: Cell[] = [];
       try {
         while (keep.length + made.length < r * c) {
@@ -689,7 +690,7 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
           const s = c.widget.getState();
           // The widget draws no separate volume series and no comparisons, so
           // it saves neither rather than claim a preference it cannot show.
-          return { id: c.id, symbol: s.symbol, exchange: s.exchange, interval: s.interval, chartType: s.chartType,
+          return { id: c.id, symbol: s.symbol, exchange: s.exchange, interval: s.interval, ...(s.variant ? { variant: s.variant } : {}), chartType: s.chartType,
             chart: s.chart as WorkspaceChartState, settings: { [THEME_SETTING]: s.theme }, volume: false,
             magnet: s.rail?.magnet ?? 'off', stay: s.rail?.stay ?? false, comparisons: [], comparisonMode: 'percent', historyPeriod: c.historyPeriod };
         }),
@@ -716,7 +717,7 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
           Object.assign(cell, { row: slot.row, column: slot.column, rowSpan: slot.rowSpan ?? 1, columnSpan: slot.columnSpan ?? 1 });
           const rail = cell.widget.getState().rail;
           const report = cell.widget.restoreState({ version: 1, symbol: pane.symbol, exchange: pane.exchange, interval: pane.interval,
-            chartType: pane.chartType, chart: pane.chart, ...(rail === null ? {} : { rail: { ...rail, magnet: pane.magnet, stay: pane.stay } }) });
+            ...(pane.variant ? { variant: pane.variant } : {}), chartType: pane.chartType, chart: pane.chart, ...(rail === null ? {} : { rail: { ...rail, magnet: pane.magnet, stay: pane.stay } }) });
           if (!report.applied) throw new Error(`${pane.id}: ${report.reason ?? 'the chart state could not be restored'}`);
         }
       } catch (error) {

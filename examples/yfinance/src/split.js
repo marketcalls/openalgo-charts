@@ -14,6 +14,7 @@ import { tbtn, renderToolbar, CHART_TYPES } from './toolbar.js';
 import { openContextMenu, closeMenu } from './menus.js';
 import { attachVolume, refreshVolume, setVolumeLegend, applyVolumeSettings, volumeValues } from './volume.js';
 import { referenceDataContext, isExpression, fetchExpressionBars } from './expression.js';
+import { requestVariant, sessionOf } from './session.js';
 import { applyTransform } from './transforms.js';
 import { chartDecorationsForRebuild, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
 import { bindIndicatorSource } from './indicator-source.js';
@@ -230,7 +231,11 @@ export async function restoreSecondaryLayout(saved, selected = 1) {
     if (!CHART_TYPES.some(type => type.v === chartType) || !['atr', 'percent', 'fixed'].includes(pfmode)) {
       throw new Error('The second chart has invalid chart type settings');
     }
+    if (req.session !== undefined && !['regular', 'extended'].includes(req.session)) {
+      throw new Error('The second chart has an invalid session');
+    }
     app.p2 = { symbol: req.symbol, interval: req.interval, period: req.period, chartType, pfmode,
+      ...(req.session === 'extended' ? { session: 'extended' } : {}),
       legendIconSize: normalizeLegendIconSize(saved.legendIconSize),
       timezone: saved.state?.timezone || app.chartTimezone };
     app.inspectionState2 = saved.inspection || { panel: null, width: 300 };
@@ -242,7 +247,7 @@ export async function restoreSecondaryLayout(saved, selected = 1) {
     const restoredChart = app.chart2;
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (revision !== restoreRevision || !loaded || !restoredChart || app.chart2 !== restoredChart
-      || !['symbol', 'interval', 'period'].every(key => app.p2[key] === req[key])) return false;
+      || !['symbol', 'interval', 'period'].every(key => app.p2[key] === req[key]) || sessionOf(app.p2) !== sessionOf(req)) return false;
     let report;
     withoutViewportSync(() => { report = app.chart2.restoreState(saved.state); });
     if (!report.applied) throw new Error('The second chart layout could not be restored');
@@ -286,7 +291,7 @@ export function buildChart2({ keepView = true, typeChanged = false, state } = {}
   app.p2.timezone = app.chart2.timezone();
   app.chart2.setDataContext(dataContext);
   app.symbolLegend2 = new PaneLegend({ id: 'symbol', title: app.p2.symbol, row: 0, actions: [],
-    status: () => symbolStatus({ symbol: app.p2.symbol, bars: app.chart2.primaryBars(), timezone: app.chart2.timezone() }),
+    status: () => symbolStatus({ symbol: app.p2.symbol, bars: app.chart2.primaryBars(), timezone: app.chart2.timezone(), session: sessionOf(app.p2) }),
   });
   app.chart2.addPrimitive(app.symbolLegend2);
   const chartType = app.p2.chartType || 'candlestick';
@@ -367,7 +372,8 @@ export async function loadPane2() {
   app.alerts2?.setPaused(true);
   app.p2.period = clampPeriod(app.p2.interval, app.p2.period);
   const request = { ...app.p2 };
-  const identityChanged = before?.symbol !== request.symbol || before?.interval !== request.interval;
+  const identityChanged = before?.symbol !== request.symbol || before?.interval !== request.interval
+    || before?.variant?.session !== requestVariant(request)?.session;
   const keepView = chart.primaryBars().length > 0 && !identityChanged;
   // Clear while the old context still owns these bars; a refresh keeps its view.
   if (identityChanged) {
@@ -376,7 +382,10 @@ export async function loadPane2() {
     app.volume2?.setData([]);
     setPane2Legend(null);
   }
-  app.chart2.setDataContext(referenceDataContext(app.p2, app.chart2.getDataContext()));
+  // A session change alone is a new source, which only the helper makes the chart see.
+  const context = referenceDataContext(app.p2, app.chart2.getDataContext());
+  if (engine.publishDataContext) engine.publishDataContext(app.chart2, context);
+  else app.chart2.setDataContext(context);
   if (app.linkGroup) app.linkGroup.setSymbol(chart, request.symbol);
   app.linkGroup?.setInterval?.(chart, request.interval);
   app.drawingLinkGroup?.setContext(chart, drawingLinkContext(request));
@@ -385,9 +394,10 @@ export async function loadPane2() {
   setPane2Note('loading ' + app.p2.symbol + ' ' + intervalLabel(app.p2.interval) + '...');
   renderToolbar();
   try {
+    const variant = requestVariant(request);
     const loaded = isExpression(request.symbol)
-      ? (await fetchExpressionBars(request.symbol, request.interval, request.period, { signal: controller.signal, timezone: request.timezone })).bars
-      : await fetchBars(request.symbol, request.interval, request.period, { signal: controller.signal, timezone: request.timezone });
+      ? (await fetchExpressionBars(request.symbol, request.interval, request.period, { signal: controller.signal, timezone: request.timezone, variant })).bars
+      : await fetchBars(request.symbol, request.interval, request.period, { signal: controller.signal, timezone: request.timezone, variant });
     if (revision !== pane2LoadRevision || app.chart2 !== chart) return false;
     bars2 = loaded;
     const note = `${bars2.length} bars${fetchNote()}`;
@@ -405,7 +415,7 @@ export async function loadPane2() {
     const fault = feedErrorState(e);
     if (fault.state === 'aborted') return false;
     app.loadFailed2 = true;
-    setPane2Note('error: ' + fault.message);
+    setPane2Note((fault.state === 'unsupported' ? '' : 'error: ') + fault.message);
     return false;
   } finally {
     if (revision === pane2LoadRevision) {

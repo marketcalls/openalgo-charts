@@ -1,3 +1,5 @@
+import { sessionOf } from './session.js';
+
 /** Resolve the selected chart without replacing shared host state. */
 export function selectedPane(app) {
   return app.focusPane === 2 && app.chart2 ? 2 : 1;
@@ -19,6 +21,7 @@ export function capturePaneTarget(app, pane = selectedPane(app)) {
       const context = chart.getDataContext?.();
       return app[chartKey] === chart
         && ['symbol', 'interval', 'period'].every(key => app[requestKey]?.[key] === request[key])
+        && sessionOf(app[requestKey]) === sessionOf(request)
         && (!context || ['symbol', 'interval'].every(key => context[key] === request[key]));
     },
   };

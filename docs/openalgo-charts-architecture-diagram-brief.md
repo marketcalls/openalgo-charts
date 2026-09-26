@@ -61,6 +61,11 @@ names accounts, the workspace chip watchlists and the widget chip the watchlist 
 news panels; the description names the movable price pane, viewport drawings and
 tick schedules.
 
+Rechecked after 2.5.5 (unreleased, data variants): base 119.98 kB, indicators
+36.63 kB, draw 44.87 kB, profile 14.96 kB, transform 4.50 kB, trade 16.64 kB,
+workspace 10.04 kB, webgl 6.39 kB and widget 82.66 kB; all tiers 336.67 kB. The
+version label stays 2.5.5 until the release step, which measures again.
+
 Source references: `src/index.ts`, `src/feed/data-controller.ts`,
 `src/feed/instrument.ts`, `src/model/bar.ts`, `src/core/pane.ts`,
 `src/alerts/controller.ts`, `src/replay/group.ts`, `src/link/group.ts`,

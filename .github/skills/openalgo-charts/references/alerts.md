@@ -40,8 +40,15 @@ nonnegative cooldownSeconds, UTC-seconds expiresAt, and opaque payload.
 `{ kind: 'indicator', instanceId, plotKey, value, upperValue? }`; a named
 predicate uses `{ kind: 'barCondition', id }`.
 A drawing uses `{ kind: 'drawing', drawingId, level?, input? }`.
-`AlertScope` captures symbol, exchange and interval from chart data context.
+`AlertScope` captures symbol, exchange and interval from chart data context,
+and `variant` when the chart shows a non-default data variant (none for the
+default series, so existing scopes and documents are unchanged).
 Set that context before creating alerts; alerts do not migrate to a new market.
+An alert evaluates only on its own variant, like its own interval, and
+`availability` asks for that variant. A fixed price level stays visible, paused,
+on another session or adjustment of the instrument, but not in another currency
+or unit, where the same number is another price. `parseAlertsDocument` refuses
+a scope variant this build cannot name.
 From 2.5.0, price-source levels remain visible across intervals for the same
 symbol and exchange. On another interval they show the original timeframe;
 armed levels are paused and cannot drag. Triggered, disabled and expired levels

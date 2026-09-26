@@ -117,6 +117,19 @@ the rest. `planIndicatorTemplate` and `planIndicatorTemplateState` in `replace` 
 every current host study (not `removable` or not `listed`), with its identity and policy,
 and give the template's pane groups the free slots around its pane, so a replace neither
 copies nor removes one.
+## Data variants in workspaces (unreleased)
+
+`WorkspacePane.variant?: DataVariant` names the provider series a chart showed (extended
+hours, raw prices, a currency or a unit). The parser keeps a pane's variant as the
+frozen canonical copy `normalizeDataVariant` returns, stores the default (`{}`) as no
+field at all, and refuses the document with `WorkspaceDocumentError` for a variant this
+build cannot name, because it would reopen as some other series. `migrateWidgetWorkspace`
+carries a widget state's `variant`. `createChartGrid` saves each cell's variant in
+`getWorkspace()`, reopens it through `applyWorkspace()` (a payload whose variant cannot
+be read is refused and the grid keeps its charts), gives a new cell from `setPreset`
+the active chart's variant, and saves when a cell's variant changes. Comparisons have no
+variant of their own: a host asks for them in their chart's session and adjustment
+(`inheritedDataVariant`). See [feeds-and-live](feeds-and-live.md).
 
 ## Named watchlists (2.5.5)
 

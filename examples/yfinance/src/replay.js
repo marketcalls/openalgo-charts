@@ -6,6 +6,7 @@ import { attachTip } from './hover.js';
 import { setLegend } from './volume.js';
 import { capturePaneTarget } from './pane-target.js';
 import { replayBarEndTime } from './replay-timing.js';
+import { requestVariant, sessionOf } from './session.js';
 export { replayBarEndTime } from './replay-timing.js';
 
 // Read off the namespace rather than named above on purpose: a missing named
@@ -25,7 +26,8 @@ let replaySpeed = 1;
 /** Base-interval bars under the displayed ones, for intra-bar replay. */
 let replaySubBars = new Map();
 let replayLoadRevision = 0;
-const requestKey = req => JSON.stringify([req.symbol, req.interval, req.period]);
+// The session is part of the key: extended finer bars are another series.
+const requestKey = req => JSON.stringify([req.symbol, req.interval, req.period, sessionOf(req)]);
 const readouts = new WeakMap();
 let controlHomes = [];
 export function syncReplayAlertPause() {
@@ -378,7 +380,8 @@ export async function loadReplaySubBars(target = owner()) {
   if (replaySubBars.has(key)) return replaySubBars.get(key);
   const revision = replayLoadRevision;
   try {
-    const bars = await fetchBars(req.symbol, finer, req.period, { slot: 'replay:' + target.pane, timezone: target.timezone });
+    const bars = await fetchBars(req.symbol, finer, req.period, { slot: 'replay:' + target.pane, timezone: target.timezone,
+      variant: requestVariant(req) });
     if (!bars || bars.length === 0) return null;
     if (revision !== replayLoadRevision || !target.current()) return null;
     replaySubBars.set(key, bars);

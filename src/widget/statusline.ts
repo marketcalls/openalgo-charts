@@ -19,6 +19,7 @@ import { widgetText } from './localization';
 import type { Bar, Chart, CrosshairMoveEvent } from 'openalgo-charts';
 import { formatZonedCrosshairLabel } from 'openalgo-charts';
 import { h, type WidgetContext } from './context';
+import { dataVariantLabel } from './data-status';
 
 export interface StatuslineOptions {
   /** BCP 47 tag for number formatting. Default: the runtime's. */
@@ -72,8 +73,13 @@ export function mountStatusline(ctx: WidgetContext, host: HTMLElement, opts: Sta
   const title = h(doc, 'span', 'oac-statusline__title');
   const sym = h(doc, 'span', 'oac-statusline__sym');
   const iv = h(doc, 'span', 'oac-statusline__iv');
+  // Which of the provider's series this is, when it is not the default one:
+  // extended hours and raw prices look like any other candles.
+  // It reads like the interval beside it, so it takes the interval's style.
+  const variant = h(doc, 'span', 'oac-statusline__iv oac-statusline__variant');
   title.appendChild(sym);
   title.appendChild(iv);
+  title.appendChild(variant);
   host.appendChild(title);
 
   const field = (label: string, cls: string): { el: HTMLElement; val: HTMLElement } => {
@@ -114,6 +120,9 @@ export function mountStatusline(ctx: WidgetContext, host: HTMLElement, opts: Sta
   const paint = (): void => {
     const sw = chart.statusLineOptions();
     show(title, sw.title !== false);
+    const label = dataVariantLabel(ctx, chart.getDataContext()?.variant);
+    write(variant, label);
+    show(variant, label !== '');
     const values = sw.chartValues !== false && bar !== null;
     for (const f of [open, high, low, close]) show(f.el, values);
     const digits = priceDigits(chart);

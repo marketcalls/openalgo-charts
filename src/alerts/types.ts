@@ -1,6 +1,7 @@
 import type { SeriesApi } from '../model/series';
 import type { Bar } from '../model/bar';
 import type { ChartDataContext } from '../model/indicator-registry';
+import type { DataVariant } from '../feed/data-variant';
 import type { IndicatorApi } from '../model/indicator-instance';
 import type { IPrimitive } from '../primitives/primitive';
 import type { TickSchedule } from '../feed/tick-schedule';
@@ -126,14 +127,17 @@ export interface BarCondition {
 }
 
 /**
- * Evaluation belongs to the instrument and interval present when the alert was armed.
- * Fixed price levels remain visible on other intervals of the same instrument,
- * labelled with their original timeframe and paused until it is displayed again.
+ * Evaluation belongs to the instrument, interval and data variant present when
+ * the alert was armed. Fixed price levels remain visible on other intervals and
+ * sessions of the same instrument quoted in the same currency and unit,
+ * labelled with where they evaluate and paused until that is displayed again.
  */
 export interface AlertScope {
   symbol?: string;
   exchange?: string;
   interval?: string;
+  /** The series the chart showed (extended hours, raw prices, a currency). Absent for the provider's default. */
+  variant?: DataVariant;
 }
 
 export interface AlertInput {

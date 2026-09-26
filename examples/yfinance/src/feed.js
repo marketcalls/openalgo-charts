@@ -6,6 +6,7 @@ import { venueLive, exchangeOf } from './status.js';
 import { popupMenu } from './menus.js';
 import { renderToolbar } from './toolbar.js';
 import { el, toast } from './ui.js';
+import { extendedSessionAvailable, requestVariant, sessionOf } from './session.js';
 
 // 1.3 surfaces: chart linking, the bar cache and the interval registry.
 // Same namespace read for the same reason: this page must still draw
@@ -61,6 +62,14 @@ export class NetworkError extends FeedError {
     this.retryable = opts.retryable === true;
   }
 }
+/**
+ * The source does not have the session asked for: extended hours for a
+ * symbol or an interval it only serves in regular hours. Retrying will not
+ * help; choosing regular hours will.
+ */
+export class UnsupportedSessionError extends FeedError {
+  constructor(message, opts) { super(message, opts); this.name = 'UnsupportedSessionError'; this.state = 'unsupported'; }
+}
 /** Superseded by a newer request, or cancelled by the caller. Not a fault. */
 export class AbortedError extends FeedError {
   constructor(message = 'request aborted', opts) { super(message, opts); this.name = 'AbortedError'; this.state = 'aborted'; }
@@ -87,8 +96,11 @@ export const DEFAULT_RETRY_DELAY_MS = 750;
 const RATE_LIMIT_TEXT = /rate.?limit|too many requests|\b429\b/i;
 const NOT_FOUND_TEXT = /delisted|no data found|no price data|not found|\b404\b|no timezone found/i;
 
+// The session goes on the URL only when the request names one, so a regular
+// load asks exactly what it asked before sessions existed.
 const historyUrl = (req) =>
-  `/api/history?symbol=${encodeURIComponent(req.symbol)}&interval=${encodeURIComponent(req.interval)}&period=${encodeURIComponent(req.period)}`;
+  `/api/history?symbol=${encodeURIComponent(req.symbol)}&interval=${encodeURIComponent(req.interval)}&period=${encodeURIComponent(req.period)}`
+  + (req.variant?.session ? `&session=${encodeURIComponent(req.variant.session)}` : '');
 
 /**
  * Turn what the server sent into bars or a typed error. Pure, so the
@@ -116,6 +128,7 @@ export function classifyHistoryResponse(status, body, req, headers) {
   const text = record && typeof record.error === 'string' ? record.error : '';
   const code = record && typeof record.code === 'string' ? record.code : '';
   const where = `${req.symbol} ${req.interval}/${req.period}`;
+  if (code === 'unsupported_session') throw new UnsupportedSessionError(text || `${req.symbol}: no extended hours for ${req.interval}`, { status });
   if (status === 404 || code === 'no_data' || NOT_FOUND_TEXT.test(text)) {
     throw new NotFoundError(`${req.symbol}: no bars${text ? ' (' + text + ')' : ''}`, { status });
   }
@@ -161,6 +174,15 @@ export class YFinanceDataFeed {
     this.timeoutMs = timeoutMs;
     this.retryDelayMs = retryDelayMs;
     this.retries = retries;
+  }
+
+  /**
+   * What the source serves for an instrument: regular hours always, extended
+   * hours for intraday bars of a US listed stock. The same rule the server
+   * enforces, so a request for anything else is refused before it is sent.
+   */
+  dataVariants(query) {
+    return { sessions: extendedSessionAvailable(query.symbol, query.interval) ? ['regular', 'extended'] : ['regular'] };
   }
 
   async getBars(req) {
@@ -252,9 +274,9 @@ export function initFeed(a, feedOptions) {
   feed = app.cache || liveFeed;
 }
 
-/** Newest bar time this page has actually seen, per `symbol|interval`. */
+/** Newest bar time this page has actually seen, per `symbol|interval`, and session when it is extended. */
 const lastBarSeen = new Map();
-const seenKey = (symbol, interval) => symbol + '|' + interval;
+const seenKey = (symbol, interval, variant) => symbol + '|' + interval + (variant?.session === 'extended' ? '|extended' : '');
 /** Newest bar per `symbol|interval` as the picker names it, with the wire frame it was judged on. */
 const newestSeen = new Map();
 
@@ -277,18 +299,21 @@ const newestSeen = new Map();
  * the request runs to the end of the forming bar as before, and the cache's
  * own forming-bar rule is what keeps it fresh.
  */
-export function barsRequest(symbol, interval, period) {
+export function barsRequest(symbol, interval, period, variant) {
   const sec = intervalSeconds(interval) || 86400;
   const now = Math.floor(Date.now() / 1000);
   let to = Math.floor(now / sec) * sec + sec - 1;
-  const seen = lastBarSeen.get(seenKey(symbol, interval));
-  if (seen !== undefined && !venueLive(symbol)) to = Math.min(to, seen + sec - 1);
+  const seen = lastBarSeen.get(seenKey(symbol, interval, variant));
+  // An extended series trades before and after the regular one, so its own hours decide.
+  if (seen !== undefined && !venueLive(symbol, sessionOf(variant))) to = Math.min(to, seen + sec - 1);
   // `max` is 1e6 days in the picker's table, which as a `from` is an epoch
   // far enough back to be meaningless; a century is as much as any of this
   // data goes, and it keeps the value readable in a debugger.
   const days = Math.min(PERIOD_DAYS[period] || 366, 40000);
   const from = Math.floor((now - days * 86400) / sec) * sec;
-  return { symbol, exchange: exchangeOf(symbol), interval, period, from, to };
+  // The variant is part of the cache key, so the regular and the extended
+  // series never serve each other's bars.
+  return { symbol, exchange: exchangeOf(symbol), interval, period, from, to, ...(variant ? { variant } : {}) };
 }
 
 /** Was the last `fetchBars` served out of the cache, and how long did it take. */
@@ -337,7 +362,13 @@ export async function fetchBars(symbol, interval, period, opts) {
   }
   const fold = foldedInterval(interval);
   const wire = fold ? fold.foldFrom : interval;
-  const req = barsRequest(symbol, wire, period);
+  const variant = opts && opts.variant;
+  const req = barsRequest(symbol, wire, period, variant);
+  // Asked of the feed's own declaration, before the wire: extended hours the
+  // source does not have are refused here rather than fetched as regular ones.
+  if (variant && variant.session === 'extended' && !liveFeed.dataVariants(req).sessions.includes('extended')) {
+    throw new UnsupportedSessionError(`Extended hours are not available for ${symbol} ${interval} bars from this source`);
+  }
   if (opts && opts.noCache) req.noCache = true;
   let controller = null;
   const slot = opts && opts.slot;
@@ -363,10 +394,10 @@ export async function fetchBars(symbol, interval, period, opts) {
     ms: Math.round(performance.now() - t0),
   };
   if (bars.length) {
-    lastBarSeen.set(seenKey(symbol, wire), bars[bars.length - 1].time);
+    lastBarSeen.set(seenKey(symbol, wire, variant), bars[bars.length - 1].time);
     // Freshness is judged on the wire frame: a folded month is as fresh as
     // the daily bars under it, and a calendar bucket has no length to judge by.
-    newestSeen.set(seenKey(symbol, interval), { wire, time: bars[bars.length - 1].time });
+    newestSeen.set(seenKey(symbol, interval, variant), { wire, time: bars[bars.length - 1].time });
     syncStaleBadge();
   }
   return fold ? foldToBuckets(bars, fold.bucketing, timezone) : bars;
@@ -400,9 +431,9 @@ export const STALE_GRACE_SEC = 60;
  * close. Otherwise `{ stale, overdueSec }`, where `overdueSec` is how long
  * ago the newest bar closed (negative while it is still forming).
  */
-export function staleness(symbol, wireInterval, newestSec, nowSec, zone) {
+export function staleness(symbol, wireInterval, newestSec, nowSec, zone, session = 'regular') {
   if (newestSec === undefined || newestSec === null) return null;
-  if (!venueLive(symbol)) return null;
+  if (!venueLive(symbol, session)) return null;
   let closeSec = barCloseSec ? barCloseSec(wireInterval, newestSec, zone) : null;
   if (closeSec == null) {
     const sec = intervalSeconds(wireInterval);
@@ -416,9 +447,9 @@ export function staleness(symbol, wireInterval, newestSec, nowSec, zone) {
 /** The reading for the symbol and interval on the main chart, or null. */
 export function currentStaleness(nowSec = Math.floor(Date.now() / 1000)) {
   if (!app || !app.req || !app.req.symbol) return null;
-  const seen = newestSeen.get(seenKey(app.req.symbol, app.req.interval));
+  const seen = newestSeen.get(seenKey(app.req.symbol, app.req.interval, requestVariant(app.req)));
   if (!seen) return null;
-  return staleness(app.req.symbol, seen.wire, seen.time, nowSec, app.chartTimezone);
+  return staleness(app.req.symbol, seen.wire, seen.time, nowSec, app.chartTimezone, sessionOf(app.req));
 }
 
 const overdueText = (sec) => (sec >= 3600 ? `${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min` : `${Math.max(1, Math.round(sec / 60))} min`);

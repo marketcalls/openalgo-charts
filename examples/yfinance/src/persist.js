@@ -7,6 +7,7 @@ import { comparisonSnapshot, restoreComparisons, syncComparisons } from './compa
 import { renderIndicatorChips } from './indicators.js';
 import { CHART_TYPES, renderToolbar } from './toolbar.js';
 import { INTERVALS, PERIODS } from './intervals.js';
+import { SESSIONS, sessionOf } from './session.js';
 import { withoutViewportSync } from './split.js';
 import { normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
 import { keepHostStudy } from './host-study.js';
@@ -42,7 +43,9 @@ export const QUARANTINE_KEEP = 5;
 // and neither means anything on a different dataset: restoring a day chart's
 // view onto five-minute bars leaves the candles off-screen, which reads as
 // the chart having loaded nothing at all.
-export const datasetKey = (r) => `${r.symbol}|${r.interval}|${r.period}`;
+// The session joins the key only when it is extended, so a key written
+// before sessions existed still names the regular series it described.
+export const datasetKey = (r) => `${r.symbol}|${r.interval}|${r.period}` + (sessionOf(r) === 'extended' ? '|extended' : '');
 
 // ── schema and migrations ──────────────────────────────────────────────
 /**
@@ -71,9 +74,15 @@ const isRecord = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 function layoutRequest(value) {
   if (!isRecord(value) || typeof value.symbol !== 'string' || !value.symbol.trim()
-    || !INTERVALS.includes(value.interval) || !PERIODS.includes(value.period)) return null;
-  return { symbol: value.symbol.trim(), interval: value.interval, period: value.period };
+    || !INTERVALS.includes(value.interval) || !PERIODS.includes(value.period)
+    || (value.session !== undefined && !SESSIONS.includes(value.session))) return null;
+  return { symbol: value.symbol.trim(), interval: value.interval, period: value.period,
+    ...(value.session === 'extended' ? { session: 'extended' } : {}) };
 }
+
+/** The request as saved: the session only when it is not the default. */
+export const savedRequest = r => ({ symbol: r.symbol, interval: r.interval, period: r.period,
+  ...(sessionOf(r) === 'extended' ? { session: 'extended' } : {}) });
 
 function validTimezone(value) {
   if (typeof value !== 'string' || !value) return false;
@@ -93,7 +102,9 @@ export function primaryLayoutSelection(doc) {
     // A separator in an expression makes the old key ambiguous. Keep its chart
     // state usable, but do not guess which instrument the user intended.
     const fields = doc.dataset.split('|');
-    if (fields.length === 3) request = layoutRequest({ symbol: fields[0], interval: fields[1], period: fields[2] });
+    if (fields.length === 3 || (fields.length === 4 && fields[3] === 'extended')) {
+      request = layoutRequest({ symbol: fields[0], interval: fields[1], period: fields[2], session: fields[3] });
+    }
   }
   const { chartType, pfmode, timezone } = doc;
   if (chartType !== undefined && !CHART_TYPES.some(type => type.v === chartType)) {
@@ -112,7 +123,8 @@ export function restorePrimarySelection(doc = readLayout()) {
   const { request, chartType, pfmode, timezone } = primaryLayoutSelection(doc);
   if (request) {
     app.req = request;
-    for (const [key, value] of Object.entries(request)) el(key).value = value;
+    for (const key of ['symbol', 'interval', 'period']) el(key).value = request[key];
+    el('session').value = sessionOf(request);
   }
   if (chartType !== undefined) el('ctype').value = chartType;
   if (pfmode !== undefined) el('pfmode').value = pfmode;
@@ -325,7 +337,7 @@ export function layoutSnapshot() {
     schema: LAYOUT_SCHEMA,
     ...app.chart.getState(),
     dataset: datasetKey(app.req),
-    request: { symbol: app.req.symbol, interval: app.req.interval, period: app.req.period },
+    request: savedRequest(app.req),
     chartType: el('ctype').value || 'candlestick',
     pfmode: el('pfmode').value || 'atr',
     legendIconSize: normalizeLegendIconSize(app.chart.legendIconSize?.()),
@@ -338,7 +350,7 @@ export function layoutSnapshot() {
     focusPane: app.focusPane === 2 && app.chart2 ? 2 : 1,
     linkOptions: app.linkGroup?.options(),
     secondary: app.chart2 ? {
-      request: { symbol: app.p2.symbol, interval: app.p2.interval, period: app.p2.period },
+      request: savedRequest(app.p2),
       chartType: app.p2.chartType || 'candlestick',
       pfmode: app.p2.pfmode || 'atr',
       legendIconSize: normalizeLegendIconSize(app.chart2.legendIconSize?.()),

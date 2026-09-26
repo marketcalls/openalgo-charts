@@ -334,7 +334,9 @@ export class Instrument {
     // The primary series can use a left or hidden scale instead of the chart default.
     series.priceScale().setOptions({ minMove: m.priceTick });
     series.priceScale().setPriceFormatter(value => this.formatPrice(value));
-    chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest });
+    // The variant is the host's choice of provider series, not instrument metadata, so it stays.
+    chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest,
+      ...(previous?.variant === undefined ? {} : { variant: previous.variant }) });
     // Times past the last bar follow this instrument's sessions, so a drawing
     // placed there after a close lands on the next opening. Another
     // instrument replaces them, and a context moved to another symbol drops
