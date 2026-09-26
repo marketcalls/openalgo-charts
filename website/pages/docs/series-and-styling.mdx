@@ -166,10 +166,10 @@ themselves, and an indicator can recolour the **price** candles from its own ver
 all.
 
 <Callout type="info">
-[Conflation](/docs/data-loading#large-datasets-conflation) drops per-bar colour: a merged
-bucket of bars has no single one. It is off by default and only engages when bars fall
-below sub-pixel widths, but a chart that turns it on loses the tint at the zoom levels
-where it merges.
+The [level of detail](/docs/data-loading#large-datasets-level-of-detail) keeps per-bar colour
+as far as one column can: a merged candle stick takes the colours of the bar that closed its
+column, and line and histogram series keep real bars with their own colours. It engages only
+below about one CSS px per bar, which the default time scale never reaches.
 </Callout>
 
 ## Colour helpers
