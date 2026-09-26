@@ -168,3 +168,62 @@ test('the mobile sheet walks the same timeline on a narrow screen', async ({ pag
   await page.screenshot({ path: info.outputPath('history-mobile.png') });
   expect(errors).toEqual([]);
 });
+
+/** Lit pixels across every canvas of one pane: a drawing may paint over or under the series. */
+const inkAll = (page: Page, pane: number) => page.evaluate(index => {
+  const element = (window as any).__widget.chart.panes()[index]?.element as HTMLElement | undefined;
+  let lit = 0;
+  for (const canvas of [...(element?.querySelectorAll('canvas') ?? [])] as HTMLCanvasElement[]) {
+    if (canvas.width === 0 || canvas.height === 0) continue;
+    const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 128 && (data[i] > 60 || data[i + 1] > 60 || data[i + 2] > 70)) lit++;
+  }
+  return lit;
+}, pane);
+
+test('a pane left with only a drawing comes back painted, and a drawing the host makes in ignore survives every press', async ({ page }, info) => {
+  const errors = await mount(page);
+  // Two study panes, a line on the first, then its study moved away: the pane holds only the line.
+  const line = await page.evaluate(() => {
+    const w = (window as any).__widget;
+    const rsi = w.chart.addIndicator('rsi');
+    w.chart.addIndicator('cci');
+    const bars = w.series.getData();
+    const made = w.draw.add({ tool: 'horizontal-line', paneIndex: 1, points: [{ time: bars[bars.length - 20].time, price: 50 }], style: { color: '#ffcc00', lineWidth: 3 } });
+    w.chart.moveIndicator(rsi.id, 2);
+    return made.id;
+  });
+  await expect.poll(() => state(page).then(s => s.panes)).toBe(3);
+  await page.evaluate(() => (window as any).__widget.history.clear());
+  await paint(page);
+  const held = await inkAll(page, 1);
+  expect(held).toBeGreaterThan(300);
+
+  await page.evaluate(() => (window as any).__widget.chart.removePane(1));
+  await expect.poll(() => state(page).then(s => s.panes)).toBe(2);
+  expect(await page.evaluate(() => (window as any).__widget.history.peekUndo()?.changes)).toEqual(['pane-remove']);
+  const price = (await paneBoxes(page))[0];
+  await page.mouse.move(price.x + price.width * 0.5, price.y + price.height * 0.5);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(() => state(page).then(s => s.panes)).toBe(3);
+  expect(await page.evaluate(id => (window as any).__widget.draw.get(id)?.paneIndex, line)).toBe(1);
+  await paint(page);
+  await expect.poll(() => inkAll(page, 1)).toBeGreaterThan(held * 0.8);
+  await page.screenshot({ path: info.outputPath('history-pane-back.png') });
+
+  // The host's own line, drawn inside ignore: no step, and no press takes it back.
+  const host = await page.evaluate(() => {
+    const w = (window as any).__widget;
+    const bars = w.series.getData();
+    return w.history.ignore(() => w.draw.add({ tool: 'horizontal-line', paneIndex: 0, points: [{ time: bars[bars.length - 30].time, price: bars[bars.length - 30].close }], style: { color: '#00e5ff' } })).id;
+  });
+  await page.keyboard.press('ControlOrMeta+y');
+  await expect.poll(() => state(page).then(s => s.panes)).toBe(2);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(() => state(page).then(s => s.panes)).toBe(3);
+  expect(await page.evaluate(id => (window as any).__widget.draw.get(id) !== undefined, host)).toBe(true);
+  expect(await page.evaluate(() => (window as any).__widget.history.canUndo())).toBe(false);
+  await paint(page);
+  await page.screenshot({ path: info.outputPath('history-host-line.png') });
+  expect(errors).toEqual([]);
+});

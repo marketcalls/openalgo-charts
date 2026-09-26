@@ -11,8 +11,9 @@ All notable changes to OpenAlgo Charts.
   stacking row and price scale), study settings, visibility and scale
   assignments, the chart type and the primary series' scale, price scale
   settings (mode, invert, margins, auto-fit, pinned ratio and axis placement),
-  pane moves, folds and heights, the chart settings the settings dialog writes,
-  and drawings, in the order they were made. The widget builds one as
+  pane moves, folds and heights, panes added or removed on their own, the chart
+  settings the settings dialog writes, and drawings, in the order they were
+  made. The widget builds one as
   `widget.history` (and `ctx.history`): Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z, the
   rail's Undo and Redo, and the mobile sheets all walk it. The mobile More
   sheet now opens with Undo and Redo, and the Drawing sheet gains Redo.
@@ -26,16 +27,26 @@ All notable changes to OpenAlgo Charts.
   a Cancel that restores every value leaves none; each context-menu row is one
   step. `transact(fn, label)` records what the chart does not announce,
   `group(label)` merges a live edit, `ignore(fn)` keeps a host's own change out,
-  `push(command)` records a host's own reversible step, and `attach(chart, draw)`
-  keeps the timeline across a host's chart rebuild. A step that cannot be
+  drawings included and the redo branch kept, `push(command)` records a host's
+  own reversible step, and `attach(chart, draw)` keeps the timeline across a
+  host's chart rebuild. A listener's change while a step is applied is not a
+  step either, and a Cancel gives the redo branch back. A step that cannot be
   applied is rolled back, dropped with the steps behind it, and reported to
   `onError`; a new action clears redo; `restoreState` starts a new timeline.
 - `DrawingController.historySteps()` and a `step` number on the `drawing:change`
   that closes a recorded step (`DrawingChangeEvent`), so a host can hold drawing
-  steps in a timeline of its own.
-- The yfinance reference host walks one timeline per chart through its toolbar,
-  rail, keyboard and mobile bar, records its chart-type rebuild as a command,
-  and keeps comparisons, the volume row and loaded layouts out of it.
+  steps in a timeline of its own, and `DrawingController.untracked(fn)`, which
+  runs a host's own edits without recording a step or touching either branch,
+  taking them into every recorded step the way a forced edit is.
+- A linked appearance change is an undo step of the chart that made it only: the
+  chart grid and the reference host's split view apply it on the others outside
+  their timelines, and undoing or redoing it announces the result again, so linked
+  charts never drift apart.
+- The yfinance reference host walks one timeline per chart: the keyboard and the
+  mobile bar walk the focused chart's, the drawing toolbar and the rail the main
+  chart's. It records its chart-type rebuild as a command, makes each chart
+  settings and study settings session one step, and keeps comparisons, the volume
+  row and loaded layouts out of it.
 
 ### Changed
 

@@ -214,6 +214,47 @@ describe('dialogs and menus', () => {
     expect(study.settings().length).toBe(9);
   });
 
+  it('keeps the redo branch through a settings dialog that is cancelled', async () => {
+    const { w, root } = make();
+    w.chart.addIndicator('widget-history-osc');
+    await settle();
+    w.history.undo();
+    expect(w.history.canRedo()).toBe(true);
+    mountSettingsDialog(w.context, undefined, { tab: 'appearance' });
+    const vert = root.querySelector('#oac-cset-canvas-grid-vertLines') as FakeElement;
+    vert.checked = !vert.checked;
+    fire(vert, 'change');
+    (root.querySelectorAll('.oac-dialog__actions button')[0]).click();   // Cancel
+    expect(w.history.canRedo()).toBe(true);
+    expect(w.history.redo()).toBe(true);
+    expect(w.chart.indicators()).toHaveLength(1);
+  });
+
+  it('records a colour dragged live through the study dialog as one step', async () => {
+    const { w, root } = make();
+    const study = w.chart.addIndicator('widget-history-osc');
+    await settle();
+    w.history.clear();
+    const before = study.settings()['osc:color'];
+    mountIndicatorSettings(w.context, undefined, { instanceId: study.id });
+    (root.querySelectorAll('[role="tab"]')[1]).click();   // Style
+    const color = root.querySelector(`#oac-ind-${study.id}-osc-color`) as FakeElement & { value: string };
+    for (const value of ['#110000', '#550000', '#aa0000']) {
+      color.value = value;
+      fire(color, 'input');                                // every frame of the drag writes
+      await settle();
+    }
+    fire(color, 'change');
+    expect(study.settings()['osc:color']).toBe('#aa0000');
+    (root.querySelectorAll('.oac-dialog__actions button')[1]).click();   // OK
+    expect(w.history.peekUndo()).toEqual({ label: 'Study settings', changes: ['study-settings'] });
+    w.history.undo();
+    expect(study.settings()['osc:color']).toBe(before);
+    expect(w.history.canUndo()).toBe(false);
+    w.history.redo();
+    expect(study.settings()['osc:color']).toBe('#aa0000');
+  });
+
   it('makes each context-menu row one step, including what the chart does not announce', () => {
     const { w, root } = make();
     const orders = vi.fn();

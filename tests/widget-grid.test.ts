@@ -4,7 +4,7 @@
  * DOM with measured charts and a synchronous raf, like the widget shell tests.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { Chart, type Bar, type BarsRequest, type DataFeed } from '../src/index';
+import { Chart, applyChartSettings, type Bar, type BarsRequest, type DataFeed } from '../src/index';
 import '../src/indicators/index';
 import { parseWorkspacePayload, type WorkspacePayload } from '../src/workspace/index';
 import { createChartGrid, CHART_GRID_PRESETS, type ChartGrid, type ChartGridOptions, type StorageLike } from '../src/widget/index';
@@ -230,6 +230,33 @@ describe('chart grid linked navigation', () => {
     expect(a.getVisibleLogicalRange()).toEqual(before);
     b.setVisibleLogicalRange({ from: 20, to: 70 });
     expect(a.getVisibleLogicalRange()).not.toEqual(before);
+  });
+});
+
+describe('chart grid linked appearance and undo', () => {
+  it('applies a linked appearance change outside the timeline of the chart following it, and walks it back on every chart', async () => {
+    const { grid } = makeGrid({ preset: '1x2', links: { appearance: true, crosshair: false, viewport: false } });
+    const [leader, follower] = grid.cells().map(cell => cell.widget);
+    for (const widget of [leader, follower]) widget.series.setData(bars(120));
+    await flush();
+    leader.history.clear();
+    follower.history.clear();
+    const mode = (widget: typeof leader): string | undefined => widget.chart.priceAxisState(0, 'right')?.mode;
+
+    leader.history.transact(() => applyChartSettings(leader.chart, { 'scales.mode': 'logarithmic' }), 'Chart settings');
+    expect(mode(follower)).toBe('logarithmic');
+    // The leader's step, not the follower's.
+    expect(follower.history.canUndo()).toBe(false);
+    follower.chart.addIndicator('rsi');
+    await flush();
+    expect(follower.history.peekUndo()?.changes).toEqual(['study-add']);
+    follower.history.undo();
+    expect([mode(leader), mode(follower)]).toEqual(['logarithmic', 'logarithmic']);
+
+    leader.history.undo();
+    expect([mode(leader), mode(follower)]).toEqual(['linear', 'linear']);
+    leader.history.redo();
+    expect([mode(leader), mode(follower)]).toEqual(['logarithmic', 'logarithmic']);
   });
 });
 

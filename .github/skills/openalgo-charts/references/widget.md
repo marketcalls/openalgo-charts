@@ -803,8 +803,8 @@ widget.openNews();
 removed (with its settings, visibility, pane, stacking row and scale), study settings,
 visibility and scale assignment (`setPriceScale`, `setPlotPriceScales`), the chart type and
 the primary series' scale, price scale settings (mode, invert, margins, auto-fit, pinned
-ratio, axis placement), panes (moved, folded, resized, and brought back with the studies and
-drawings they held), the chart settings `applyChartSettings` writes, and drawings. The widget
+ratio, axis placement), panes (moved, folded, resized, added or removed, and brought back with
+the studies and drawings they held), the chart settings `applyChartSettings` writes, and drawings. The widget
 builds one as `widget.history` and hands it to every piece as `ctx.history`; Ctrl+Z, Ctrl+Y
 and Ctrl+Shift+Z, the rail's Undo and Redo, and the mobile Drawing and More sheets all walk it.
 
@@ -817,7 +817,7 @@ history.canUndo(); history.canRedo();
 history.peekUndo();                       // { label?, changes: ChartHistoryChange[] } | null
 history.transact(() => chart.setPriceAxisOptions(0, 'right', { mode: 'logarithmic' }), 'Scale');
 const end = history.group('Chart settings');   // one step until end() runs; a no-op group is none
-history.ignore(() => hostOwnSetup());     // the host's own change, never a step
+history.ignore(() => hostOwnSetup());     // the host's own change, drawings included, never a step
 history.push({ label: 'Chart type', undo: () => rebuild('candlestick'), redo: () => rebuild('line') });
 history.attach(rebuiltChart, rebuiltDraw);    // a host that rebuilds its chart keeps the timeline
 history.subscribe(refreshButtons); history.clear(); history.destroy();
@@ -839,7 +839,18 @@ history.subscribe(refreshButtons); history.clear(); history.destroy();
 - **Drawings** stay the controller's: each step is held by the number `drawing:change`
   reported (`DrawingChangeEvent.step`, `DrawingController.historySteps()`), and undone by the
   controller. After `attach` to a new controller, an old step is taken back from the drawings
-  either side of it.
+  either side of it, and so is a step the controller holds under one the history does not.
+- **The host's own changes** (`ignore`, and whatever a listener does while a press is applied)
+  are recorded nowhere, drawings included: they run through `DrawingController.untracked`,
+  so no undo or redo reverses them and the redo branch is kept. Inside `transact` or `group`
+  the step is recorded on either side of an `ignore`. A group that ends as no step (a
+  Cancel) gives the redo branch back.
+- **Panes** that come or go with no study bringing or taking them are `pane-add` and
+  `pane-remove` steps: one left with only drawings comes back with them, an empty one empty.
+  A pane holding a host's own series is never made or removed by history.
+- **Linked charts**: a linked appearance change is the step of the chart that made it.
+  Followers apply it through their `ignore` (the grid and the yfinance split view do), and
+  walking the step re-announces the result on `style:change` so the followers follow.
 - **Never**: no bars are written, no alert fires (a study brought back reseeds silently), no
   order is placed.
 - **Failure**: a step that cannot be applied is rolled back, dropped with every step behind
@@ -851,5 +862,6 @@ history.subscribe(refreshButtons); history.clear(); history.destroy();
 - Types: `ChartHistoryOptions` (`draw`, `limit` default 100, `series`, `setChartType`,
   `onError`), `ChartHistoryCommand`, `ChartHistoryStep`, `ChartHistoryChange` (`study-add`,
   `study-remove`, `study-settings`, `study-visibility`, `study-scale`, `study-pane`,
-  `study-order`, `chart-type`, `series-scale`, `pane-order`, `pane-weight`, `pane-collapse`,
-  `axis`, `settings`, `drawing`, `command`), `ChartHistoryError` (`direction`, `step`, `error`).
+  `study-order`, `chart-type`, `series-scale`, `pane-add`, `pane-remove`, `pane-order`,
+  `pane-weight`, `pane-collapse`, `axis`, `settings`, `drawing`, `command`), `ChartHistoryError`
+  (`direction`, `step`, `error`).

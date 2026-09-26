@@ -105,6 +105,9 @@ from behind the compact tabs takes the linked window. The window is forgotten wh
 chart changes instrument or is removed, and when viewport linking is switched on,
 which starts without one until the next pan or zoom. See
 [Chart linking](/docs/chart-linking) for how time, not bar index, crosses charts.
+A linked appearance change is an undo step of the chart it was made on only: the
+others apply it outside their own timelines, and undoing it there takes it back on
+every linked chart.
 
 ## Workspaces
 

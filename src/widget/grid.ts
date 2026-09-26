@@ -553,7 +553,9 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
         widget.setInterval(interval);
         return true;
       },
-      appearance: { read: () => readChartSettings(chart), apply: values => applyChartSettings(chart, values) },
+      // A linked change is the leader's step, taken back on its timeline and
+      // sent here again; on this chart's own timeline it is never a step.
+      appearance: { read: () => readChartSettings(chart), apply: values => widget.history.ignore(() => applyChartSettings(chart, values)) },
     });
     // A new instrument fits its own view, so the keeper's window is no longer
     // the linked one; the other charts still show it.

@@ -8,7 +8,8 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { Chart } from '../src/core/chart';
 import { AlertController } from '../src/alerts/controller';
-import { registerIndicator, readChartSettings, applyChartSettings } from '../src/index';
+import { registerIndicator, readChartSettings, applyChartSettings, createLinkGroup } from '../src/index';
+import type { LinkChart } from '../src/link/group';
 import type { Bar } from '../src/index';
 import { fakeDocument } from './helpers/fake-dom';
 import { DrawingController } from '../src/draw/index';
@@ -51,6 +52,12 @@ registerIndicator({
   // True on every bar: any evaluation of history would announce each one.
   alerts: [{ id: 'always', title: 'Always', when: () => true }],
   calc: (b) => ({ value: b.map(x => x.close) }),
+});
+registerIndicator({
+  id: 'hist-bands', name: 'History bands', placement: 'onchart',
+  inputs: [{ key: 'width', type: 'number', label: 'Width', default: 2 }],
+  plots: [{ key: 'upper', title: 'Upper', type: 'line' }, { key: 'lower', title: 'Lower', type: 'line' }],
+  calc: (b) => ({ upper: b.map(x => x.high + 1), lower: b.map(x => x.low - 1) }),
 });
 let asyncWork: Promise<void> = Promise.resolve();
 registerIndicator({
@@ -209,6 +216,26 @@ describe('studies', () => {
     expect(other().settings().length).toBe(11);
   });
 
+  it('brings a removed study back under the instance id it had, so an alert keyed to it reaches it again', async () => {
+    const { chart, history } = rig();
+    const study = chart.addIndicator('hist-osc', { length: 3 });
+    const alerts = new AlertController(chart);
+    const alert = alerts.add({ source: { kind: 'indicator', instanceId: study.id, plotKey: 'value', value: 100 } });
+    await settle();
+    history.clear();
+    expect(alerts.availability(alert.id).available).toBe(true);
+    chart.removeIndicator(study.id);
+    await settle();
+    expect(alerts.availability(alert.id).available).toBe(false);
+    history.undo();
+    // Red on this branch alone: green once addIndicator honours options.instanceId (the core change).
+    expect(studyIds(chart)).toEqual([study.id]);
+    expect(alerts.availability(alert.id).available).toBe(true);
+    history.redo();
+    history.undo();
+    expect(studyIds(chart)).toEqual([study.id]);
+  });
+
   it('records study settings, visibility, scale assignment and stacking as steps', async () => {
     const { chart, history } = rig();
     const one = chart.addIndicator('hist-overlay', { length: 3 });
@@ -347,6 +374,54 @@ describe('chart type and price scales', () => {
     expect(inverted()).toEqual([true, true, true, true]);
   });
 
+  it('takes back a pinned ratio and both plot margins, each as its own step', async () => {
+    const { chart, history } = rig();
+    chart.addIndicator('hist-osc');
+    await settle();
+    history.clear();
+    const scale = (slot: number) => chart.panes()[slot].scaleFor('right').options;
+    const top = scale(1).marginTop;
+    const bottom = scale(1).marginBottom;
+    history.transact(() => chart.setPriceAxisLockRatio(0, 'right', true), 'Pin');
+    history.transact(() => chart.setPriceAxisOptions(1, 'right', { marginBottom: 0.3 }), 'Bottom');
+    history.transact(() => chart.setPriceAxisOptions(1, 'right', { marginTop: 0.25 }), 'Top');
+    expect(chart.panes()[0].ratioLocked('right')).toBe(true);
+
+    history.undo();
+    expect(scale(1).marginTop).toBeCloseTo(top);
+    expect(scale(1).marginBottom).toBeCloseTo(0.3);
+    history.undo();
+    expect(scale(1).marginBottom).toBeCloseTo(bottom);
+    expect(chart.panes()[0].ratioLocked('right')).toBe(true);
+    history.undo();
+    expect(chart.panes()[0].ratioLocked('right')).toBe(false);
+    for (let i = 0; i < 3; i++) history.redo();
+    expect(chart.panes()[0].ratioLocked('right')).toBe(true);
+    expect(scale(1).marginBottom).toBeCloseTo(0.3);
+    expect(scale(1).marginTop).toBeCloseTo(0.25);
+  });
+
+  it('takes back a plot moved to another scale, and brings a study back with its plots where they were', async () => {
+    const { chart, history } = rig();
+    const bands = chart.addIndicator('hist-bands');
+    await settle();
+    history.clear();
+    expect(bands.setPlotPriceScales({ upper: 'left' })).toBe(true);
+    await settle();
+    expect(history.peekUndo()?.changes).toEqual(['study-scale']);
+    history.undo();
+    expect(bands.plotPriceScaleIds()).toEqual({});
+    history.redo();
+    expect(bands.plotPriceScaleIds()).toEqual({ upper: 'left' });
+
+    chart.removeIndicator(bands.id);
+    await settle();
+    history.undo();
+    const back = chart.indicators()[0];
+    expect(back.plotPriceScaleIds()).toEqual({ upper: 'left' });
+    expect(back.series('upper')?.priceScale()).toBe(chart.panes()[0].scaleFor('left'));
+  });
+
   it('takes back a scale placement and a series scale assignment', async () => {
     const { chart, history } = rig();
     const series = chart.primarySeries()!;
@@ -417,6 +492,74 @@ describe('panes', () => {
     expect(chart.panes()).toHaveLength(2);
     expect(draw.get(marker.id)).toBeUndefined();
     expect(chart.indicators().some(s => s.id === a.id)).toBe(false);
+  });
+
+  it('brings back a pane that held only drawings, as a step of its own, with its height and place', async () => {
+    const { chart, draw, history } = rig();
+    const a = chart.addIndicator('hist-osc');
+    const b = chart.addIndicator('hist-osc');
+    await settle();
+    const mark = draw.add(line(50, 1));
+    chart.moveIndicator(a.id, 2);          // pane 1 keeps only the drawing
+    await settle();
+    history.ignore(() => chart.setPaneWeight(1, 0.45));
+    // Nothing is plotted there: the range its scale kept from the study is
+    // what places the drawing (set here as a painted frame would have).
+    const range = { min: 20, max: 80 };
+    chart.panes()[1].scaleFor('right').setComputedRange(range);
+    history.clear();
+    expect(chart.panes()).toHaveLength(3);
+
+    expect(chart.removePane(1)).toBe(true);
+    await settle();
+    expect(draw.get(mark.id)).toBeUndefined();
+    expect(history.peekUndo()?.changes).toEqual(['pane-remove']);
+    history.undo();
+    expect(chart.panes()).toHaveLength(3);
+    expect(draw.get(mark.id)?.paneIndex).toBe(1);
+    expect(chart.paneWeight(1)).toBeCloseTo(0.45);
+    expect(chart.panes()[1].scaleFor('right').priceRange()).toEqual(range);
+    expect([a.paneIndex, b.paneIndex]).toEqual([2, 2]);
+    history.redo();
+    expect(chart.panes()).toHaveLength(2);
+    expect(draw.get(mark.id)).toBeUndefined();
+    history.undo();
+    expect(draw.get(mark.id)?.paneIndex).toBe(1);
+    expect(history.canUndo()).toBe(false);
+  });
+
+  it('records an empty pane coming and going, and leaves a pane a host plots a series in to the host', async () => {
+    const { chart, history } = rig();
+    const visual = { zOrder: () => 'bottom' as const, draw: () => {} };
+    chart.addPrimitive(visual, 1);          // a pane with nothing plotted in it
+    await settle();
+    expect(chart.panes()).toHaveLength(2);
+    expect(history.peekUndo()?.changes).toEqual(['pane-add']);
+    history.undo();
+    expect(chart.panes()).toHaveLength(1);
+    history.redo();
+    expect(chart.panes()).toHaveLength(2);
+    history.ignore(() => chart.setPaneWeight(1, 0.6));
+    history.clear();
+
+    expect(chart.removePane(1)).toBe(true);
+    await settle();
+    expect(history.peekUndo()?.changes).toEqual(['pane-remove']);
+    history.undo();
+    expect(chart.panes()).toHaveLength(2);
+    expect(chart.paneWeight(1)).toBeCloseTo(0.6);
+    history.clear();
+
+    // A series a host plots in a pane of its own is price data, which history never takes away.
+    chart.addSeries('line', { paneIndex: 2 }).setData(bars(20));
+    await settle();
+    expect(chart.panes()).toHaveLength(3);
+    expect(history.canUndo()).toBe(false);
+    chart.addIndicator('hist-osc');
+    await settle();
+    expect(history.peekUndo()?.changes).toEqual(['study-add']);
+    history.undo();
+    expect(chart.panes()).toHaveLength(3);
   });
 
   it('puts a price pane moved below its studies back on top', async () => {
@@ -500,6 +643,37 @@ describe('one timeline with drawings', () => {
     expect(draw.drawings()).toHaveLength(1);
   });
 
+  it('keeps a whole drawing drag as one step, and records a study added while it runs as a step of its own', async () => {
+    const { chart, draw, history } = rig();
+    const d = draw.add(line(101));
+    history.clear();
+    const at = (price: number) => ({ id: `draw:${d.id}`, time: T0 + 10 * 60, price, paneIndex: 0 });
+    chart.emit('drag', at(101));
+    await settle();
+    chart.emit('drag', at(103));
+    await settle();
+    // A chord, or the host, while the pointer is still down; on the price pane, so no pane is announced.
+    const study = chart.addIndicator('hist-overlay');
+    await settle();
+    chart.emit('drag', at(106));
+    await settle();
+    chart.emit('drag:end', {});
+    await settle();
+    expect(draw.get(d.id)?.points[0].price).toBeCloseTo(106);
+
+    expect(history.peekUndo()?.changes).toEqual(['drawing']);
+    history.undo();
+    expect(draw.get(d.id)?.points[0].price).toBeCloseTo(101);
+    expect(chart.indicators()).toHaveLength(1);
+    expect(history.peekUndo()?.changes).toEqual(['study-add']);
+    history.undo();
+    expect(chart.indicators().some(s => s.id === study.id)).toBe(false);
+    expect(history.canUndo()).toBe(false);
+    history.redo();
+    history.redo();
+    expect(draw.get(d.id)?.points[0].price).toBeCloseTo(106);
+  });
+
   it('skips drawing steps the controller no longer holds', async () => {
     const { chart, draw, history } = rig();
     draw.add(line(99));
@@ -550,6 +724,45 @@ describe('coalescing', () => {
     expect(history.canUndo()).toBe(false);
   });
 
+  it('gives the redo branch back when a group ends as no step', async () => {
+    const { chart, history } = rig();
+    const study = chart.addIndicator('hist-osc');
+    await settle();
+    study.setSettings({ length: 8 });
+    await settle();
+    history.undo();
+    expect(history.canRedo()).toBe(true);
+    const end = history.group('Dialog');
+    study.setSettings({ length: 30 });
+    await settle();
+    study.setSettings({ length: 5 });   // Cancel puts it back
+    await settle();
+    end();
+    expect(history.canRedo()).toBe(true);
+    expect(history.peekUndo()?.changes).toEqual(['study-add']);
+    expect(history.redo()).toBe(true);
+    expect(study.settings().length).toBe(8);
+  });
+
+  it('keeps the oldest step a cancelled group would have pushed past the limit', async () => {
+    const chart = makeChart();
+    chart.addSeries('candlestick').setData(bars(40));
+    const history = new ChartHistory(chart, { limit: 2 });
+    const one = chart.addIndicator('hist-osc');
+    await settle();
+    chart.addIndicator('hist-osc');
+    await settle();
+    const end = history.group();
+    one.setSettings({ length: 30 });
+    await settle();
+    one.setSettings({ length: 5 });
+    await settle();
+    end();
+    expect(history.undo()).toBe(true);
+    expect(history.undo()).toBe(true);
+    expect(chart.indicators()).toHaveLength(0);
+  });
+
   it('leaves a host change made in the middle of a group out of the step', async () => {
     const { chart, history } = rig();
     const study = chart.addIndicator('hist-osc');
@@ -572,6 +785,30 @@ describe('coalescing', () => {
     expect(history.redo()).toBe(true);
     expect(study.settings().length).toBe(12);
     expect(chart.priceAxisState(1, 'right')).toMatchObject({ inverted: true, mode: 'percentage' });
+  });
+
+  it('leaves an ignore inside a transaction out of its one step', () => {
+    const { chart, draw, history } = rig();
+    let host = '';
+    history.transact(() => {
+      chart.setPriceAxisOptions(0, 'right', { inverted: true });
+      history.ignore(() => {
+        chart.setPriceAxisOptions(0, 'right', { marginTop: 0.3 });
+        host = draw.add(line(100)).id;
+      });
+      chart.addIndicator('hist-osc');
+    }, 'Template');
+    expect(history.peekUndo()).toEqual({ label: 'Template', changes: expect.arrayContaining(['axis', 'study-add']) });
+    expect(history.peekUndo()?.changes).not.toContain('drawing');
+    history.undo();
+    expect(chart.indicators()).toHaveLength(0);
+    expect(chart.priceAxisState(0, 'right')?.inverted).toBe(false);
+    expect(chart.panes()[0].scaleFor('right').options.marginTop).toBeCloseTo(0.3);
+    expect(draw.get(host)).toBeDefined();
+    expect(history.canUndo()).toBe(false);
+    history.redo();
+    expect(chart.priceAxisState(0, 'right')?.inverted).toBe(true);
+    expect(chart.indicators()).toHaveLength(1);
   });
 
   it('records a transaction as one step, drawings included, and joins nested ones', () => {
@@ -627,6 +864,25 @@ describe('what history never does', () => {
     // The study is live and still judges new bars; only history stays quiet.
     chart.primarySeries()!.update(bars(81)[80]);
     expect(fired.some(entry => (entry as unknown[])[0] === 'indicator:alert')).toBe(true);
+  });
+
+  it('fires no trader alert keyed to a study when a step takes the study away and brings it back', async () => {
+    const { chart, history } = rig();
+    const study = chart.addIndicator('hist-osc');
+    const alerts = new AlertController(chart);
+    // Every close is above 90, so a check against history would trigger at once.
+    alerts.add({ source: { kind: 'indicator', instanceId: study.id, plotKey: 'value', value: 90 }, condition: 'greaterThan', repeat: 'everyTime' });
+    await settle();
+    const fired: unknown[] = [];
+    for (const event of ['alert:triggered', 'alert:created', 'alert:removed', 'alerts:restored']) chart.on(event, payload => fired.push([event, payload]));
+    const state = JSON.stringify(alerts.list());
+    chart.removeIndicator(study.id);
+    await settle();
+    history.undo();
+    history.redo();
+    history.undo();
+    expect(fired).toEqual([]);
+    expect(JSON.stringify(alerts.list())).toBe(state);
   });
 
   it('never writes bars, whatever it takes back', async () => {
@@ -732,6 +988,43 @@ describe('nested callbacks and async work', () => {
     expect(history.canUndo()).toBe(false);
   });
 
+  it('leaves a drawing a listener makes while an undo is applied out of every step, and loses nothing', async () => {
+    const { chart, draw, history } = rig();
+    const first = draw.add(line(101));
+    chart.addIndicator('hist-osc');
+    await settle();
+    let made: string | null = null;
+    const off = chart.on('indicatorRemoved', () => { if (made === null) made = draw.add(line(102)).id; });
+    history.undo();                       // the study goes, and the listener draws
+    off();
+    expect(made).not.toBeNull();
+    expect(history.peekUndo()?.changes).toEqual(['drawing']);
+    history.undo();                       // the first line, and nothing else
+    expect(draw.get(first.id)).toBeUndefined();
+    expect(draw.get(made!)).toBeDefined();
+    expect(history.redo()).toBe(true);
+    expect(history.redo()).toBe(true);
+    expect(draw.get(first.id)).toBeDefined();
+    expect(chart.indicators()).toHaveLength(1);
+    expect(draw.get(made!)).toBeDefined();
+  });
+
+  it('keeps the redo branch when a listener draws while an undo is applied', async () => {
+    const { chart, draw, history } = rig();
+    chart.addIndicator('hist-osc');
+    await settle();
+    const mine = draw.add(line(101));
+    history.undo();                       // the line waits on the redo branch
+    let made: string | null = null;
+    const off = chart.on('indicatorRemoved', () => { if (made === null) made = draw.add(line(102)).id; });
+    history.undo();                       // the study goes, and the listener draws
+    off();
+    expect(history.redo()).toBe(true);
+    expect(history.redo()).toBe(true);
+    expect(draw.get(mine.id)).toBeDefined();
+    expect(draw.get(made!)).toBeDefined();
+  });
+
   it('refuses an undo pressed from inside an undo', async () => {
     const { chart, history } = rig();
     chart.addIndicator('hist-osc');
@@ -778,6 +1071,41 @@ describe('host control', () => {
     await settle();
     expect(history.canUndo()).toBe(false);
     expect(history.canRedo()).toBe(false);
+  });
+
+  it('records no drawing the host makes inside ignore, keeps the redo branch, and never takes the drawing back', async () => {
+    const { chart, draw, history } = rig();
+    chart.addIndicator('hist-osc');
+    await settle();
+    const mine = draw.add(line(101));
+    history.undo();
+    expect(draw.get(mine.id)).toBeUndefined();
+    const host = history.ignore(() => draw.add(line(102)));
+    expect(history.peekUndo()?.changes).toEqual(['study-add']);
+    expect(history.canRedo()).toBe(true);
+    expect(history.redo()).toBe(true);
+    expect(draw.get(mine.id)).toBeDefined();
+    history.undo();
+    history.undo();
+    expect(chart.indicators()).toHaveLength(0);
+    expect(draw.get(host.id)).toBeDefined();
+    expect(history.canUndo()).toBe(false);
+  });
+
+  it('never presses through a drawing step it does not hold', async () => {
+    const { chart, draw, history } = rig();
+    const mine = draw.add(line(101));
+    // A controller that records inside ignore, the way one that cannot run untracked would.
+    vi.spyOn(draw, 'untracked').mockImplementation(fn => fn());
+    const host = history.ignore(() => draw.add(line(102)));
+    expect(history.peekUndo()?.changes).toEqual(['drawing']);
+    expect(history.undo()).toBe(true);
+    expect(draw.get(mine.id)).toBeUndefined();
+    expect(draw.get(host.id)).toBeDefined();
+    expect(history.redo()).toBe(true);
+    expect(draw.get(mine.id)).toBeDefined();
+    expect(draw.get(host.id)).toBeDefined();
+    expect(chart.indicators()).toHaveLength(0);
   });
 
   it('takes back only the fields a step changed, keeping the host\'s own changes beside them', async () => {
@@ -914,5 +1242,53 @@ describe('settings the history leaves alone', () => {
     chart.emit('objects:change', {});
     await settle();
     expect(history.canUndo()).toBe(false);
+  });
+});
+
+describe('linked charts', () => {
+  it('sends a linked appearance step back to the charts that followed it, on undo and on redo', async () => {
+    const lead = rig();
+    const follow = rig();
+    lead.chart.addIndicator('hist-osc');
+    await settle();
+    // The study pane is logarithmic from its own axis menu already, so the
+    // chart-wide write moves the price pane alone and is taken back on its axis.
+    lead.history.ignore(() => lead.chart.setPriceAxisOptions(1, 'right', { mode: 'logarithmic' }));
+    lead.history.clear();
+    const links = createLinkGroup({ appearance: true, crosshair: false, viewport: false });
+    for (const r of [lead, follow]) {
+      links.add(r.chart as unknown as LinkChart, {
+        appearance: { read: () => readChartSettings(r.chart), apply: values => r.history.ignore(() => applyChartSettings(r.chart, values)) },
+      });
+    }
+    const mode = (chart: Chart): string | undefined => chart.priceAxisState(0, 'right')?.mode;
+    lead.history.transact(() => applyChartSettings(lead.chart, { 'scales.mode': 'logarithmic' }), 'Settings');
+    expect(mode(follow.chart)).toBe('logarithmic');
+    expect(follow.history.canUndo()).toBe(false);
+
+    lead.history.undo();
+    expect(mode(lead.chart)).toBe('linear');
+    expect(mode(follow.chart)).toBe('linear');
+    lead.history.redo();
+    expect(mode(lead.chart)).toBe('logarithmic');
+    expect(mode(follow.chart)).toBe('logarithmic');
+    expect(follow.history.canUndo()).toBe(false);
+    links.destroy();
+  });
+
+  it('announces nothing on undo for a step no linked chart heard', async () => {
+    const { chart, history } = rig();
+    chart.addIndicator('hist-osc');
+    await settle();
+    history.clear();
+    const heard: unknown[] = [];
+    chart.on('style:change', payload => heard.push(payload));
+    // An axis menu row: the price pane's axis alone, which no linked chart follows.
+    history.transact(() => chart.setPriceAxisOptions(0, 'right', { mode: 'logarithmic' }), 'Axis menu');
+    history.undo();
+    expect(chart.priceAxisState(0, 'right')?.mode).toBe('linear');
+    history.redo();
+    expect(chart.priceAxisState(0, 'right')?.mode).toBe('logarithmic');
+    expect(heard).toEqual([]);
   });
 });
