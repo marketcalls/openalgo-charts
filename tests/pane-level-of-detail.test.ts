@@ -230,6 +230,32 @@ describe('createLodColumns', () => {
     expect(wide[0].bar).toMatchObject({ open: 1, high: 5, low: 0, close: 3 });
   });
 
+  it('puts a stick wider than a pixel in the column holding its middle, so it lands within half a stick of every bar it stands for', () => {
+    // At a ratio of three a stick is three device pixels and a column is one
+    // stick. Read from the stick's left edge, a bar centred on a column's last
+    // pixel went to the column before and was drawn two pixels from where it
+    // is drawn in full; at a ratio of four, three.
+    for (const dpr of [1, 1.5, 2, 3, 4]) {
+      const stick = Math.max(1, Math.floor(dpr));
+      for (const spacing of [0.99, 0.8, 0.55, 0.3]) {
+        for (const phase of [0, 0.13, 0.37, 0.61, 0.89]) {
+          const input: [number, Bar][] = [];
+          for (let i = 0; i < 400; i++) input.push([(i + phase) * spacing, bar(i, 1, 2, 0, 1)]);
+          const out = run('ohlc', dpr, 1, input);
+          // Each stick stands for the bars from its time up to the next stick's.
+          for (let k = 0; k < out.length; k++) {
+            const centre = Math.round(out[k].x * dpr);
+            const end = k + 1 < out.length ? out[k + 1].bar.time : input.length;
+            for (let i = out[k].bar.time; i < end; i++) {
+              const drift = Math.abs(Math.round(input[i][0] * dpr) - centre);
+              expect(drift, `dpr ${dpr} spacing ${spacing} phase ${phase} bar ${i}`).toBeLessThanOrEqual(stick >> 1);
+            }
+          }
+        }
+      }
+    }
+  });
+
   it('reuses the merged bars from one frame to the next', () => {
     const seen: Bar[][] = [];
     const lod = createLodColumns((_x, b) => seen[seen.length - 1].push(b));
@@ -438,6 +464,33 @@ describe('the level of detail at the edges', () => {
     expect(coverage(candles)).toEqual(coverage(off.backends[0].series.rec.ops));
     on.chart.destroy();
     off.chart.destroy();
+  });
+
+  it('keeps every pixel within a pixel of where the bars put it at a ratio of three', () => {
+    // A phone's ratio: three-pixel sticks in three-pixel columns. Every pixel
+    // the bars paint has a stick pixel in its row at most one column away, and
+    // every stick pixel has a bar pixel as near, at spacings either side of
+    // one bar to a column.
+    const bars = walk(4000);
+    const near = (from: Set<string>, to: Set<string>): string[] => {
+      const out: string[] = [];
+      for (const key of from) {
+        const [x, y] = key.split(',').map(Number);
+        if (!to.has(`${x},${y}`) && !to.has(`${x - 1},${y}`) && !to.has(`${x + 1},${y}`)) out.push(key);
+      }
+      return out;
+    };
+    for (const spacing of [0.99, 0.8, 0.3]) {
+      const on = rig(bars, { dpr: 3 });
+      const off = rig(bars, { dpr: 3, conflate: false });
+      for (const r of [on, off]) { r.chart.timeScale.setBarSpacing(spacing); r.paint(); }
+      const lod = coverage(on.backends[0].series.rec.ops), full = coverage(off.backends[0].series.rec.ops);
+      expect(on.backends[0].calls[0].items.length).toBeLessThan(off.backends[0].calls[0].items.length);
+      expect(near(full, lod).slice(0, 5), `spacing ${spacing}: bar pixels with no stick pixel near`).toEqual([]);
+      expect(near(lod, full).slice(0, 5), `spacing ${spacing}: stick pixels with no bar pixel near`).toEqual([]);
+      on.chart.destroy();
+      off.chart.destroy();
+    }
   });
 
   it('draws an empty series, a single bar and a run of whitespace without a stick to spare', () => {

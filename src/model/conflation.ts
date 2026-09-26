@@ -355,10 +355,13 @@ export function createLodColumns(emit: (x: number, bar: Bar) => void): LodColumn
       seq = 0;
     },
     push(x: number, bar: Bar): void {
-      // The column the bar paints its stick into: the renderers round the
-      // centre to a device pixel and start the stick half a stick to its
-      // left, so the column is read from that left edge.
-      const c = Math.floor((Math.round(x * dpr) - (stick >> 1)) / column);
+      // The column holding the middle pixel of the bar's stick: the renderers
+      // round the centre to a device pixel and start the stick half a stick to
+      // its left. A stick as wide as a column straddles two, and the one with
+      // its middle holds most of it; read from the left edge instead, a
+      // three-pixel stick went to the column holding one of its pixels and was
+      // drawn two pixels from its bar.
+      const c = Math.floor((Math.round(x * dpr) - (stick >> 1) + ((stick - 1) >> 1)) / column);
       if (c !== current) {
         flush();
         current = c;
