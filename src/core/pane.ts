@@ -42,6 +42,7 @@ import { getChartType, type SeriesRenderContext } from '../model/chart-type-regi
 import type { SeriesStyle } from '../render/series-style';
 import { lodActive, lodColumnWidth, lodKind } from '../model/conflation';
 import { createSeriesDrawItems, visibleSpan, type LodRequest, type SeriesDrawItems, type VisibleSpan } from '../render/draw-items';
+import { announcingHost, createHitBoxes, inHitBox } from '../render/hit-boxes';
 import {
   drawPriceAxis, drawLeftPriceAxis, drawTimeAxis, drawLastPriceLabel, drawSessionClock,
   drawTimeAxisPill, lastPriceTagHeight, AXIS_LABEL_PRIORITY, resolveAxisLabels, drawSeriesValueTag,
@@ -211,6 +212,10 @@ export class Pane {
   private _height = 0;
   /** Each series' draw items, reused from frame to frame (src/render/draw-items.ts). */
   private readonly _drawItems = new Map<SeriesRecord, SeriesDrawItems>();
+  /** Hit boxes of the primitives that declare one, kept while nothing they follow changes (src/render/hit-boxes.ts). */
+  private readonly _hitBoxes = createHitBoxes();
+  /** Bumped by every change on this pane that can move a primitive's context: series, scales, axes, primitives. */
+  private _hitEpoch = 0;
 
   /**
    * `backend` defaults to the 2D one so a pane built on its own (tests, a host
@@ -298,6 +303,7 @@ export class Pane {
   public addSeries(record: SeriesRecord): void {
     this._scaleFor(record.scaleId); // create the target scale if needed
     this._series.push(record);
+    this._hitEpoch++;
   }
 
   /** The PriceScale for a scale id, creating the left/overlay scale on first use. */
@@ -335,12 +341,14 @@ export class Pane {
 
   public setAxisPlacement(id: PriceScaleId, side: PriceAxisSide, order?: number): boolean {
     if (!this._axisLayout.set(id, side, order)) return false;
+    this._hitEpoch++;
     this._retainPlacedScales();
     return true;
   }
 
   public restoreAxisPlacements(saved: ReadonlyMap<PriceScaleId, PriceAxisPlacement>): void {
     this._axisLayout.restore(saved);
+    this._hitEpoch++;
     this._retainPlacedScales();
   }
 
@@ -390,6 +398,7 @@ export class Pane {
    */
   public moveSeriesScale(from: 'right' | 'left', to: 'right' | 'left'): boolean {
     if (from === to || !this.usesScale(from) || this.usesScale(to)) return false;
+    this._hitEpoch++;
     const moving = this._scaleFor(from);
     const vacated = this._scaleFor(to);
     this._axisLayout.set(to, to);
@@ -514,6 +523,7 @@ export class Pane {
     if (i < 0) return false;
     this._series.splice(i, 1);
     this._drawItems.delete(record);
+    this._hitEpoch++;
     // A scale with nothing left on it keeps describing what just left, and a
     // pane is reused when one indicator replaces another. Forget the range so
     // the next occupant is measured on its own terms, or not labelled at all.
@@ -535,6 +545,7 @@ export class Pane {
   public reorderSeries(ordered: readonly SeriesRecord[]): void {
     const members = new Set(ordered);
     const local = ordered.filter(record => this._series.includes(record));
+    this._hitEpoch++;
     let index = 0;
     for (let i = 0; i < this._series.length; i++) if (members.has(this._series[i])) this._series[i] = local[index++];
   }
@@ -542,6 +553,7 @@ export class Pane {
   /** Name the chart's price source on this pane, or null when it is elsewhere or gone. */
   public setSourceSeries(record: SeriesRecord | null): void {
     this._source = record;
+    this._hitEpoch++;
   }
 
   /** The price source when it shows a price here, else undefined. */
@@ -554,6 +566,7 @@ export class Pane {
   public moveSeries(record: SeriesRecord, before: SeriesRecord | null): void {
     const from = this._series.indexOf(record);
     if (from < 0 || record === before) return;
+    this._hitEpoch++;
     this._series.splice(from, 1);
     const at = before === null ? -1 : this._series.indexOf(before);
     this._series.splice(at < 0 ? this._series.length : at, 0, record);
@@ -563,6 +576,7 @@ export class Pane {
   public reorderPrimitives(ordered: readonly IPrimitive[]): void {
     const members = new Set(ordered);
     const local = ordered.filter(primitive => this._primitives.includes(primitive));
+    this._hitEpoch++;
     let index = 0;
     for (let i = 0; i < this._primitives.length; i++) if (members.has(this._primitives[i])) this._primitives[i] = local[index++];
   }
@@ -577,6 +591,8 @@ export class Pane {
     this._primitives.splice(index, 1);
     this._primitiveScales.delete(primitive);
     this._stackAbove.delete(primitive);
+    this._hitEpoch++;
+    target._hitEpoch++;
     target._primitives.push(primitive);
     if (scaleId !== undefined) target._primitiveScales.set(primitive, scaleId);
     if (entry !== undefined) target._stackAbove.set(primitive, entry);
@@ -638,6 +654,7 @@ export class Pane {
     if (scaleId !== null && (typeof scaleId !== 'string'
       || (scaleId !== 'left' && scaleId !== 'right' && scaleId !== '' && !scaleId.startsWith('overlay:')))) return false;
     if (this.primitiveScaleId(primitive) === scaleId) return false;
+    this._hitEpoch++;
     if (scaleId === null) this._primitiveScales.delete(primitive);
     else {
       this._scaleFor(scaleId);
@@ -658,7 +675,10 @@ export class Pane {
 
   public addPrimitive(primitive: IPrimitive, host: PrimitiveHost): void {
     this._primitives.push(primitive);
-    primitive.attached?.(host);
+    this._hitEpoch++;
+    // A primitive with a hit box gets a host that also retires the box when it
+    // announces a change; every other one keeps the chart's host as it was.
+    primitive.attached?.(primitive.hitBounds === undefined ? host : announcingHost(host));
   }
 
   /** Whether this pane currently holds `primitive`. */
@@ -673,6 +693,7 @@ export class Pane {
     this._primitives.splice(i, 1);
     this._primitiveScales.delete(primitive);
     this._stackAbove.delete(primitive);
+    this._hitEpoch++;
     primitive.detached?.();
     return true;
   }
@@ -683,6 +704,7 @@ export class Pane {
     this._primitiveScales.clear();
     this._stackAbove.clear();
     this._drawItems.clear();
+    this._hitBoxes.clear();
     for (const p of this._primitives) p.detached?.();
     this._primitives.length = 0;
     this._backend.destroy();
@@ -743,13 +765,29 @@ export class Pane {
    * band order, as `bestHit` ranks them. A hit painted by a primitive placed
    * in the series band names it (`paintedBy`), so the chart can rank it
    * against a series painted over it too.
+   *
+   * Two things keep a pointer move from asking every primitive. One that
+   * declares a hit box is skipped when the point is outside it; the boxes are
+   * kept while nothing they depend on changes (`_checkHitBoxes`). And the
+   * walk stops at an exact hit in the front band, which nothing after it can
+   * outrank: a later primitive would need a smaller distance than zero or a
+   * band above the front one, and the order the walk visits primitives in
+   * only ever breaks exact ties, which the first hit wins.
    */
   public hitTestPrimitives(x: number, y: number, ctx: PaneRenderContext, except?: IPrimitive | null): PrimitiveHit | null {
     const prc = this._primitiveContext(ctx), live = this._live(ctx), slotted = this._slotted(live, ctx);
+    this._checkHitBoxes(ctx);
     let best: PrimitiveHit | null = null, bestRank = 0;
-    for (const p of live) {
+    for (let i = 0; i < live.length; i++) {
+      const p = live[i];
       if (!p.hitTest || p === except) continue;
-      const context = this._boundPrimitiveContext(p, prc, ctx);
+      // The kept box first, so a primitive the point is nowhere near costs a
+      // read and four comparisons: not even its render context is built.
+      let context: PrimitiveRenderContext | undefined;
+      let box = this._hitBoxes.kept(i);
+      if (box === undefined) box = this._hitBoxes.measure(i, p, context = this._boundPrimitiveContext(p, prc, ctx));
+      if (!inHitBox(box, x, y)) continue;
+      context ??= this._boundPrimitiveContext(p, prc, ctx);
       let hit = p.hitTest(x, y, context);
       if (hit === null) continue;
       if (this._primitiveScales.has(p)) hit = { ...hit, priceScale: context.priceScale };
@@ -761,9 +799,55 @@ export class Pane {
       const side = +(rank >= 2) - +(bestRank >= 2);
       if (best === null || side > 0 || side === 0 && (hit.distance < best.distance || hit.distance === best.distance && rank > bestRank)) {
         best = hit; bestRank = rank;
+        if (best.distance === 0 && bestRank >= HIT_RANK.top) break;
       }
     }
     return best;
+  }
+
+  /** After an on-screen paint: what the pane shows now is what the key describes (src/render/hit-boxes.ts). */
+  private _paintedHitBoxes(ctx: PaneRenderContext): void {
+    this._checkHitBoxes(ctx);
+    this._hitBoxes.painted();
+  }
+
+  /**
+   * Read the key the kept hit boxes are checked against: what a primitive's
+   * render context can map with (the time scale and the bars' times, every
+   * price scale here, the pane's size and axes, the pixel ratio, the readout
+   * scale, hover and drag, the theme, the session calendar) and this pane's
+   * own count of changes.
+   */
+  private _checkHitBoxes(ctx: PaneRenderContext): void {
+    const key = this._hitBoxes, ts = ctx.timeScale, layer = ctx.dataLayer;
+    key.begin();
+    key.number(this._hitEpoch);
+    key.number(ctx.dpr);
+    key.number(this._width);
+    key.number(this._height);
+    key.number(ctx.priceAxisWidth);
+    key.number(ctx.leftAxisWidth ?? 0);
+    key.number(ctx.axisColumnWidth ?? -1);
+    key.number(ctx.showTimeAxis ? ctx.timeAxisHeight : -1);
+    key.number(ctx.collapsed === true ? 1 : 0);
+    key.number(ctx.emptyPriceAxis === false ? 0 : 1);
+    key.number(ts.barSpacing);
+    key.number(ts.rightOffset);
+    key.number(ts.width);
+    key.number(layer.length);
+    key.number(layer.indexToTime(0) ?? NaN);
+    key.number(layer.indexToTime(layer.baseIndex) ?? NaN);
+    key.scale(this._rightScale);
+    if (this._leftScale !== null) key.scale(this._leftScale);
+    for (const scale of this._overlayScales.values()) key.scale(scale);
+    key.ref(ctx.hoverId ?? null);
+    key.ref(ctx.hoverKey ?? null);
+    key.ref(ctx.dragId ?? null);
+    key.ref(ctx.theme);
+    key.ref(layer.sessionCalendar);
+    key.ref(this._readoutScale());
+    key.ref(this._rightScale);
+    key.end();
   }
 
   /**
@@ -1192,6 +1276,7 @@ export class Pane {
         dpr, ctx.sessionClock, axisStyle);
     }
     g.restore(); // end plot shift
+    if (target === undefined) this._paintedHitBoxes(ctx);
   }
 
   /**
@@ -1282,6 +1367,7 @@ export class Pane {
       }
     }
     g.restore();
+    if (target === undefined) this._paintedHitBoxes(ctx);
   }
 
   /**
