@@ -182,6 +182,27 @@ export interface IndexedBar {
 const EMPTY_BARS: readonly Bar[] = [];
 
 /**
+ * Where the bar at `time` sits in a series, or -1. A study writes a revised
+ * older point of its plot through `update`, so this runs per point per tick and
+ * searches rather than scans. A miss scans after all: only a series holding a
+ * time that does not order (NaN) can be out of order, and a miss is followed by
+ * an insert that costs more than the scan.
+ */
+function indexOfTime(bars: readonly Bar[], time: number): number {
+  let lo = 0;
+  let hi = bars.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const t = bars[mid].time;
+    if (t === time) return mid;
+    if (t < time) lo = mid + 1;
+    else if (t > time) hi = mid - 1;
+    else break;
+  }
+  return bars.findIndex((b) => b.time === time);
+}
+
+/**
  * Sort ascending by time and collapse repeated times, keeping the **last**
  * occurrence.
  *
@@ -196,6 +217,11 @@ const EMPTY_BARS: readonly Bar[] = [];
  * value when a live bar arrives alongside the historical one it supersedes.
  */
 function sortedUniqueByTime(bars: readonly Bar[]): Bar[] {
+  // A study's plots and most feeds arrive in time order already, so that case
+  // is checked for first rather than paid a sort for.
+  let ordered = true;
+  for (let i = 1; i < bars.length && ordered; i++) ordered = bars[i].time > bars[i - 1].time;
+  if (ordered) return bars.slice();
   const out = bars.slice().sort((a, b) => a.time - b.time);
   let w = 0;
   for (let r = 0; r < out.length; r++) {
@@ -254,14 +280,53 @@ export class DataLayer {
   }
 
   /**
-   * Bulk-load (full replace) one series' data, then re-merge the time axis.
-   * Input is sorted and de-duplicated by time by a private `sortedUniqueByTime`.
+   * Bulk-load (full replace) one series' data. Input is sorted and
+   * de-duplicated by time by a private `sortedUniqueByTime`.
+   *
+   * The shared index is rebuilt only when the set of times changes. A rebuild
+   * re-merges every series on the chart, and most whole writes do not change
+   * the set: a study's plots carry the source's own times, which the source
+   * put in the index before any study recomputed, and a colour overlay on the
+   * source keeps its times. Ten studies on a long history used to pay for the
+   * index two dozen times per tick while it came out unchanged.
    */
   public setSeriesData(id: SeriesId, bars: readonly Bar[]): void {
     const entry = this._series.get(id);
     if (entry === undefined) throw new Error(`openalgo-charts: unknown series ${id}`);
+    const previous = entry.bars;
     entry.bars = sortedUniqueByTime(bars);
-    this._rebuild();
+    if (!this._extendIndex(previous, entry.bars)) this._rebuild();
+  }
+
+  /**
+   * Bring the index up to date without a rebuild for a series whose bars went
+   * from `previous` to `next`, when the set of times cannot have changed but
+   * for times past the right edge: every time of `previous` is still in
+   * `next`, and every time of `next` is in the index already or later than all
+   * of it. False when a time went away (another series may or may not still
+   * hold it) or a new one lands inside the axis, and the caller rebuilds.
+   */
+  private _extendIndex(previous: readonly Bar[], next: readonly Bar[]): boolean {
+    const m = previous.length;
+    const n = next.length;
+    // The common case, the same times or the same with more after them, is a
+    // plain walk; only what follows the shared run needs searching.
+    let k = 0;
+    while (k < m && k < n && previous[k].time === next[k].time) k++;
+    for (let i = k, j = k; i < m; i++) {
+      const time = previous[i].time;
+      while (j < n && next[j].time < time) j++;
+      if (j === n || next[j].time !== time) return false;
+    }
+    // Checked before anything is appended, so a false answer leaves the index
+    // exactly as it was for the rebuild that follows.
+    const edge = this._sortedTimes.length > 0 ? this._sortedTimes[this._sortedTimes.length - 1] : -Infinity;
+    for (let i = k; i < n; i++) {
+      const time = next[i].time;
+      if (!(time > edge) && !this._indexByTime.has(time)) return false;
+    }
+    for (let i = k; i < n; i++) this._appendTime(next[i].time);
+    return true;
   }
 
   /**
@@ -317,7 +382,7 @@ export class DataLayer {
       return 'replace';
     }
     // older than the last bar: replace if the time exists, else insert into history
-    const i = bars.findIndex((b) => b.time === bar.time);
+    const i = indexOfTime(bars, bar.time);
     if (i >= 0) {
       bars[i] = bar;
       return 'replace';
@@ -406,8 +471,8 @@ export class DataLayer {
 
   /**
    * The future plan for the current last bars and calendar. A rebuild that
-   * leaves the recent bars as they were (an indicator re-merging its plots on
-   * every tick) keeps the plan and the times it already generated.
+   * leaves the recent bars as they were (a page of older history, a gap filled
+   * well to the left) keeps the plan and the times it already generated.
    */
   private _plan(): FuturePlan {
     const t = this._sortedTimes, from = Math.max(0, t.length - 1 - SAMPLE);

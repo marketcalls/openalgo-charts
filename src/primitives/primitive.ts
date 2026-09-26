@@ -52,7 +52,11 @@ export interface PrimitiveHit {
   /** Distinguishes hover regions which share one external click ID. Omission uses externalId. */
   hoverKey?: string;
   zOrder: ZOrder;
-  /** Pixel distance from the cursor (smaller wins ties before z-order). */
+  /**
+   * Pixel distance from the cursor (smaller wins ties before z-order). Never
+   * negative: zero is a hit on the shape itself, and the pane stops asking
+   * once the front band has one.
+   */
   distance: number;
   cursor?: string;
   /** Coordinate scale for a bound primitive's drag prices. Unbound hits omit it. */
@@ -118,6 +122,25 @@ export interface IPrimitive {
   afterAutoscale?(): void;
   /** Optional: topmost hit under (x,y) in media px (relative to the pane plot). */
   hitTest?(x: number, y: number, rc: PrimitiveRenderContext): PrimitiveHit | null;
+  /**
+   * Optional: the box, in the coordinates `hitTest` receives, outside which it
+   * answers null, or null when nothing of this primitive can be hit at all.
+   * Edges are inclusive, and an unbounded side may be infinite.
+   *
+   * A pointer move then asks `hitTest` only of primitives whose box it is in,
+   * so a pane carrying hundreds of them pays for the few near the pointer.
+   * The pane asks for the box once and reuses it while nothing it can follow
+   * changes: the time scale and the bars' times, the pane's price scales, its
+   * size and axes, the pixel ratio, the hover and drag state, and the
+   * primitive's own state, which it announces through `requestUpdate`. A box
+   * that follows anything else, such as bar prices, has to request an update
+   * when that changes, or leave this out. Work the box out from the same
+   * geometry `hitTest` answers from, `rc` or what the last `draw` recorded: a
+   * box asked for between a change and the frame that paints it is asked for
+   * again once that frame is painted. Absent, every pointer move asks
+   * `hitTest`.
+   */
+  hitBounds?(rc: PrimitiveRenderContext): { left: number; top: number; right: number; bottom: number } | null;
   attached?(host: PrimitiveHost): void;
   detached?(): void;
 }

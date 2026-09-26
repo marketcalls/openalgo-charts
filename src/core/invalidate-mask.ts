@@ -2,9 +2,10 @@
  * Invalidation model (ARCHITECTURE.md §3.2).
  *
  * A single global level is too coarse for multi-pane indicators and trade
- * overlays, so the mask carries a **global level + a per-pane map + a queue of
- * time-scale operations**. Multiple invalidations within one frame coalesce via
- * {@link InvalidateMask.merge}.
+ * overlays, so the mask carries a **global level + a per-pane map**. Multiple
+ * invalidations within one frame coalesce via {@link InvalidateMask.merge}. It
+ * also keeps a queue of time-scale operations that nothing in the chart reads
+ * (see {@link TimeScaleOp}).
  */
 
 /** How much of a pane (or the whole chart) must be repainted this frame. */
@@ -27,9 +28,11 @@ export interface PaneInvalidation {
 }
 
 /**
- * Discrete time-scale operations an invalidation can carry. The mask queues
- * and merges them, but nothing in the chart reads the queue yet: pan, zoom,
- * fit and reset change the shared time scale directly (ARCHITECTURE.md §3.2).
+ * Discrete time-scale operations a mask can queue, kept for compatibility.
+ * The mask queues and merges them, and the chart never reads the queue: pan,
+ * zoom, fit and reset change the shared time scale directly, and the kinetic
+ * and wheel-zoom glides are stepped at the top of the render loop's frame
+ * (ARCHITECTURE.md §3.2).
  */
 export type TimeScaleOp =
   | { type: 'fitContent' }
@@ -76,6 +79,7 @@ export class InvalidateMask {
     return this._panes;
   }
 
+  /** Queue an operation. The chart never reads the queue; see {@link TimeScaleOp}. */
   public addTimeScaleOp(op: TimeScaleOp): void {
     this._timeScaleOps.push(op);
   }

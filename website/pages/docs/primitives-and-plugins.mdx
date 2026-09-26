@@ -461,6 +461,12 @@ registerChartType('my-style', {
 chart.addSeries('my-style').setData(bars);
 ```
 
+`items` holds the visible bars, each with its `x` in media px. The array and its
+objects belong to the pane until it draws the series again, when it rewrites them in
+place, so copy what you keep past the call. A custom renderer, even one registered
+under a built-in name, always receives every bar: the level of detail
+(`conflate`) reduces only the built-in renderers.
+
 ## A custom primitive
 
 Implement `IPrimitive` and attach it - the same contract markers, profiles, and the trade
@@ -476,7 +482,7 @@ const watermark: IPrimitive = {
     ctx.font = '700 48px system-ui';
     ctx.fillText('OPENALGO', 24, host.plotHeight - 24);
   },
-  // optional: hitTest(point), autoscaleInfo(), attached(host), detached()
+  // optional: hitTest(x, y, rc), hitBounds(rc), autoscaleInfo(), attached(host), detached()
 };
 
 chart.addPrimitive(watermark, 0);
@@ -530,6 +536,58 @@ ranks it by where it paints: a primitive painted over the series (a `'normal'` o
 over it takes the context menu. This is how the draw tier puts a drawing between
 studies; see [Draw order](/docs/drawing-tools#draw-order).
 The call returns false for a primitive that is on no pane.
+
+## Hit boxes
+
+A pointer move asks `hitTest` of every primitive on the pane unless the primitive says
+where it can answer. The optional `hitBounds(rc)` (2.5.8) returns that box, in the same
+plot-relative media px `hitTest` receives (edges inclusive, and a side may be infinite),
+or `null` when nothing of the primitive can be hit. The pane then asks `hitTest` only
+when the pointer is inside the box, so a pane carrying hundreds of annotations pays for
+the few near the pointer.
+
+```ts
+const GRAB = 4; // how far from the segment hitTest still answers, in media px
+
+const segment = {
+  zOrder: () => 'normal' as const,
+  draw(ctx, rc) { /* paint the segment from (t0, p0) to (t1, p1) */ },
+  hitTest(x, y, rc) { /* answer within GRAB px of the segment */ },
+  hitBounds(rc) {
+    const x0 = rc.timeScale.indexToX(rc.dataLayer.timeToIndexFloat(t0));
+    const x1 = rc.timeScale.indexToX(rc.dataLayer.timeToIndexFloat(t1));
+    const y0 = rc.priceScale.priceToY(p0);
+    const y1 = rc.priceScale.priceToY(p1);
+    const pad = GRAB + 0.5; // everything hitTest answers, rounding included
+    return {
+      left: Math.min(x0, x1) - pad, top: Math.min(y0, y1) - pad,
+      right: Math.max(x0, x1) + pad, bottom: Math.max(y0, y1) + pad,
+    };
+  },
+};
+```
+
+A primitive that declares a box promises:
+
+- **The box holds every point `hitTest` can answer.** A point outside it is never
+  asked, so a box that is too tight loses hits. A NaN edge makes the pane ask anyway.
+- **It changes only with what the pane follows**: the time scale and the bars' times,
+  the pane's price scales, size and axes, the pixel ratio, hover and drag, the theme
+  and the session calendar, or the primitive's own state, announced through
+  `host.requestUpdate()`. The pane keeps the box until one of those changes. A box that
+  depends on anything else, bar prices say, must request an update when that changes,
+  or leave the hook out.
+- **It comes from the same geometry `hitTest` uses**, `rc` or what the last `draw`
+  recorded. A box asked for between a change and the frame that paints it is asked for
+  again once that frame is painted.
+- **`hitTest` is free of side effects.** The pane may skip it, outside the box and also
+  after an exact hit (`distance: 0`) among the primitives painted in front, which
+  nothing after it can outrank.
+
+A primitive that declares `hitBounds` is attached with a host object that wraps the
+chart's, so the pane hears its `requestUpdate`; do not compare that host with another
+by identity. The built-in primitives and the draw tier's layers declare no box yet, so
+they are asked on every move as before.
 
 ## `bestHit` helper
 

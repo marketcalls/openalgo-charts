@@ -448,7 +448,10 @@ margins would total 1 or more.
 
 `src/model/conflation.ts`
 
-Conflation merges many sub-pixel bars into one drawn bar, preserving candle shape. Off by default.
+Conflation merges many sub-pixel bars into one drawn bar, preserving candle shape. The chart's
+level of detail (`ChartOptions.conflate`, on by default) merges by device-pixel column; see
+[Data loading](/docs/data-loading#large-datasets-level-of-detail). The helpers below merge
+fixed-size groups, for a host that downsamples bars itself, and the pane does not call them.
 
 ```ts
 function conflationGroupSize(

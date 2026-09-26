@@ -3,16 +3,18 @@
  * is, and hosts size dashboards on what they say. Several of those statements
  * had stopped being true, or had never been measured: a single canvas where
  * every pane has two, a time-scale operation queue nothing ever filled, one
- * study repainting only its own pane, and "50k+ bars stay 60 fps". A review
+ * study repainting only its own pane while every pane repainted, and "50k+
+ * bars stay 60 fps". A review
  * found more of the same kind: order lines placed on the overlay canvas, a
  * GPU speed-up nobody had measured, SVG credited to one tier of three, and a
  * right-edge append said to leave the shared index alone.
  *
  * These checks tie each such statement to the code or to a measurement
- * record. Where the engine could reasonably change (how far a recompute
- * repaints), the check is symmetric: the document must say what the chart
- * does today, so improving the engine without updating the document fails
- * here just as surely as the reverse.
+ * record. Where the engine could reasonably change (how far a recompute or a
+ * tick repaints, whether a glide runs on the render loop's frame), the check
+ * is symmetric: the document must say what the chart does today, so changing
+ * the engine without updating the document fails here just as surely as the
+ * reverse.
  */
 /// <reference types="vite/client" />
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -210,13 +212,23 @@ describe('the shared index', () => {
   });
 });
 
+/** Source files outside the mask that read its time-scale queue. */
+const queueReaders = (): string[] => Object.entries(SOURCES)
+  .filter(([path, text]) => !path.endsWith('/invalidate-mask.ts') && /\.timeScaleOps\(\)/.test(text))
+  .map(([path]) => path);
+
 describe('the invalidation mask', () => {
-  it('ARCHITECTURE.md sketches only the time-scale operations the mask declares', () => {
+  it('ARCHITECTURE.md puts a time-scale queue in the mask it sketches exactly when the frame reads one', () => {
+    const read = queueReaders().length > 0;
+    const sketch = /class InvalidateMask \{[\s\S]*?\n\}/.exec(architecture)?.[0] ?? '';
+    expect(sketch).not.toBe('');
+    expect(/timeScaleOps/.test(sketch)).toBe(read);
+    expect(/mask is a[^.]*queue of time-scale operations/i.test(architecture)).toBe(read);
+    // An operation the document names is one the mask declares.
     const declared = new Set([...maskSource.matchAll(/type: '(\w+)'/g)].map(m => m[1]));
-    const sketch = /type TimeScaleOp =[\s\S]*?\n\n/.exec(architecture)?.[0] ?? '';
-    const documented = [...sketch.matchAll(/type: '(\w+)'/g)].map(m => m[1]);
-    expect(documented.length).toBeGreaterThan(0);
-    expect(documented.filter(op => !declared.has(op))).toEqual([]);
+    expect(declared.size).toBeGreaterThan(0);
+    const named = /type TimeScaleOp =[\s\S]*?\n\n/.exec(architecture)?.[0] ?? '';
+    expect([...named.matchAll(/type: '(\w+)'/g)].map(m => m[1]).filter(op => !declared.has(op))).toEqual([]);
   });
 
   it('ARCHITECTURE.md says whether anything queues a time-scale operation, and the code agrees', () => {
@@ -228,8 +240,7 @@ describe('the invalidation mask', () => {
   });
 
   it('the TimeScaleOp declaration says the queue is applied only when something reads it', () => {
-    const readers = Object.entries(SOURCES)
-      .filter(([path, text]) => !path.endsWith('/invalidate-mask.ts') && /\.timeScaleOps\(\)/.test(text));
+    const readers = queueReaders();
     const doc = /\/\*\*((?:(?!\*\/)[\s\S])*)\*\/\s*export type TimeScaleOp\b/.exec(maskSource)?.[1] ?? '';
     expect(doc).not.toBe('');
     expect(/applied to the shared time scale/i.test(doc)).toBe(readers.length > 0);
@@ -237,19 +248,46 @@ describe('the invalidation mask', () => {
 });
 
 /**
- * Wording that confines a recompute or a tick to its own pane. The shapes
- * are the ones ARCHITECTURE.md used while the claim was false, so bringing
- * one back fails here even beside a sentence that says the opposite.
+ * Wording that confines a recompute or a tick to some of the panes. The
+ * shapes include the ones ARCHITECTURE.md used while the claim was false, so
+ * while the chart repaints every pane, bringing one back fails here even
+ * beside a sentence that says the opposite.
  */
 const LOCAL_REPAINT = /(?:recomput\w*|finishing a calc|live tick)[^.|]*?(?:must not repaint|(?:is|are) not repainted|aren't repainted|\bentry only\b|\bis local\b|repaints only|only (?:its|the study's) own pane)/i;
 
 const localRepaintClaims = (markdown: string): string[] => statements(markdown).filter(s => LOCAL_REPAINT.test(s));
 
+/** What each document says when a study recompute or a replacing tick leaves an unrelated pane alone. */
+const RECOMPUTE_LOCAL = /a study recompute repaints only the panes its output lands on/i;
+const TICK_LOCAL: Readonly<Record<string, RegExp>> = {
+  'ARCHITECTURE.md': /a live tick that replaces the forming bar[^.]*repaints only its own series' pane/i,
+  'README.md': /a live tick repaints the price pane and the panes of the studies computed from it/i,
+};
+/**
+ * What each document says about the wall-clock readings keeping a pane
+ * repainting on a pane-scoped write: the corner clock on the bottom pane, and
+ * the bar countdown in the last-price tag of each pane with a price series.
+ */
+const CLOCK_REPAINT: Readonly<Record<'sessionClock' | 'barCountdown', Readonly<Record<string, RegExp>>>> = {
+  sessionClock: {
+    'ARCHITECTURE.md': /except while the corner clock is on \(`axisChrome\.sessionClock`\)[^.]*each such write also repaints that pane/i,
+    'README.md': /the bottom pane repaints with them while the corner clock is on/i,
+  },
+  barCountdown: {
+    'ARCHITECTURE.md': /the bar countdown \(`axisChrome\.barCountdown`\)[^.]*each such write also repaints every pane with a price series/i,
+    'README.md': /every pane with a price series while the bar countdown is on/i,
+  },
+};
+
 describe('how far a repaint reaches', () => {
   afterEach(() => { vi.restoreAllMocks(); });
   let sequence = 0;
 
-  /** A price series and a study in a pane of its own, painting synchronously. */
+  /**
+   * A price series, a study computed from it in a pane of its own, and a
+   * line series of the host's in a third pane that nothing here writes to,
+   * painting synchronously.
+   */
   function mount(): { chart: Chart; tick: () => void; recompute: () => void } {
     const document = fakeDocument();
     const chart = new Chart(document.createElement('div'), {
@@ -271,7 +309,8 @@ describe('how far a repaint reaches', () => {
       attach: context => { attachment = context; },
     });
     chart.addIndicator(id);
-    expect(chart.panes()).toHaveLength(2);
+    chart.addSeries('line', { paneIndex: 2 }).setData(bars.map(bar => ({ time: bar.time, value: bar.close })));
+    expect(chart.panes()).toHaveLength(3);
     const last = bars[bars.length - 1];
     return {
       chart,
@@ -289,23 +328,49 @@ describe('how far a repaint reaches', () => {
     return chart.panes().map(pane => painted.has(pane));
   }
 
-  it('an indicator recompute: ARCHITECTURE.md says every pane repaints exactly when the price pane does', () => {
+  it('an indicator recompute: the documents confine it to the study panes exactly when the unrelated pane is left alone', () => {
     const { chart, recompute } = mount();
-    const [pricePane, studyPane] = repainted(chart, recompute);
+    const [pricePane, studyPane, otherPane] = repainted(chart, recompute);
     chart.destroy();
     expect(studyPane).toBe(true);
-    expect(/an indicator recompute repaints every pane/i.test(architecture)).toBe(pricePane);
-    if (pricePane) expect(localRepaintClaims(architecture)).toEqual([]);
+    // The study sends nothing to the candles, so the price pane has nothing new either.
+    expect(pricePane).toBe(otherPane);
+    expect(/an indicator recompute repaints every pane/i.test(architecture)).toBe(otherPane);
+    for (const [name, text] of Object.entries(DOCS)) {
+      expect(RECOMPUTE_LOCAL.test(text), name).toBe(!otherPane);
+      if (otherPane) expect(localRepaintClaims(text), name).toEqual([]);
+    }
   });
 
-  it('a live tick: ARCHITECTURE.md says every pane repaints exactly when the study pane does', () => {
+  it('a live tick: the documents confine it to the panes it changes exactly when the unrelated pane is left alone', () => {
     const { chart, tick } = mount();
-    const [pricePane, studyPane] = repainted(chart, tick);
+    const [pricePane, studyPane, otherPane] = repainted(chart, tick);
     chart.destroy();
     expect(pricePane).toBe(true);
-    expect(/a live tick repaints every pane/i.test(architecture)).toBe(studyPane);
-    if (studyPane) expect(localRepaintClaims(architecture)).toEqual([]);
+    // The study is computed from the ticking series, so it has a new value to show.
+    expect(studyPane).toBe(true);
+    expect(/a live tick repaints every pane/i.test(architecture)).toBe(otherPane);
+    for (const [name, text] of Object.entries(DOCS)) {
+      expect(TICK_LOCAL[name].test(text), name).toBe(!otherPane);
+      if (otherPane) expect(localRepaintClaims(text), name).toEqual([]);
+    }
   });
+
+  for (const reading of ['sessionClock', 'barCountdown'] as const) {
+    it(`${reading}: the documents say it keeps an unrelated pane repainting exactly when it does`, () => {
+      const plain = mount();
+      const without = repainted(plain.chart, plain.tick)[2];
+      plain.chart.destroy();
+      const on = mount();
+      on.chart.setAxisChromeOptions({ [reading]: true });
+      const withReading = repainted(on.chart, on.tick)[2];
+      on.chart.destroy();
+      // The unrelated pane is the bottom one, where the clock is drawn, and it
+      // holds a line, a price series whose last-price tag carries the countdown.
+      const readingOnly = withReading && !without;
+      for (const [name, text] of Object.entries(DOCS)) expect(CLOCK_REPAINT[reading][name].test(text), name).toBe(readingOnly);
+    });
+  }
 
   it('recognises the pane-local wording the document used while it was false', () => {
     for (const old of [
@@ -314,5 +379,64 @@ describe('how far a repaint reaches', () => {
       'An indicator finishing a calc, or one pane\'s autoscale changing, is local.',
     ]) expect(localRepaintClaims(old), old).toHaveLength(1);
     expect(localRepaintClaims('A study recompute and a live tick still repaint every pane, not only the study\'s own.')).toEqual([]);
+  });
+});
+
+describe('the animation loop', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  /**
+   * Run a kinetic glide frame by frame. It is on the render loop's frame when
+   * no frame asks for more than one callback and every frame that moved the
+   * view painted the offset it moved to.
+   */
+  function glideOnTheFrame(): boolean {
+    let now = 0;
+    let id = 0;
+    let requests = 0;
+    const queue = new Map<number, () => void>();
+    const document = fakeDocument();
+    const chart = new Chart(document.createElement('div'), {
+      document, pixelRatio: () => 1, shortcuts: false, now: () => now,
+      raf: { schedule: cb => { requests++; queue.set(++id, cb); return id; }, cancel: key => { queue.delete(key); } },
+    });
+    chart.applySize(800, 600);
+    chart.addSeries('candlestick').setData(Array.from({ length: 300 }, (_, i) => ({
+      time: 1_700_000_000 + i * 60, open: 100, high: 101, low: 99, close: 100,
+    })));
+    const frame = (): number => {
+      now += 16;
+      const before = requests;
+      for (const [key, cb] of [...queue.entries()]) if (queue.delete(key)) cb();
+      return requests - before;
+    };
+    for (let i = 0; i < 50 && queue.size > 0; i++) frame();
+    const pricePane = chart.panes()[0];
+    let painted: number | null = null;
+    vi.spyOn(Pane.prototype, 'paintBase').mockImplementation(function (this: Pane) {
+      if (this === pricePane) painted = chart.timeScale.rightOffset;
+    });
+    (chart as unknown as { _startKinetic(v: number): void })._startKinetic(1.5);
+    let one = true;
+    let frames = 0;
+    for (let last = chart.timeScale.rightOffset; frames < 200 && queue.size > 0; frames++) {
+      painted = null;
+      if (frame() > 1) one = false;
+      const offset = chart.timeScale.rightOffset;
+      if (offset !== last && painted !== offset) one = false;
+      last = offset;
+    }
+    chart.destroy();
+    expect(frames).toBeGreaterThan(10);
+    return one;
+  }
+
+  it('ARCHITECTURE.md and README say a glide steps inside the frame exactly when it does', () => {
+    const one = glideOnTheFrame();
+    expect(/\*\*Glides step inside the frame\.\*\*/.test(architecture)).toBe(one);
+    expect(/each frame paints the step it made/i.test(architecture)).toBe(one);
+    expect(/each frame paints the step it made/i.test(readme)).toBe(one);
+    // The wording the document used while each glide ran its own frames.
+    expect(/schedule their own animation frames|run their own animation-frame loop|paint follows one frame behind/i.test(architecture)).toBe(!one);
   });
 });

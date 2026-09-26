@@ -16,6 +16,7 @@ import { atr, sourceValues } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
 import { sma, wma, highest, lowest, nulls, smaSeededEma, alma, linreg } from './calc';
 import { emaOfGapped } from './smoothing';
+import { withTail, windowTail, whole } from './tail';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -193,7 +194,7 @@ export const ENVELOPE: IndicatorDescriptor = {
   },
 };
 
-export const DONCHIAN: IndicatorDescriptor = {
+export const DONCHIAN: IndicatorDescriptor = withTail({
   id: 'donchian',
   name: 'Donchian Channels',
   category: 'Volatility',
@@ -229,7 +230,13 @@ export const DONCHIAN: IndicatorDescriptor = {
       lower: nulls(shift(lower, offset)),
     };
   },
-};
+}, (calc) => windowTail(calc, (s) => {
+  // A forward offset only reaches further back. A backward one draws the
+  // forming bar's channel on an earlier slot than the tail covers.
+  const length = int(s, 'length', 20);
+  const offset = Math.round(num(s, 'offset', 0));
+  return whole(length) && offset >= 0 ? length - 1 + offset : null;
+}));
 
 /**
  * Two stacked extremes: an ATR-padded high/low band, then the running extreme of

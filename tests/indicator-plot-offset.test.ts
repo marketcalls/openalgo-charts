@@ -31,7 +31,9 @@ class Recorder implements IRenderBackend {
     entry: RendererEntry, items: readonly DrawItem[], priceToY: (p: number) => number,
     barSpacing: number, dpr: number, style: SeriesStyle, rc: SeriesRenderContext,
   ): void {
-    this.calls.push({ style, items: items.slice() });
+    // Copies of the items, not the items: the pane reuses them from frame to
+    // frame, so a record kept past the next frame has to own its own.
+    this.calls.push({ style, items: items.map((it) => ({ ...it })) });
     this._inner.drawSeries(entry, items, priceToY, barSpacing, dpr, style, rc);
   }
   public endFrame(): void { this._inner.endFrame(); }

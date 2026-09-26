@@ -1,12 +1,234 @@
 # Performance notes
 
-Findings for the release that adds a render benchmark and per-size budgets. Each
-one was found by reading the code while the 2.5.5 measurements in
-[browser endurance](browser-endurance.md) were recorded. None has been measured on
-its own yet, so none is quoted as a cost. Read these before setting a budget, and
-remove an entry once a change has dealt with it.
+What the render bench measures, the budgets it holds the chart to and where they
+came from, then findings that are not measured yet. Read this before changing a
+budget, and remove a finding once a change has dealt with it.
 
-## Markers map the whole history on every paint
+## Render bench
+
+`tests/e2e/render-bench.perf.ts` times three paths in real Chromium, at 10,000,
+50,000 and 200,000 bars, on the `canvas2d` and the `webgl2` backend, and fails
+the run when a p95 exceeds its budget:
+
+| Scenario | What one step is |
+| --- | --- |
+| Pan | A mouse drag one bar further across a price chart with a volume pane, about 200 bars in view (6 px per bar, 1280 by 800, DPR 1) |
+| Full zoom-out | One pixel of drag on the same chart with every loaded bar in view: the spacing floor is lowered so a fit does not stop at one bar per pixel |
+| Tick, 10 studies | A forming-bar update on a chart carrying EMA, Bollinger Bands, RSI, MACD, volume, Supertrend, ADX, Stochastic, VWAP and ATR |
+
+```sh
+npm run build
+npm run bench:render                      # every row
+npm run bench:render -- --grep canvas2d   # further arguments go to Playwright
+```
+
+It runs alone: the `render-bench` Playwright project exists only while
+`OAC_RENDER_BENCH` is set, which `npm run bench:render` does, and CI gives it a
+job of its own. Each row writes every sample to
+`artifacts/render-bench/<renderer>-<bars>.json` (or `OAC_RENDER_BENCH_OUT`).
+
+### How a step is timed
+
+A step runs from the input to painted pixels. The chart is given a frame
+scheduler that queues callbacks instead of waiting for the display; after the
+input, the bench runs the one frame the input asked for, then draws every chart
+canvas into a one-pixel probe and reads the probe back, which cannot finish
+before the canvases are rasterized. Waiting for the display instead would round
+every cost up to a whole number of 16.7 ms frames and hide any change smaller
+than a frame. The probe is read rather than the chart canvases because a canvas
+that is read back repeatedly can be moved off the GPU by the browser. With
+nothing changed, the probe itself costs about 0.1 ms on `canvas2d` and 0.5 ms
+on `webgl2`, and on `webgl2` a probe kept on the GPU, which reads no chart
+canvas back, gives the same step times, so a step's time is the chart's. Each
+report also gives a script p95, over the same steps timed only to the end of the
+frame (before the raster wait), which is not budgeted but says where a
+regression is.
+
+Headless Chromium has no graphics device of its own: WebGL, and GPU raster of a
+2D canvas, both run on the browser's software GL device, a CPU emulation of one,
+and the bench pins that device so a desktop and a CI runner emulate the same
+one. Rasterizing a 2D canvas through that emulation costs roughly ten to twenty
+times what the browser's own software rasterizer does: ten thousand thin
+rectangles took 50 to 95 ms against 5 to 6 ms on the reference machine,
+depending on their layout.
+
+The `canvas2d` rows therefore run with `--disable-accelerated-2d-canvas`, a real
+configuration: a device that rasterizes 2D in software.
+
+The `webgl2` rows keep GPU raster for the canvas their GPU surface is composited
+into, as a device with a GPU would. Their numbers time an emulated GPU: they
+compare one build of the WebGL path with another, not the WebGL path with the 2D
+one, and not with a device that has a real GPU.
+
+A cheap step proves nothing unless the frame did its work, so a row also fails
+when any recorded step ran no chart frame or left the view where it was, when
+the price pane is blank afterwards, when a `webgl2` row issued no GPU draw or
+fell back to 2D (or a `canvas2d` row touched the GPU), when the zoomed-out view
+does not hold every bar, or when a tick did not recompute each of the ten studies
+exactly once.
+
+### Budgets
+
+The budgets live in `scripts/render-bench-budgets.mjs`, as two tables of
+measured p95s. Local runs are held to the desktop table: for each row and
+scenario, the lowest p95 of five full runs on the reference machine. CI is held
+to the hosted runner table, measured on the runner itself: the first CI run
+(2.5.8's release candidate) came in at up to about five times the desktop
+figures, most where the software GL device does the work, so four times the
+desktop figure failed cells whose code had not changed. The runner table's
+margin is smaller because it measures the machine that enforces it. Scaled by
+the desktop ratios between 2.5.7 and 2.5.8, it would still fail 2.5.7's tick cost
+and a lost level of detail at every bar count; that is an estimate, since neither
+has run on a runner. The
+budget that fails a run is derived from each figure:
+
+<!-- render-bench-budgets:start (generated by scripts/check-render-bench-docs.mjs --write) -->
+Local runs (the desktop table): measured on the merged Release 3 build before its 2.5.8 version bump, lowest p95 of five runs on an 8-core desktop CPU (16 logical) in headless Chromium 149, 2026-09-26.
+Budget = max(ceil(measured p95 x 4), 17 ms).
+
+| Renderer | Bars | pan frame p95, measured (budget) | full zoom-out frame p95, measured (budget) | tick p95, 10 studies, measured (budget) |
+| --- | --- | --- | --- | --- |
+| canvas2d | 10,000 | 2.2 ms (17 ms) | 5.3 ms (22 ms) | 20.1 ms (81 ms) |
+| canvas2d | 50,000 | 2.2 ms (17 ms) | 19.8 ms (80 ms) | 49.2 ms (197 ms) |
+| canvas2d | 200,000 | 2.1 ms (17 ms) | 53 ms (212 ms) | 152.2 ms (609 ms) |
+| webgl2 | 10,000 | 11.1 ms (45 ms) | 13.1 ms (53 ms) | 28.4 ms (114 ms) |
+| webgl2 | 50,000 | 10.8 ms (44 ms) | 21.3 ms (86 ms) | 56.6 ms (227 ms) |
+| webgl2 | 200,000 | 11.1 ms (45 ms) | 58.3 ms (234 ms) | 167.5 ms (670 ms) |
+
+CI (the hosted runner table): measured on a GitHub-hosted ubuntu-latest runner (4 vCPU) in the CI bench job, the 2.5.8 release candidate, one run, 2026-09-26.
+Budget = max(ceil(measured p95 x 2.5), 17 ms).
+
+| Renderer | Bars | pan frame p95, measured (budget) | full zoom-out frame p95, measured (budget) | tick p95, 10 studies, measured (budget) |
+| --- | --- | --- | --- | --- |
+| canvas2d | 10,000 | 10.8 ms (27 ms) | 25.8 ms (65 ms) | 51 ms (128 ms) |
+| canvas2d | 50,000 | 11.2 ms (28 ms) | 58.5 ms (147 ms) | 132.4 ms (331 ms) |
+| canvas2d | 200,000 | 10.6 ms (27 ms) | 137.7 ms (345 ms) | 289.1 ms (723 ms) |
+| webgl2 | 10,000 | 46.5 ms (117 ms) | 57.2 ms (143 ms) | 113.2 ms (283 ms) |
+| webgl2 | 50,000 | 47.3 ms (119 ms) | 69.5 ms (174 ms) | 172.3 ms (431 ms) |
+| webgl2 | 200,000 | 47 ms (118 ms) | 147.9 ms (370 ms) | 383.6 ms (959 ms) |
+<!-- render-bench-budgets:end -->
+
+**Lowest of five.** Load only ever adds time, so the lowest run is the closest
+to what the machine itself costs; the margin then covers the runner. The table
+above was measured with nothing else running, and the five runs agreed closely:
+a cell's highest p95 was at most 1.43 times its lowest (the 10,000-bar
+`canvas2d` zoom-out), 1.40 for the 50,000-bar `canvas2d` tick, and under 1.17
+for every other cell. The 2.5.7 table was measured while other test suites
+shared the machine, at times holding every core, and there a zoom-out p95 moved
+by up to 2.2 times across the five runs and a 50,000-bar tick by up to 2.4.
+
+**Margin.** The reference machine is a desktop. A hosted CI runner has fewer and
+older cores, shares them with other tenants, and gives the software GL device
+and the collector fewer threads to work with. Four times the reference leaves
+room for a runner core half as quick and a busy run on top of that, and still
+fails a change that makes a path several times costlier, which is the
+regression this exists to catch. One check of the thread count, though not of
+core speed: a full run with the browser held to four logical processors of the
+reference machine, as many as a hosted Linux runner gives a public repository,
+stayed inside every budget of the table above. Its tightest cells were the
+50,000-bar `canvas2d` tick at 82 ms of 197 ms and the 10,000-bar `canvas2d`
+zoom-out at 8.9 ms of 22 ms. The browser's graphics process sets its own
+affinity, so that run held the page's own work to four processors but not the
+software GL device. In CI a failed row is retried once, like every Playwright
+test there (`retries` in `playwright.config.ts`), so runner noise has to strike
+twice to fail a change, and a real regression fails both attempts.
+
+**Floor.** One frame at 60 Hz, 17 ms. A frame that costs less is on time
+whatever it costs, so a budget under that line would police timer and collector
+noise rather than anything a user sees.
+
+**Sample counts.** Pan takes 60 recorded steps, and zoom-out and tick 40 each
+(20 at 200,000 bars, where the p95 is then the second slowest step). On 2.5.7 a
+tick cost seconds at 50,000 and 200,000 bars, so those rows recorded 10 and 5
+ticks and their p95 was their slowest tick; now that a tick costs tens to a few
+hundred milliseconds they record as many as zoom-out. The 200,000-bar rows stay
+at 20 so that a tick back at 2.5.7's cost, on a runner four times slower than
+the reference, still fails on its budget inside the test timeout rather than on
+the timeout. The counts live in `planFor` in the spec.
+
+### Against 2.5.7
+
+The table 2.5.7 held, against the one above for the merged Release 3 build that
+ships as 2.5.8: each cell reads 2.5.7's p95 to this build's, both the lowest of
+five runs on the same machine, and in brackets how many times less the step now
+costs.
+
+| Renderer | Bars | Pan p95 | Full zoom-out p95 | Tick p95, 10 studies |
+| --- | --- | --- | --- | --- |
+| canvas2d | 10,000 | 3.1 to 2.2 ms (1.4x) | 21.2 to 5.3 ms (4.0x) | 209.1 to 20.1 ms (10.4x) |
+| canvas2d | 50,000 | 3.2 to 2.2 ms (1.5x) | 65.4 to 19.8 ms (3.3x) | 1166.3 to 49.2 ms (23.7x) |
+| canvas2d | 200,000 | 2.9 to 2.1 ms (1.4x) | 278.2 to 53 ms (5.2x) | 5591.7 to 152.2 ms (36.7x) |
+| webgl2 | 10,000 | 12.4 to 11.1 ms (1.1x) | 20.4 to 13.1 ms (1.6x) | 206.3 to 28.4 ms (7.3x) |
+| webgl2 | 50,000 | 12.5 to 10.8 ms (1.2x) | 57.5 to 21.3 ms (2.7x) | 1089.9 to 56.6 ms (19.3x) |
+| webgl2 | 200,000 | 12.1 to 11.1 ms (1.1x) | 232 to 58.3 ms (4.0x) | 5785.6 to 167.5 ms (34.5x) |
+
+The two tables were not taken under the same conditions: the 2.5.7 runs shared
+the machine with other suites and recorded 10 and 5 ticks at 50,000 and 200,000
+bars, so their tick p95 there is the slowest tick. As a check, one run of the
+bench with its imports pointed at `dist-baseline/` (2.5.7), on the quiet
+machine with this build's sample counts, came within 10% of every zoom-out and
+tick figure in 2.5.7's table, and its pan matched this build's. With the budgets
+above, that run of 2.5.7 fails every tick row and the 200,000-bar zoom-out on
+both backends; its zoom-out at 10,000 and 50,000 bars passes, because the level
+of detail saves less there than the margin of four allows.
+
+- **Tick**, 7 to 37 times cheaper, most at deep history. A study now writes only
+  the plot points a tick moved, the shared time index is no longer rebuilt on a
+  tick, and nine of the ten studies (all but volume) take their built-in tail
+  instead of a pass over the history. The step is still mostly script (at
+  200,000 bars a script p95 of 120 to 150 ms in a 150 to 180 ms step) and still
+  grows with the loaded history rather than the view: from 10,000 to 200,000
+  bars about 7.6 times on `canvas2d` and 5.9 times on `webgl2`, with the same
+  200 bars in view. What remains is not profiled yet.
+- **Full zoom-out**, 1.6 to 5.2 times cheaper. The level of detail, now on by
+  default, draws one stick per device-pixel column, so the marks a frame paints
+  follow the plot width rather than the bar count. The frame still grows with
+  the bars in view, 10 times from 10,000 to 200,000 on `canvas2d`, because the
+  pane still walks every one of them, and at 200,000 bars nearly all of it is
+  script on both backends.
+- **Pan** did not change: the 1.1 to 1.5 times is the quieter machine, since
+  2.5.7 on it pans in 2.2 to 2.4 ms on `canvas2d` and 11.6 to 12.1 ms on
+  `webgl2`, inside this build's own run-to-run range. It stays about 2 ms and
+  11 ms at every bar count, the latter almost all emulated raster (a script p95
+  of about 1 ms).
+
+### Tightening a budget
+
+After a cheaper path lands, run `npm run bench:render` five times on the
+reference machine, put the lowest p95 of each cell into `measuredP95Ms` in
+`scripts/render-bench-budgets.mjs`, update `reference`, and run
+`node scripts/check-render-bench-docs.mjs --write` so the block above follows;
+CI fails while the two disagree. Each run leaves its figures in
+`artifacts/render-bench/`, or wherever `OAC_RENDER_BENCH_OUT` points. The margin
+is a policy of its own and changes separately, with its reason in the commit.
+
+The nightly workflow uploads the bench's results from a hosted runner every
+night (`render-bench-nightly`, with every sample). Once a few weeks of those
+exist, the reference can move to the runner itself with a smaller margin, which
+is the tighter and more honest budget.
+
+## Other performance checks
+
+- `npm run bench` (`scripts/bench-indicators.mjs`) holds indicator calculation
+  to CI budgets and counts the recomputes a burst of 50 ticks between two frames
+  causes. Each indicator must recompute exactly once: more means recompute has
+  gone back to running per tick, none means the harness no longer drives the
+  chart. Either fails the run.
+- CI builds `dist-baseline/` from the newest release tag the commit descends
+  from, so `tests/e2e/render-parity.spec.ts` compares pixels with that release on
+  every push instead of skipping. A change meant to move pixels sets
+  `PARITY_BASELINE_REF` in `.github/workflows/ci.yml` and says so in its commit.
+  The ref must stay reachable from `master` once the change merges (a squashed
+  pull request's own commits do not), and the release that ships the change
+  clears it, since its tag then carries the new pixels.
+- `.github/workflows/nightly.yml` runs `scripts/soak.mjs` for a 6.25-hour
+  session (90,000 ticks, 1,000 create and destroy cycles), the thirty-minute
+  [browser endurance](browser-endurance.md) workload and the render bench, and
+  keeps every report.
+
+## Findings not measured yet
+
+### Markers map the whole history on every paint
 
 `SeriesMarkers.draw` in `src/primitives/markers.ts` builds a map from bar
 time to bar on every paint. It fills the map from `dataLayer.indexedBars(seriesId)`,
@@ -16,24 +238,9 @@ visible range one at a time. The work therefore grows with the history length an
 the marker count, not with the bars in view, and it repeats on every base repaint
 of the pane, which includes every live tick (ARCHITECTURE.md §3.2).
 
-The endurance workload attaches no markers, so the recorded frame times do not
-include this cost. To see it, add a marker set of realistic size to a benchmark
-workload and compare frame times at 2,000 and 50,000 bars with the view held at
+Neither the endurance workload nor the render bench attaches markers, so neither
+includes this cost. To see it, add a marker set of realistic size to a bench
+scenario and compare frame times at 2,000 and 50,000 bars with the view held at
 150 bars. A fix would read only the visible range (`visibleBars`), plus the styled
 markers that are laid out whatever their position, or keep the map until the
 series data changes.
-
-## The painted-chart gate also hashes the price axis
-
-`paintProbe` in `scripts/fixtures/browser-endurance.html` hashes every pixel of each
-chart's first canvas, which is the price pane's base canvas. The price-axis strip
-is painted on that same canvas, so a moving last-price tag changes the hash while
-the plot itself stays frozen. The canvas-changed gate can therefore pass on the
-axis alone; only the candle-pixel count shows that candles were painted. The
-comment in `paintProbe` says the axis has its own canvas, which has not been true
-since the axes moved onto the base canvas.
-
-The fixture belongs to the harness, and this change leaves it as it is. The fix is
-to hash only the plot rectangle, excluding the axis strip's width, and to correct
-the comment. A report produced before that fix still stands for its candle-pixel
-and screenshot evidence.

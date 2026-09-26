@@ -2,6 +2,224 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.5.8
+
+2026-09-26
+
+Rendering performance. A live tick no longer rebuilds the chart's time index or
+rewrites every study plot, sixteen common built-in studies update without a pass
+over the whole history, a tick or a study recompute repaints only the panes it changes,
+and a zoomed-out chart draws one stick per pixel column. Two things a host can
+see change: the level of detail is on by default (`conflate: true`), and a
+study's plot series now receives `update()` calls on a live tick. A render bench
+in CI holds frame budgets per bar count.
+
+### Added
+
+- `IPrimitive.hitBounds(rc)`, optional: the box, in the plot-relative media px
+  `hitTest` receives, outside which the primitive's `hitTest` answers null
+  (edges inclusive, a side may be infinite), or `null` when nothing of it can be
+  hit. A pointer move then asks `hitTest` only of the primitives whose box holds
+  the point, so a pane carrying hundreds of annotations pays for the few near
+  the pointer. A primitive that declares a box promises three things. The box
+  holds every point its `hitTest` can answer: a point outside it is never
+  asked, so a box that is too tight loses hits. The box changes only with what
+  the pane follows (the time scale and the bars' times, the pane's price
+  scales, size and axes, the pixel ratio, hover and drag, the theme and the
+  session calendar) or with the primitive's own state, which it announces
+  through `host.requestUpdate()`; a box that follows anything else, bar prices
+  say, must request an update when that changes. And its `hitTest` is free of
+  side effects, since the pane may skip it. A NaN edge makes the pane ask
+  `hitTest` anyway. The pane keeps each box until one of those changes, and a primitive
+  that declares one is attached with a host object that wraps the chart's, so
+  the pane hears its `requestUpdate`. No built-in primitive or drawing layer
+  declares a box yet, so they are asked on every move as before.
+- Render bench: `npm run bench:render` (`tests/e2e/render-bench.perf.ts`) times
+  a pan, a frame with every loaded bar in view and a forming-bar tick with ten
+  studies, at 10,000, 50,000 and 200,000 bars, on the `canvas2d` and `webgl2`
+  backends in Chromium. Each step is timed from the input to painted pixels, and
+  the run fails when a p95 exceeds its budget. The budgets live in
+  `scripts/render-bench-budgets.mjs` as two measured tables, never under 17 ms:
+  local runs use the lowest p95 of five desktop runs times four, and CI uses
+  the hosted runner's own p95 times 2.5, because the runner measured up to five
+  times the desktop figures. CI runs the bench in a job of its own, and
+  `docs/performance-notes.md` records the measurements, the margin and why the
+  bench's fast results can be trusted.
+- Nightly workflow (`.github/workflows/nightly.yml`): the soak for a 6.25-hour
+  session (90,000 ticks, 1,000 create and destroy cycles), thirty minutes of
+  browser endurance and the render bench, on a hosted runner. Every report is
+  kept, pass or fail.
+
+### Changed
+
+- **The level of detail is on by default.** `ChartOptions.conflate` now
+  defaults to `true`. Below about one CSS px per bar (exactly one at a whole
+  pixel ratio: the bar is narrower than the stick a candle is drawn with), the
+  bars sharing a device-pixel column draw as one OHLC-preserving stick: open of
+  the first bar, close of the last, the column's high and low, volume summed,
+  the last open interest and the colours of the bar that closed the column.
+  Line, step, area and baseline series keep each column's first, lowest,
+  highest and last bar, with a gap kept as a gap; the HLC area keeps those
+  plus each run's highest high and lowest low, so its close line, band edges
+  and gaps match the full frame; and columns and histograms keep the lowest and
+  highest bar, so they cover the pixels every bar would. A merged stick sits in
+  the column that holds its middle pixel, at every pixel ratio. At
+  or above one bar per stick nothing changes, and the default
+  `timeScale.minBarSpacing: 1` never zooms out that far, so a chart that keeps
+  the floor paints as before: render parity against 2.5.7 is zero differing
+  pixels for every built-in series type at pixel ratios 1 and 2. `conflate:
+  false` draws every bar at every zoom. `conflationFactor` now means the column
+  width in sticks (it was a multiplier on a half-pixel threshold): `2` merges
+  into two-stick columns from spacings under two CSS px. A renderer a host
+  registers, even under a built-in name, always receives every bar. Data,
+  autoscale, indicators and the crosshair still see every bar.
+- **A study's plot series receives `update()` on a live tick.** A recompute
+  whose bars begin with the times the last one wrote sends each plot only the
+  points that changed, and its last point, through `SeriesApi.update`, where it
+  used to hand each plot its whole history in one `setData`. New or older
+  history, a filled gap, a plot the previous pass did not write and more than
+  eight moved points still go through `setData`. What each plot holds is
+  identical, key order included. A custom `IndicatorHost` must therefore
+  return from `addIndicatorSeries` a series whose `update` behaves as
+  documented: an item at an existing time replaces that point, an older one
+  included, and a newer one appends. A study is the only writer of its plot
+  series: `indicator.series(key)` is for styling, and data written into it now
+  survives wherever the study did not move a point.
+- **Sixteen built-ins carry a `calcTail`:** `sma`, `ema`, `wma`, `rsi`, `atr`,
+  `adx`, `macd`, `bollinger`, `vwap`, `supertrend`, `stochastic`, `obv`, `cci`,
+  `keltner-channel`, `donchian` and `parabolic-sar` (see Performance). It is a
+  non-enumerable own property: `SMA.calcTail` and `'calcTail' in SMA` see it,
+  `Object.keys(SMA)` and `{ ...SMA }` do not. A descriptor that spreads a
+  built-in therefore keeps recomputing in full through its own `calc`, exactly
+  as on 2.5.7. To keep the tail on a copy, write `calcTail: SMA.calcTail`, and
+  only when your `calc` returns the built-in's result unchanged for the settings
+  it is given, since a tail never calls your `calc`. A copied tail stops for
+  good when the held result has a column it does not write.
+- **Kinetic scroll and the eased wheel zoom step inside the render frame.**
+  They schedule no animation frames of their own: the chart steps them at the
+  top of its frame, before the study flush, so each frame paints the step it
+  made rather than the one before, and a glide asks the frame scheduler (an
+  injected `raf` included) for one frame per frame instead of two. A glide
+  step's `pan` or `zoom` event fires in the frame that paints it. The autoscale
+  easing during a glide starts one frame earlier; final ranges are unchanged.
+  A frame's own glide step or study recompute no longer schedules an empty
+  frame after it.
+- The draw items a renderer (`RendererEntry.draw`) or a render backend
+  (`IRenderBackend.drawSeries`) is handed, the array and its objects, belong to
+  the pane: they are rewritten in place the next time it draws that series, so
+  a renderer or backend that keeps them past the call must copy. The `priceToY`
+  it is handed is one stable function per series.
+- A pointer move stops walking a pane's primitives at an exact hit
+  (`distance: 0`) among those painted in front, which nothing after it can
+  outrank. `PrimitiveHit.distance` is documented as never negative.
+
+### Performance
+
+- A tick or a study recompute repaints only the panes it changes. A live tick
+  that replaces the forming bar repaints the price pane and the panes of the
+  studies computed from it. A study recompute repaints only the panes its
+  output lands on: its own pane, and the price pane for a plot or bar colours
+  sent to the candles; a data-derived study level repaints its own pane. Each
+  repainted pane re-measures its scale. A write that moves the shared index or
+  the time scale still repaints every pane: an appended bar, a host `setData`
+  or `prependData`, and a study that opens a pane. While
+  `axisChrome.sessionClock` is on, a pane-scoped write also repaints the bottom
+  pane, and while `axisChrome.barCountdown` is on, every pane with a price
+  series, since neither reading has a timer of its own. The pixels are those of
+  a full repaint.
+- A live tick no longer rebuilds the shared time index, which ten studies used
+  to rebuild about two dozen times per tick. `DataLayer.setSeriesData` rebuilds
+  it only when the set of times changes (a time dropped, or a new one inside
+  the axis) and adds new times past the right edge in place, input already in
+  time order skips the sort, and `DataLayer.update` finds an older bar by binary
+  search. A whole write whose times the index already holds (a study after a
+  page of history, a bar-colour overlay on the source) and stepping replay
+  forward rebuild nothing either.
+- The sixteen built-in tails: a tick on the forming bar, or one appended bar,
+  costs them a step or one window instead of a pass over the loaded history.
+  The spliced result equals a full `calc` value for value, NaN and negative
+  zero included, which a property test checks after every tick and appended
+  bar on random histories with session breaks, missing prices and missing
+  volume. The studies that carry state from bar to bar rebuild it once after
+  each full calculation (a load, a history change, a settings change), so the
+  first tick after one costs about a full pass. The tail declines, and `calc`
+  runs, for a length that is not a positive whole number, a negative Donchian
+  `offset`, any VWAP `offset`, and a VWAP bar that changes how the history's
+  sessions are read. Such a tick leaves their output history as it was, so a
+  study built on one of their outputs (an EMA of an SMA) is now offered its own
+  tail. The other 89 built-ins still recompute in full.
+- The series pass allocates nothing per bar. The pane walks the visible bars in
+  place and each series keeps its draw items between frames; the candle, bar,
+  column and line renderers and the time axis build no object per bar, and the
+  line-family renderers, which draw every indicator plot, project into point
+  buffers they keep.
+- With the level of detail a zoomed-out frame paints marks by the plot's width,
+  not by the number of bars in view.
+- On the render bench (`docs/performance-notes.md`: the lowest p95 of five
+  runs on one desktop machine, headless Chromium), a forming-bar tick with ten
+  studies went from 1166.3 to 49.2 ms at 50,000 bars and from 5591.7 to
+  152.2 ms at 200,000 bars on `canvas2d`, and from 5785.6 to 167.5 ms at
+  200,000 bars on `webgl2`. A frame with all 200,000 bars in view went from
+  278.2 to 53 ms on `canvas2d`. A pan did not change. The 2.5.7 figures were
+  taken with other suites sharing the machine; one quiet run of 2.5.7 came
+  within 10% of every zoom-out and tick figure. A tick still grows with the
+  loaded history rather than the view, about 7.6 times from 10,000 to 200,000
+  bars on `canvas2d`.
+
+### Fixed
+
+- Browser endurance reads its canvas-changed hash and candle-pixel count from
+  the price plot only. Before, the price-axis last-price tag could satisfy both
+  gates over a frozen plot.
+
+### Documentation
+
+- README and ARCHITECTURE.md describe the repaint scope, the clock and
+  countdown rule, the single animation loop, the level of detail and the
+  in-place plot writes; `tests/docs-claims.test.ts` holds the repaint and loop
+  statements to the code in both directions.
+- ARCHITECTURE.md no longer sketches a time-scale operation queue in the
+  invalidation mask. `InvalidateMask.addTimeScaleOp` and `timeScaleOps` stay
+  for compatibility and are not deprecated; their documentation says the chart
+  never queues or reads an operation.
+- `docs/performance-notes.md` records the render bench, its budgets and the
+  comparison with 2.5.7, and the website's Performance page describes the frame
+  budgets and the nightly run. The skills and the site describe the level of
+  detail, primitive hit boxes, the built-ins' tails, the draw item lifetime and
+  what a custom indicator host's plot series must do.
+
+### Internal
+
+- `npm run bench` fails when a burst of ticks between two frames recomputes any
+  indicator other than exactly once. It used to print the result and pass
+  either way.
+- CI builds the render-parity baseline from the newest release tag, so
+  `tests/e2e/render-parity.spec.ts` compares pixels on every change instead of
+  skipping; `PARITY_BASELINE_REF` overrides it for a change meant to move
+  pixels. The parity spec now holds all 13 built-in series types to the
+  previous release's pixels at pixel ratios 1 and 2.
+- New browser specs compare studies through live ticks
+  (`indicator-tick-parity`) and the built-in tails (`indicator-tail-parity`)
+  with the previous release pixel for pixel, and check the repaint scope and
+  the one frame request per glide frame (`repaint-scope`). All three pass in
+  Chromium, Firefox and WebKit.
+- `node scripts/bench-pane.mjs` counts the marks a zoomed-out frame paints, the
+  allocation while panning and the hit tests per hover move, and fails on its
+  budgets; `node tests/bench/plot-tick.mjs <dist-dir>` times a ten-study tick
+  on any build.
+
+Saved layouts, drawings and workspace documents from 2.5.7 load unchanged, and
+no runtime dependencies or package tiers were added.
+
+Sizes, measured on this release and against 2.5.7 (Brotli, decimal kB): base
+engine 126.91 to 130.37, base plus trade 143.60 to 147.06, indicators 36.44 to
+40.38 (the sixteen tails), widget terminal 304.49 to 311.90 and every tier
+together 357.50 to 364.91; the trade, draw, widget, workspace, transform,
+profile and WebGL2 tiers are unchanged. The chart-only import grows from 80.87
+to 83.87 KiB: the level of detail, the reused draw items, the hit boxes, the
+kept time index and the pane-scoped repaint all run on every chart. Each budget
+is the smallest two-decimal value that passes.
+
 ## 2.5.7
 
 2026-09-26

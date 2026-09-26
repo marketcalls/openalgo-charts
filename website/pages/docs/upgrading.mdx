@@ -1,20 +1,90 @@
 ---
-title: Upgrading to 2.5.7
-description: Version 2.5.7 reorganises the chart's internals and changes nothing a host uses.
+title: Upgrading to 2.5.8
+description: Version 2.5.8 turns the level of detail on by default and writes study plots in place, and needs no migration.
 ---
 
-# Upgrading to 2.5.7
+# Upgrading to 2.5.8
 
-Version 2.5.7 needs no migration and no code change. It reorganises the chart's
-internal code; every public method, option, event and type is the same, saved
-layouts, drawings and workspace documents from 2.5.6 load unchanged, and charts
-paint the same pixels. The base engine is 1.52 kB Brotli larger.
+Version 2.5.8 needs no migration. Saved layouts, drawings and workspace documents
+from 2.5.7 load unchanged, no export was added or removed, and a chart that keeps
+the default zoom floor paints the same pixels. It changes one default and how a
+study writes its plots, and it makes several internal paths cheaper that a test
+of your own may count.
 
-If you import from the package entry points, nothing else applies. Code that
-reached into the chart's private members (never supported) will find several of
-them moved to internal collaborators.
+Check these points in your host:
+
+- **Level of detail (`conflate`) is on by default.** It engages only below about
+  one CSS px per bar, which the default `timeScale.minBarSpacing: 1` never reaches.
+  If your host lowers `minBarSpacing`, a chart zoomed out past that spacing now
+  draws one OHLC-preserving stick per device-pixel column, and line and histogram
+  series keep each column's extremes. OHLC bar series look thinner there, because
+  one stick's open and close ticks spill into fewer neighbouring columns than every
+  bar's did; the envelope is the same. Refresh screenshot baselines taken at those
+  zoom levels, or pass `conflate: false` to draw every bar. See
+  [Large datasets](/docs/data-loading#large-datasets-level-of-detail).
+- **`conflationFactor` has a new meaning.** It is now the column width in sticks;
+  it used to multiply a half-pixel threshold. A value you set therefore engages the
+  merge at a wider spacing than before. A chart type you registered with
+  `registerChartType`, even under a built-in name, still receives every bar.
+- **A custom `IndicatorHost`** (only if you implement it yourself; `createChart`
+  supplies its own). On a live tick a study now writes its plots through `update`
+  on the series your `addIndicatorSeries` returned, for the points that changed and
+  the last point, instead of one `setData` of the whole history. That series'
+  `update` must behave as `SeriesApi.update` documents: an item at an existing time
+  replaces that point, an older one included, and a newer one appends. A series
+  that ignores `update` shows the study frozen at its last whole write.
+- **Data written into a study's plot.** `indicator.series(key)` is for styling. Data
+  you write into it used to be overwritten on the next recompute; it now survives
+  wherever the study did not move a point. Put values of your own on a series of
+  your own.
+- **Primitive hit boxes (`hitBounds`).** Optional: a primitive without one is asked
+  on every pointer move as before. If you add one, it must hold every point your
+  `hitTest` answers, work from the same geometry `hitTest` uses, and change only
+  with the scales, the pane's layout, hover and drag, or your own state announced
+  through `host.requestUpdate()`; anything else it depends on (bar prices, say)
+  must call `requestUpdate` when it changes. A primitive that declares a box is
+  attached with a host object that wraps the chart's, so do not compare that host
+  with another by identity. See [Hit boxes](/docs/primitives-and-plugins#hit-boxes).
+- **`hitTest` can be skipped.** Besides the boxes, a pointer move stops at an exact
+  hit (`distance: 0`) among the primitives painted in front. Keep `hitTest` free of
+  side effects, and never return a negative `distance`.
+- **Draw items are reused.** The `items` array and its objects handed to a
+  `RendererEntry.draw` or an `IRenderBackend.drawSeries` are rewritten the next time
+  the pane draws that series. A renderer or backend that keeps them past the call
+  must copy them.
+- **The built-ins' `calcTail`.** Sixteen built-ins now carry one, as a property that
+  is not enumerable, so `{ ...getIndicator('ema'), calc: myCalc }` recomputes in
+  full through `myCalc` as before. Code that lists a built-in's keys sees no change;
+  code that tests `descriptor.calcTail` on one of the sixteen now finds a function.
+  Copy it by name (`calcTail: getIndicator('ema').calcTail`) only when your `calc`
+  returns the built-in's result unchanged. See
+  [the built-ins' tails](/docs/indicators#the-built-ins-tails-258).
+- **Glides step inside the chart's frame.** An injected `raf` now gets one request
+  per kinetic or zoom-glide frame instead of two, a glide's `pan` and `zoom` events
+  fire in the frame that paints them, and the autoscale easing during a glide starts
+  a frame earlier. Charts in a `LinkGroup` paint a glide one frame apart: the leader
+  in the frame it steps, a follower in the next, where both used to lag a frame
+  together. A history loader that throws while a glide runs now also skips that
+  frame's paint until the next change; catch inside the loader.
+- **Fewer repaints.** A tick that replaces the forming bar, and a study recompute,
+  no longer repaint the panes they do not change, so a test counting
+  `Pane.paintBase` calls sees fewer. The pixels are those of a full repaint. While
+  the bar countdown is on, every pane with a price series still repaints on each
+  tick, and the bottom pane while the corner clock is on.
+
+New and optional: `IPrimitive.hitBounds`. See
+[Primitives and plugins](/docs/primitives-and-plugins),
+[Indicators](/docs/indicators) and the
+[release notes](/docs/release-notes#258).
 
 ## Earlier upgrades
+
+Version 2.5.7 needed no migration and no code change. It reorganised the chart's
+internal code; every public method, option, event and type stayed the same, saved
+layouts, drawings and workspace documents from 2.5.6 loaded unchanged, and charts
+painted the same pixels. The base engine grew by 1.52 kB Brotli. Code that reached
+into the chart's private members (never supported) found several of them moved to
+internal collaborators.
 
 Version 2.5.6 needed no migration. Saved layouts, drawings and workspace
 documents from 2.5.5 loaded unchanged, and every new contract was optional.

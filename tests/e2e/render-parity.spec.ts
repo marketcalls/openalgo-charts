@@ -170,3 +170,115 @@ test('paints the same pixels as the baseline build at every zoom', async ({ page
   }
   expect(errors).toEqual([]);
 });
+
+/**
+ * Every built-in series type, not only the candles and volume above: the
+ * series pass writes its draw items in place and the renderers work their
+ * geometry out without an object per bar (candles, OHLC and high-low bars,
+ * columns, and the line family's reused point buffers), and none of that may
+ * move a pixel. Per-bar colours, a whitespace gap and previous-close colouring
+ * take the renderers down their less common paths, and a pixel ratio of two
+ * checks the device-pixel snapping as well as the one-to-one case.
+ */
+const TYPES = [
+  'candlestick', 'hollow-candle', 'volume-candle', 'bar', 'high-low',
+  'line', 'line-markers', 'step', 'area', 'hlc-area', 'baseline', 'column', 'histogram',
+];
+
+for (const dpr of [1, 2]) {
+  test(`paints every built-in series type as the baseline build does at a pixel ratio of ${dpr}`, async ({ browser }) => {
+    const context = await browser.newContext({ deviceScaleFactor: dpr, viewport: { width: W + 40, height: H + 40 } });
+    const page = await context.newPage();
+    const probe = await page.request.get('/dist-baseline/openalgo-charts.mjs');
+    test.skip(!probe.ok(), 'no dist-baseline/ (run: node scripts/build-baseline.mjs)');
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto('/');
+
+    const report = await page.evaluate(
+      async ({ w, h, types }) => {
+        interface ChartLike {
+          addSeries: (t: string, o?: unknown) => { setData: (b: unknown[]) => void };
+          applySize: (w: number, h: number) => void;
+          fitContent: () => void;
+          destroy: () => void;
+          timeScale: { setBarSpacing: (n: number) => void };
+        }
+        type Mod = { createChart: (el: HTMLElement, o?: unknown) => ChartLike };
+        const [next, base] = (await Promise.all([
+          import('/dist/openalgo-charts.mjs'),
+          import('/dist-baseline/openalgo-charts.mjs'),
+        ])) as unknown as [Mod, Mod];
+
+        const bars: Array<Record<string, number | string>> = [];
+        let p = 100;
+        for (let i = 0; i < 400; i++) {
+          const o = p;
+          p += Math.sin(i / 7) * 1.2 + ((i % 5) - 2) * 0.4;
+          const bar: Record<string, number | string> = {
+            time: 1_700_000_000 + i * 300, open: o, high: Math.max(o, p) + 0.8, low: Math.min(o, p) - 0.8, close: p, volume: 100 + (i % 37) * 9,
+          };
+          // A study that colours some bars by its own rule, and one gap of whitespace.
+          if (i % 11 === 3) bar.color = '#aa44ff';
+          if (i >= 200 && i < 206) { bar.open = NaN; bar.high = NaN; bar.low = NaN; bar.close = NaN; }
+          bars.push(bar);
+        }
+        const frame = (): Promise<void> =>
+          new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+        const shoot = async (mod: Mod, type: string, spacing: number, variant: number): Promise<Uint8ClampedArray[]> => {
+          const host = document.createElement('div');
+          host.style.cssText = `position:fixed;left:0;top:0;width:${w}px;height:${h}px;z-index:9999`;
+          document.body.appendChild(host);
+          const chart = mod.createChart(host, { priceAxisWidth: 64 });
+          chart.applySize(w, h);
+          const style = variant === 0 ? {}
+            : { colorByPreviousClose: true, highColor: '#ff8800', lowColor: '#0088ff', baseValue: 101, lineStyle: 'dashed', markers: true };
+          chart.addSeries(type, { style }).setData(bars);
+          chart.fitContent();
+          chart.timeScale.setBarSpacing(spacing);
+          await frame();
+          const shot = Array.from(host.querySelectorAll('canvas')).map((cv) => {
+            const c = cv as HTMLCanvasElement;
+            const ctx = c.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+            return ctx.getImageData(0, 0, c.width, c.height).data;
+          });
+          chart.destroy();
+          host.remove();
+          return shot;
+        };
+        const out: Array<{ label: string; differing: number; nonBackground: number }> = [];
+        for (const type of types) {
+          for (const [spacing, variant] of [[1.5, 0], [4, 1], [13, 0]] as const) {
+            const a = await shoot(next, type, spacing, variant);
+            const b = await shoot(base, type, spacing, variant);
+            let differing = 0;
+            const counts = new Map<number, number>();
+            for (let c = 0; c < Math.min(a.length, b.length); c++) {
+              const x = a[c], y = b[c];
+              if (x.length !== y.length) { differing += Math.abs(x.length - y.length) / 4; continue; }
+              for (let i = 0; i < x.length; i += 4) {
+                if (x[i] !== y[i] || x[i + 1] !== y[i + 1] || x[i + 2] !== y[i + 2] || x[i + 3] !== y[i + 3]) differing++;
+                if (x[i + 3] !== 0) {
+                  const key = (x[i] << 24) | (x[i + 1] << 16) | (x[i + 2] << 8) | x[i + 3];
+                  counts.set(key, (counts.get(key) ?? 0) + 1);
+                }
+              }
+            }
+            let total = 0, most = 0;
+            for (const n of counts.values()) { total += n; if (n > most) most = n; }
+            out.push({ label: `${type} at ${spacing} px, variant ${variant}`, differing, nonBackground: total - most });
+          }
+        }
+        return out;
+      },
+      { w: W, h: H, types: TYPES },
+    );
+
+    for (const r of report) {
+      expect(r.nonBackground, `${r.label} painted only background`).toBeGreaterThan(2000);
+      expect(r.differing, `${r.label} differs from baseline in ${r.differing} pixels`).toBe(0);
+    }
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+}

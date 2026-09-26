@@ -21,6 +21,7 @@
 import { InvalidationLevel } from './invalidate-mask';
 import type { Chart } from './chart';
 import type { PreservedScaleFormats } from './chart-state';
+import type { Pane } from './pane';
 import type { PriceScale } from '../scale/price-scale';
 import type { SeriesApi, PriceScaleId } from '../model/series';
 import { replayWindow, observeReplayWindow } from '../model/replay-window';
@@ -153,6 +154,7 @@ export class ChartStudies {
     validateIndicatorScaleAssignment(descriptor, options.priceScaleId, plotPriceScaleIds,
       options.paneIndex ?? (descriptor.placement === 'onchart' ? this._host._primaryIndex() : this._host._panes.length), this._host._primaryIndex());
     this._flushIndicators();
+    const before = this._host._series._sharedAxis();
     const reserved = new Set([...this._host._indicatorReservedIds, ...this._host._indicators.map(item => item.id)]);
     for (const edges of planIndicatorDependencies(this._host._indicators.map(item => item.dependencyNode())).dependencies.values()) {
       for (const edge of edges) reserved.add(edge.source.instanceId);
@@ -169,6 +171,8 @@ export class ChartStudies {
       policy,
     );
     this._host._indicators.push(instance);
+    // Its first pass ran in the constructor, outside a flush.
+    this._invalidateStudies([instance.id], before);
     this._host._legendStack._restackLegends();
     this._host._indicatorReservedIds.add(instance.id);
     this._queueIndicatorDependents(instance.id, true);
@@ -321,9 +325,15 @@ export class ChartStudies {
     return {
       assignIndicatorScale: (id, series, primitives, commit) => this._assignIndicatorScale(id, series, primitives, commit),
       bindIndicatorPrimitiveScale: (primitive, scaleId) => {
-        this._host._panes.find(pane => pane.hasPrimitive(primitive))?.bindPrimitiveScale(primitive, scaleId);
+        const pane = this._host._panes.find(item => item.hasPrimitive(primitive));
+        pane?.bindPrimitiveScale(primitive, scaleId);
+        // A data-derived level is bound again each time it moves, so this runs
+        // inside a recompute. Only the pane whose scale now counts the
+        // primitive has changed; a new axis column repaints every pane itself.
         this._host._layout._recomputeAxisColumns();
-        this._host.invalidate(mask => mask.invalidateGlobal(InvalidationLevel.Full));
+        const index = pane === undefined ? -1 : this._host._panes.indexOf(pane);
+        this._host.invalidate(mask => index < 0 ? mask.invalidateGlobal(InvalidationLevel.Full)
+          : mask.invalidatePane(index, { level: InvalidationLevel.Full, autoScale: true }));
       },
       setIndicatorRange: (id, paneIndex, scaleId, range, series) => {
         const previous = this._host._indicatorRanges.get(id);
@@ -632,7 +642,12 @@ export class ChartStudies {
     // untouched, so nothing about the axis or the base index moves, and routing
     // it through the data path would recompute every indicator mid-recompute.
     this._host._dataLayer.setSeriesData(dataId, out);
-    this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
+    // The colours are on the price bars alone, so only their pane repaints.
+    const pane = this._host._panes.findIndex(item => item.series().some(record => record.dataId === dataId));
+    this._host.invalidate((m) => {
+      if (pane < 0) m.invalidateGlobal(InvalidationLevel.Light);
+      else m.invalidatePane(pane, { level: InvalidationLevel.Light, autoScale: false });
+    });
   }
 
   /**
@@ -659,8 +674,8 @@ export class ChartStudies {
 
   /**
    * Recompute every stale indicator. Reentrant-guarded: an indicator writes its
-   * plots with `series.setData`, which re-enters the same data-mutation path
-   * that marked us dirty.
+   * plots with `series.setData`, or on a live tick with `series.update`, and
+   * either re-enters the same data-mutation path that marked us dirty.
    */
   public _flushIndicators(): void {
     if (!this._host._indicatorsDirty && this._host._indicatorRefreshes.size === 0) return;
@@ -671,6 +686,7 @@ export class ChartStudies {
       return;
     }
     const all = this._host._indicatorsDirty;
+    const before = this._host._series._sharedAxis();
     const order = planIndicatorDependencies(this._host._indicators.map(item => item.dependencyNode())).order;
     const work = new Map(this._host._indicatorRefreshes);
     this._host._indicatorRefreshes.clear();
@@ -678,13 +694,14 @@ export class ChartStudies {
     this._host._indicatorsDirty = false;
     this._recomputing = true;
     this._indicatorWork = work;
-    this._indicatorProcessed = new Set();
+    const processed = new Set<string>();
+    this._indicatorProcessed = processed;
     try {
       for (const id of order) {
-        if (!work.has(id) || this._indicatorProcessed.has(id)) continue;
+        if (!work.has(id) || processed.has(id)) continue;
         const indicator = this._host._indicators.find(item => item.id === id);
         if (!indicator) continue;
-        this._indicatorProcessed.add(id);
+        processed.add(id);
         indicator.recompute(work.get(id));
       }
       for (const indicator of this._host._indicators) indicator.republishBarColors();
@@ -692,7 +709,36 @@ export class ChartStudies {
       this._indicatorWork = null;
       this._indicatorProcessed = null;
       this._recomputing = false;
+      this._invalidateStudies(processed, before);
     }
+  }
+
+  /**
+   * Repaint what recomputing these studies changed: every pane holding one of
+   * their plots or primitives, which is each study's own pane and any pane
+   * its output targets, at `Full` so each re-measures its scale. Nothing else
+   * has changed, unless the pass moved the shared index or the time scale,
+   * which every pane follows. `before` is `ChartSeries._sharedAxis` from
+   * before the pass.
+   *
+   * Asked for here as well as by each plot's write, because not everything a
+   * pass changes is a series: a level line or an attached primitive on a
+   * pane with no plot of the study still widens that pane's range.
+   */
+  private _invalidateStudies(ids: Iterable<string>, before: readonly number[]): void {
+    const panes = new Set<Pane>();
+    for (const id of ids) {
+      const resources = this._host._indicators.find(item => item.id === id)?.renderResources();
+      for (const { api } of resources?.series ?? []) {
+        const pane = this._host._seriesOwners.get(api)?.pane;
+        if (pane !== undefined) panes.add(pane);
+      }
+      for (const { primitive } of resources?.primitives ?? []) {
+        const pane = this._host._panes.find(item => item.hasPrimitive(primitive));
+        if (pane !== undefined) panes.add(pane);
+      }
+    }
+    this._host._series._invalidateWrite(panes, before);
   }
 
   private _queueIndicatorDependents(id: string, refresh: boolean): void {

@@ -142,7 +142,9 @@ describe('native dependent study inputs', () => {
     const h = mount();
     let tails = 0;
     const id = descriptor({ calcTail: () => { tails++; return null; } });
-    const producer = h.chart.addIndicator('sma', { length: 2 });
+    // The built-in average has a tail of its own and a spread of it does not,
+    // so the producer here is a spread.
+    const producer = h.chart.addIndicator(descriptor(), { length: 2 });
     const consumer = h.chart.addIndicator(id, { length: 2, source: reference(producer.id) });
     h.source.update(bar(180, 9));
     expect(consumer.values().ma).toEqual([null, null, 3, 5.5]);

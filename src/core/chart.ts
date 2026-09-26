@@ -189,6 +189,8 @@ export class Chart {
   private readonly _priceAxisWidth: number;
   private readonly _timeAxisHeight: number;
   private _pending: InvalidateMask | null = null;
+  /** While a frame steps the glides and the studies: what they invalidate is painted by that frame. */
+  private _framing = false;
   private _scaleMutationDepth = 0;
   // Every collaborator below takes the chart itself as its host. The cast is
   // safe because each host interface types every member from Chart's own
@@ -422,7 +424,7 @@ export class Chart {
     this._zoomAnchor = options.zoomAnchor ?? 'cursor';
     this._doubleClick = options.doubleClick ?? 'reset';
     this._movablePrimaryPane = options.movablePrimaryPane === true;
-    this._conflate = options.conflate ?? false;
+    this._conflate = options.conflate ?? true;
     this._conflationFactor = options.conflationFactor ?? 1;
     // Resolved here, before the first pane, so an unregistered explicit choice
     // fails at construction rather than on the first frame.
@@ -599,10 +601,7 @@ export class Chart {
     const stopPan = wasPan !== false && this._navigation.panEnabled === false;
     const stopZoom = wasZoom !== false && this._navigation.zoomEnabled === false;
     if (stopPan || stopZoom) {
-      if (stopZoom) this._motion._navigationEpoch++;
-      if (stopPan) this._motion._stopKinetic();
-      if (stopZoom) this._motion._stopZoomGlide();
-      this._motion._autoscaleTime = null;
+      this._motion._stopDisabled(stopPan, stopZoom);
       if (this._input._pinch !== null || (stopPan && this._input._dragging)
         || (stopZoom && (this._input._axisDrag === 'price' || this._input._axisDrag === 'time'))) {
         this._input._navigationCancelled = true;
@@ -2044,7 +2043,7 @@ export class Chart {
   public invalidate(build: (mask: InvalidateMask) => void): void {
     if (this._pending === null) this._pending = new InvalidateMask();
     build(this._pending);
-    if (this._scaleMutationDepth === 0) this._loop.requestFrame();
+    if (this._scaleMutationDepth === 0 && !this._framing) this._loop.requestFrame();
   }
 
   public applySize(width: number, height: number): void {
@@ -2332,21 +2331,22 @@ export class Chart {
 
   private _onFrame(): void {
     if (this._destroyed || this._destroying) return;
-    // Before the mask is taken, not after: recomputing writes plot data, which
-    // invalidates, and that invalidation has to land in this frame's mask
-    // rather than in the next frame's.
-    this._studies._flushIndicators();
-
+    // Before the mask is taken, not after: a glide step moves the time scale
+    // and recomputing writes plot data, and what either invalidates belongs to
+    // this frame's mask, so neither asks for a frame of its own meanwhile.
+    this._framing = true;
+    let moving = false;
+    try { moving = this._motion._step(); this._studies._flushIndicators(); } finally { this._framing = false; }
     const mask = this._pending;
     this._pending = null;
-    if (mask === null || mask.isEmpty()) return;
+    // The next step is asked for once this one is painted, so a scheduler that runs a frame at once paints each in turn.
+    try { if (mask !== null && !mask.isEmpty()) this._paintFrame(mask); } finally { if (moving && !this._destroyed) this._loop.requestFrame(); }
+  }
 
+  private _paintFrame(mask: InvalidateMask): void {
     const global = mask.globalLevel;
     let easing = false;
-    const now = this._now();
-    const fraction = this._motion._autoscaleTime === null || ++this._motion._autoscaleFrames >= 90
-      ? 1 : 1 - Math.exp(-Math.max(1, now - this._motion._autoscaleTime) / 80);
-    if (this._motion._autoscaleTime !== null) this._motion._autoscaleTime = now;
+    const fraction = this._motion._autoscaleFraction();
     // Keep the actual pointer untouched for drawing and hit tests. Resolve at
     // paint time so toggling the option or changing the viewport takes effect
     // without waiting for another pointer event, across every pane at once.

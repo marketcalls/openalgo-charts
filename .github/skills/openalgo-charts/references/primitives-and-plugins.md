@@ -50,6 +50,8 @@ interface IPrimitive {
   draw(ctx: CanvasRenderingContext2D, rc: PrimitiveRenderContext): void; // required
   autoscaleInfo?(): { min: number; max: number } | null;
   hitTest?(x: number, y: number, rc: PrimitiveRenderContext): PrimitiveHit | null;
+  // The box, in hitTest's coordinates, outside which hitTest answers null; null: never hit.
+  hitBounds?(rc: PrimitiveRenderContext): { left: number; top: number; right: number; bottom: number } | null;
   attached?(host: PrimitiveHost): void;
   detached?(): void;
 }
@@ -60,7 +62,7 @@ interface PrimitiveHit {
   externalId: string;
   hoverKey?: string;     // optional transient subtarget identity, separate from click IDs
   zOrder: ZOrder;
-  distance: number;      // media px from the cursor; smaller wins
+  distance: number;      // media px from the cursor; smaller wins; never negative
   cursor?: string;
   draggable?: boolean;   // arms a two-axis drag on press
   priceScale?: PriceScale; // coordinate scale for bound drag prices
@@ -182,6 +184,28 @@ Namespacing convention used by the built-ins, one primitive, several targets:
 | `EventMarkers` | a unique caller `event.id` for a single event; a generated stable handle for anonymous events, duplicate IDs and clusters; details retain original event IDs |
 
 Record hit geometry during `draw` and read it in `hitTest`, that is how `PriceLine`, `BuySellButtons`, and `PaneLegend` stay in sync with what was actually painted, and it means a primitive that has not drawn yet correctly reports no hit.
+
+### Hit boxes (`hitBounds`)
+
+A pointer move asks `hitTest` of every primitive on the pane unless it declares where it can answer. `hitBounds(rc)` returns that box in the same media px, relative to the plot (edges inclusive, a side may be infinite), or `null` when nothing of it can be hit. The pane then asks `hitTest` only when the point is inside, so 500 annotations cost the handful near the pointer (4.5 asked per move instead of 500 in `node scripts/bench-pane.mjs`).
+
+```ts
+hitBounds(rc) {
+  const x0 = rc.timeScale.indexToX(rc.dataLayer.timeToIndexFloat(this.t0));
+  const x1 = rc.timeScale.indexToX(rc.dataLayer.timeToIndexFloat(this.t1));
+  const y0 = rc.priceScale.priceToY(this.p0), y1 = rc.priceScale.priceToY(this.p1);
+  const pad = GRAB + 0.5; // cover everything hitTest answers, rounding included
+  return { left: Math.min(x0, x1) - pad, top: Math.min(y0, y1) - pad, right: Math.max(x0, x1) + pad, bottom: Math.max(y0, y1) + pad };
+}
+```
+
+- **The box must hold every point `hitTest` can answer.** A point outside it is never asked, so a box that is too tight loses hits. A NaN edge makes the pane ask anyway.
+- **The pane keeps the box** while nothing it follows changes: the time scale and the bars' times, the pane's price scales, size and axes, the pixel ratio, hover and drag, the theme and session calendar, and the primitive's own state, announced through `host.requestUpdate()`. A box that depends on anything else (bar prices) must request an update when that changes, or leave the hook out.
+- **Compute it from the same geometry `hitTest` uses**, `rc` or what the last `draw` recorded. A box asked for between a change and the frame that paints it is asked for again once that frame is painted.
+- The pane also stops walking at an exact hit (`distance: 0`) among the primitives painted in front, which nothing after it can outrank. `hitTest` must be free of side effects either way: a primitive can be skipped.
+- **A primitive that declares `hitBounds` is attached with a host that wraps the chart's**, so the pane hears its `requestUpdate`. Do not compare that host with another primitive's by identity.
+
+The hook arrived in 2.5.8. The built-in primitives and the draw tier's layers do not declare boxes yet, so they are asked on every move as before.
 
 ## `autoscaleInfo`
 
@@ -481,7 +505,7 @@ registerChartType('range-band', {
 chart.addSeries('range-band').setData(bars);
 ```
 
-`RendererEntry` in full: `defaultStyle: SeriesStyle`, `isPriceSeries: boolean`, `draw(ctx, items, toY, barSpacing, dpr, style, rc)`, `extents(bar, style)`. `items` is `{ x: number /* bar centre, media px */, bar: Bar }[]`, already culled to the visible range and conflated when `conflate` is on. `rc` is `{ plotHeight, maxVolume, theme }`, media px, the visible-window volume peak, and the palette.
+`RendererEntry` in full: `defaultStyle: SeriesStyle`, `isPriceSeries: boolean`, `draw(ctx, items, toY, barSpacing, dpr, style, rc)`, `extents(bar, style)`. `items` is `{ x: number /* bar centre, media px */, bar: Bar }[]`, already culled to the visible range. A custom type is never reduced by the level of detail (`conflate`), even one registered under a built-in name; the built-in renderers are below one CSS px per bar. The array and its objects belong to the pane, which rewrites them in place the next time it draws the series: copy anything kept past that. `rc` is `{ plotHeight, maxVolume, theme }`, media px, the visible-window volume peak, and the palette.
 
 `registeredChartTypes()` lists every registered id. `'point-figure'` and `'kagi'` live in the transform tier and only resolve once `openalgo-charts/transform` is imported.
 
@@ -497,7 +521,7 @@ chart.addSeries('range-band').setData(bars);
 
 **`rc.bars()` returns the live array the data layer holds.** Treat it as read-only, and guard the call, a synthetic render context may not supply it.
 
-**`series.update()` schedules a `Full` repaint,** which re-runs every `autoscaleInfo()` and every `draw`. Cache anything expensive across frames.
+**`series.update()` schedules a `Full` repaint** of the panes it changes (the series' own pane and those of the studies computed from it; every pane when it appends a bar), which re-runs every `autoscaleInfo()` and every `draw` on them. Cache anything expensive across frames.
 
 Related: [core-api](core-api.md) (`addPrimitive`, invalidation levels, the event bus), [chart-types](chart-types.md) (the built-in renderers), [drawing-tools](drawing-tools.md) (`DrawingLayer`, a primitive built on this contract), [trading](trading.md) and [trade-tier](trade-tier.md) (order lines and `tradeHost`), [indicators](indicators.md) (`IndicatorFill`, `PaneLegend`), [events-and-state](events-and-state.md) (click and drag routing), [scales-and-panes](scales-and-panes.md) (which scale a primitive sees).
 

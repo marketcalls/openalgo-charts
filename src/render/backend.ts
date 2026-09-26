@@ -48,6 +48,10 @@ export interface IRenderBackend {
    * Paint one series. Same contract as `RendererEntry.draw` minus the context:
    * `priceToY` and `items[].x` are media px, and the renderer snaps to device
    * pixels with `dpr` itself.
+   *
+   * `items` and the objects in it belong to the pane, which rewrites them in
+   * place the next time it draws this series, so a backend that keeps any of
+   * it past that (a batch held across frames, say) copies what it keeps.
    */
   drawSeries(
     entry: RendererEntry,

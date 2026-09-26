@@ -44,6 +44,13 @@ registry: for a host bringing its own backend, and for a test that wants to see 
 pane asks a backend to paint. A factory that returns `null` gets the 2D backend for that
 pane.
 
+The `items` array `drawSeries` receives, and the objects in it, belong to the pane: it
+reuses them and rewrites them in place the next time it draws that series (2.5.8), so a
+backend that keeps them past the call must copy them. `priceToY` is one stable function
+per series. Under the level of detail (`conflate`, on by default) a built-in type's items
+are one merged stick or a few kept bars per device-pixel column once bars are narrower
+than about one CSS px.
+
 <RunnableExample height={320} caption="Pan and zoom. With WebGL2 available the candles are batched into one GPU draw call per frame and composited into the pane's own canvas; everything else about the chart is unchanged." code={`const chart = lib.createChart(el, { renderer: 'auto' });
 const bars = lib.generateBars(1700000000, 600, 3600);
 chart.addSeries('candlestick').setData(bars);
