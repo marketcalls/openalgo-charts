@@ -68,9 +68,16 @@ animation frames. The series pass on each pane goes through a render backend
 port: the shipped Canvas2D backend is the default, the `openalgo-charts/webgl`
 tier puts a WebGL2 backend behind the same port, and `exportSVG` runs the same
 paint into a serialising context. See
-[Render Backends & SVG Export](/docs/rendering). A source-bar update currently repaints base content across
-active panes, so [Performance & Operations](/docs/performance-and-operations)
-covers the retained-history and canvas-memory budgets for sustained sessions.
+[Render Backends & SVG Export](/docs/rendering). A live tick that replaces the
+forming bar repaints the price pane and the panes of the studies computed from it,
+and a study recompute repaints only the panes its output lands on; an appended bar,
+which moves the shared time scale, repaints every pane, and the corner clock and bar
+countdown keep the panes that show them repainting while they are on. Kinetic scroll
+and the eased wheel zoom are stepped inside the same frame. A zoomed-out chart draws
+one stick per device-pixel column (the level of detail, on by default). Every study
+still does work over its full history on a tick frame, so
+[Performance & Operations](/docs/performance-and-operations) covers the
+retained-history and canvas-memory budgets for sustained sessions.
 
 **Drawables.** [Chart types](/docs/chart-types), [indicators](/docs/indicators),
 [drawing tools](/docs/drawing-tools) and [primitives](/docs/primitives-and-plugins).

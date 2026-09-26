@@ -25,7 +25,7 @@ with no runtime dependencies.
 npm install openalgo-charts
 ```
 
-Current version: **2.5.7**, an internal release: the chart's code is split by responsibility with no change to the API or to what it paints. 2.5.6 added one undo timeline for the whole chart, study policies, one draw order for studies and drawings, extended hours and adjusted prices as their own series, study inputs that follow other settings, and the space past the last bar laid out in the venue's hours.
+Current version: **2.5.8**, a rendering performance release: a live tick no longer rebuilds the time index or rewrites every study plot, sixteen common built-in studies update without a pass over the whole history, a tick or a study recompute repaints only the panes it changes, a zoomed-out chart draws one stick per pixel column (the level of detail, now on by default), primitives can bound their hit tests, and a render bench holds frame budgets per bar count in CI. 2.5.7 split the chart's code by responsibility with no change to the API or to what it paints.
 See the [changelog](./CHANGELOG.md) for release notes.
 
 ## Quick start
@@ -562,12 +562,13 @@ npm run test:endurance # node endurance-harness tests: 7 cases
 npm run build      # Rollup -> dist/ (minified ESM per tier + types)
 npm run size       # size-limit (Brotli) against the budget
 npm run e2e        # Playwright Chromium smoke tests
+npm run bench:render # render bench: pan, zoom-out and tick frame budgets per bar count
 npm run verify     # lint + types + unit + endurance harness + build + demo + dts + size + shake
 ```
 
 ## Principles
 
-- **Canvas rendering, two canvases per pane**: a base canvas for the chart, its axes and the price lines (order and position lines included), and an overlay canvas for the crosshair, the drawings and the other top-layer primitives, so a crosshair move repaints only the overlay. No SVG and no DOM element per bar; SVG appears only in `exportSVG` output and in the icon markup of the draw and widget tiers. The optional WebGL tier draws on a shared offscreen surface and copies into the base canvas. Frame times are recorded, not promised: see [browser endurance](./docs/browser-endurance.md).
+- **Canvas rendering, two canvases per pane**: a base canvas for the chart, its axes and the price lines (order and position lines included), and an overlay canvas for the crosshair, the drawings and the other top-layer primitives, so a crosshair move repaints only the overlay. No SVG and no DOM element per bar; SVG appears only in `exportSVG` output and in the icon markup of the draw and widget tiers. The optional WebGL tier draws on a shared offscreen surface and copies into the base canvas. Frame times are budgeted per bar count by the render bench ([performance notes](./docs/performance-notes.md)) and recorded over long sessions by [browser endurance](./docs/browser-endurance.md).
 - **Repaint what changed, on one loop**: a live tick repaints the price pane and the panes of the studies computed from it, and a study recompute repaints only the panes its output lands on; a write that moves the shared time scale, such as an appended bar, repaints every pane. The bottom pane repaints with them while the corner clock is on, and every pane with a price series while the bar countdown is on, since both read the time as their pane paints. Kinetic scroll and the eased wheel zoom are stepped inside the chart's own animation frame, so each frame paints the step it made.
 - **Gapless time axis by default**: weekends, holidays, and session breaks collapse.
 - **Registries, not switches**: chart types, indicators, and drawing tools are all descriptors. Adding one is a registration, never a core change.
@@ -576,14 +577,14 @@ npm run verify     # lint + types + unit + endurance harness + build + demo + dt
 
 ## Status &amp; limitations
 
-Version **2.5.7**. All engine build phases are implemented. Upgrading a 1.9.x host: [Migrating to 2.0](./docs/migrating-to-2.md).
+Version **2.5.8**. All engine build phases are implemented. Upgrading a 1.9.x host: [Migrating to 2.0](./docs/migrating-to-2.md).
 
 Known gaps, stated plainly:
 
 - **Footprint and order flow need trade-by-trade data classified bid/ask.** OpenAlgo does not store this by default, so it is live-session-only unless you add a tick recorder: `FootprintAggregator` is the live path. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) §6A.
 - **Only `Footprint` is theme-aware among the profile primitives.** `VolumeProfile`, `MarketProfile` and `HorizontalProfile` never read `rc.theme`; their defaults are dark-tuned, so a light theme needs explicit colours. `HorizontalProfile` also hardcodes its POC / value-area line colours and has no `setOptions`.
 - The OpenAlgo **WS/trade adapter wire schemas** ship with injectable transports and offline tests, but the exact field names should be verified against your running OpenAlgo build.
-- **Large histories slow the live path.** With 150 bars in view, two charts and five studies each, the recorded frame-interval p95 is 17 ms at 2,000 bars per chart and 717 ms at 50,000. The view is the same in both, so the extra time is work over the whole history, such as recomputing every study on each tick. The workload, machine and commands are in [browser endurance](./docs/browser-endurance.md); bound retained history for sustained sessions.
+- **Large histories slow the live path.** With 150 bars in view, two charts and five studies each, the frame-interval p95 recorded on 2.5.5 was 17 ms at 2,000 bars per chart and 717 ms at 50,000. The view is the same in both, so the extra time is work over the whole history, such as recomputing every study on each tick. The workload, machine and commands are in [browser endurance](./docs/browser-endurance.md); that workload has not been rerun since. 2.5.8 cut the tick: a study writes only the plot points that moved and sixteen common built-ins step from the last bar, and on the render bench a ten-study tick at 50,000 bars fell from a p95 of 1166.3 ms to 49.2 ms on `canvas2d` ([performance notes](./docs/performance-notes.md)). It still grows with the loaded history rather than the view, so bound retained history for sustained sessions.
 - **The WebGL2 backend draws the standard chart types.** Kagi, point-and-figure and custom chart types, drawings, text and every primitive stay on the 2D context; `renderer: 'auto'` moves the series pass of the standard types to the GPU and is not a second renderer for everything. Its frame time against Canvas2D has not been measured.
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) §13a for the full deferred list.

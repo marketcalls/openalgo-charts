@@ -68,7 +68,7 @@ does not need to be loaded again.
 |---|---|---|---|
 | `document` | `Document` | `container.ownerDocument` | Element factory (SSR / multi-window). |
 | `pixelRatio` | `() => number` | `window.devicePixelRatio ?? 1` | Called per frame; canvases resize to media x dpr. Read again whenever the device ratio changes: the chart watches a `(resolution: Xdppx)` query, made again for each new ratio, and the window's `resize`, and re-sizes and repaints every canvas at once. |
-| `raf` | `{ schedule, cancel? }` | `requestAnimationFrame` | Injectable frame scheduler (deterministic tests). Supplied, it runs every frame the chart paints, including the repaint after a resize or a new pixel ratio, which the default one paints at once inside the callback that reports it. |
+| `raf` | `{ schedule, cancel? }` | `requestAnimationFrame` | Injectable frame scheduler (deterministic tests). Supplied, it runs every frame the chart paints, including the repaint after a resize or a new pixel ratio, which the default one paints at once inside the callback that reports it. Kinetic scroll and the eased wheel zoom are stepped inside those frames (since 2.5.8) and ask it for one frame per glide frame. |
 | `theme` | `ChartTheme` | `DEFAULT_THEME` | See [themes-and-styling](themes-and-styling.md). |
 | `priceAxisWidth` | `number` | `56` | Media px. Also the width reserved for a left axis when one exists. |
 | `timeAxisHeight` | `number` | `22` | Media px, bottom pane only. |
@@ -606,9 +606,9 @@ Each pane owns two stacked canvases: `pane.base` (z-index 0: background, grid, s
 | `Light` | 2 | Repaint the base canvas at current scales, no rescale. |
 | `Full` | 3 | Autoscale every price scale, then repaint everything. |
 
-The effective level per pane is `max(globalLevel, paneLevel)`. Crosshair moves raise `Cursor` globally; hover changes raise `Light` globally; a primitive's `requestUpdate` raises `Light` on its pane only; data mutations, pan, zoom, resize, theme and grid changes raise `Full` globally.
+The effective level per pane is `max(globalLevel, paneLevel)`. Crosshair moves raise `Cursor` globally; hover changes raise `Light` globally; a primitive's `requestUpdate` raises `Light` on its pane only; pan, zoom, resize, theme and grid changes raise `Full` globally. A data write raises `Full` (with an autoscale) on the panes whose data it changed when it leaves the shared index and the time scale's window where they were, and globally when it moves them (since 2.5.8): a tick that replaces the forming bar repaints its series' pane, and a study recompute the panes its output lands on, while an appended bar, a host `setData` or `prependData` and a study that opens a pane repaint every pane. While `axisChrome.sessionClock` is on such a pane-scoped write also raises `Light` on the bottom pane, and while `axisChrome.barCountdown` is on, on every pane with a price series, because neither reading has a timer.
 
-**Every `series.update()` schedules a `Full` repaint.** A high-frequency feed therefore re-autoscales each frame; batch ticks upstream (see [feeds-and-live](feeds-and-live.md)) rather than calling `update` per tick.
+**Every `series.update()` schedules a `Full` repaint** of the panes it changes. A high-frequency feed therefore re-autoscales those panes each frame; batch ticks upstream (see [feeds-and-live](feeds-and-live.md)) rather than calling `update` per tick.
 
 ## Render backends
 
@@ -627,6 +627,8 @@ interface IRenderBackend {
   destroy(): void;
 }
 ```
+
+The `items` array `drawSeries` receives, and the objects in it, belong to the pane (since 2.5.8): the pane reuses them and rewrites them in place the next time it draws that series, so a backend that keeps them past the call must copy them. `priceToY` is one stable function per series. Under the level of detail (`conflate`, on by default) a built-in type's items are one merged stick or a few kept bars per device-pixel column, not every bar.
 
 `mount` takes the pane's existing 2D context as its second argument (the pane's base `CanvasLayer` already asked the canvas for one; a second `getContext` would split a frame across two contexts). A backend that owns its canvas ignores it.
 

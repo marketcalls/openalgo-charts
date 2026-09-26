@@ -8,6 +8,74 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.5.8
+
+2026-09-26
+
+Rendering performance: a live tick costs far less on a deep history, repaints only
+the panes it changes, and a zoomed-out chart draws one stick per pixel column.
+
+### Added
+
+- **Primitive hit boxes.** An optional `IPrimitive.hitBounds(rc)` returns the box
+  outside which the primitive's `hitTest` answers null, so a pointer move asks only
+  the primitives near it. The box must hold every point `hitTest` can answer, must
+  follow only the scales, layout, hover and drag, or the primitive's own
+  `requestUpdate`, and `hitTest` must be free of side effects.
+- **A render bench in CI.** `npm run bench:render` times a pan, a fully zoomed-out
+  frame and a ten-study tick at 10,000, 50,000 and 200,000 bars on both backends,
+  and fails the run when a p95 is over its budget. A nightly workflow adds the long
+  soak, browser endurance and the bench on a hosted runner.
+
+### Changed
+
+- **Level of detail on by default.** `conflate` now defaults to `true`: below about
+  one CSS px per bar, the bars in each device-pixel column draw as one
+  OHLC-preserving stick, and line and histogram series keep each column's extremes.
+  The default `minBarSpacing: 1` never zooms out that far, so such a chart paints
+  as before. `conflate: false` opts out, and `conflationFactor` is now the column
+  width in sticks.
+- **Plot series receive `update()` on a tick.** A study writes only the plot points
+  that changed, through `SeriesApi.update`, instead of one `setData` of the whole
+  history. A custom `IndicatorHost` must return plot series whose `update` replaces
+  an existing point, an older one included, and appends a newer one.
+- **Sixteen built-ins carry a `calcTail`** (`sma`, `ema`, `wma`, `rsi`, `atr`,
+  `adx`, `macd`, `bollinger`, `vwap`, `supertrend`, `stochastic`, `obv`, `cci`,
+  `keltner-channel`, `donchian`, `parabolic-sar`). It is not enumerable, so a
+  descriptor that spreads a built-in keeps recomputing in full through its own
+  `calc`; copy the tail by name only when your `calc` returns the built-in's result
+  unchanged.
+- **Glides step inside the render frame.** Kinetic scroll and the eased wheel zoom
+  schedule no frames of their own, so each frame paints the step it made and a
+  glide asks for one frame per frame instead of two.
+- Draw items handed to a renderer or render backend are reused from frame to frame:
+  copy what you keep past the call.
+
+### Performance
+
+- A live tick no longer rebuilds the chart's time index, and the sixteen built-ins
+  above step from the last bar instead of recomputing the history, value for value
+  the same.
+- A tick repaints the price pane and the panes of the studies computed from it, and
+  a study recompute only the panes its output lands on. An appended bar still
+  repaints every pane, and so do the panes showing the corner clock or the bar
+  countdown while those are on.
+- The series pass allocates nothing per bar.
+- On the render bench, a ten-study tick at 200,000 bars went from 5591.7 to 152.2 ms
+  on `canvas2d`, and a frame with all 200,000 bars in view from 278.2 to 53 ms. The
+  figures and their conditions are in the
+  [performance notes](https://github.com/marketcalls/openalgo-charts/blob/master/docs/performance-notes.md).
+
+### Fixed
+
+- Browser endurance reads its changed-canvas and candle-pixel gates from the price
+  plot only, so the last-price tag can no longer pass them over a frozen plot.
+
+Saved layouts, drawings and workspace documents from 2.5.7 load unchanged. No
+runtime dependencies or package tiers were added.
+
+See [Upgrading to 2.5.8](/docs/upgrading).
+
 ## 2.5.7
 
 2026-09-26

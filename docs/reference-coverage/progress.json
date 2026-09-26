@@ -343,14 +343,14 @@
     }
   ],
   "next": [
-    "Publish 2.5.7 through the release workflow, deploy the website and create the GitHub release.",
-    "Charts 90 program Release 3 (2.5.8): rendering performance (candle level of detail, allocation-free frames, shared plot time index, calcTail for the common built-ins, per-pane repaint, one animation loop, hit-test prefilter, CI render benches).",
-    "Releases 4 to 6 (2.5.9, 2.5.10 and 2.6.0) follow the plan, then five fresh reviewers rescore every area.",
+    "Publish 2.5.8 through the release workflow, deploy the website and create the GitHub release.",
+    "Charts 90 program Release 4 (2.5.9): drawing interaction and the icons it needs (plan items D2 to D11, S12 and I4).",
+    "Releases 5 and 6 (2.5.10 and 2.6.0) follow the plan, then five fresh reviewers rescore every area.",
     "Validate the removal of the depth_level key against the OpenAlgo server before 3.0.0.",
     "Defer issue #22."
   ],
   "release": {
-    "version": "2.5.7",
+    "version": "2.5.8",
     "authorized": true,
     "status": "verified-candidate",
     "steps": [
@@ -378,18 +378,24 @@
       "published": "npm openalgo-script 0.8.0 and PyPI openscript 0.8.0 on 2026-09-26: the chart adapter gates the tables hook and per-bar band colours on the chart version (chartVersion), both available from charts 2.5.4. The published 0.8.0 passes the chart repository's script-engine integration checks against 2.5.6 and 2.5.7."
     },
     "scope": [
-      "Move-only split of src/core/chart.ts into collaborator modules behind the unchanged Chart class (90 program E1)",
-      "ESLint max-lines at 1,500 with a shrinking cap list for the older long files"
+      "Candle level of detail on by default: one OHLC-preserving stick per device-pixel column below about one CSS px per bar (90 program R1)",
+      "No per-bar allocation in the series pass: visible bars walked in place into reused draw items, point buffers for the line renderers (R2)",
+      "Shared time index rebuilt only when the set of times changes, and study plots written in place on a tick (R3)",
+      "calcTail for sixteen common built-ins, non-enumerable so a spread keeps its own calc (R4, A3)",
+      "Repaint only the panes a live tick or a study recompute changes, with the corner clock and bar countdown kept live (R5)",
+      "One animation loop: kinetic scroll and the eased wheel zoom stepped inside the render frame (R8)",
+      "Primitive hit boxes (IPrimitive.hitBounds) that prefilter pane hit tests (R9)",
+      "Render bench with frame budgets per bar count in CI, a coalescing check in npm run bench, a nightly soak, endurance and bench workflow, and the render-parity baseline built in CI (R10)"
     ],
     "previous": {
-      "version": "2.5.6",
+      "version": "2.5.7",
       "status": "published",
-      "releaseUrl": "https://github.com/marketcalls/openalgo-charts/releases/tag/v2.5.6"
+      "releaseUrl": "https://github.com/marketcalls/openalgo-charts/releases/tag/v2.5.7"
     }
   },
   "validation": {
-    "chartTests": 9247,
-    "chartTestFiles": 409,
+    "chartTests": 9370,
+    "chartTestFiles": 418,
     "compiledProgramTests": 18,
     "demoTests": 653,
     "demoTestFiles": 62,

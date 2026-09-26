@@ -202,9 +202,10 @@ hitBounds(rc) {
 - **The box must hold every point `hitTest` can answer.** A point outside it is never asked, so a box that is too tight loses hits. A NaN edge makes the pane ask anyway.
 - **The pane keeps the box** while nothing it follows changes: the time scale and the bars' times, the pane's price scales, size and axes, the pixel ratio, hover and drag, the theme and session calendar, and the primitive's own state, announced through `host.requestUpdate()`. A box that depends on anything else (bar prices) must request an update when that changes, or leave the hook out.
 - **Compute it from the same geometry `hitTest` uses**, `rc` or what the last `draw` recorded. A box asked for between a change and the frame that paints it is asked for again once that frame is painted.
-- The pane also stops walking at an exact hit (`distance: 0`) in the front band, which nothing after it can outrank. `hitTest` must be free of side effects either way: a primitive can be skipped.
+- The pane also stops walking at an exact hit (`distance: 0`) among the primitives painted in front, which nothing after it can outrank. `hitTest` must be free of side effects either way: a primitive can be skipped.
+- **A primitive that declares `hitBounds` is attached with a host that wraps the chart's**, so the pane hears its `requestUpdate`. Do not compare that host with another primitive's by identity.
 
-The built-in primitives and the draw tier's layers do not declare boxes yet, so they are asked on every move as before.
+The hook arrived in 2.5.8. The built-in primitives and the draw tier's layers do not declare boxes yet, so they are asked on every move as before.
 
 ## `autoscaleInfo`
 
@@ -520,7 +521,7 @@ chart.addSeries('range-band').setData(bars);
 
 **`rc.bars()` returns the live array the data layer holds.** Treat it as read-only, and guard the call, a synthetic render context may not supply it.
 
-**`series.update()` schedules a `Full` repaint,** which re-runs every `autoscaleInfo()` and every `draw`. Cache anything expensive across frames.
+**`series.update()` schedules a `Full` repaint** of the panes it changes (the series' own pane and those of the studies computed from it; every pane when it appends a bar), which re-runs every `autoscaleInfo()` and every `draw` on them. Cache anything expensive across frames.
 
 Related: [core-api](core-api.md) (`addPrimitive`, invalidation levels, the event bus), [chart-types](chart-types.md) (the built-in renderers), [drawing-tools](drawing-tools.md) (`DrawingLayer`, a primitive built on this contract), [trading](trading.md) and [trade-tier](trade-tier.md) (order lines and `tradeHost`), [indicators](indicators.md) (`IndicatorFill`, `PaneLegend`), [events-and-state](events-and-state.md) (click and drag routing), [scales-and-panes](scales-and-panes.md) (which scale a primitive sees).
 

@@ -1064,7 +1064,7 @@ absent filter means every day. Whitespace around the parts is ignored.
 | `paneIndex` | `number` | Pane the indicator drew into. |
 | `settings()` | `IndicatorSettings` | Current settings, as a copy. |
 | `setSettings(patch, options?)` | `boolean` | Merge a patch, recompute, and restyle. False when the study's policy is not `configurable` and `options` is not `{ force: true }`. |
-| `series(plotKey)` | `SeriesApi \| undefined` | The series behind one plot, for direct styling. |
+| `series(plotKey)` | `SeriesApi \| undefined` | The series behind one plot, for direct styling. The study must be its only writer: since 2.5.8 a tick updates only the points that moved, so data written into it survives wherever the study did not move a point. |
 | `priceScaleId()` | `PriceScaleId \| null` | Whole-study override, or null for descriptor defaults. Per-plot overrides can still apply. |
 | `setPriceScale(id, options?)` | `boolean` | Assign local resources together and clear their per-plot overrides. Null restores local descriptor defaults. Refused like `setSettings` for a study that is not `configurable`. |
 | `plotPriceScaleId(plotKey)` | `PriceScaleId \| null` | Effective scale of a declared plot, or null for an unknown key. |
@@ -1279,6 +1279,15 @@ identifies the primary bars used by the result. Consumers require available,
 aligned, current snapshots. Custom hosts must maintain those guarantees and avoid
 recursive `values()` reads. Existing hosts can omit the hooks for independent
 indicators; native Chart already supplies them.
+
+A custom host's `addIndicatorSeries` must return a series with a working `update`
+(2.5.8). On a live tick a study writes each plot in place: `update` for the points
+that moved and for the last point, where it used to call `setData` with the whole
+history. That `update` must behave as `SeriesApi.update` documents: an item at an
+existing time replaces that point, an older one included, and a newer one appends.
+`setData` still carries a first write, new or older history, a filled gap and a
+pass that moved more than eight points. A series that ignores `update` shows the
+study frozen at its last whole write.
 
 ## Inspecting the registry
 
@@ -1820,7 +1829,7 @@ and put the message beside the study instead of in a console.
 | `plots` | `IndicatorPlot[]` | One per drawn series. `type` is any registered chart type; `overlay: true` puts that one plot on the price pane; [`ohlc`](#a-plot-drawn-as-candles) names four columns so the plot draws as bars; `offset` (2.4.0) paints the column that many bars to the right, the shifted tail landing in the right margin; `colorParts` (2.4.0) colours a candle plot's body, wick and border apart. |
 | `fills` | `IndicatorFillSpec[]?` | Optional shaded bands. `between` names two `calc` columns, which need not be plots. `colorBy` computes each bar's color; `gradientBy` computes each bar's gradient; `gradient` supplies a static or computed price-anchored gradient for the whole band. Per-bar color takes precedence. `overlay: true` draws the band on the price pane beside overlay plots. |
 | `calc` | `(bars, settings, store, ctx?) => IndicatorValues` | Full recompute. `ctx` is the optional [calculation context](#the-calculation-context). |
-| `calcTail` | `(bars, settings, fromIndex, previous, store, ctx?) => IndicatorValues \| null` | Optional incremental path. Sixteen built-ins implement it (unreleased), see below. |
+| `calcTail` | `(bars, settings, fromIndex, previous, store, ctx?) => IndicatorValues \| null` | Optional incremental path. Sixteen built-ins implement it (2.5.8), see below. |
 | `markers` | `({ bars, values, settings }) => IndicatorMarker[]` | Optional bar-anchored signal markers, run after every `calc`. Shapes include `cross` and `xcross`, and `paneTop` / `paneBottom` pin a glyph to the plot edge (2.4.0). A mark may name a [target](#drawing-and-marker-targets): `overlay: true` for the candles, `plot` for another plot. |
 | `markerAnchor` | `'plot' \| 'price'` | Defaults to the first plot. `'price'` selects the primary series for an indicator on the price pane when one exists. Applies to marks that name no target. |
 | `table` | `({ bars, values, settings }) => \{ rows, options \} \| null` | Optional corner-pinned summary grid, run after every `calc`. |
@@ -1891,7 +1900,13 @@ arriving at the left edge falls back to a full `calc` instead of splicing onto a
 that no longer exists.
 </Callout>
 
-#### The built-ins' tails (unreleased)
+Whichever path computed the values, a recompute writes each plot in place: a pass
+whose bars begin with the times the last pass wrote sends only the points that
+changed, and the last point, to the plot's series, and the chart's shared time index
+is rebuilt only when the set of times changes (2.5.8). What each plot holds is the
+same as a whole rewrite would leave.
+
+#### The built-ins' tails (2.5.8)
 
 The built-in `sma`, `ema`, `wma`, `rsi`, `atr`, `adx`, `macd`, `bollinger`, `vwap`,
 `supertrend`, `stochastic`, `obv`, `cci`, `keltner-channel`, `donchian` and
