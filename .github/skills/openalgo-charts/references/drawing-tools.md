@@ -194,41 +194,42 @@ The tier ships a glyph for every tool, as path data:
 ```ts
 import { drawingToolIcon, drawingToolAccent, ICON_ATTRS } from 'openalgo-charts/draw';
 
-const accent = drawingToolAccent('trend-line');   // the two anchor dots
+const accent = drawingToolAccent('trend-line');   // the two anchor dots, for a fill
 <svg {...ICON_ATTRS} width={24} height={24}>
   <path d={drawingToolIcon('trend-line')} />
-  {accent && <path d={accent} fill="currentColor" />}
+  {accent && <path d={accent} fill="currentColor" stroke="none" />}
 </svg>
 ```
 
-A glyph may carry one filled **accent** (anchor dots, pole caps, an arrowhead):
-closed marks on the same grid, painted in `currentColor` and stroked by the
-same frame as the glyph. It is part of the picture, and the part that tells
-siblings apart (a trend line ends in two dots, a ray starts at one, a path ends
-in a head), so a host wrapping raw path data must draw it; the builders below
-always do.
+Each path is the whole glyph. The marks that tell siblings apart (a trend
+line ends in two dots, a ray starts at one, a path ends in a head) are drawn in
+the path itself as small closed outlines, so a host that renders only the path
+data still shows every one of them. An **accent** repeats those marks for a
+fill on top: it adds weight, never identity. The builders below always draw it,
+as a second `<path>` with `fill="currentColor" stroke="none"`; a host wrapping
+the raw path data may do the same, and loses only the fill if it does not.
 
 | Export | |
 |---|---|
 | `DRAWING_TOOL_ICONS` | `Record<string, string>` of tool id to `d` attribute |
 | `drawingToolIcon(id)` | One glyph, or `undefined` when there is none |
-| `DRAWING_TOOL_ACCENTS` / `drawingToolAccent(id)` | The optional filled accent per tool glyph, as a second `d`; `undefined` when a glyph has none |
+| `DRAWING_TOOL_ACCENTS` / `drawingToolAccent(id)` | The optional fill per tool glyph: marks its path already outlines, as a second `d`; `undefined` when a glyph has none |
 | `drawingToolIconIds()` | Every id the set covers |
 | `ICON_VIEWBOX` | `'0 0 24 24'` |
 | `ICON_STROKE` | `2` |
 | `ICON_ATTRS` | The whole attribute bag for the `<svg>` (an `IconAttrs`) |
 | `CHROME_ICONS` | `Record<string, string>` of chrome id (undo, redo, lock, trash, magnet, ...) to `d` attribute, on a 16 grid |
 | `chromeIcon(id)` / `chromeIconIds()` | One chrome glyph or `undefined`; every chrome id |
-| `CHROME_ICON_ACCENTS` / `chromeIconAccent(id)` | The chrome accents (the eye's pupil, the camera lens, slider knobs, pole caps) |
-| `CHROME_ICON_VIEWBOX` / `CHROME_ICON_STROKE` / `CHROME_ICON_ATTRS` | `'0 0 16 16'`, `2` (1.5 through 2.5.5), the attribute bag |
+| `CHROME_ICON_ACCENTS` / `chromeIconAccent(id)` | The chrome fills (the eye's pupil, the camera lens, slider knobs, pole caps), each also outlined in its glyph's path |
+| `CHROME_ICON_VIEWBOX` / `CHROME_ICON_STROKE` / `CHROME_ICON_ATTRS` | `'0 0 16 16'`, `2` (1.5 through 2.5.5; pass `{ stroke: 1.5 }` to keep the old weight), the attribute bag |
 | `CHROME_ICON_FILLED` | The chrome ids painted solid rather than stroked (`chromeIconSvg` consults it; a host wrapping raw path data must too) |
 | `iconSvg(id, opts?)` / `chromeIconSvg(id, opts?)` | A complete inline `<svg>` string in `currentColor`, the accent included; `size` in px or `'1em'` (an `IconSvgOptions`). Throws on an unknown id |
-| `iconSprite(ids?)` / `iconUse(id, opts?)` | One hidden symbol sheet (ids `oac-icon-<id>`, `ICON_SYMBOL_PREFIX`) and the per-glyph `<use>`; symbols carry no stroke, so the weight inherits from the frame, and an accent carries only its `fill="currentColor"` |
-| `toolCursor(id, opts?)` | A CSS `cursor` value carrying the glyph and its accent over a contrasting halo; `size` 1..128 (default 20), `hotspot` (default the centre), `color`, `halo`, `fallback` (a `ToolCursorOptions`) |
+| `iconSprite(ids?)` / `iconUse(id, opts?)` | One hidden symbol sheet (ids `oac-icon-<id>`, `ICON_SYMBOL_PREFIX`) and the per-glyph `<use>`; symbols carry no stroke weight, so it inherits from the frame, and an accent carries only `fill="currentColor" stroke="none"` |
+| `toolCursor(id, opts?)` | A CSS `cursor` value carrying the glyph over a contrasting halo, its accent filled; `size` 1..128 (default 20), `hotspot` (default the centre), `color`, `halo`, `fallback` (a `ToolCursorOptions`) |
 
 The path data is data, not DOM: the host still builds its own rail and
 flyouts. The string builders derive from that one set, so the rail, a flyout
-and the armed cursor cannot drift apart. What the host no longer does is draw
+and the tool cursor cannot drift apart. What the host no longer does is draw
 a glyph per tool before it can show a toolbar, which is what every adopter had
 to do before, each drifting on weight and grid independently until the set
 read as many icons rather than one. Measure the count with
@@ -237,21 +238,25 @@ than there are tools (the cursor, the magnet, and glyphs drawn ahead of tools
 not yet registered).
 
 **Render at 24px, or an integer multiple, and chrome at 16px.** With a 2-unit
-stroke on integer coordinates, an orthogonal edge covers exactly two device
-pixels at 1:1. At 18px the 0.75 scale puts it on 1.5 pixels and every edge is
-anti-aliased across two rows: that is a host sizing choice and no path data can
-fix it. The chrome tier uses the same 2-unit stroke after 2.5.5, so both rails
-show one 2px line; a host stylesheet that still forces `stroke-width: 1.5` on
-16px chrome glyphs brings back the blur that change removed.
+stroke on integer coordinates, a horizontal or vertical edge covers exactly two
+device pixels at 1:1; diagonals and curves are anti-aliased at any size. At
+18px the 0.75 scale puts the line on 1.5 pixels and every edge is anti-aliased
+across two rows: that is a host sizing choice and no path data can fix it. The
+chrome tier uses the same 2-unit stroke after 2.5.5 (it was 1.5), so both rails
+show one 2px line. A host that wants the old weight passes it explicitly
+(`chromeIconSvg(id, { stroke: 1.5 })`, or `stroke-width: 1.5` in its own frame
+or stylesheet), and gets the softer edges that came with it.
 
 The set is held to one grid by `tests/draw-icons.test.ts`, which checks each
 glyph and accent for the live area (2..22 and 2..14), whole units, a single
-weight, complexity and span, and rejects two glyphs that are the same drawing
-written differently. `tests/e2e/icon-raster.spec.ts` rasterises both tiers in
-Chromium, Firefox and WebKit and fails when two glyphs overlap at an
-intersection over union of 0.85 or more (only the star, eye and link state
-pairs may), or when a tier stops being crisp. A glyph added to either registry
-has to pass both.
+weight, complexity and span, that every accent mark is also in its glyph's
+path, that no hollow shape is filled in by the glyph's other strokes, and
+rejects two glyphs that are the same drawing written differently.
+`tests/e2e/icon-raster.spec.ts` rasterises both tiers in Chromium, Firefox and
+WebKit, as the builders draw them and as bare path data, and fails when two
+glyphs overlap at an intersection over union of 0.85 or more (only the star,
+eye and link state pairs may), when a named sibling pair reaches 0.7, or when a
+tier stops being crisp. A glyph added to either registry has to pass both.
 
 ## Tool catalogue
 

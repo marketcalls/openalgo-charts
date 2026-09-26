@@ -743,7 +743,8 @@ window.addEventListener('keydown', (e) => {
 The tier ships a glyph for every tool on a 24 grid, and a chrome set (undo, lock, eye,
 trash, settings and the rest) on a 16 grid, as path data with string builders over it.
 Both tiers draw a 2-unit stroke on whole units, so at their native sizes (24px and 16px)
-every straight edge lands on a pixel boundary and both rails share one 2px line.
+every horizontal and vertical edge lands on a pixel boundary, and both rails share one
+2px line. Diagonals and curves are anti-aliased at any size.
 
 ```ts
 import { iconSvg, chromeIconSvg, iconSprite, iconUse, toolCursor } from 'openalgo-charts/draw';
@@ -753,23 +754,32 @@ lockButton.innerHTML = chromeIconSvg('lock');   // 16px
 canvas.style.cursor = toolCursor('trend-line'); // the glyph over a contrasting halo
 ```
 
-Some glyphs carry one filled **accent**: the anchor dots of a trend line, the origin dot
-of a ray, an arrowhead, a magnet's pole caps. That is what tells siblings apart, so the
-builders always draw it: a second `<path>` with `fill="currentColor"` after the glyph,
-under the same stroke. A host that wraps the raw path data itself reads the accent too:
+Each path is the whole glyph. The marks that tell siblings apart (the anchor dots of a
+trend line, the origin dot of a ray, an arrowhead, a magnet's pole caps) are drawn in the
+path as outlines, so a host that wraps the raw path data gets every one of them. Some
+glyphs also carry an **accent**: the same marks again, for a fill on top. The builders
+always draw it, as a second `<path>` with `fill="currentColor" stroke="none"`; a host with
+its own wrapper can do the same:
 
 ```ts
 import { drawingToolIcon, drawingToolAccent, ICON_ATTRS } from 'openalgo-charts/draw';
 
 const accent = drawingToolAccent('ray');         // undefined when the glyph has none
 svg.innerHTML = `<path d="${drawingToolIcon('ray')}"/>`
-  + (accent ? `<path d="${accent}" fill="currentColor"/>` : '');
+  + (accent ? `<path d="${accent}" fill="currentColor" stroke="none"/>` : '');
 ```
 
-`CHROME_ICON_ACCENTS` and `chromeIconAccent(id)` are the same for the chrome set. The
-grid, margins, stroke and accents are checked by unit tests, and a browser check
-rasterises every glyph in Chromium, Firefox and WebKit and fails when two glyphs in a set
-overlap enough to be mistaken for each other.
+`CHROME_ICON_ACCENTS` and `chromeIconAccent(id)` are the same for the chrome set.
+
+The chrome stroke (`CHROME_ICON_STROKE`) was 1.5 through 2.5.5 and is 2 now. To keep the
+old weight, pass it explicitly: `chromeIconSvg(id, { stroke: 1.5 })`, `stroke-width="1.5"`
+on your own `<svg>`, or `stroke-width: 1.5` in your stylesheet. The glyphs are drawn for 2
+on whole units, so at 1.5 their edges are soft again.
+
+The grid, margins, stroke and marks are checked by unit tests. A browser check rasterises
+every glyph in Chromium, Firefox and WebKit, both as the builders draw it and as the bare
+path data, and fails when two glyphs in a set overlap enough to be mistaken for each
+other.
 
 ## Plot clipping and moved axes (2.1.6)
 

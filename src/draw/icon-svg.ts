@@ -12,9 +12,9 @@
  * a string builder has no such value to hand back, and an empty button in a
  * rail is harder to trace than a stack that names the id.
  *
- * A glyph with an accent becomes two paths: the glyph, then the accent with
- * `fill="currentColor"` and nothing else, so the frame's stroke, caps and
- * colour reach both.
+ * A glyph with an accent becomes two paths: the glyph, which already outlines
+ * every mark, then the accent with `fill="currentColor" stroke="none"`, which
+ * paints the inside of those marks and leaves the outline to the frame.
  */
 import {
   CHROME_ICON_ACCENTS, CHROME_ICON_ATTRS, CHROME_ICON_FILLED, CHROME_ICONS,
@@ -75,10 +75,13 @@ function glyph(registry: Readonly<Record<string, string>>, id: string, tier: str
 /**
  * The paths of one glyph: its line, then its accent filled. The accent names
  * its own fill because the frame's is `none`, and inside a sprite symbol it
- * would otherwise inherit that and paint a ring where a dot belongs.
+ * would otherwise inherit that and leave a ring where a dot belongs. It turns
+ * its stroke off because the glyph's path already strokes the same outline;
+ * a second pass would darken the anti-aliased edge of every mark.
  */
 function body(d: string, accent: string | undefined): string {
-  return `<path d="${attr(d)}"/>` + (accent === undefined ? '' : `<path d="${attr(accent)}" fill="currentColor"/>`);
+  return `<path d="${attr(d)}"/>`
+    + (accent === undefined ? '' : `<path d="${attr(accent)}" fill="currentColor" stroke="none"/>`);
 }
 
 /** Grid size from a viewBox, so the cursor's pixel maths follows the registry. */
@@ -133,7 +136,8 @@ export function chromeIconSvg(id: string, opts: IconSvgOptions = {}): string {
  * wants each path in the document once. Inject it once, then place glyphs with
  * `iconUse`. Symbols carry the paths and viewBox, and no stroke: the weight
  * inherits from the `<svg>` around each `<use>`, so one sprite serves every
- * weight. An accent carries its fill, the one attribute it cannot inherit.
+ * weight. An accent carries its fill, the one attribute it cannot inherit,
+ * and no stroke, since the glyph's own path outlines it.
  *
  * Default: every tool glyph. Repeated ids collapse to one symbol, since a
  * duplicate element id is an invalid document.
@@ -169,12 +173,12 @@ function contrastOf(color: string): string {
 
 /**
  * A CSS `cursor` value carrying the tool's glyph, for the canvas while that
- * tool is armed.
+ * tool is the active one.
  *
  * The glyph is drawn twice: once in `halo`, one pixel wider on each side, and
- * once in `color` on top, so it reads on a light chart and a dark one without
- * the host choosing per theme. The value is `url("data:image/svg+xml,...") x y,
- * fallback`, ready for `canvas.style.cursor`.
+ * once in `color` on top with its marks filled, so it reads on a light chart
+ * and a dark one without the host choosing per theme. The value is
+ * `url("data:image/svg+xml,...") x y, fallback`, ready for `canvas.style.cursor`.
  */
 export function toolCursor(id: string, opts: ToolCursorOptions = {}): string {
   const d = glyph(DRAWING_TOOL_ICONS, id, 'tool');
@@ -190,18 +194,16 @@ export function toolCursor(id: string, opts: ToolCursorOptions = {}): string {
   // clears the glyph by a pixel on each side.
   const unit = gridOf(ICON_ATTRS) / size;
   const haloWidth = Math.round((ICON_STROKE + 2 * unit) * 100) / 100;
-  // Each layer is the glyph and then its accent, the accent filled in that
-  // layer's colour: haloed together, so a dot keeps its outline on a chart of
-  // its own colour, and painted together, so the cursor draws the same tool
-  // as the rail button that picked it.
+  // The glyph's path outlines its marks, so the halo around it clears the
+  // dots and heads as well, and a dot keeps its edge on a chart of its own
+  // colour. The accent then fills the marks in the glyph's colour, so the
+  // cursor draws the same tool as the rail button that picked it.
   const accent = DRAWING_TOOL_ACCENTS[id];
-  const layer = (paint: string, width: number): string =>
-    `<path d="${d}" stroke="${paint}" stroke-width="${width}"/>`
-    + (accent === undefined ? '' : `<path d="${accent}" fill="${paint}" stroke="${paint}" stroke-width="${width}"/>`);
   const svg = `<svg xmlns="${XMLNS}" viewBox="${ICON_ATTRS.viewBox}" width="${size}" height="${size}"`
     + ` fill="none" stroke-linecap="${ICON_ATTRS.strokeLinecap}" stroke-linejoin="${ICON_ATTRS.strokeLinejoin}">`
-    + layer(attr(halo), haloWidth)
-    + layer(attr(color), ICON_STROKE)
+    + `<path d="${d}" stroke="${attr(halo)}" stroke-width="${haloWidth}"/>`
+    + `<path d="${d}" stroke="${attr(color)}" stroke-width="${ICON_STROKE}"/>`
+    + (accent === undefined ? '' : `<path d="${accent}" fill="${attr(color)}"/>`)
     + '</svg>';
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${Math.round(hx)} ${Math.round(hy)}, ${fallback}`;
 }

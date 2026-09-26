@@ -15,9 +15,17 @@ import type { Widget } from '../../src/widget/widget';
  * tier is compared as a mask: the share of inked pixels the two have in common
  * (intersection over union). The same pass measures how much of each glyph's
  * ink is solid rather than anti-aliased, which is what crisp means at 1:1.
+ *
+ * Both tiers are judged twice: as the markup builders draw them, accents
+ * filled, and as the bare path data, which is all a host that wraps the
+ * registry itself draws. The marks that tell siblings apart have to survive
+ * the second: a horizontal ray whose origin dot lived only in its accent was
+ * the horizontal line at 0.86 overlap for such a host.
  */
 
 interface Glyph { id: string; svg: string; px: number }
+type Tier = 'tools' | 'chrome';
+type Rendering = 'markup' | 'path';
 interface Measured {
   pairs: { a: string; b: string; iou: number }[];
   crisp: number;
@@ -27,9 +35,10 @@ interface Measured {
 declare global {
   interface Window {
     __iconFixture: {
-      icons: { tools: Glyph[]; chrome: Glyph[] };
+      icons: Record<Tier | 'toolsPath' | 'chromePath', Glyph[]>;
       widget: Widget;
       lineId: string;
+      mountIndicatorSettings: (ctx: Widget['context'], anchor?: HTMLElement, opts?: { instanceId?: string; tab?: 'inputs' | 'style' }) => unknown;
     };
   }
 }
@@ -44,24 +53,30 @@ const CEILING = 0.85;
 const STATE_PAIRS = new Set(['star~star-filled', 'eye~eye-off', 'link~unlink']);
 
 /**
- * Siblings that sit next to each other in one flyout and were measured too
- * close in 2.5.5, held to a tighter ceiling than the rest: same family, told
- * apart by their ends, their direction or their marks.
+ * Siblings that sit next to each other in one flyout or menu and were
+ * measured too close, held to a tighter ceiling than the rest: same family,
+ * told apart by their ends, their direction or their marks. The horizontal
+ * pair, the three bubbles and trash beside paste were 0.72 to 0.86.
  */
-const SIBLINGS: Record<'tools' | 'chrome', [string, string][]> = {
+const SIBLINGS: Record<Tier, [string, string][]> = {
   tools: [
     ['long-position', 'short-position'], ['risk-reward-long', 'risk-reward-short'],
     ['long-position', 'risk-reward-long'], ['short-position', 'risk-reward-short'],
     ['path', 'polyline'], ['cursor', 'cross-line'],
     ['trend-line', 'ray'], ['trend-line', 'extended-line'], ['trend-line', 'info-line'], ['trend-line', 'arrow'],
     ['ray', 'extended-line'], ['ray', 'info-line'], ['extended-line', 'info-line'],
+    ['horizontal-line', 'horizontal-ray'], ['callout', 'balloon'], ['callout', 'comment'], ['balloon', 'comment'],
   ],
-  chrome: [['lock', 'unlock'], ['cursor', 'plus']],
+  chrome: [['lock', 'unlock'], ['cursor', 'plus'], ['trash', 'paste']],
 };
-const SIBLING_CEILING = 0.75;
+const SIBLING_CEILING = 0.7;
 
-/** Share of a tier's inked pixels that are solid at native size. */
-const CRISP_FLOOR = { tools: 0.55, chrome: 0.3 };
+/**
+ * Share of a tier's inked pixels that are solid at native size, as the
+ * builders draw them. Measured at 0.59 for the tools and 0.62 for chrome in
+ * all three engines; a floor far under that lets a real loss through.
+ */
+const CRISP_FLOOR: Record<Tier, number> = { tools: 0.59, chrome: 0.6 };
 
 async function mount(page: Page, theme: 'dark' | 'light' = 'dark'): Promise<string[]> {
   const errors: string[] = [];
@@ -72,8 +87,8 @@ async function mount(page: Page, theme: 'dark' | 'light' = 'dark'): Promise<stri
   return errors;
 }
 
-/** Rasterise one tier in the page and compare every pair. */
-function measure(page: Page, tier: 'tools' | 'chrome'): Promise<Measured> {
+/** Rasterise one tier, drawn one way, in the page and compare every pair. */
+function measure(page: Page, tier: Tier, rendering: Rendering = 'markup'): Promise<Measured> {
   return page.evaluate(async (which) => {
     const list = window.__iconFixture.icons[which];
     const rows: { id: string; mask: Uint8Array; crisp: number }[] = [];
@@ -110,20 +125,20 @@ function measure(page: Page, tier: 'tools' | 'chrome'): Promise<Measured> {
       }
     }
     return { pairs, crisp: rows.reduce((s, r) => s + r.crisp, 0) / rows.length, n: rows.length };
-  }, tier);
+  }, rendering === 'markup' ? tier : (`${tier}Path` as const));
 }
 
 const key = (a: string, b: string): string => `${a}~${b}`;
 
-for (const tier of ['tools', 'chrome'] as const) {
-  test(`no two ${tier} glyphs rasterise to the same shape`, async ({ page }, info) => {
+for (const [tier, rendering] of [['tools', 'markup'], ['chrome', 'markup'], ['tools', 'path'], ['chrome', 'path']] as const) {
+  test(`no two ${tier} glyphs rasterise to the same shape, drawn as ${rendering === 'path' ? 'bare path data' : 'markup'}`, async ({ page }, info) => {
     const errors = await mount(page);
-    const m = await measure(page, tier);
+    const m = await measure(page, tier, rendering);
     expect(m.n).toBeGreaterThan(20);
     const close = m.pairs
       .filter((p) => p.iou >= CEILING && !STATE_PAIRS.has(key(p.a, p.b)) && !STATE_PAIRS.has(key(p.b, p.a)))
       .map((p) => `${key(p.a, p.b)} ${p.iou.toFixed(2)}`);
-    await info.attach(`${tier}-closest.txt`, {
+    await info.attach(`${tier}-${rendering}-closest.txt`, {
       body: [...m.pairs].sort((p, q) => q.iou - p.iou).slice(0, 20).map((p) => `${key(p.a, p.b)} ${p.iou.toFixed(3)}`).join('\n'),
       contentType: 'text/plain',
     });
@@ -139,7 +154,9 @@ for (const tier of ['tools', 'chrome'] as const) {
     expect(tooClose, `siblings at IoU ${SIBLING_CEILING} or more`).toEqual([]);
     expect(errors).toEqual([]);
   });
+}
 
+for (const tier of ['tools', 'chrome'] as const) {
   test(`${tier} glyphs are crisp at their native size`, async ({ page }, info) => {
     await mount(page);
     const m = await measure(page, tier);
@@ -199,6 +216,28 @@ test('the widget shows the glyphs as the tier ships them, in the rail, a flyout 
     await expect(menu.getByRole('menuitem', { name: /Duplicate/ })).toBeVisible();
     await menu.screenshot({ path: info.outputPath(`drawing-menu-${theme}.png`) });
     await page.keyboard.press('Escape');
+
+    // The widget's own glyphs sit in the settings tab rails beside registry
+    // ones, at the same width; the price tab and the style brush were drawn
+    // for the old line and have to read at this one.
+    const tabGlyphs = async (name: string): Promise<void> => {
+      const tabs = page.locator('.oac-tabs').last();
+      await expect(tabs).toBeVisible();
+      const strokes = await tabs.locator('.oac-glyph--chrome > svg').evaluateAll((svgs) => svgs.map((s) => getComputedStyle(s).strokeWidth));
+      expect(strokes.length).toBeGreaterThan(1);
+      expect(new Set(strokes)).toEqual(new Set(['2px']));
+      await tabs.screenshot({ path: info.outputPath(`${name}-tabs-${theme}.png`) });
+      await page.keyboard.press('Escape');
+      await expect(tabs).toHaveCount(0);
+    };
+    expect(await page.evaluate(() => window.__iconFixture.widget.openSettings())).toBe(true);
+    await tabGlyphs('settings');
+    await page.evaluate(() => {
+      const { widget, mountIndicatorSettings } = window.__iconFixture;
+      const inst = widget.chart.addIndicator('sma', { length: 5 });
+      mountIndicatorSettings(widget.context, undefined, { instanceId: inst.id, tab: 'style' });
+    });
+    await tabGlyphs('indicator');
     expect(errors).toEqual([]);
   }
 });

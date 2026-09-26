@@ -21,220 +21,11 @@ import {
   type IconAttrs,
 } from '../src/draw/icons';
 import { registeredDrawingTools, registerBuiltinDrawingTools } from '../src/draw/index';
+import {
+  clotted, coords, drawingKey, gridPoints, isClosed, subpathKey, subpaths,
+} from './helpers/icon-geometry';
 
 registerBuiltinDrawingTools();
-
-/** Every coordinate in a path, as numbers. */
-function coords(d: string): number[] {
-  return (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
-}
-
-/**
- * Coordinates that are positions on the grid, excluding the arc parameters of
- * `A rx ry rot large sweep x y`, whose flags and radii are not grid points.
- */
-function gridPoints(d: string): number[] {
-  // A path walker, not a number scraper. Relative commands carry the pen from
-  // the current point, so scraping the literals reports a span of zero for a
-  // glyph drawn with h and v, and the balance check silently passes.
-  const out: number[] = [];
-  let x = 0;
-  let y = 0;
-  let started = false;
-  const put = (px: number, py: number): void => { out.push(px, py); x = px; y = py; };
-  for (const m of d.matchAll(/([MmLlHhVvCcSsQqTtAaZz])([^A-Za-z]*)/g)) {
-    const cmd = m[1];
-    const n = (m[2].match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
-    switch (cmd) {
-      case 'M': case 'L':
-        for (let i = 0; i + 1 < n.length; i += 2) put(n[i], n[i + 1]);
-        started = true;
-        break;
-      case 'm': case 'l':
-        for (let i = 0; i + 1 < n.length; i += 2) put(started ? x + n[i] : n[i], started ? y + n[i + 1] : n[i + 1]);
-        started = true;
-        break;
-      case 'H': for (const v of n) put(v, y); break;
-      case 'h': for (const v of n) put(x + v, y); break;
-      case 'V': for (const v of n) put(x, v); break;
-      case 'v': for (const v of n) put(x, y + v); break;
-      // Curves: the endpoint is the only part that has to sit on the grid.
-      case 'C': for (let i = 5; i < n.length; i += 6) put(n[i - 1], n[i]); break;
-      case 'c': for (let i = 5; i < n.length; i += 6) put(x + n[i - 1], y + n[i]); break;
-      case 'S': case 'Q': for (let i = 3; i < n.length; i += 4) put(n[i - 1], n[i]); break;
-      case 's': case 'q': for (let i = 3; i < n.length; i += 4) put(x + n[i - 1], y + n[i]); break;
-      case 'A': for (let i = 6; i < n.length; i += 7) put(n[i - 1], n[i]); break;
-      case 'a': for (let i = 6; i < n.length; i += 7) put(x + n[i - 1], y + n[i]); break;
-      default: break; // Z closes; T is unused here.
-    }
-  }
-  return out;
-}
-
-/** One subpath of a glyph, rewritten in absolute coordinates. */
-interface Subpath {
-  /** Every drawing command after the opening move, absolute, in order. */
-  tokens: string[];
-  /** The on-grid points: the start, then each command's endpoint. */
-  points: [number, number][];
-  /** Points along each arc as well, for the extent a stroke actually covers. */
-  extent: [number, number][];
-  closed: boolean;
-  linesOnly: boolean;
-}
-
-/**
- * Points along an SVG elliptical arc, from its endpoint form (SVG 1.1 F.6.5).
- * Only the extent matters here, so eight samples per quarter turn is plenty.
- */
-function arcSamples(
-  x1: number, y1: number, rx: number, ry: number, rot: number, large: number, sweep: number, x2: number, y2: number,
-): [number, number][] {
-  if (rx === 0 || ry === 0 || (x1 === x2 && y1 === y2)) return [[x2, y2]];
-  const phi = (rot * Math.PI) / 180;
-  const cos = Math.cos(phi);
-  const sin = Math.sin(phi);
-  const dx = (x1 - x2) / 2;
-  const dy = (y1 - y2) / 2;
-  const xp = cos * dx + sin * dy;
-  const yp = -sin * dx + cos * dy;
-  let a = Math.abs(rx);
-  let b = Math.abs(ry);
-  const scale = (xp * xp) / (a * a) + (yp * yp) / (b * b);
-  if (scale > 1) { a *= Math.sqrt(scale); b *= Math.sqrt(scale); }
-  const num = a * a * b * b - a * a * yp * yp - b * b * xp * xp;
-  const den = a * a * yp * yp + b * b * xp * xp;
-  const k = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, num / den));
-  const cxp = (k * a * yp) / b;
-  const cyp = (-k * b * xp) / a;
-  const cx = cos * cxp - sin * cyp + (x1 + x2) / 2;
-  const cy = sin * cxp + cos * cyp + (y1 + y2) / 2;
-  const angle = (ux: number, uy: number, vx: number, vy: number): number =>
-    Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
-  const t1 = angle(1, 0, (xp - cxp) / a, (yp - cyp) / b);
-  let dt = angle((xp - cxp) / a, (yp - cyp) / b, (-xp - cxp) / a, (-yp - cyp) / b);
-  if (sweep === 0 && dt > 0) dt -= 2 * Math.PI;
-  if (sweep === 1 && dt < 0) dt += 2 * Math.PI;
-  const steps = Math.max(2, Math.ceil(Math.abs(dt) / (Math.PI / 16)));
-  const out: [number, number][] = [];
-  for (let i = 1; i <= steps; i++) {
-    const t = t1 + (dt * i) / steps;
-    out.push([cx + a * Math.cos(t) * cos - b * Math.sin(t) * sin, cy + a * Math.cos(t) * sin + b * Math.sin(t) * cos]);
-  }
-  return out;
-}
-
-/**
- * A path walked into absolute subpaths. The duplicate check needs this rather
- * than the raw string: the same two boxes written in the other order, or a
- * line written from its other end, is the same picture in a different string,
- * and a string comparison let exactly that ship as two tools.
- */
-function subpaths(d: string): Subpath[] {
-  const out: Subpath[] = [];
-  let cur: Subpath | undefined;
-  let x = 0;
-  let y = 0;
-  let sx = 0;
-  let sy = 0;
-  const open = (px: number, py: number): void => {
-    cur = { tokens: [], points: [[px, py]], extent: [[px, py]], closed: false, linesOnly: true };
-    out.push(cur);
-    x = sx = px;
-    y = sy = py;
-  };
-  const to = (token: string, px: number, py: number, curve: boolean): void => {
-    if (cur === undefined) open(x, y);
-    cur!.tokens.push(token);
-    cur!.points.push([px, py]);
-    cur!.extent.push([px, py]);
-    if (curve) cur!.linesOnly = false;
-    x = px;
-    y = py;
-  };
-  for (const m of d.matchAll(/([MmLlHhVvCcSsQqTtAaZz])([^A-Za-z]*)/g)) {
-    const cmd = m[1];
-    const rel = cmd === cmd.toLowerCase();
-    const n = (m[2].match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
-    const ox = (): number => (rel ? x : 0);
-    const oy = (): number => (rel ? y : 0);
-    switch (cmd.toUpperCase()) {
-      case 'M':
-        for (let i = 0; i + 1 < n.length; i += 2) {
-          // A leading lower-case m is absolute: there is no current point yet.
-          const px = rel && (i > 0 || cur !== undefined) ? x + n[i] : n[i];
-          const py = rel && (i > 0 || cur !== undefined) ? y + n[i + 1] : n[i + 1];
-          if (i === 0) open(px, py); else to(`L${px},${py}`, px, py, false);
-        }
-        break;
-      case 'L':
-        for (let i = 0; i + 1 < n.length; i += 2) { const px = ox() + n[i]; const py = oy() + n[i + 1]; to(`L${px},${py}`, px, py, false); }
-        break;
-      case 'H': for (const v of n) { const px = ox() + v; to(`L${px},${y}`, px, y, false); } break;
-      case 'V': for (const v of n) { const py = oy() + v; to(`L${x},${py}`, x, py, false); } break;
-      case 'C':
-        for (let i = 0; i + 5 < n.length; i += 6) {
-          const [a, b, c, e, f, g] = [ox() + n[i], oy() + n[i + 1], ox() + n[i + 2], oy() + n[i + 3], ox() + n[i + 4], oy() + n[i + 5]];
-          to(`C${a},${b},${c},${e},${f},${g}`, f, g, true);
-        }
-        break;
-      case 'S': case 'Q':
-        for (let i = 0; i + 3 < n.length; i += 4) {
-          const [a, b, f, g] = [ox() + n[i], oy() + n[i + 1], ox() + n[i + 2], oy() + n[i + 3]];
-          to(`${cmd.toUpperCase()}${a},${b},${f},${g}`, f, g, true);
-        }
-        break;
-      case 'A':
-        for (let i = 0; i + 6 < n.length; i += 7) {
-          const [px, py] = [ox() + n[i + 5], oy() + n[i + 6]];
-          const [fx, fy] = [x, y];
-          to(`A${n[i]},${n[i + 1]},${n[i + 2]},${n[i + 3]},${n[i + 4]},${px},${py}`, px, py, true);
-          cur!.extent.push(...arcSamples(fx, fy, n[i], n[i + 1], n[i + 2], n[i + 3], n[i + 4], px, py));
-        }
-        break;
-      case 'Z':
-        if (cur !== undefined) cur.closed = true;
-        x = sx;
-        y = sy;
-        break;
-      default: break;
-    }
-  }
-  return out;
-}
-
-/** True when a subpath encloses an area: it ends with z, or returns to where it started. */
-function isClosed(s: Subpath): boolean {
-  const [fx, fy] = s.points[0];
-  const [lx, ly] = s.points[s.points.length - 1];
-  return s.closed || (s.points.length > 2 && fx === lx && fy === ly);
-}
-
-/**
- * A glyph as a string that ignores how it was written: subpaths in any order,
- * lines from either end, a polygon from any corner in either direction.
- */
-function drawingKey(d: string, accent = ''): string {
-  const keyOf = (s: Subpath): string => {
-    const start = `M${s.points[0][0]},${s.points[0][1]}`;
-    if (!s.linesOnly) return start + s.tokens.join('') + (s.closed ? 'Z' : '');
-    const pts = s.points.map(([px, py]) => `${px},${py}`);
-    if (isClosed(s)) {
-      if (pts.length > 1 && pts[0] === pts[pts.length - 1]) pts.pop();
-      const spins: string[] = [];
-      for (const ring of [pts, [...pts].reverse()]) {
-        for (let i = 0; i < ring.length; i++) spins.push(`P${[...ring.slice(i), ...ring.slice(0, i)].join(' ')}`);
-      }
-      return spins.sort()[0];
-    }
-    const fwd = pts.join(' ');
-    const back = [...pts].reverse().join(' ');
-    return `L${fwd < back ? fwd : back}`;
-  };
-  const glyph = subpaths(d).map(keyOf).sort().join(' | ');
-  const marks = subpaths(accent).map(keyOf).sort().join(' | ');
-  return marks === '' ? glyph : `${glyph} + ${marks}`;
-}
 
 /**
  * One row per tier. The invariants are the same on both grids; only the
@@ -361,12 +152,13 @@ describe.each(TIERS)('the $name set is balanced', (tier) => {
     // 2.5.5 shipped long-position and short-position as one picture: the same
     // two boxes and stem, written in the other order. A string comparison
     // passed it. The key walks each glyph into absolute subpaths, sorts them
-    // and reads each line and polygon from a fixed end, so only a different
-    // drawing gets a different key. The raster spec (icon-raster) is the
-    // check for glyphs that differ on paper and still look alike.
+    // and reads each from a fixed end, so only a different drawing gets a
+    // different key. The path alone is keyed, accents aside: it is the whole
+    // glyph for a host that draws nothing else. The raster spec (icon-raster)
+    // is the check for glyphs that differ on paper and still look alike.
     const seen = new Map<string, string>();
     for (const [id, d] of tier.entries) {
-      const key = drawingKey(d, tier.accentOf(id));
+      const key = drawingKey(d);
       const prev = seen.get(key);
       expect(prev, `${id} draws the same as ${prev}`).toBeUndefined();
       seen.set(key, id);
@@ -381,20 +173,60 @@ describe.each(TIERS)('the $name set is balanced', (tier) => {
     expect(drawingKey('M2 12h20m-10-10v20')).toBe(drawingKey('M12 2v20M22 12H2'));
     expect(drawingKey('M4 20 20 4')).not.toBe(drawingKey('M4 20 20 5'));
     expect(drawingKey('M3 5h18v5H3z')).not.toBe(drawingKey('M3 5h18v5H3'));
-    expect(drawingKey('M4 20 20 4', 'M3 21a1 1 0 0 0 2 0a1 1 0 0 0-2 0z')).not.toBe(drawingKey('M4 20 20 4'));
+    expect(drawingKey('M4 20 20 4M3 21a1 1 0 0 0 2 0a1 1 0 0 0-2 0z')).not.toBe(drawingKey('M4 20 20 4'));
+  });
+
+  it('keys curves and arcs by their drawing too', () => {
+    // Lines and polygons were normalised and curves were not, so the same arc
+    // drawn from its other end, or a dot started on its far side, keyed as a
+    // different glyph. A curve reverses with its control points, an arc with
+    // its sweep, and a closed ring of either may start at any of its joints.
+    expect(drawingKey('M3 19a12 12 0 0 1 18 0')).toBe(drawingKey('M21 19a12 12 0 0 0-18 0'));
+    expect(drawingKey('M4 19a1 1 0 0 0 2 0a1 1 0 0 0-2 0z')).toBe(drawingKey('M6 19a1 1 0 0 0-2 0a1 1 0 0 0 2 0z'));
+    expect(drawingKey('M4 19a1 1 0 0 0 2 0a1 1 0 0 0-2 0z')).toBe(drawingKey('M4 19a1 1 0 0 1 2 0a1 1 0 0 1-2 0z'));
+    expect(drawingKey('M3 18c4-12 14-12 18 0')).toBe(drawingKey('M21 18c-4-12-14-12-18 0'));
+    expect(drawingKey('M2 12c3-9 6-9 9 0s6 9 9 0')).toBe(drawingKey('M2 12c3-9 6-9 9 0 3 9 6 9 9 0'));
+    expect(drawingKey('M12 5c5 0 9 3 9 7s-4 7-9 7-9-3-9-7 4-7 9-7z'))
+      .toBe(drawingKey('M21 12c0 4-4 7-9 7s-9-3-9-7 4-7 9-7 9 3 9 7z'));
+    expect(drawingKey('M3 19a12 12 0 0 1 18 0')).not.toBe(drawingKey('M3 19a12 12 0 0 0 18 0'));
+    expect(drawingKey('M3 18c4-12 14-12 18 0')).not.toBe(drawingKey('M3 18c4-11 14-12 18 0'));
+  });
+
+  it('leaves no hollow shape filled in by its own strokes', () => {
+    // A shape wide enough to show a hole at the tier's line is drawn hollow
+    // on purpose; if another stroke of the glyph runs through its middle, the
+    // 2px line fills it and the glyph turns into a block. Marks an accent
+    // fills are meant solid.
+    for (const [id, d] of tier.entries) {
+      if (tier.name === 'chrome' && CHROME_ICON_FILLED.has(id)) continue;
+      const marks = new Set(subpaths(tier.accentOf(id) ?? '').map(subpathKey));
+      expect(clotted(d, tier.stroke, marks), `${id} fills a hollow shape solid`).toEqual([]);
+    }
   });
 });
 
 describe.each(TIERS)('the $name accents', (tier) => {
-  // An accent is the one filled mark a glyph may carry: an anchor dot, a pole
-  // cap, an arrowhead. It is a second path because a stroke alone cannot
-  // paint a solid dot at this size, and a separate registry because a host
-  // that wraps the path data itself must still get a complete glyph.
+  // An accent fills the marks a glyph may carry: an anchor dot, a pole cap,
+  // an arrowhead. The glyph's own path already draws each of them, so a host
+  // that renders the path data and nothing else still gets every mark that
+  // tells a glyph from its siblings, only outlined; the accent is the fill on
+  // top, a second path because a fill is a presentation choice.
   const accents = tier.accents;
 
   it('belong to glyphs of their own tier', () => {
     for (const [id] of accents) expect(tier.registry[id], `${id} has an accent but no glyph`).toBeDefined();
     expect(accents.length).toBeGreaterThan(0);
+  });
+
+  it.each(accents)('%s fills marks its glyph already draws', (id, a) => {
+    // The accent carries weight, never identity: every mark in it is also a
+    // subpath of the glyph, so leaving it out loses a fill and nothing else.
+    // Accents that held the only arrowhead or origin dot shipped a path-only
+    // horizontal ray at 0.86 overlap with the horizontal line.
+    const drawn = new Set(subpaths(tier.registry[id]).map(subpathKey));
+    for (const mark of subpaths(a)) {
+      expect(drawn.has(subpathKey(mark)), `${id}: the path does not draw ${subpathKey(mark)}`).toBe(true);
+    }
   });
 
   it.each(accents)('%s lands on whole units inside the live area', (_id, a) => {
@@ -468,46 +300,63 @@ describe('the two tiers read as one set', () => {
 });
 
 describe('look-alike glyphs are drawn apart', () => {
+  // Read from the path data alone, which is all some hosts draw: the marks
+  // that tell siblings apart have to be in it, not only in the accent.
   const tool = (id: string): string => DRAWING_TOOL_ICONS[id];
-  const accent = (id: string): string => drawingToolAccent(id) ?? '';
-  /** The centres of an accent's marks, from the extent of each closed mark. */
-  const centres = (a: string): [number, number][] => subpaths(a).map((s) => {
+  /** The closed marks of a glyph's path: its dots and heads. */
+  const marks = (id: string) => subpaths(tool(id)).filter((s) => isClosed(s));
+  /** The open strokes of a glyph's path. */
+  const strokes = (id: string) => subpaths(tool(id)).filter((s) => !isClosed(s));
+  /** The centre of each mark, from the extent it covers. */
+  const centres = (id: string): [number, number][] => marks(id).map((s) => {
     const xs = s.extent.map((p) => p[0]);
     const ys = s.extent.map((p) => p[1]);
     return [Math.round((Math.min(...xs) + Math.max(...xs)) / 2), Math.round((Math.min(...ys) + Math.max(...ys)) / 2)];
   });
-  const ends = (d: string): [number, number][] => {
-    const s = subpaths(d)[0];
-    return [s.points[0], s.points[s.points.length - 1]];
+  const ends = (id: string): [number, number][] => {
+    const s = strokes(id)[0];
+    return [[s.start[0], s.start[1]], [s.points[s.points.length - 1][0], s.points[s.points.length - 1][1]]];
   };
 
   it('starts the ray at an origin dot, with no tick across it', () => {
     // The ray was a line with a short stroke across its start, which read as
     // a check mark. It is one line now, from a dot, open at the far end.
-    expect(subpaths(tool('ray'))).toHaveLength(1);
-    expect(centres(accent('ray'))).toEqual([ends(tool('ray'))[0]]);
+    expect(strokes('ray')).toHaveLength(1);
+    expect(centres('ray')).toEqual([ends('ray')[0]]);
   });
 
   it('tells the line family apart by its ends', () => {
     // Same diagonal, different ends, because the ends are what differ between
     // the tools: a segment stops at both anchors, a ray at one, an extended
     // line at neither, and an arrow ends in a head.
-    expect(centres(accent('trend-line'))).toEqual(ends(tool('trend-line')));
-    const [a, b] = ends(tool('extended-line'));
-    for (const [cx, cy] of centres(accent('extended-line'))) {
+    expect(centres('trend-line')).toEqual(ends('trend-line'));
+    const [a, b] = ends('extended-line');
+    for (const [cx, cy] of centres('extended-line')) {
       expect(cx).toBeGreaterThan(Math.min(a[0], b[0]));
       expect(cx).toBeLessThan(Math.max(a[0], b[0]));
       expect(cy).toBeGreaterThan(Math.min(a[1], b[1]));
       expect(cy).toBeLessThan(Math.max(a[1], b[1]));
     }
-    expect(centres(accent('extended-line'))).toHaveLength(2);
-    expect(subpaths(accent('arrow'))).toHaveLength(1);
-    const keys = ['trend-line', 'ray', 'extended-line', 'arrow'].map((id) => drawingKey('', accent(id)));
+    expect(centres('extended-line')).toHaveLength(2);
+    expect(marks('arrow')).toHaveLength(1);
+    const keys = ['trend-line', 'ray', 'extended-line', 'arrow'].map((id) => marks(id).map(subpathKey).sort().join(' | '));
     expect(new Set(keys).size).toBe(keys.length);
     // The info line is a segment that also labels itself: a segment's ends,
     // and a label the plain segment does not have.
-    expect(accent('info-line')).toBe(accent('trend-line'));
+    expect(centres('info-line').filter(([x, y]) => centres('trend-line').some(([u, v]) => u === x && v === y)))
+      .toEqual(centres('trend-line'));
     expect(subpaths(tool('info-line')).length).toBeGreaterThan(subpaths(tool('trend-line')).length);
+  });
+
+  it('starts the horizontal ray at a dot inside the grid, where the line runs edge to edge', () => {
+    // The two sat at 0.86 overlap as path data: the ray was the line with its
+    // start trimmed, and its dot lived only in the accent. The ray now leaves
+    // from an anchor a third of the way in and reaches the far edge, as the
+    // diagonal ray does, and the line keeps the full width.
+    expect(centres('horizontal-ray')).toEqual([ends('horizontal-ray')[0]]);
+    expect(ends('horizontal-ray')[0][0]).toBeGreaterThanOrEqual(8);
+    expect(ends('horizontal-ray')[1][0]).toBe(22);
+    expect(ends('horizontal-line').map(([x]) => x).sort((p, q) => p - q)).toEqual([2, 22]);
   });
 
   it('draws a short position as the long one turned over, not as the same picture', () => {
@@ -526,8 +375,10 @@ describe('look-alike glyphs are drawn apart', () => {
       return c + out.join(' ');
     });
     for (const [long, short] of [['long-position', 'short-position'], ['risk-reward-long', 'risk-reward-short']]) {
-      expect(drawingKey(tool(long), accent(long))).not.toBe(drawingKey(tool(short), accent(short)));
-      expect(drawingKey(flip(tool(long)), flip(accent(long)))).toBe(drawingKey(tool(short), accent(short)));
+      expect(drawingKey(tool(long))).not.toBe(drawingKey(tool(short)));
+      expect(drawingKey(flip(tool(long)))).toBe(drawingKey(tool(short)));
+      const acc = drawingToolAccent(long);
+      if (acc !== undefined) expect(drawingKey(flip(acc))).toBe(drawingKey(drawingToolAccent(short) ?? ''));
     }
   });
 });

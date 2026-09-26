@@ -5,17 +5,28 @@ html, body { margin: 0; height: 100%; background: #131722; }
 #host { position: absolute; inset: 0; }
 </style></head>
 <body><div id="host"></div><script type="module">
-// Both glyph tiers as the built draw tier hands them to a host: the markup
-// builders, accents included, at each tier's native size. A widget beside
-// them shows the same glyphs in place, in the rail, a flyout and a menu.
+// Both glyph tiers as the built draw tier hands them to a host, two ways: the
+// markup builders, accents included, and the bare path data in the tier's
+// attribute bag, which is all a host that wraps the registry itself draws.
+// Each at its tier's native size. A widget beside them shows the same glyphs
+// in place, in the rail, a flyout, a menu and the settings dialogs.
 import {
   iconSvg, chromeIconSvg, drawingToolIconIds, chromeIconIds,
+  DRAWING_TOOL_ICONS, ICON_ATTRS, CHROME_ICONS, CHROME_ICON_ATTRS, CHROME_ICON_FILLED,
 } from '/dist/openalgo-charts.draw.mjs';
-import { createWidget } from '/dist/openalgo-charts.widget.mjs';
+import { createWidget, mountIndicatorSettings } from '/dist/openalgo-charts.widget.mjs';
+import '/dist/openalgo-charts.indicators.mjs';
 
+const bare = (d, a, fill) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${a.viewBox}" width="${a.viewBox.split(' ')[2]}"`
+  + ` height="${a.viewBox.split(' ')[2]}" fill="${fill}" stroke="${a.stroke}" stroke-width="${a.strokeWidth}"`
+  + ` stroke-linecap="${a.strokeLinecap}" stroke-linejoin="${a.strokeLinejoin}"><path d="${d}"/></svg>`;
 const icons = {
   tools: drawingToolIconIds().map((id) => ({ id, svg: iconSvg(id), px: 24 })),
   chrome: chromeIconIds().map((id) => ({ id, svg: chromeIconSvg(id), px: 16 })),
+  toolsPath: drawingToolIconIds().map((id) => ({ id, svg: bare(DRAWING_TOOL_ICONS[id], ICON_ATTRS, 'none'), px: 24 })),
+  chromePath: chromeIconIds().map((id) => ({
+    id, svg: bare(CHROME_ICONS[id], CHROME_ICON_ATTRS, CHROME_ICON_FILLED.has(id) ? 'currentColor' : 'none'), px: 16,
+  })),
 };
 
 const bars = [];
@@ -41,5 +52,5 @@ widget.on('data', () => {
   }).id;
   window.__iconFixture.lineId = lineId;
 });
-window.__iconFixture = { icons, widget, lineId };
+window.__iconFixture = { icons, widget, lineId, mountIndicatorSettings };
 </script></body></html>

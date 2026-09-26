@@ -21,14 +21,14 @@ const CHROME_IDS = chromeIconIds();
 
 /**
  * The `<path>` elements a glyph should render as: its registry path, then its
- * accent, if it has one, filled and nothing else. Stroke, width, caps and
- * joins still come from the frame for both.
+ * accent, if it has one, filled and not stroked. The registry path already
+ * outlines the accent's marks, with the frame's stroke, width, caps and joins.
  */
 function expected(
   registry: Readonly<Record<string, string>>, accents: Readonly<Record<string, string>>, id: string,
 ): Record<string, string>[] {
   const out: Record<string, string>[] = [{ d: registry[id] }];
-  if (accents[id] !== undefined) out.push({ d: accents[id], fill: 'currentColor' });
+  if (accents[id] !== undefined) out.push({ d: accents[id], fill: 'currentColor', stroke: 'none' });
   return out;
 }
 
@@ -67,7 +67,7 @@ describe('iconSvg', () => {
     expect(r.class).toBeUndefined();
     expect(paths(svg)).toEqual([
       { d: DRAWING_TOOL_ICONS['trend-line'] },
-      { d: DRAWING_TOOL_ACCENTS['trend-line'], fill: 'currentColor' },
+      { d: DRAWING_TOOL_ACCENTS['trend-line'], fill: 'currentColor', stroke: 'none' },
     ]);
     expect(svg.endsWith('</svg>')).toBe(true);
     expect(svg).not.toMatch(/\n/);
@@ -77,13 +77,15 @@ describe('iconSvg', () => {
     expect(paths(iconSvg(id))).toEqual(expected(DRAWING_TOOL_ICONS, DRAWING_TOOL_ACCENTS, id));
   });
 
-  it('paints an accent solid in the frame colour, under the frame stroke', () => {
-    // The ray's origin dot: a closed mark whose only attribute is its fill,
-    // so a host restyling the frame restyles the dot with it.
+  it('paints an accent solid in the frame colour, inside the outline the glyph strokes', () => {
+    // The ray's origin dot: the glyph's path strokes its ring with the frame's
+    // line, and the accent fills it, in the frame colour and with no stroke of
+    // its own, so a host restyling the frame restyles the dot with it.
     const svg = iconSvg('ray', { stroke: 1.5 });
     const [line, dot] = paths(svg);
     expect(line).toEqual({ d: DRAWING_TOOL_ICONS.ray });
-    expect(dot).toEqual({ d: DRAWING_TOOL_ACCENTS.ray, fill: 'currentColor' });
+    expect(dot).toEqual({ d: DRAWING_TOOL_ACCENTS.ray, fill: 'currentColor', stroke: 'none' });
+    expect(line.d).toContain(dot.d);
     expect(root(svg)['stroke-width']).toBe('1.5');
     expect(root(svg).fill).toBe('none');
   });
@@ -171,13 +173,14 @@ describe('iconSprite', () => {
 
   it('keeps each symbol stroke-free, so the weight inherits from the use site', () => {
     // One sprite serves every weight only if nothing inside it fixes one. An
-    // accent carries its fill, and only that: the frame around a <use> is
-    // fill none, so a dot left to inherit would paint as a ring.
+    // accent carries its fill and turns its own stroke off, and nothing else:
+    // the frame around a <use> is fill none, so a dot left to inherit would
+    // paint as a ring, and the glyph's path already strokes its outline.
     for (const s of symbols(iconSprite())) {
       const id = s.id.slice(ICON_SYMBOL_PREFIX.length);
       expect(paths(s.body)).toEqual(expected(DRAWING_TOOL_ICONS, DRAWING_TOOL_ACCENTS, id));
-      expect(s.body).toMatch(/^(<path d="[^"]+"( fill="currentColor")?\/>)+$/);
-      expect(s.body).not.toMatch(/stroke/);
+      expect(s.body).toMatch(/^<path d="[^"]+"\/>(<path d="[^"]+" fill="currentColor" stroke="none"\/>)?$/);
+      expect(s.body).not.toMatch(/stroke-width|stroke="(?!none")/);
     }
   });
 
@@ -186,8 +189,8 @@ describe('iconSprite', () => {
     // <use> to the first match anyway.
     const syms = symbols(iconSprite(['ray', 'arrow', 'ray']));
     expect(syms.map((s) => s.id)).toEqual([`${ICON_SYMBOL_PREFIX}ray`, `${ICON_SYMBOL_PREFIX}arrow`]);
-    expect(syms[0].body).toBe(`<path d="${DRAWING_TOOL_ICONS.ray}"/><path d="${DRAWING_TOOL_ACCENTS.ray}" fill="currentColor"/>`);
-    expect(syms[1].body).toBe(`<path d="${DRAWING_TOOL_ICONS.arrow}"/><path d="${DRAWING_TOOL_ACCENTS.arrow}" fill="currentColor"/>`);
+    expect(syms[0].body).toBe(`<path d="${DRAWING_TOOL_ICONS.ray}"/><path d="${DRAWING_TOOL_ACCENTS.ray}" fill="currentColor" stroke="none"/>`);
+    expect(syms[1].body).toBe(`<path d="${DRAWING_TOOL_ICONS.arrow}"/><path d="${DRAWING_TOOL_ACCENTS.arrow}" fill="currentColor" stroke="none"/>`);
   });
 
   it('throws for an unknown id rather than emitting an empty symbol', () => {
@@ -259,22 +262,23 @@ describe('toolCursor', () => {
     expect(px).toBeCloseTo(2, 5);
   });
 
-  it('haloes an accent with its glyph, and paints both layers solid', () => {
+  it('haloes the marks with their glyph, and fills them in the glyph colour', () => {
     // The dots on a trend line are part of the picture: a cursor that drops
     // them draws a different tool, and one that haloes the line but not the
-    // dots loses them on a chart of the same colour.
-    const [halo, haloMarks, glyph, marks] = paths(parse(toolCursor('trend-line')).svg);
+    // dots loses them on a chart of the same colour. The glyph's path draws
+    // the dots, so the halo and the line both pass around them; the accent
+    // then fills them, last and unstroked.
+    const [halo, glyph, marks, ...rest] = paths(parse(toolCursor('trend-line')).svg);
+    expect(rest).toEqual([]);
     expect(halo.d).toBe(DRAWING_TOOL_ICONS['trend-line']);
-    expect(haloMarks.d).toBe(DRAWING_TOOL_ACCENTS['trend-line']);
-    expect(haloMarks.fill).toBe('#000');
-    expect(haloMarks.stroke).toBe('#000');
-    expect(haloMarks['stroke-width']).toBe(halo['stroke-width']);
+    expect(halo.d).toContain(DRAWING_TOOL_ACCENTS['trend-line']);
+    expect(halo.stroke).toBe('#000');
     expect(glyph.d).toBe(DRAWING_TOOL_ICONS['trend-line']);
     expect(glyph.fill).toBeUndefined();
+    expect(glyph.stroke).toBe('#fff');
     expect(marks.d).toBe(DRAWING_TOOL_ACCENTS['trend-line']);
     expect(marks.fill).toBe('#fff');
-    expect(marks.stroke).toBe('#fff');
-    expect(marks['stroke-width']).toBe(String(ICON_STROKE));
+    expect(marks.stroke).toBeUndefined();
   });
 
   it('scales the halo with the image so it stays one pixel at any size', () => {
@@ -292,10 +296,10 @@ describe('toolCursor', () => {
 
   it('lets an explicit halo win, and falls back to black for a colour it cannot read', () => {
     expect(paths(parse(toolCursor('ray', { color: '#000', halo: '#f00' })).svg)[0].stroke).toBe('#f00');
-    // Halo line, halo dot, then the glyph line and dot in the colour itself.
+    // The halo, then the glyph in the colour itself, then its dot filled in it.
     const layers = paths(parse(toolCursor('ray', { color: 'rgb(0,0,0)' })).svg);
-    expect(layers.map((p) => p.stroke)).toEqual(['#000', '#000', 'rgb(0,0,0)', 'rgb(0,0,0)']);
-    expect(layers[3].fill).toBe('rgb(0,0,0)');
+    expect(layers.map((p) => p.stroke)).toEqual(['#000', 'rgb(0,0,0)', undefined]);
+    expect(layers[2].fill).toBe('rgb(0,0,0)');
   });
 
   it('takes a hotspot, a size and a fallback keyword', () => {
