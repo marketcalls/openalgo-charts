@@ -170,10 +170,11 @@ node scripts/browser-endurance.mjs --bars 50000 --duration-seconds 120 --sample-
 
 Each run had two charts, 150 bars in view, ten requested forming-bar replacements
 per second per chart, five studies per chart (EMA, Bollinger Bands, RSI, MACD,
-volume), Canvas2D, a 1440 by 900 viewport and DPR 1. The machine was an AMD
-Ryzen 7 7700 (16 logical processors, 31.2 GiB RAM) on Windows 11 (build 26200)
-with headless Chromium 149.0.7827.55. Other builds and test runs were active on
-the machine; the harness does not control concurrent host activity.
+volume), Canvas2D, a 1440 by 900 viewport and DPR 1. The machine was an 8-core
+desktop CPU (16 logical processors, 31.2 GiB RAM) running headless Chromium
+149.0.7827.55; each `report.json` records the CPU model and operating system.
+Other builds and test runs were active on the machine; the harness does not
+control concurrent host activity.
 
 | Bars per chart | Result | Frame p95 | Frame p99 | Frames over 50 ms | Pointer p95 | Updates delivered |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -188,7 +189,8 @@ passed in all three, and the screenshots show both charts drawn. The view
 is the same 150 bars throughout, so the growth is work over the whole history
 rather than drawing. Until a render benchmark sets budgets per bar count, treat
 these as the recorded state of 2.5.5 on this machine, not as a guarantee for
-another device.
+another device. [Performance notes](performance-notes.md) records what these runs
+do not isolate yet, including a weakness in the painted-chart gate.
 
 ## Artifacts and completion
 
@@ -214,8 +216,8 @@ The heap measurement covers collected JavaScript objects, with additional CDP
 embedder/backing-store fields preserved when available. It does not cover total
 browser RSS, all native Canvas2D resources, the GPU process, or physical-device
 thermals. CDP DOM counters and zero-canvas checks narrow teardown risks but do not
-prove the absence of every native leak. Hardware acceleration can use a software
-renderer in headless environments, which is declared in the report.
+prove the absence of every native leak. A headless browser may draw with a software
+renderer instead of the graphics device; the report declares which one it used.
 
 Only the selected Chromium build is covered. Firefox, WebKit, WebGL, other DPRs,
 mobile devices, appends, backfills, reconnects and actual host/broker behavior

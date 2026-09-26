@@ -12,7 +12,7 @@ with no runtime dependencies.
 [![npm version](https://img.shields.io/npm/v/openalgo-charts.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/openalgo-charts)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![npm downloads](https://img.shields.io/npm/dm/openalgo-charts.svg?color=0ea5e9&label=npm%20downloads)](https://www.npmjs.com/package/openalgo-charts)
-[![tests](https://img.shields.io/badge/engine%20tests-8679%20passing-brightgreen.svg)](#develop)
+[![tests](https://img.shields.io/badge/engine%20tests-8699%20passing-brightgreen.svg)](#develop)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](#principles)
 
 [**Documentation**](https://marketcalls.github.io/openalgo-charts/) &nbsp;·&nbsp; [**Live examples**](https://marketcalls.github.io/openalgo-charts/examples) &nbsp;·&nbsp; [**Getting started**](./docs/getting-started.md) &nbsp;·&nbsp; [**Migrating to 2.0**](./docs/migrating-to-2.md) &nbsp;·&nbsp; [**Architecture**](./ARCHITECTURE.md)
@@ -551,7 +551,7 @@ See [Contributing](./CONTRIBUTING.md) for setup, targeted checks, documentation 
 ```bash
 npm install        # install dev toolchain
 npm run typecheck  # strict TypeScript check
-npm test           # engine unit tests (Vitest): 8679 across 383 files
+npm test           # engine unit tests (Vitest): 8699 across 383 files
 npm run test:demo  # reference-host tests: 589 across 56 files
 npm run test:endurance # node endurance-harness tests: 7 cases
 npm run build      # Rollup -> dist/ (minified ESM per tier + types)
@@ -562,7 +562,7 @@ npm run verify     # lint + types + unit + endurance harness + build + demo + dt
 
 ## Principles
 
-- **Canvas rendering, two canvases per pane**: a base canvas for the chart and its axes, and an overlay canvas for the crosshair and anything being dragged, so a crosshair move repaints only the overlay. No SVG and no DOM element per bar; SVG appears only in `exportSVG` output and the draw tier's icons. The optional WebGL tier draws on a shared offscreen surface and copies into the base canvas. Frame times are recorded, not promised: see [browser endurance](./docs/browser-endurance.md).
+- **Canvas rendering, two canvases per pane**: a base canvas for the chart, its axes and the price lines (order and position lines included), and an overlay canvas for the crosshair, the drawings and the other top-layer primitives, so a crosshair move repaints only the overlay. No SVG and no DOM element per bar; SVG appears only in `exportSVG` output and in the icon markup of the draw and widget tiers. The optional WebGL tier draws on a shared offscreen surface and copies into the base canvas. Frame times are recorded, not promised: see [browser endurance](./docs/browser-endurance.md).
 - **Gapless time axis by default**: weekends, holidays, and session breaks collapse.
 - **Registries, not switches**: chart types, indicators, and drawing tools are all descriptors. Adding one is a registration, never a core change.
 - **Zero runtime dependencies**: nothing is excluded from the size budget.
@@ -578,7 +578,7 @@ Known gaps, stated plainly:
 - **Only `Footprint` is theme-aware among the profile primitives.** `VolumeProfile`, `MarketProfile` and `HorizontalProfile` never read `rc.theme`; their defaults are dark-tuned, so a light theme needs explicit colours. `HorizontalProfile` also hardcodes its POC / value-area line colours and has no `setOptions`.
 - The OpenAlgo **WS/trade adapter wire schemas** ship with injectable transports and offline tests, but the exact field names should be verified against your running OpenAlgo build.
 - **Large histories slow the live path.** With 150 bars in view, two charts and five studies each, the recorded frame-interval p95 is 17 ms at 2,000 bars per chart and 717 ms at 50,000. The view is the same in both, so the extra time is work over the whole history, such as recomputing every study on each tick. The workload, machine and commands are in [browser endurance](./docs/browser-endurance.md); bound retained history for sustained sessions.
-- **The WebGL2 backend draws the standard chart types.** Kagi, point-and-figure and custom chart types, drawings, text and every primitive stay on the 2D context; `renderer: 'auto'` is a speed-up for the series pass, not a second renderer for everything.
+- **The WebGL2 backend draws the standard chart types.** Kagi, point-and-figure and custom chart types, drawings, text and every primitive stay on the 2D context; `renderer: 'auto'` moves the series pass of the standard types to the GPU and is not a second renderer for everything. Its frame time against Canvas2D has not been measured.
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) §13a for the full deferred list.
 
