@@ -158,6 +158,11 @@ selection or Escape; ambiguous study scales require an explicit pick target.
 Timestamps are edited as UTC seconds without rounding fractional values.
 See [typed study inputs](/docs/indicators#typed-study-inputs).
 
+Unreleased: inputs can also be shown or enabled by another setting, and related
+inputs can share one row. The dialog re-reads those rules on every edit and
+announces what changed; see
+[conditional inputs](/docs/indicators#conditional-inputs-and-inline-rows).
+
 ## Use individual controls in your own host
 
 `AlertUi.context` exposes the same widget context used by its alert dialogs.
@@ -179,6 +184,14 @@ Custom terminals can also supply their own `WidgetContext` and compose controls:
 - `createColorPicker(document, options)` supports `openOverlay: context.openOverlay`
   so its palette stays above scrolling dialogs. Dispose it on unmount. For generated
   forms, pass the same opener to `renderForm` and call the returned `destroy()`.
+- `renderForm(host, controlsFromInputs(inputs), options)` honours each input's
+  `visibleWhen`, `activeWhen` and `inline` (unreleased). It asks `options.unavailable`
+  again after every edit and every `sync`, so a host reason can depend on values;
+  that reason wins over the condition's. After a sync that disables a field, call
+  `refresh()` on the `mountIndicatorInputControls` handle so its pick follows.
+- `inputStates(inputs, values)` returns each input's `{ visible, active, dependsOn }`
+  and `inputConditionMet(condition, values)` tests one condition (unreleased), for a
+  form of your own that must agree with the widget's.
 
 When styles are supplied by the host, include `WIDGET_CSS` and
 `WIDGET_COMPONENT_CSS`, then apply widget theme tokens. `createWidget` and

@@ -5,6 +5,7 @@ description: Live, in-page chart demos powered by the real OpenAlgo Charts libra
 
 import RunnableExample from '../components/RunnableExample'
 import TypedInputsDemo from '../components/TypedInputsDemo'
+import ConditionalInputsDemo from '../components/ConditionalInputsDemo'
 import { STOCK_BARS_SOURCE } from '../components/synthetic-market'
 import { SANDBOX_BROKER_EXAMPLE } from '../components/account-examples'
 import { ProfileDemo, ProfileThemeGallery } from '../components/ProfileShowcase'
@@ -276,6 +277,34 @@ bar.appendChild(readout);
 chart.on('objects:change', show);
 show();
 return chart;`} />
+## Conditional study inputs
+
+Open the study inputs and change the mode, the smoothing and the signal switch.
+The band width appears only in Bands mode and keeps its value while it is
+hidden, the smoothing length is editable only with a smoothing chosen, and the
+signal's length and colour share its row and follow its switch. Unreleased: see
+[conditional inputs](/docs/indicators#conditional-inputs-and-inline-rows).
+
+<ConditionalInputsDemo />
+
+The descriptor declares the rules as data beside each input:
+
+```ts
+inputs: [
+  { key: 'length', type: 'number', label: 'Length', default: 20, inline: 'len' },
+  { key: 'source', type: 'source', label: 'Source', default: 'close', inline: 'len' },
+  { key: 'mode', type: 'select', label: 'Mode', default: 'line', options: MODES },
+  { key: 'width', type: 'number', label: 'Band width', default: 1.5, visibleWhen: { key: 'mode', is: 'bands' } },
+  { key: 'smoothing', type: 'select', label: 'Smoothing', default: 'none', options: SMOOTHING },
+  { key: 'smoothLength', type: 'number', label: 'Smoothing length', default: 5,
+    activeWhen: { key: 'smoothing', isNot: 'none' } },
+  { key: 'showSignal', type: 'boolean', label: 'Signal', default: false, inline: 'signal' },
+  { key: 'signalLength', type: 'number', label: 'Length', default: 9, inline: 'signal',
+    activeWhen: { key: 'showSignal', is: true } },
+  { key: 'signalColor', type: 'color', label: 'Colour', default: '#d97706', inline: 'signal',
+    activeWhen: { key: 'showSignal', is: true } },
+]
+```
 
 ## Compare markets
 

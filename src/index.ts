@@ -95,6 +95,9 @@ export {
 export type {
   IndicatorDescriptor,
   IndicatorInput,
+  IndicatorInputCondition,
+  IndicatorInputConditionValue,
+  IndicatorInputPresentation,
   IndicatorPlot,
   PlotBarColor,
   IndicatorBarsRequest,

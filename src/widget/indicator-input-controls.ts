@@ -23,7 +23,17 @@ export interface IndicatorInputControlsHandle {
   destroy(): void;
 }
 
-/** Host actions for typed fields. Values remain ordinary settings scalars. */
+/**
+ * The form's reason a field cannot act, which its action cannot outrun: a pick
+ * or a search would write a value the form is showing as out of play.
+ */
+const inert = (field: HTMLInputElement | HTMLTextAreaElement): string | null => field.disabled ? field.title : null;
+
+/**
+ * Host actions for typed fields. Values remain ordinary settings scalars.
+ * Call `refresh` after the form re-reads its conditions, so an action follows
+ * its field in and out of play.
+ */
 export function mountIndicatorInputControls(ctx: WidgetContext, options: IndicatorInputControlsOptions): IndicatorInputControlsHandle {
   let destroyed = false;
   const buttons: HTMLButtonElement[] = [], pickers: SymbolPickerHandle[] = [], refreshers: (() => void)[] = [];
@@ -75,9 +85,12 @@ export function mountIndicatorInputControls(ctx: WidgetContext, options: Indicat
         if (current()) picker?.open(field.value);
       } });
       trigger.dataset.inputAction = input.key;
-      trigger.disabled = ctx.symbolSearch === undefined;
-      if (trigger.disabled) trigger.title = widgetText(ctx, 'Symbol search is not configured; enter an instrument manually');
       field.parentElement?.appendChild(trigger); buttons.push(trigger);
+      refreshers.push(() => {
+        const why = inert(field) ?? (ctx.symbolSearch === undefined
+          ? widgetText(ctx, 'Symbol search is not configured; enter an instrument manually') : null);
+        trigger.disabled = why !== null; trigger.title = why ?? '';
+      });
       const picker = ctx.symbolSearch === undefined ? null : mountSymbolPicker(ctx, field as HTMLInputElement, {
         search: ctx.symbolSearch,
         context: () => current() ? [instance.id, ctx.symbol(), ctx.interval(), ctx.chart.getDataContext()] : null,
@@ -98,6 +111,8 @@ export function mountIndicatorInputControls(ctx: WidgetContext, options: Indicat
     }
     if ((input.type !== 'price' && input.type !== 'timestamp') || !input.pick) continue;
     const reason = (): string | null => {
+      const off = inert(field);
+      if (off !== null) return off;
       if (ctx.draw.activeTool() !== null) return widgetText(ctx, 'Finish or cancel the active drawing before picking');
       if (!options.suspend && !ctx.overlays.suspend) return widgetText(ctx, 'This host cannot suspend the settings dialog');
       if (input.type === 'price' && studyInputTarget(ctx.chart, instance, input.key) === null) {

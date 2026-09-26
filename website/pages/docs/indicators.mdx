@@ -86,6 +86,56 @@ registerIndicator({
 `timeKey` must name a declared `timestamp` input that no other price pairs with, and
 `anchor` needs a `timeKey`; anything else raises `IndicatorInputError` when the
 descriptor is registered. Try the [anchored study input example](/examples#anchored-study-input).
+## Conditional inputs and inline rows
+
+Unreleased. An input that only matters for some settings can say so. Every input
+takes three optional presentation fields, which the widget's settings dialog and
+the reference host's form both honour:
+
+| Field | Effect in the form |
+| --- | --- |
+| `visibleWhen` | The input is shown only while the condition holds. A hidden input leaves the tab order, and whatever was typed into it is kept for when it returns. |
+| `activeWhen` | The input can be edited only while the condition holds. Otherwise it is disabled with its value readable and a reason naming the setting it depends on. |
+| `inline` | Consecutive inputs with the same id share one row, the first one's label leading it and each member keeping its own label. |
+
+A condition compares another setting with a value or a list of values, and
+combines with `all` and `any`:
+
+```ts
+inputs: [
+  { key: 'length', type: 'number', label: 'Length', default: 14, inline: 'len' },
+  { key: 'source', type: 'source', label: 'Source', default: 'close', inline: 'len' },
+  { key: 'mode', type: 'select', label: 'Mode', default: 'line',
+    options: [{ label: 'Line', value: 'line' }, { label: 'Bands', value: 'bands' }] },
+  { key: 'width', type: 'number', label: 'Band width', default: 2,
+    visibleWhen: { key: 'mode', is: 'bands' } },
+  { key: 'smoothing', type: 'select', label: 'Smoothing', default: 'none',
+    options: [{ label: 'None', value: 'none' }, { label: 'Moving average', value: 'sma' }] },
+  { key: 'smoothLength', type: 'number', label: 'Smoothing length', default: 5,
+    activeWhen: { key: 'smoothing', isNot: 'none' } },
+  { key: 'fill', type: 'boolean', label: 'Fill', default: false,
+    visibleWhen: { all: [{ key: 'mode', is: 'bands' }, { key: 'width', isNot: 0 }] } },
+]
+```
+
+`is` and `isNot` compare strictly, so the number 5 does not match the text `'5'`.
+Rules cascade: an input shown by a hidden input is hidden too, and one enabled by
+a hidden or disabled input stays disabled.
+
+The rules only change the form. `calc` receives every setting, a hidden value is
+kept rather than reset, and changing a controlling setting writes nothing else.
+The form re-reads the rules after every edit, announces rows that appear, leave,
+or change availability to screen readers, and moves focus off a control that
+just left. A hidden or disabled draft never blocks OK or Apply: a valid one is
+saved, an invalid one is left out and the stored value stands. **Defaults**
+restores hidden inputs as well, and **Cancel** restores the settings and so the
+rows they show.
+
+A host that renders its own form reads the same rules through `inputStates` and
+`inputConditionMet` from `openalgo-charts/widget`; see
+[the widget page](/docs/widget#use-individual-controls-in-your-own-host).
+
+Try the [conditional study inputs example](/examples#conditional-study-inputs).
 
 There are two ways to put an indicator on a chart, and they suit different jobs.
 

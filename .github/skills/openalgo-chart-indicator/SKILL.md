@@ -92,6 +92,15 @@ Since 2.4.0, for the constructs a ported study most often could not express (eve
 
 Full semantics for all of these are in [indicators](../openalgo-charts/references/indicators.md#coverage-additions-240).
 
+Unreleased: an input that only matters for some settings takes `visibleWhen` or
+`activeWhen`, a condition over the other settings such as
+`{ key: 'mode', is: 'bands' }` (also `isNot`, `all`, `any`), and related inputs
+share one row with the same `inline` id. The widget and reference host forms honour
+them; `calc` still receives every setting. A ported study whose inputs were greyed
+or hidden by another input keeps that behaviour this way instead of listing every
+parameter as always editable. See
+[indicators](../openalgo-charts/references/indicators.md#conditional-inputs-and-inline-rows-unreleased).
+
 Full semantics for every one of these, including the firing rules and the known gaps, are in [indicators](../openalgo-charts/references/indicators.md). Read them before using `barColors` or `alerts`: both have behaviour that is deliberate and surprising.
 
 ```ts

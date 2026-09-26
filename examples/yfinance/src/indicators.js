@@ -3,8 +3,8 @@ import { el, esc, currentTheme, chartTheme, toast, closeOverlay } from './ui.js'
 import { autosave } from './persist.js';
 import { capturePaneTarget } from './pane-target.js';
 import { historyGroup } from './history.js';
-import { createColorPicker, applyTokens, widgetTokens } from '/dist/openalgo-charts.widget.mjs';
-import { bindTypedField, typedFieldValue, typedFieldError, validateTypedRows, mountReferenceInputControls } from './indicator-input-controls.js';
+import { createColorPicker, applyTokens, widgetTokens, inputStates } from '/dist/openalgo-charts.widget.mjs';
+import { bindTypedField, typedFieldValue, typedFieldError, typedFieldProblem, validateTypedRows, mountReferenceInputControls, outOfPlay } from './indicator-input-controls.js';
 import { studyAllows } from './host-study.js';
 import { anchoredGrowthSeed } from './anchored-study.js';
 
@@ -99,6 +99,9 @@ let disposeSettings = null;
 const formPickers = new WeakMap();
 const sourceReferences = new WeakMap();
 const formDrafts = new WeakMap();
+// Per form: the inputs, the values it opened with, and the rows the
+// descriptor's conditions show, hide, enable and disable.
+const formRules = new WeakMap();
 
 function studySource(value) {
   return value !== null && typeof value === 'object' && value.kind === 'indicator'
@@ -148,6 +151,10 @@ export function openSettings(instanceId, target = capturePaneTarget(app)) {
  * control (or one option of a select) cannot act in the current context, or
  * null when it can. A control with nothing behind it is drawn disabled with
  * its value still readable rather than left live and inert.
+ *
+ * An input's `visibleWhen` and `activeWhen` are read against the drafts on
+ * every edit, with the same reader the widget uses, and consecutive inputs
+ * that share an `inline` id share one row.
  */
 export function renderInputRows(host, inputs, values, onChange, unavailable) {
   destroyInputRows(host);
@@ -156,25 +163,164 @@ export function renderInputRows(host, inputs, values, onChange, unavailable) {
   host.classList.add('oac-widget', 'host-form-widget');
   applyTokens(host, widgetTokens(chartTheme(), currentTheme()));
   host.innerHTML = '';
-  let group = null;
+  const members = [];
+  let group = null, head = null, inline = null;
   for (const input of inputs) {
     if (input.group && input.group !== group) {
       group = input.group;
-      const h = document.createElement('div');
-      h.className = 'set-group';
-      h.textContent = group;
-      host.appendChild(h);
+      head = document.createElement('div');
+      head.className = 'set-group';
+      head.textContent = group;
+      host.appendChild(head);
+      inline = null;
     }
-    host.appendChild(input.type === 'colorPair'
+    if (inline && (!inlinable(input) || input.inline !== inline.id)) inline = null;
+    if (inline) {
+      members.push({ ...inlineItem(host, inline, input, values, onChange, unavailable), input, row: inline.row, head });
+      continue;
+    }
+    const lead = inlinable(input);
+    const row = input.type === 'colorPair'
       ? colorPairRow(host, input, values, onChange, unavailable)
-      : simpleRow(host, input, values, onChange, unavailable));
+      : simpleRow(host, input, values, onChange, unavailable, lead);
+    host.appendChild(row);
+    const fields = [...row.querySelectorAll('[data-key]')];
+    const member = { input, row, head, fields, parts: [row], offEl: row, offClass: 'set-row--off', titles: [row],
+      offKeys: input.type === 'colorPair' ? [input.up.key, input.down.key] : [input.key] };
+    if (lead) {
+      row.classList.add('set-row--inline');
+      row.dataset.inline = input.inline;
+      const label = row.querySelector('label');
+      const item = row.querySelector('.set-inline');
+      member.parts = item ? [label, item] : [fields[0], label];
+      member.titles = item ? [label, item] : [label];
+      inline = { id: input.inline, row, ctl: row.querySelector('.set-ctl') };
+    }
+    members.push(member);
   }
+  if (!inputs.some(input => input.activeWhen || input.visibleWhen)) return;
+  // Polite and inside the dialog, so the change is read after the edit that
+  // caused it without moving focus to announce it.
+  const live = document.createElement('div');
+  live.className = 'sr-only';
+  live.setAttribute('role', 'status');
+  live.setAttribute('aria-live', 'polite');
+  host.appendChild(live);
+  for (const m of members) { m.shown = true; m.enabled = true; }
+  // Committed edits only, the way the widget's form reads them: a box counts
+  // once it is left, not at every keystroke. Every open renders into the same
+  // host, so destroyInputRows takes the listener off again.
+  const changed = event => refreshInputRows(host, event.target?.dataset?.key);
+  host.addEventListener('change', changed);
+  formRules.set(host, { inputs, values, members, live, unavailable, refreshers: [], taken: {},
+    detach: () => host.removeEventListener('change', changed) });
+  refreshInputRows(host, undefined, false);
+}
+
+// A pair is already a row of its own and a multi-line box needs the width.
+function inlinable(input) {
+  return Boolean(input.inline) && input.type !== 'colorPair' && input.type !== 'multiline';
+}
+
+/** A later member of an inline row: its own label and control, dimmed and hidden on their own. */
+function inlineItem(host, inline, input, values, onChange, unavailable) {
+  const item = document.createElement('span');
+  item.className = 'set-inline';
+  const label = document.createElement('label');
+  label.textContent = input.type === 'timestamp' ? input.label + ' (UTC seconds)' : input.label;
+  label.htmlFor = host.id + '_' + input.key;
+  if (input.tooltip) label.appendChild(helpMark(input.tooltip));
+  const field = inputField(host, input.key, input.type, input, values[input.key], onChange, unavailable);
+  if (input.type === 'boolean') item.append(field, label);
+  else item.append(label, field._colorPicker?.el || field);
+  inline.ctl.appendChild(item);
+  bindTypedField(field, input, inline.row);
+  return { fields: [field], parts: [item], offEl: item, offClass: 'set-inline--off', titles: [item], offKeys: [input.key] };
+}
+
+/**
+ * Show, hide, enable and disable the rows of a conditional form from its
+ * drafts, and say in the live region what changed. Runs after the first paint
+ * and after every edit; a form with no conditions never gets here.
+ */
+export function refreshInputRows(host, cause, announce = true) {
+  const rules = formRules.get(host);
+  if (!rules) return;
+  const before = document.activeElement;
+  // What the widget's form would hold: a number as its last commit left it,
+  // and a typed draft it would refuse is no edit, so the last accepted value
+  // still decides.
+  const draft = { ...rules.values, ...formDrafts.get(host), ...rules.taken };
+  for (const m of rules.members) for (const field of m.fields) {
+    if (typedFieldProblem(field)) continue;
+    draft[field.dataset.key] = rules.taken[field.dataset.key] = field._committed ? field._committed() : fieldValue(field);
+  }
+  const states = inputStates(rules.inputs, draft);
+  const said = { shown: [], hidden: [], on: [], off: [] };
+  // A pair's switch and swatches are named by the pair, as the reader counts them.
+  const labelOf = key => rules.inputs.find(input => input.key === key
+    || [input.enabled, input.up, input.down].some(part => part?.key === key))?.label;
+  for (const m of rules.members) {
+    const state = states.get(m.input.key);
+    const visible = state?.visible ?? true;
+    let reason = null;
+    if (state && !state.active) {
+      const names = state.dependsOn.map(labelOf).filter(Boolean);
+      reason = names.length ? `Depends on ${names.join(', ')}` : 'Not used with the current settings';
+    }
+    for (const part of m.parts) part.hidden = !visible;
+    const why = new Map();
+    for (const field of m.fields) {
+      const r = rules.unavailable?.(field.dataset.key) ?? reason;
+      why.set(field.dataset.key, r);
+      for (const node of [field, field._colorPicker?.trigger]) {
+        if (!node) continue;
+        node.disabled = r !== null;
+        node.title = field._title(r);
+      }
+      const error = field._error;
+      if (error) error.hidden = !visible || error.textContent === '';
+    }
+    const off = m.fields.length > 0 && m.offKeys.every(key => why.get(key) !== null);
+    m.offEl.classList.toggle(m.offClass, off);
+    for (const node of m.titles) node.title = off ? why.get(m.offKeys[0]) ?? '' : '';
+    if (m.shown !== visible) said[visible ? 'shown' : 'hidden'].push(m.input.label);
+    else if (visible && m.enabled === off) said[off ? 'off' : 'on'].push(m.input.label);
+    m.shown = visible;
+    m.enabled = !off;
+  }
+  // A row whose every member left goes too, and a heading with nothing under it.
+  for (const outer of ['row', 'head']) {
+    const groups = new Map();
+    for (const m of rules.members) if (m[outer]) groups.set(m[outer], (groups.get(m[outer]) ?? false) || m.shown);
+    for (const [node, any] of groups) node.hidden = !any;
+  }
+  // Focus inside a row that just left or turned off would fall out of the
+  // dialog: give it back to the field that caused this, or the first one left.
+  if (before && host.contains(before) && outOfPlay(before, host)) {
+    const usable = [...host.querySelectorAll('[data-key]')].filter(field => !outOfPlay(field, host));
+    (usable.find(field => field.dataset.key === cause) ?? usable[0])?.focus();
+  }
+  for (const refresh of rules.refreshers) refresh();
+  if (!announce) return;
+  const lines = [];
+  if (said.shown.length) lines.push('Shown: ' + said.shown.join(', '));
+  if (said.hidden.length) lines.push('Hidden: ' + said.hidden.join(', '));
+  if (said.on.length) lines.push('Available: ' + said.on.join(', '));
+  if (said.off.length) lines.push('Unavailable: ' + said.off.join(', '));
+  if (!lines.length) return;
+  const message = lines.join('. ');
+  // A live region is read when its text changes, so the same words twice in a
+  // row differ by a trailing space that is not read out.
+  rules.live.textContent = rules.live.textContent === message ? message + '\u00a0' : message;
 }
 
 export function destroyInputRows(host) {
   for (const picker of formPickers.get(host) || []) picker.destroy();
+  formRules.get(host)?.detach();
   formPickers.delete(host);
   formDrafts.delete(host);
+  formRules.delete(host);
 }
 
 /**
@@ -229,7 +375,9 @@ function inputField(host, key, kind, spec, value, onChange, unavailable) {
       id: host.id + '_' + key, label: spec.label || key, value,
       disabledReason: off,
       openOverlay: app?.['alertUi' + (app.focusPane === 2 ? '2' : '')]?.context.openOverlay,
-      onChange: next => onChange?.(key, next),
+      // A swatch fires no input event on the form, so a condition that reads
+      // a colour has to be told here.
+      onChange: next => { onChange?.(key, next); refreshInputRows(host, key); },
     });
     formPickers.get(host).push(picker);
     field = picker.input;
@@ -245,12 +393,16 @@ function inputField(host, key, kind, spec, value, onChange, unavailable) {
       if (spec.step !== undefined) field.step = spec.step;
     }
     field.value = String(value ?? '');
+    if (kind === 'number') commitNumber(field, spec, value);
   }
   // Namespaced by host, so both dialogs can exist in the document at once
   // without two fields claiming the same id.
   field.id = host.id + '_' + key;
   field.dataset.key = key;
   field.dataset.kind = kind;
+  // The title a field carries for a reason it cannot act, or for none; a
+  // swatch keeps its name, since it says nothing about itself.
+  field._title = kind === 'color' ? why => why ?? (spec.label || key) : why => why ?? '';
   if (off) { field.disabled = true; field.title = off; }
   if (onChange && kind !== 'color') {
     for (const ev of ['input', 'change']) {
@@ -258,6 +410,22 @@ function inputField(host, key, kind, spec, value, onChange, unavailable) {
     }
   }
   return field;
+}
+
+/**
+ * Commit a number box the way the widget's form does, so a condition that
+ * reads it answers alike in both: clamped to its bounds, and a blank or
+ * unparseable box is no edit and gets the last good value back. Registered
+ * before the form's own change listener, so that reads the committed value.
+ */
+function commitNumber(field, spec, value) {
+  let good = value;
+  field._committed = () => good;
+  field.addEventListener('change', () => {
+    const raw = field.value.trim(), n = raw === '' ? NaN : Number(raw);
+    if (Number.isFinite(n)) good = Math.min(spec.max ?? Infinity, Math.max(spec.min ?? -Infinity, n));
+    if (!Number.isFinite(n) || n !== good) field.value = typeof good === 'number' && Number.isFinite(good) ? String(good) : '';
+  });
 }
 
 /**
@@ -277,8 +445,11 @@ function helpMark(tooltip) {
 }
 
 /** A row carrying one control. Booleans sit in the switch column, in front
- *  of their label; everything else sits in the control column on the right. */
-function simpleRow(host, input, values, onChange, unavailable) {
+ *  of their label; everything else sits in the control column on the right.
+ *  `lead` starts an inline row: the control column exists for the members
+ *  that follow, and the lead's own control sits in an item like theirs, so a
+ *  pick button beside it hides with it. */
+function simpleRow(host, input, values, onChange, unavailable, lead = false) {
   const row = document.createElement('div');
   row.className = 'set-row';
   const off = unavailable ? unavailable(input.key) : null;
@@ -291,10 +462,22 @@ function simpleRow(host, input, values, onChange, unavailable) {
   if (input.type === 'boolean') {
     field.classList.add('set-sw');
     row.append(field, label);
+    if (lead) {
+      const ctl = document.createElement('div');
+      ctl.className = 'set-ctl';
+      row.appendChild(ctl);
+    }
   } else {
     const ctl = document.createElement('div');
     ctl.className = 'set-ctl';
-    ctl.appendChild(field._colorPicker?.el || field);
+    if (lead) {
+      const item = document.createElement('span');
+      item.className = 'set-inline';
+      item.appendChild(field._colorPicker?.el || field);
+      ctl.appendChild(item);
+    } else {
+      ctl.appendChild(field._colorPicker?.el || field);
+    }
     row.append(label, ctl);
   }
   bindTypedField(field, input, row);
@@ -334,6 +517,7 @@ function colorPairRow(host, input, values, onChange, unavailable) {
     // tight for two more labels: the name goes on the control itself, and
     // keeps the reason alongside it when this half has nothing to paint.
     sw.title = sw.disabled ? half.label + ' - ' + sw.title : half.label;
+    sw._title = why => why === null ? half.label : half.label + ' - ' + why;
     ctl.appendChild(sw._colorPicker?.el || sw);
   }
   row.append(label, ctl);
@@ -349,10 +533,16 @@ export function fieldValue(field) {
     : kind === 'color' && field._colorPicker ? field._colorPicker.read() : typedFieldValue(field);
 }
 
-/** Every field in a generated form, as a flat patch keyed by input key. */
+/**
+ * Every field in a generated form, as a flat patch keyed by input key. A
+ * hidden or disabled field keeps a valid draft, but an invalid one is left out
+ * so the stored value stands: nobody can correct what they cannot reach.
+ */
 export function collectInputRows(host) {
   return { ...formDrafts.get(host), ...Object.fromEntries(
-    [...host.querySelectorAll('[data-key]')].map(field => [field.dataset.key, fieldValue(field)]),
+    [...host.querySelectorAll('[data-key]')]
+      .filter(field => !(outOfPlay(field, host) && typedFieldProblem(field)))
+      .map(field => [field.dataset.key, fieldValue(field)]),
   ) };
 }
 
@@ -383,9 +573,14 @@ export function renderSettingsTab(draft) {
       if (!Object.prototype.hasOwnProperty.call(patch, field.dataset.key)) continue;
       field.value = String(patch[field.dataset.key]); typedFieldError(field, null);
     }
+    refreshInputRows(host);
     return true;
   }, current);
-  if (controls) formPickers.get(host).push(controls);
+  if (controls) {
+    formPickers.get(host).push(controls);
+    // A pick or a search beside a field follows it in and out of play.
+    formRules.get(host)?.refreshers.push(() => controls.refresh());
+  }
 }
 
 /** Say that the host locked the study since its settings opened: the write changed nothing. */
