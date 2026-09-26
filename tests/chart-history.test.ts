@@ -1658,6 +1658,20 @@ describe('study policies the host changes later', () => {
     expect(errors).toEqual([]);
   });
 
+  it('records no step for a forced remove in the same turn the host protected the study', async () => {
+    const { chart, history } = rig();
+    const study = chart.addIndicator('hist-osc', { length: 3 });
+    await settle();
+    history.clear();
+    // No capture falls between the two: the policy is read off the study that went.
+    study.setPolicy({ removable: false });
+    expect(chart.removeIndicator(study.id, { force: true })).toBe(true);
+    await settle();
+    expect(history.canUndo()).toBe(false);
+    expect(history.undo()).toBe(false);
+    expect(chart.indicators()).toEqual([]);
+  });
+
   it.each([
     ['one it had set a policy on', { movable: false }],
     ['one it had set no policy on', null],
