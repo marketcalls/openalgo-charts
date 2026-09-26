@@ -106,6 +106,31 @@ must survive JSON without losing symbols, accessors or extra array properties.
 Arbitrary free text is not secret-scanned.
 Do not execute imported text or assume namespace names provide authorization.
 
+## Study policies in documents
+
+Workspace chart states keep each study's `policy` (validated, restrictions only) and a
+moved source's `sourceAbove`. A portable indicator template is the user's own copy of the
+user's own studies: parsing and `captureIndicatorTemplate` leave out every study the host
+keeps from the user (policy not `removable` or not `listed`), every study reading the
+output of one, their plot bindings and the scale ranges they owned, and drop `policy` from
+the rest. `planIndicatorTemplate` and `planIndicatorTemplateState` in `replace` mode keep
+every current host study (not `removable` or not `listed`), with its identity and policy,
+and give the template's pane groups the free slots around its pane, so a replace neither
+copies nor removes one.
+## Data variants in workspaces (2.5.6)
+
+`WorkspacePane.variant?: DataVariant` names the provider series a chart showed (extended
+hours, raw prices, a currency or a unit). The parser keeps a pane's variant as the
+frozen canonical copy `normalizeDataVariant` returns, stores the default (`{}`) as no
+field at all, and refuses the document with `WorkspaceDocumentError` for a variant this
+build cannot name, because it would reopen as some other series. `migrateWidgetWorkspace`
+carries a widget state's `variant`. `createChartGrid` saves each cell's variant in
+`getWorkspace()`, reopens it through `applyWorkspace()` (a payload whose variant cannot
+be read is refused and the grid keeps its charts), gives a new cell from `setPreset`
+the active chart's variant, and saves when a cell's variant changes. Comparisons have no
+variant of their own: a host asks for them in their chart's session and adjustment
+(`inheritedDataVariant`). See [feeds-and-live](feeds-and-live.md).
+
 ## Named watchlists (2.5.5)
 
 DOM-free named symbol lists in the same tier and with the same storage discipline as

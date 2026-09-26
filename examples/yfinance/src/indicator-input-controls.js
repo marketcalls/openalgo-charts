@@ -21,6 +21,23 @@ function errorFor(input, value) {
   return null;
 }
 
+/** The reason a typed field's draft cannot be saved, or null; null for any other field. */
+export function typedFieldProblem(field) {
+  const input = specs.get(field)?.input;
+  return input ? errorFor(input, typedFieldValue(field)) : null;
+}
+
+/**
+ * Whether a field is out of the user's reach: disabled, or inside a row a
+ * condition hid. Read through the `hidden` property, which is what the form
+ * sets, rather than a selector.
+ */
+export function outOfPlay(field, host) {
+  if (field.disabled) return true;
+  for (let node = field; node && node !== host; node = node.parentElement) if (node.hidden) return true;
+  return false;
+}
+
 export function typedFieldError(field, message) {
   const info = specs.get(field);
   if (!info) return;
@@ -34,15 +51,16 @@ export function bindTypedField(field, input, row) {
   const error = field.ownerDocument.createElement('div');
   error.className = 'set-input-error'; error.id = field.id + '-error'; error.hidden = true;
   error.setAttribute('role', 'status'); field.setAttribute('aria-describedby', error.id);
-  row.appendChild(error); specs.set(field, { input, error });
+  row.appendChild(error); specs.set(field, { input, error }); field._error = error;
   field.addEventListener('input', () => typedFieldError(field, errorFor(input, typedFieldValue(field))));
 }
 
+/** Mark every reachable typed draft; one out of reach never blocks Apply. */
 export function validateTypedRows(host) {
   let valid = true;
   for (const field of host.querySelectorAll('[data-key]')) {
     const input = specs.get(field)?.input;
-    if (!input) continue;
+    if (!input || outOfPlay(field, host)) continue;
     const error = errorFor(input, typedFieldValue(field));
     typedFieldError(field, error);
     if (error) valid = false;

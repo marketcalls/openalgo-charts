@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DiagnosticBag, check, emit, isError, parse, sourceFile } from 'script-engine-under-test';
 import { descriptorFor } from 'script-engine-under-test/adapters/charts';
+import engine from 'script-engine-under-test/package.json';
 import { Chart as PublicChart, registerIndicator as registerPublicIndicator } from 'openalgo-charts';
 import { captureIndicatorTemplate, planIndicatorTemplateState } from 'openalgo-charts/workspace';
 import { Chart } from '../src/core/chart';
@@ -8,6 +9,9 @@ import { registerIndicator, type IndicatorDescriptor } from '../src/model/indica
 import type { Bar } from '../src/model/bar';
 import type { SeriesMarker } from '../src/primitives/markers';
 import { ChartTable } from '../src/primitives/table';
+import { IndicatorFill } from '../src/primitives/indicator-fill';
+import type { PrimitiveRenderContext } from '../src/primitives/primitive';
+import { VERSION } from '../src/version';
 import { securityExpression } from '../src/indicators/security';
 import { alignRequestedExpression, type RequestedExpression } from '../src/indicators/requested-context';
 import { createRequestedIndicator } from '../src/indicators/requested-indicator';
@@ -15,12 +19,18 @@ import { createTier2Indicator } from '../src/indicators/external';
 import { SMA } from '../src/indicators/trend';
 import { ReplayController } from '../src/replay/controller';
 import { fakeDocument } from '../tests/helpers/fake-dom';
+import { makeCtx } from '../tests/helpers/fake-ctx';
 
 const charts: Chart[] = [];
 let sequence = 0;
 afterEach(() => charts.splice(0).forEach(chart => chart.destroy()));
 
-function compile(text: string): IndicatorDescriptor {
+/**
+ * Compile a study. `options` goes to the adapter as a variable rather than a
+ * literal, so a field an older engine does not declare (`chartVersion`
+ * before 0.8.0) still type checks against it.
+ */
+function compile(text: string, extra: Record<string, unknown> = {}): IndicatorDescriptor {
   const file = sourceFile('compatibility.oscript', text);
   const bag = new DiagnosticBag();
   const ast = parse(file, bag);
@@ -29,10 +39,19 @@ function compile(text: string): IndicatorDescriptor {
   const errors = bag.ordered().filter(isError);
   expect(errors.map(error => `${error.code}: ${error.message}`)).toEqual([]);
   if (!result.program) throw new Error('script engine emitted no program');
+  const options = { id: `script-compat-${sequence++}`, ...extra };
   // This assignment is checked against the actual public adapter declarations.
   // The integration runner fails compilation if the chart contract drifts.
-  const descriptor: IndicatorDescriptor = descriptorFor(result.program, { id: `script-compat-${sequence++}` });
+  const descriptor: IndicatorDescriptor = descriptorFor(result.program, options);
   return descriptor;
+}
+
+/** Whether the engine under test is at least `wanted`, read from its own package.json. */
+function engineAtLeast(wanted: string): boolean {
+  const have = engine.version.split(/[-+]/)[0].split('.').map(Number);
+  const want = wanted.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (have[i] !== want[i]) return have[i] > want[i];
+  return !engine.version.includes('-');
 }
 
 function makeChart(data: Bar[], now: number, updatesOnly = false) {
@@ -603,5 +622,54 @@ plot(close, "Close")
     expect(tables()[0].rows()[0][0].text).toBe('5.00');
     indicator.remove();
     expect(tables()).toHaveLength(0);
+  });
+
+  it('draws every declared grid and a band coloured per bar when the host states the chart version', context => {
+    // The adapter draws both only from 0.8.0, and refuses such a study before.
+    context.skip(!engineAtLeast('0.8.0'),
+      `script engine ${engine.version} is older than 0.8.0, whose adapter first draws several grids and a band colour computed per bar`);
+    const descriptor = compile(`version 1
+study("Grids and band", overlay = true)
+upper = plot(close + 1, "Upper")
+lower = plot(close - 1, "Lower")
+fill(upper, lower, color = close > open ? lime : red)
+first = table("First", 1, 1, position = "topLeft")
+cell(first, 0, 0, text(close, 2))
+second = table("Second", 1, 2, position = "bottomRight")
+cell(second, 0, 0, "Open")
+cell(second, 0, 1, text(open, 1))
+`, { chartVersion: VERSION });
+    registerIndicator(descriptor);
+    const candle = (time: number, open: number, close: number): Bar => ({ time, open, high: Math.max(open, close) + 1, low: 0, close });
+    // Up, down, down, up, up. The band between two bars takes the colour the
+    // script computed on the first of them, one fill per run of a colour.
+    const { chart, series } = makeChart([candle(120, 1, 3), candle(180, 5, 2), candle(240, 4, 3), candle(300, 2, 4), candle(360, 3, 5)], 400);
+    const indicator = chart.addIndicator(descriptor.id);
+    const primitives = () => chart.panes().flatMap(pane => pane.primitives());
+    const tables = () => primitives().filter((item): item is ChartTable => item instanceof ChartTable);
+    const texts = () => tables().map(table => table.rows().map(row => row.map(cell => cell.text)));
+    indicator.values();
+    expect(tables()).toHaveLength(2);
+    expect(texts()).toEqual([[['5.00']], [['Open', '3.0']]]);
+    expect(tables().map(table => table.options().position)).toEqual(['top-left', 'bottom-right']);
+
+    const band = primitives().find((item): item is IndicatorFill => item instanceof IndicatorFill);
+    expect(band).toBeDefined();
+    const shades = (): (string | undefined)[] => {
+      indicator.values();
+      const { ctx, rec } = makeCtx();
+      band!.draw(ctx, { dpr: 1, timeScale: chart.timeScale, priceScale: { priceToY: (value: number) => 100 - value } } as unknown as PrimitiveRenderContext);
+      return rec.ops.filter(op => op.type === 'fill').map(op => op.fillStyle);
+    };
+    const up = 'rgba(0, 255, 0, 1)', down = 'rgba(255, 0, 0, 1)';
+    expect(shades()).toEqual([up, down, up]);
+    // Live bars the script computes down, and a grid written on the last one.
+    series.update(candle(420, 6, 2));
+    series.update(candle(480, 2, 1));
+    expect(shades()).toEqual([up, down, up, down]);
+    expect(texts()).toEqual([[['1.00']], [['Open', '2.0']]]);
+    indicator.remove();
+    expect(tables()).toHaveLength(0);
+    expect(primitives().some(item => item instanceof IndicatorFill)).toBe(false);
   });
 });

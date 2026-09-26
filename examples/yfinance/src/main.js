@@ -17,6 +17,7 @@ import { initFeed, fetchBars, fetchNote, feedErrorState } from './feed.js';
 import { applyTransform } from './transforms.js';
 import { isExpression, fetchExpressionBars, mountOperatorKeypad, referenceDataContext } from './expression.js';
 import { initStatus, nameOf, symbolStatus } from './status.js';
+import { requestVariant, sessionOf, sessionLabel } from './session.js';
 import { DEFAULT_TZ, initTimezone } from './timezone.js';
 import { initAxisChrome, applyAxisChrome, applyStatusLineChoice, applyTradeChoice } from './axis-chrome.js';
 import { initVolume, attachVolume, refreshVolume, setVolumeShown, setLegend, applyVolumeSettings } from './volume.js';
@@ -24,13 +25,15 @@ import {
   initOrders, saveState, restoreState, cancelOrder, attachOrderLines, removeAllOrders,
   updatePositionLine, restyleTradeChrome, clearPosition, executionAllowed, repriceOrder,
 } from './orders.js';
-import { tickScheduleFor, axisMinMove } from './ticks.js';
+import { tickScheduleFor, axisMinMove, sessionCalendarFor } from './ticks.js';
 import { initBracket, attachBracketLines, setBracketPrice, updateBracket, removeBracket } from './bracket.js';
 import { initAccount } from './account.js';
 import { initIndicators, fillIndicatorPicker, renderIndicatorChips, openSettings, rememberIndicators } from './indicators.js';
-import { chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
+import { afterChartSettingsWrite, chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
+import { initHistory, attachHistory, historyFor, recordChartType } from './history.js';
 import { bindIndicatorSource, initIndicatorSource } from './indicator-source.js';
 import { initRoutedStudy } from './routed-study.js';
+import { initAnchoredStudy } from './anchored-study.js';
 import { initCompare, attachComparison, invalidateComparisons, syncComparisons, restoreComparisons } from './compare.js';
 import { initSnapshot } from './snapshot.js';
 import { initReplay, exitReplay, attachReplay, syncReplayAlertPause } from './replay.js';
@@ -63,6 +66,10 @@ const { PriceLevels } = engine;
 // against an older dist/ and say which features that dist cannot serve,
 // rather than failing at link time and showing a blank document.
 const { createLinkGroup, withBarCache, barCloseSec, registerInterval, bucketStartOf } = engine;
+// A session change alone is a change of source, which only this helper makes
+// the chart see; a dist/ from before sessions sets the context directly.
+const publishContext = (chart, context) => (engine.publishDataContext
+  ? engine.publishDataContext(chart, context) : chart.setDataContext(context));
 
 /**
  * A tick size for the demo, by market. yfinance does not report one, and a
@@ -216,7 +223,7 @@ function render({ keepView = true, state } = {}) {
   // legend draws nothing for a field with no data, so these switches are live
   // only because this hands them something.
   app.symbolLegend = new PaneLegend({ id: 'symbol', title: '', params: '', row: 0, actions: [],
-    status: () => symbolStatus({ symbol: app.req.symbol, bars: app.chart.primaryBars(), timezone: app.chart.timezone() }),
+    status: () => symbolStatus({ symbol: app.req.symbol, bars: app.chart.primaryBars(), timezone: app.chart.timezone(), session: sessionOf(app.req) }),
   });
   app.chart.addPrimitive(app.symbolLegend);
 
@@ -232,6 +239,9 @@ function render({ keepView = true, state } = {}) {
   const sel = el('ctype').value;
   const isTransform = sel.startsWith('t:');
   el('pfmode').hidden = sel !== 't:point-figure';
+  // What the chart was last built as, so a switch from the select can be
+  // recorded with the type it replaced.
+  app.renderedType = { chartType: sel, pfmode: el('pfmode').value };
 
   // Family-B transforms replace the plotted series with derived elements, so
   // Trading uses real prices. Volume also needs a source-bar mapping, which
@@ -247,6 +257,10 @@ function render({ keepView = true, state } = {}) {
   }
   app.price = app.chart.addSeries(type, { style }); // first series -> drives the OHLC legend
   app.price.setData(data);
+  // The venue's hours for the empty space right of the last candle, so a
+  // trend line or a box drawn there after Friday's close ends on Monday's
+  // bars. Optional-called: an older dist/ has no calendar to take.
+  app.chart.dataLayer.setSessionCalendar?.(sessionCalendarFor(app.req.symbol));
 
   // Tell the engine the instrument's tick. Left unset, `minMove` is 0, which
   // means "infer precision from the visible range": the axis then renders a
@@ -262,6 +276,9 @@ function render({ keepView = true, state } = {}) {
   // trade at is on it, whichever band that price is in.
   app.ticks = tickScheduleFor(app.req.symbol);
   app.chart.setPriceScaleOptions({ minMove: axisMinMove(app.req.symbol, tickFor(app.req.symbol)) });
+  // The chart rounds a dragged price alert by the same bands, since the axis
+  // grid alone accepts prices a coarse band does not trade at.
+  app.chart.setTickSchedule?.(app.ticks);
   attachVolume(1, !isTransform || sel === 't:heikin-ashi');
   if (!isTransform) {
     app.markersApi = app.price.createMarkers();
@@ -277,7 +294,9 @@ function render({ keepView = true, state } = {}) {
   if (!isTransform) {
     for (const spec of rebuildState ? [] : app.activeIndicators) {
       try {
-        const instance = app.chart.addIndicator(spec.indicatorId, spec.settings, { paneIndex: spec.paneIndex });
+        // A study the host protects comes back protected: the policy rides with the spec.
+        const instance = app.chart.addIndicator(spec.indicatorId, spec.settings, { paneIndex: spec.paneIndex,
+          ...(spec.policy ? { policy: spec.policy } : {}) });
         if (spec.visible === false) instance.setVisible(false);
       }
       catch (e) { console.warn('indicator', spec.indicatorId, e.message); }
@@ -366,6 +385,9 @@ function render({ keepView = true, state } = {}) {
   joinLink();
   attachTimeline(app, 1, app.currentBars);
   attachInspection(app);
+  // Last: everything above built this chart, and none of it is a step. The
+  // timeline itself carries over from the chart this one replaced.
+  attachHistory(1);
   window.__chart = () => app.chart;
   window.__draw = () => app.draw;
   window.__chart2 = () => app.chart2;
@@ -386,7 +408,8 @@ function installWorkspace({ layout, bars }) {
   invalidateComparisons(1);
   removeBracket(); removeAllOrders(); clearPosition();
   app.req = { ...selection.request };
-  for (const [key, value] of Object.entries(app.req)) el(key).value = value;
+  for (const key of ['symbol', 'interval', 'period']) el(key).value = app.req[key];
+  el('session').value = sessionOf(app.req);
   el('ctype').value = selection.chartType || 'candlestick';
   el('pfmode').value = selection.pfmode || 'atr';
   app.chartTimezone = selection.timezone || DEFAULT_TZ;
@@ -405,6 +428,9 @@ function installWorkspace({ layout, bars }) {
   // is applied against the final plot width, without a later resize correction.
   installSecondaryWorkspace(layout.secondary, bars[1]);
   render({ state: layout });
+  // A workspace is a new document: no step taken on the one it replaced applies to it.
+  historyFor(1)?.clear();
+  historyFor(2)?.clear();
   focusChart(layout.focusPane);
   const focused = app.focusPane === 2 ? app.chart2 : app.chart;
   const request = app.focusPane === 2 ? app.p2 : app.req;
@@ -432,20 +458,22 @@ async function load(opts) {
   const period = clampPeriod(interval, wanted);
   if (period !== wanted) el('period').value = period;
   const prev = app.req || {};
-  app.req = { symbol: el('symbol').value.trim(), interval, period };
+  app.req = { symbol: el('symbol').value.trim(), interval, period,
+    ...(el('session').value === 'extended' ? { session: 'extended' } : {}) };
   // A different instrument or timeframe means the bars on screen are about to
   // be replaced rather than refreshed, so the stage blanks under the loading
   // dots. A reload of the same request keeps them: they are still correct,
   // and blanking a chart to redraw the same chart is just a flicker.
+  // Extended hours are another series, so a session change blanks the stage too.
   const identityChanged =
-    prev.symbol !== app.req.symbol || prev.interval !== app.req.interval;
+    prev.symbol !== app.req.symbol || prev.interval !== app.req.interval || sessionOf(prev) !== sessionOf(app.req);
   if (app.chart) {
     // Context subscribers must never read the previous source's bars as the new one.
     if (identityChanged) {
       app.price?.setData([]);
       app.volume?.setData([]);
     }
-    app.chart.setDataContext(referenceDataContext(app.req, app.chart.getDataContext()));
+    publishContext(app.chart, referenceDataContext(app.req, app.chart.getDataContext()));
   }
   // Announced before the fetch, not after it: the follower starts loading
   // the same instrument in parallel instead of a second behind. Recorded
@@ -461,9 +489,10 @@ async function load(opts) {
     // quick symbol switch cannot land the older answer on the newer name.
     // A symbol box holding arithmetic (`AAPL/MSFT`) fetches every leg and folds
     // them into one series. Anything else takes the ordinary single-symbol path.
+    const variant = requestVariant(app.req);
     const bars = isExpression(app.req.symbol)
-      ? (await fetchExpressionBars(app.req.symbol, app.req.interval, app.req.period, { ...(opts || {}) })).bars
-      : await fetchBars(app.req.symbol, app.req.interval, app.req.period, { ...(opts || {}), slot: 'main' });
+      ? (await fetchExpressionBars(app.req.symbol, app.req.interval, app.req.period, { ...(opts || {}), variant })).bars
+      : await fetchBars(app.req.symbol, app.req.interval, app.req.period, { ...(opts || {}), slot: 'main', variant });
     // Read the cache verdict now: `syncComparisons()` below fetches too, and
     // `lastFetch` describes whichever load ran most recently, so composing
     // the line at the end would report the comparison's verdict as this
@@ -492,6 +521,7 @@ async function load(opts) {
     if (revision !== loadRevision) return;
     renderToolbar();
     status.textContent = `${app.req.symbol} · ${bars.length} bars · ${app.req.interval}/${app.req.period}`
+      + (sessionOf(app.req) === 'extended' ? ' · ' + sessionLabel('extended').toLowerCase() : '')
       + (period !== wanted ? `  (${wanted} unavailable at ${interval})` : '')
       + note
       + (MISSING.length ? `  ·  dist/ predates: ${MISSING.join(', ')}` : '');
@@ -501,6 +531,13 @@ async function load(opts) {
     if (fault.state === 'aborted') return;
     if (revision !== loadRevision) return;
     app.loadFailed = true;
+    if (fault.state === 'unsupported') {
+      // Not a failure to retry: the source has no such series. The card says
+      // so and offers the one choice that will load, and nothing is relabelled.
+      status.textContent = fault.message;
+      setChartState('unsupported', { ...app.req, message: fault.message, retry: () => { el('session').value = 'regular'; load(opts); } });
+      return;
+    }
     status.textContent = 'error: ' + fault.message;
     setChartState('error', { ...app.req, message: fault.message, retry: () => load(opts) });
     toast('error', `Could not load ${app.req.symbol}: ${fault.message}`);
@@ -518,6 +555,7 @@ async function load(opts) {
 initHover();
 // Before the first render(): the shell sets the theme the chart is built in.
 initShell(app);
+initHistory(app);
 initStatus(app);
 initTimezone(app);
 initAxisChrome(app);
@@ -529,6 +567,7 @@ initAccount(app);
 initIndicators(app);
 initIndicatorSource();
 initRoutedStudy();
+initAnchoredStudy();
 
 // The operator keypad lives beside the symbol field. Mounted once: it writes
 // into the field and the ordinary Enter handler does the loading, so nothing
@@ -559,7 +598,32 @@ el('save').addEventListener('click', () => {
   a.click();
 });
 // switching chart type / P&F box mode re-renders cached bars (no network round-trip)
-['ctype', 'pfmode'].forEach((id) => el(id).addEventListener('change', () => { if (app.currentBars.length) render(); }));
+['ctype', 'pfmode'].forEach((id) => el(id).addEventListener('change', () => {
+  if (!app.currentBars.length) return;
+  const from = app.renderedType;
+  render();
+  if (from) recordChartType(1, from, app.renderedType, showPrimaryType);
+}));
+
+/** Build the main chart as `type`: what undoing or redoing a type switch does. */
+function showPrimaryType(type) {
+  el('ctype').value = type.chartType;
+  el('pfmode').value = type.pfmode;
+  render();
+  renderToolbar();
+  autosave();
+}
+app.showPrimaryType = showPrimaryType;
+
+// An undo or redo can bring back a study, a zone or a scale the demo keeps
+// its own copy of; read them back from the chart, the way a rebuild does.
+app.afterHistory = (pane) => {
+  afterChartSettingsWrite(capturePaneTarget(app, pane));
+  if (pane === 1) rememberIndicators();
+  renderIndicatorChips();
+  renderToolbar();
+  autosave();
+};
 // toggle grid lines live (no rebuild needed)
 // These legacy fields belong to the primary chart; the shared toolbar captures its owner.
 const applyGrid = () => {

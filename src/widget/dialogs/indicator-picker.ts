@@ -11,7 +11,7 @@ import { widgetText } from '../localization';
  * that three round trips through the menu.
  */
 import { registeredIndicators } from 'openalgo-charts';
-import type { IndicatorApi, IndicatorDescriptor } from 'openalgo-charts';
+import type { IndicatorApi, IndicatorDescriptor, IndicatorPolicy } from 'openalgo-charts';
 import type { WidgetContext } from '../context';
 import { button, dialogFrame, el, openPanel, type PanelHandle } from '../form';
 
@@ -99,7 +99,9 @@ export function mountIndicatorPicker(
 
   function paintRunning(): void {
     running.innerHTML = '';
-    const instances = chart.indicators();
+    // A study its host keeps out of the inventory stays out of this list too.
+    const policy = (inst: IndicatorApi): Readonly<IndicatorPolicy> => (inst as Partial<IndicatorApi>).policy?.() ?? {};
+    const instances = chart.indicators().filter(inst => policy(inst).listed !== false);
     if (instances.length === 0) {
       running.appendChild(el(doc, 'div', 'oac-empty oac-pick__running-empty', widgetText(ctx, 'schema.ui.indicatorPicker.empty', {}, 'No running studies')));
       return;
@@ -119,6 +121,12 @@ export function mountIndicatorPicker(
       });
       remove.classList.add('oac-pick__remove');
       remove.setAttribute('aria-label', `${removeLabel} ${inst.name} ${n}`);
+      // Shown greyed with its reason: the host keeps this study on the chart.
+      if (policy(inst).removable === false) {
+        remove.disabled = true;
+        remove.title = widgetText(ctx, 'protected');
+        remove.setAttribute('aria-label', `${removeLabel} ${inst.name} ${n}, ${widgetText(ctx, 'protected')}`);
+      }
       row.appendChild(remove);
       running.appendChild(row);
     }

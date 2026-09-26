@@ -5,7 +5,7 @@
  * survive a reload.
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
-import type { Bar } from '../src/index';
+import { registerIndicator, type Bar } from '../src/index';
 import { hasDrawingTool, getDrawingTool } from '../src/draw/index';
 import {
   createWidget, sanitizeRailPrefs, RAIL_GROUPS, RAIL_PREFS_KEY, STORAGE_PREFIX,
@@ -232,6 +232,28 @@ describe('the controls block', () => {
     expect(redo.classList.contains('is-off')).toBe(false);
     redo.click();
     expect(w.draw.drawings()).toHaveLength(1);
+  });
+
+  it('undo and redo take back a dragged study anchor, and the buttons follow it', () => {
+    const { w, rail } = make();
+    registerIndicator({ id: 'rail-anchor-study', name: 'Anchored', placement: 'onchart', inputs: [
+      { key: 'at', type: 'timestamp', label: 'Anchor time', default: T0 + 5 * DAY, pick: true },
+      { key: 'level', type: 'price', label: 'Anchor price', default: 100, pick: true, timeKey: 'at', anchor: true },
+    ], plots: [{ key: 'v', title: 'Level', type: 'line' }], calc: bs => ({ v: bs.map(() => 100) }) });
+    const study = w.chart.addIndicator('rail-anchor-study');
+    const [, , , , , undo, redo] = rail.querySelectorAll('.oac-rail__ctl .oac-rail__btn');
+    expect(undo.classList.contains('is-off')).toBe(true);
+    const id = `input-anchor:${study.id}:level`;
+    w.chart.emit('drag:start', { id, time: T0 + 5 * DAY, price: 100, paneIndex: 0 });
+    w.chart.emit('drag', { id, time: T0 + 12 * DAY, price: 103, paneIndex: 0 });
+    w.chart.emit('drag:end', { id, time: T0 + 12 * DAY, price: 103, paneIndex: 0 });
+    expect(study.settings()).toMatchObject({ at: T0 + 12 * DAY, level: 103 });
+    expect(undo.classList.contains('is-off')).toBe(false);
+    undo.click();
+    expect(study.settings()).toMatchObject({ at: T0 + 5 * DAY, level: 100 });
+    expect(redo.classList.contains('is-off')).toBe(false);
+    redo.click();
+    expect(study.settings()).toMatchObject({ at: T0 + 12 * DAY, level: 103 });
   });
 
   it('right-click on delete offers select all and remove all with their counts', () => {

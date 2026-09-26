@@ -5,6 +5,7 @@ import { numericMatch, touchMatch } from './conditions';
 import { getBarCondition } from './bar-conditions';
 import { AlertVisuals, parseAlertLineId } from './visuals';
 import { copyAlert as copy, parseAlertsDocument, validateAlert as validate } from './document';
+import { dataVariantKey, normalizeDataVariant, passingDataContext, type DataVariant } from '../feed/data-variant';
 import type {
   Alert, AlertChartHost, AlertControllerOptions, AlertInput, AlertPatch, AlertScope,
   AlertTriggeredPayload, ChartDataUpdate, AlertAvailability, IndicatorAlertSource,
@@ -40,12 +41,31 @@ const owners = new WeakSet<AlertChartHost>();
 let nextId = 1;
 const scopeOf = (chart: AlertChartHost): AlertScope => {
   const context = chart.getDataContext();
-  return { symbol: context?.symbol, exchange: context?.exchange, interval: context?.interval };
+  // The default series names no variant, so a scope from it is what it always
+  // was. One the chart was handed malformed is kept as it is: validation
+  // refuses to set an alert on it and no comparison matches it.
+  let variant: DataVariant | undefined = context?.variant;
+  try { variant = normalizeDataVariant(variant); } catch { /* see above */ }
+  return { symbol: context?.symbol, exchange: context?.exchange, interval: context?.interval,
+    ...(variant ? { variant: { ...variant } } : {}) };
 };
+/** One string per series, and one no valid variant can produce for a malformed one, never a throw inside a listener. */
+const variantOf = (scope: AlertScope): string => { try { return dataVariantKey(scope.variant); } catch { return 'invalid'; } };
 const sameInstrument = (a: AlertScope, b: AlertScope): boolean =>
   a.symbol === b.symbol && a.exchange === b.exchange;
+/** A fixed price means the same on another timeframe, session or adjustment, not in another currency or unit. */
+const samePrices = (a: AlertScope, b: AlertScope): boolean =>
+  sameInstrument(a, b) && a.variant?.currency === b.variant?.currency && a.variant?.unit === b.variant?.unit;
 const sameScope = (a: AlertScope, b: AlertScope): boolean =>
-  sameInstrument(a, b) && a.interval === b.interval;
+  sameInstrument(a, b) && a.interval === b.interval && variantOf(a) === variantOf(b);
+/** Where a level evaluates, for its label on a chart that shows something else. */
+const scopeLabel = (scope: AlertScope, context: AlertScope): string => {
+  const timeframe = scope.interval ?? 'original timeframe';
+  if (variantOf(scope) === variantOf(context)) return timeframe;
+  const variant = scope.variant;
+  const words = variant ? [variant.session, variant.adjustment, variant.currency, variant.unit].filter(Boolean) : [];
+  return `${timeframe}, ${words.length ? words.join(' ') : 'default series'}`;
+};
 
 /** Headless, chart-owned trader alerts. Hosts subscribe to alert:triggered for delivery. */
 export class AlertController {
@@ -76,7 +96,9 @@ export class AlertController {
     owners.add(_chart);
     this._off = [
       _chart.on('data:update', payload => this._onData(payload as ChartDataUpdate)),
-      _chart.on('data:context', () => this._seedAll()),
+      // The context a variant-only change passes through is replaced at once;
+      // seeding and saving for it would only be done again.
+      _chart.on('data:context', context => { if (!passingDataContext(context)) this._seedAll(); }),
       _chart.on('objects:change', () => this._onObjects()),
       _chart.on('paneMoved', () => this._onObjects()),
       _chart.on('state:restore:start', () => { this._hovered = undefined; this._cancelDrag(); this._restoring = true; this._revision++; }),
@@ -140,8 +162,11 @@ export class AlertController {
         ? this._chart.indicators?.().find(item => item.id === source.instanceId)?.series(source.plotKey)?.priceScale()
         : undefined;
     const pane = paneIndex ?? payload.paneIndex;
+    // A price alert is in the instrument's own prices, so a tick schedule
+    // outranks the scale's one tick, which is only the grid every band lies on.
+    const ticks = source?.kind === 'price' ? this._chart.tickSchedule?.() ?? null : null;
     // The source scale owns both units and tick size, even on a left or overlay axis.
-    const snapped = scale ? roundToTick(price, scale.options.minMove)
+    const snapped = ticks ? ticks.round(price) : scale ? roundToTick(price, scale.options.minMove)
       : typeof pane === 'number' ? this._chart.snapPrice?.(pane, price) ?? price : price;
     let result = Number.isFinite(snapped) ? snapped : price;
     if (parsed && (source?.kind === 'price' || source?.kind === 'indicator')) {
@@ -151,7 +176,12 @@ export class AlertController {
       if (bound !== undefined && (parsed.index === 0 ? result > bound : result < bound)) {
         result = bound;
         const step = scale?.options.minMove ?? 0;
-        if (step > 0) {
+        if (ticks) {
+          // The band's own neighbour, not the grid's: the tick below a bound
+          // in a coarse band is a whole band tick away.
+          result = ticks.round(bound);
+          if (parsed.index === 0 ? result > bound : result < bound) result = ticks.step(result, parsed.index === 0 ? -1 : 1);
+        } else if (step > 0) {
           result = roundToTick(bound, step);
           const tolerance = Number.EPSILON * Math.max(1, Math.abs(bound)) * 4;
           if (Math.abs(result - bound) <= tolerance) result = bound;
@@ -337,6 +367,9 @@ export class AlertController {
     if (record.alert.scope.interval !== context.interval) return {
       available: false, reason: `Switch to ${record.alert.scope.interval ?? 'the original timeframe'} to evaluate this alert`,
     };
+    if (variantOf(record.alert.scope) !== variantOf(context)) return {
+      available: false, reason: 'Switch to the data variant this alert was set on to evaluate it',
+    };
     const { source } = record.alert;
     const bars = this._chart.primaryBars();
     if (source.kind === 'drawing') {
@@ -459,8 +492,9 @@ export class AlertController {
     const context = scopeOf(this._chart);
     const matches = sameScope(alert.scope, context);
     let value: AlertDrawingValue | undefined;
-    // A fixed price remains meaningful across timeframes; study and drawing values may not.
-    if (source.kind === 'price' && sameInstrument(alert.scope, context)) {
+    // A fixed price remains meaningful across timeframes and sessions, not
+    // across currencies or units; study and drawing values may not be.
+    if (source.kind === 'price' && samePrices(alert.scope, context)) {
       value = { price: source.price, upperPrice: source.upperPrice, paneIndex: this._pricePane() };
     }
     if (matches) {
@@ -473,7 +507,7 @@ export class AlertController {
       }
     }
     this._visuals.update(alert, value, this._paused || this._replay || (!matches && alert.state === 'armed'),
-      matches ? undefined : alert.scope.interval ?? 'original timeframe');
+      matches ? undefined : scopeLabel(alert.scope, context));
   }
 
   private _onData(update: ChartDataUpdate): void {

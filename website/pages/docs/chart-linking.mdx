@@ -319,6 +319,13 @@ interval, timezone, navigation, studies, event feeds, alerts and trading setting
 It does not transfer chart data or the primary series type. Enabling the channel
 waits for the next edit or an explicit `syncAppearance`; it does not choose a leader.
 
+With an undo timeline on each chart ([`ChartHistory`](/docs/undo-history)), a linked
+change is the step of the chart that made it. Apply it on the others through their
+`ignore`, so it is never a step of theirs: `apply: values => history.ignore(() =>
+applyChartSettings(chart, values))`. Undoing or redoing the step announces the result
+on `style:change` again, so every linked chart takes it back too. The chart grid and
+the reference host's split view do both.
+
 ### Drawings
 
 Drawing synchronization lives in `openalgo-charts/draw`, keeping drawing code out

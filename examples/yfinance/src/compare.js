@@ -2,9 +2,11 @@ import * as engine from '/dist/openalgo-charts.mjs';
 import { PaneLegend } from '/dist/openalgo-charts.mjs';
 import { el, esc, fmt, UP, DOWN } from './ui.js';
 import { fetchBars } from './feed.js';
+import { requestVariant, sessionOf } from './session.js';
 import { renderToolbar } from './toolbar.js';
 import { autosave } from './persist.js';
 import { capturePaneTarget, selectedPane } from './pane-target.js';
+import { withoutHistory } from './history.js';
 
 const { addComparison, comparisonController } = engine;
 export const CMP_COLORS = ['#e6b53c', '#7e57c2', '#29b6f6', '#ec407a', '#8bc34a'];
@@ -26,7 +28,9 @@ function captureComparisonTarget(pane) {
   return { ...target, timezone, current: () => target.current() && target.chart.timezone() === timezone };
 }
 const actionTarget = () => dialogTarget || captureComparisonTarget();
-const sourceKey = target => JSON.stringify([target.request.interval, target.request.period, target.timezone]);
+// A comparison is asked for in its chart's session, so it lines up with the
+// chart's bars; a session change is a new source for it too.
+const sourceKey = target => JSON.stringify([target.request.interval, target.request.period, sessionOf(target.request), target.timezone]);
 const available = target => target?.current() && target.chart.primaryBars().length > 0
   && !app[target.pane === 2 ? 'loading2' : 'loading'] && !app[target.pane === 2 ? 'loadFailed2' : 'loadFailed'];
 
@@ -88,7 +92,16 @@ export function indexCompare(spec) {
   }
 }
 
+/**
+ * A comparison is the demo's own overlay, saved with its layout: it borrows
+ * the price scale's mode while it is up, and none of that is a chart step
+ * an undo should take back underneath it.
+ */
 export function attachComparison(spec, pane = 1) {
+  withoutHistory(pane, () => attachComparisonNow(spec, pane));
+}
+
+function attachComparisonNow(spec, pane) {
   const target = captureComparisonTarget(pane);
   if (!target?.current() || !addComparison || !spec.bars?.length) return;
   if (spec.dataKey && spec.dataKey !== sourceKey(target)) return;
@@ -158,8 +171,10 @@ export function removeComparison(spec, pane = comparisonState(2).items.includes(
   const pending = chart && runtimes.get(chart)?.pending;
   pending?.get(spec.symbol)?.abort();
   pending?.delete(spec.symbol);
-  spec.handle?.remove();
-  if (spec.legend && spec.chart) spec.chart.removePrimitive(spec.legend);
+  withoutHistory(pane, () => {
+    spec.handle?.remove();
+    if (spec.legend && spec.chart) spec.chart.removePrimitive(spec.legend);
+  });
   spec.handle = null; spec.legend = null; spec.chart = null;
   items.splice(items.indexOf(spec), 1);
   if (!items.length) app[pane === 2 ? 'cmpBaseMode2' : 'cmpBaseMode'] = null;
@@ -176,7 +191,7 @@ async function loadComparison(spec, target, stillWanted) {
   const current = () => !controller.signal.aborted && target.current() && stillWanted();
   try {
     const bars = await fetchBars(spec.symbol, target.request.interval, target.request.period,
-      { signal: controller.signal, timezone: target.timezone });
+      { signal: controller.signal, timezone: target.timezone, variant: requestVariant(target.request) });
     if (!current()) return false;
     spec.bars = bars;
     spec.dataKey = sourceKey(target);
@@ -237,7 +252,7 @@ export async function addCompareSymbol(symbol, target = actionTarget()) {
 export function setCompareMode(mode, target = actionTarget()) {
   if (!target?.current() || !MODES.includes(mode)) return;
   app[target.pane === 2 ? 'cmpMode2' : 'cmpMode'] = mode;
-  comparisonController?.(target.chart).setMode(mode);
+  withoutHistory(target.pane, () => comparisonController?.(target.chart).setMode(mode));
   autosave();
 }
 

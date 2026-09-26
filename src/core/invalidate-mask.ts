@@ -11,9 +11,9 @@
 export const InvalidationLevel = {
   /** Nothing to do. */
   None: 0,
-  /** Repaint only the top (overlay) canvas — crosshair, hover, dragging primitives. */
+  /** Repaint only the top (overlay) canvas: the crosshair and the top-layer primitives. */
   Cursor: 1,
-  /** Repaint the base canvas at the current scales — series moved/changed, no rescale. */
+  /** Repaint the base canvas at the current scales: series moved or changed, no rescale. */
   Light: 2,
   /** Recompute scales/ticks then repaint everything. */
   Full: 3,
@@ -26,7 +26,11 @@ export interface PaneInvalidation {
   autoScale: boolean;
 }
 
-/** Discrete operations applied to the shared time scale before painting. */
+/**
+ * Discrete time-scale operations an invalidation can carry. The mask queues
+ * and merges them, but nothing in the chart reads the queue yet: pan, zoom,
+ * fit and reset change the shared time scale directly (ARCHITECTURE.md §3.2).
+ */
 export type TimeScaleOp =
   | { type: 'fitContent' }
   | { type: 'applyBarSpacing'; value: number }
@@ -54,7 +58,7 @@ export class InvalidateMask {
     return this._globalLevel;
   }
 
-  /** Raise the chart-wide level (monotonic — only ever increases). */
+  /** Raise the chart-wide level (monotonic: it only ever increases). */
   public invalidateGlobal(level: InvalidationLevel): void {
     if (level > this._globalLevel) this._globalLevel = level;
   }

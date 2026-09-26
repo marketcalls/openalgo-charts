@@ -20,6 +20,7 @@ import type { SeriesMarker } from '../primitives/markers';
 import type { TableCell, ChartTableOptions } from '../primitives/table';
 import type { FillGradient } from '../primitives/indicator-fill';
 import type { IPrimitive } from '../primitives/primitive';
+import type { DataVariant } from '../feed/data-variant';
 import { validateIndicatorInputs } from './indicator-inputs';
 import { IndicatorInputError } from './indicator-input-error';
 export { IndicatorInputError } from './indicator-input-error';
@@ -45,6 +46,52 @@ export interface IndicatorStudyOutput {
   values: readonly (number | null)[];
 }
 
+/** A setting value an input condition compares with. */
+export type IndicatorInputConditionValue = string | number | boolean;
+
+/**
+ * A test over a study's current settings, read by a settings form for
+ * `activeWhen` and `visibleWhen`.
+ *
+ * `is` holds when the setting under `key` equals the value, or one of the
+ * values when it is a list; `isNot` is its negation. `all` holds when every
+ * nested condition does and `any` when at least one does, so `all` of nothing
+ * holds and `any` of nothing does not. Values compare strictly: the number 5
+ * is not the text '5'. It is data rather than a callback so a descriptor that
+ * a compiler emits, or one saved as JSON, can carry it.
+ */
+export type IndicatorInputCondition =
+  | { key: string; is: IndicatorInputConditionValue | readonly IndicatorInputConditionValue[] }
+  | { key: string; isNot: IndicatorInputConditionValue | readonly IndicatorInputConditionValue[] }
+  | { all: readonly IndicatorInputCondition[] }
+  | { any: readonly IndicatorInputCondition[] };
+
+/**
+ * How a settings form presents an input. The calculation never reads these:
+ * a hidden or inactive input keeps its value, and `calc` still receives it.
+ */
+export interface IndicatorInputPresentation {
+  /**
+   * The input can be edited only while this holds; otherwise the form shows it
+   * disabled, with its value readable and a reason naming what it depends on.
+   * Also inactive while an input the condition reads is hidden or inactive,
+   * because a setting nobody can change cannot be what enables another.
+   */
+  activeWhen?: IndicatorInputCondition;
+  /**
+   * The input is shown only while this holds; otherwise it leaves the form and
+   * the tab order, and any draft in it is kept for when it returns. Also
+   * hidden while an input the condition reads is hidden.
+   */
+  visibleWhen?: IndicatorInputCondition;
+  /**
+   * Consecutive inputs sharing this id sit on one row, the first one's label
+   * leading it: a length beside its source, a switch beside the value and
+   * colour it turns on. A multi-line text input always takes a row of its own.
+   */
+  inline?: string;
+}
+
 /**
  * One tunable input. New typed values are validated before study mutations;
  * established input kinds retain their descriptor's calculation contract.
@@ -54,8 +101,11 @@ export interface IndicatorStudyOutput {
  * ported study whose every input carried an explanation arrives here with that
  * explanation dropped. A settings UI renders it as a hover affordance beside the
  * label; the core ignores it.
+ *
+ * Every variant also takes the presentation fields of
+ * {@link IndicatorInputPresentation}: `activeWhen`, `visibleWhen` and `inline`.
  */
-export type IndicatorInput =
+export type IndicatorInput = IndicatorInputPresentation & (
   | { key: string; type: 'number'; label: string; default: number; min?: number; max?: number; step?: number; group?: string; tooltip?: string }
   | { key: string; type: 'boolean'; label: string; default: boolean; group?: string; tooltip?: string }
   | { key: string; type: 'color'; label: string; default: string; group?: string; tooltip?: string }
@@ -64,7 +114,22 @@ export type IndicatorInput =
   | { key: string; type: 'session'; label: string; default: string; group?: string; tooltip?: string }
   | { key: string; type: 'multiline'; label: string; default: string; group?: string; tooltip?: string }
   | { key: string; type: 'price'; label: string; default: number; min?: number; max?: number; step?: number;
-      pick?: boolean | { paneIndex?: number; priceScaleId?: PriceScaleId }; group?: string; tooltip?: string }
+      pick?: boolean | { paneIndex?: number; priceScaleId?: PriceScaleId }; group?: string; tooltip?: string;
+      /**
+       * Key of a declared `timestamp` input this price pairs with: together
+       * they name one point, a bar time and a price. A host picks both from
+       * one click (`Chart.beginPick('point')`) and writes them in one settings
+       * patch, so the study never computes on the time of one pick and the
+       * price of another. A timestamp pairs with one price at most.
+       */
+      timeKey?: string;
+      /**
+       * With `timeKey`: a handle on the chart at the point, on the same pane
+       * and scale a pick of this price uses, that drags the time and the price
+       * together as one settings change and one undo step. The drawing tier's
+       * controller draws it; a study the user may not configure keeps it still.
+       */
+      anchor?: boolean }
   /** Absolute UTC seconds. Independent of the chart timezone and legacy wall-clock `time` inputs. */
   | { key: string; type: 'timestamp'; label: string; default: number; min?: number; max?: number; step?: number;
       pick?: boolean; group?: string; tooltip?: string }
@@ -85,7 +150,7 @@ export type IndicatorInput =
    * as UTC seconds, so a layout saved in one zone restores to the same wall
    * clock in another, and `zonedStringToUtcSeconds` turns it into a bar time.
    */
-  | { key: string; type: 'time'; label: string; default: string; group?: string; tooltip?: string };
+  | { key: string; type: 'time'; label: string; default: string; group?: string; tooltip?: string });
 
 /** Dash pattern for a level, a drawing, or a plot. */
 export type IndicatorLineStyle = 'solid' | 'dashed' | 'dotted';
@@ -347,7 +412,11 @@ export interface IndicatorLevel {
   price: number;
   color?: string;
   title?: string;
-  /** Legacy two-state dash switch. `lineStyle` wins when both are given. */
+  /**
+   * Two-state shorthand for `lineStyle`. `lineStyle` wins when both are given,
+   * and with neither a level draws dashed. A retained form rather than a
+   * deprecated one (COMPATIBILITY.md lists why).
+   */
   dashed?: boolean;
   lineWidth?: number;
   lineStyle?: IndicatorLineStyle;
@@ -360,11 +429,12 @@ export interface DrawAnchor {
 }
 
 /**
- * Where one returned drawing or marker goes, when the study's own layer is the
- * wrong place for it. A study in its own pane still has things to say about
- * the candles (a supply zone, a buy signal), and a study whose plots sit on
- * two axes has shapes and marks measured on each. Naming no target keeps the
- * output in the study's own layer, exactly as before.
+ * Where one returned drawing, marker or shading column goes, when the study's
+ * own layer is the wrong place for it. A study in its own pane still has
+ * things to say about the candles (a supply zone, a buy signal, a regime), and
+ * a study whose plots sit on two axes has shapes and marks measured on each.
+ * Naming no target keeps the output in the study's own layer, exactly as
+ * before.
  *
  * Each distinct target gets a layer of its own, owned by the instance: it
  * hides with the study, is released with it, and is released as soon as a
@@ -372,12 +442,16 @@ export interface DrawAnchor {
  * study's own marks already anchor to join that layer instead, so marks at
  * one bar stack rather than overlap, unless that series is an `overlay` plot
  * of a study in its own pane (see `plot`). A study's layers stack in a fixed
- * order: its own marks, its marker targets, its own shapes, then its drawing
- * targets, each kind's targets taking the price pane first and then the plots
- * in declaration order. A targeted layer created after the study was added
- * is put back in that order among the targeted layers on its pane, below
- * those of the studies added after it. No other layer moves for it, so an
- * output that names no target stacks exactly as before.
+ * order: its own marks, its marker targets, its own shapes, its drawing
+ * targets, its own shading, then its shading targets, each kind's targets
+ * taking the price pane first and then the plots in declaration order.
+ * Shading paints behind every series on its pane, so on any one pane it sits
+ * under the candles, the plots, the marks and the shapes whatever its slot;
+ * the order decides which study's shading covers another's. A targeted layer
+ * created after the study was added is put back in that order among the
+ * targeted layers on its pane, below those of the studies added after it. No
+ * other layer moves for it, so an output that names no target stacks exactly
+ * as before.
  */
 export interface IndicatorOutputTarget {
   /**
@@ -385,8 +459,11 @@ export interface IndicatorOutputTarget {
    * its effective price scale; a marker is anchored to that plot's series, so
    * `aboveBar` and `belowBar` read its values, and where it has none, the
    * candle's whenever that plot is on the price pane and on the candles' scale,
-   * first plot or not. Either follows the plot through a scale reassignment
-   * or a study move. An `overlay` plot takes it to the price pane.
+   * first plot or not. A shading column fills that plot's pane and is bound to
+   * its effective scale, which has no price to measure but keeps the layer on
+   * the axis the plot uses, so a reassignment never leaves a column held for
+   * nothing. Each follows the plot through a scale reassignment or a study
+   * move. An `overlay` plot takes it to the price pane.
    */
   plot?: string;
   /**
@@ -395,10 +472,20 @@ export interface IndicatorOutputTarget {
    * (its crosshair readout, which is the candles' own scale on whichever axis
    * they sit) and holds no axis itself, so the price axis stays free to move.
    * A marker is anchored to the instrument's candles, so `belowBar` sits
-   * under the low; it is drawn once the chart has a primary series. Naming a
+   * under the low; it is drawn once the chart has a primary series. A shading
+   * column fills the price pane's full height and binds no axis. Naming a
    * plot as well is rejected: a plot already decides its pane.
    */
   overlay?: boolean;
+}
+
+/**
+ * One column of per-bar shading a study's `background` returns in its list
+ * form, optionally sent to another pane or plot. `colors` is what the plain
+ * form returns: one entry per bar, `null` where nothing is shaded.
+ */
+export interface IndicatorBackgroundSpec extends IndicatorOutputTarget {
+  colors: readonly (string | null)[];
 }
 
 /** A signal marker a study returns, optionally sent to another pane or plot. */
@@ -636,6 +723,8 @@ export interface IndicatorBarsRequest {
   interval: string;
   from: number;
   to: number;
+  /** The provider series to answer from; absent is its default. See `inheritedDataVariant`. */
+  variant?: DataVariant;
   signal?: AbortSignal;
 }
 
@@ -690,6 +779,8 @@ export interface ChartDataContext {
   interval?: string;
   /** Instrument capability, independent of readings: false unsupported, absent unknown. */
   hasOpenInterest?: boolean;
+  /** Which of the provider's series the chart shows; absent is its default. Set it with `publishDataContext`. */
+  variant?: Readonly<DataVariant>;
 }
 
 /** Source identity changed, or the available source-bar range changed. */
@@ -947,13 +1038,19 @@ export interface IndicatorDescriptor {
    * value to sit at and would fight the pane's autoscale; as a column behind the
    * candles it reads at a glance and costs the scale nothing.
    *
-   * Runs after every `calc`. Return `[]` to clear the layer.
+   * Return a list of {@link IndicatorBackgroundSpec} instead to shade somewhere
+   * else as well: each column can name the price pane or a plot (see
+   * {@link IndicatorOutputTarget}), one column per target, and a column naming
+   * none shades the indicator's pane exactly as the plain form does.
+   *
+   * Runs after every `calc`. Return `[]` to clear the study's own shading and
+   * release every targeted column.
    */
   background?(ctx: {
     bars: readonly Bar[];
     values: IndicatorValues;
     settings: Readonly<IndicatorSettings>;
-  }): readonly (string | null)[];
+  }): readonly (string | null)[] | readonly IndicatorBackgroundSpec[];
   /**
    * Optional recolouring of the **main price candles**, one entry per bar,
    * `null` to leave that bar with its own colour.

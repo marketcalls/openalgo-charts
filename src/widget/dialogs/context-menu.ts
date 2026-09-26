@@ -22,11 +22,12 @@ import { widgetText } from '../localization';
  * `primaryPaneIndex`, never assumed to be the top one.
  */
 import { checkTradingCapability, getIndicator, isReplaying, PRICE_SCALE_MODES } from 'openalgo-charts';
-import type { Chart, ContextMenuEvent, ContextMenuTarget, PriceScaleId, PriceScaleMode, TradingCapabilityRequest, TradingCapabilitySource } from 'openalgo-charts';
+import type { Chart, ContextMenuEvent, ContextMenuTarget, IndicatorApi, PriceScaleId, PriceScaleMode, TradingCapabilityRequest, TradingCapabilitySource } from 'openalgo-charts';
 import { drawingSettingsSchema } from 'openalgo-charts/draw';
 import type { Drawing } from 'openalgo-charts/draw';
 import { editableIds, type WidgetContext } from '../context';
 import { boxInRoot, chromeGlyph, el, glyphSvg, openPanel, placePanel, stopOwnKeys, type PanelHandle } from '../form';
+import { ABOVE_GLYPH, BEHIND_GLYPH, FIT_GLYPH } from '../glyphs';
 import { mountDrawingProperties } from './drawing-properties';
 import { mountIndicatorPicker } from './indicator-picker';
 import { mountIndicatorSettings } from './indicator-settings';
@@ -93,9 +94,6 @@ export interface ContextMenuOptions {
 const SEP: MenuEntry = { kind: 'separator' };
 const header = (label: string): MenuEntry => ({ kind: 'header', label });
 
-const ABOVE_GLYPH = 'M3 4h10M8 14V6M5 9l3-3 3 3';
-const BEHIND_GLYPH = 'M3 12h10M8 2v8M5 7l3 3 3-3';
-const FIT_GLYPH = 'M2 8h12M4 5l-2 3 2 3M12 5l2 3-2 3';
 const TICK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4"/></svg>';
 
 /** Our words for the four scale modes, in the engine's order. */
@@ -127,7 +125,10 @@ function drawingEntries(ctx: WidgetContext, primary: Drawing, ids: readonly stri
   const out: MenuEntry[] = [];
   const locked = primary.locked === true;
   const hidden = primary.visible === false;
-  const behind = primary.zIndex < 0;
+  // Placed between studies it is on neither side: neither radio is on, and
+  // either one takes it out of the series band.
+  const between = primary.stackAbove !== undefined && ctx.chart.seriesStack(primary.paneIndex).includes(primary.stackAbove);
+  const behind = !between && primary.zIndex < 0;
   const many = ids.length > 1;
   // A selection with nothing the user may edit keeps its edit rows, greyed
   // with the reason; the controller would refuse each one anyway. Cut and
@@ -159,7 +160,7 @@ function drawingEntries(ctx: WidgetContext, primary: Drawing, ids: readonly stri
   // of the order), so a multi-selection is several calls.
   out.push({ id: 'draw-front', label: widgetText(ctx, 'Bring to front'), icon: 'front', run: () => { for (const id of ids) draw.bringToFront(id); } });
   out.push({ id: 'draw-back', label: widgetText(ctx, 'Send to back'), icon: 'back', run: () => { for (const id of ids) draw.sendToBack(id); } });
-  out.push({ id: 'draw-above', label: widgetText(ctx, 'In front of the series'), icon: glyphSvg(ABOVE_GLYPH), mark: 'radio', on: !behind,
+  out.push({ id: 'draw-above', label: widgetText(ctx, 'In front of the series'), icon: glyphSvg(ABOVE_GLYPH), mark: 'radio', on: !behind && !between,
     run: () => { for (const id of ids) draw.bringAboveSeries(id); } });
   out.push({ id: 'draw-behind', label: widgetText(ctx, 'Behind the series'), icon: glyphSvg(BEHIND_GLYPH), mark: 'radio', on: behind,
     run: () => { for (const id of ids) draw.sendBehindSeries(id); } });
@@ -347,11 +348,18 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
     const inst = chart.indicators().find((i) => i.id === target.instanceId);
     if (inst !== undefined) {
       sep();
+      // A study its host protects shows the rows its policy withholds greyed,
+      // with the reason, rather than rows that would silently do nothing.
+      // A handle without policies (a host's own, older shape) allows everything.
+      const policy = (inst as Partial<IndicatorApi>).policy?.() ?? {};
+      const note = (flag: 'configurable' | 'removable'): string | undefined => policy[flag] === false ? widgetText(ctx, 'protected') : undefined;
       out.push({ id: 'ind-settings', label: widgetText(ctx, '{name} settings...', { name: inst.name }), icon: 'settings',
+        disabled: note('configurable') !== undefined, note: note('configurable'),
         run: () => { mountIndicatorSettings(ctx, undefined, { instanceId: inst.id }); } });
       out.push({ id: 'ind-visible', label: inst.visible() ? widgetText(ctx, 'Hide {name}', { name: inst.name }) : widgetText(ctx, 'Show {name}', { name: inst.name }), icon: inst.visible() ? 'eye' : 'eye-off',
         run: () => { inst.setVisible(!inst.visible()); } });
       out.push({ id: 'ind-remove', label: widgetText(ctx, 'Remove {name}', { name: inst.name }), icon: 'trash', danger: true,
+        disabled: note('removable') !== undefined, note: note('removable'),
         run: () => { chart.removeIndicator(inst.id); } });
     }
   }
@@ -480,7 +488,14 @@ export function mountContextMenu(ctx: WidgetContext, anchor?: HTMLElement, opts:
       } else {
         row.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          item.run?.();
+          // One row is one step, including what the chart does not announce
+          // (an axis mode, an auto-fit switch). A row that changes nothing
+          // (fit, copy, an order) records nothing.
+          if (item.run !== undefined) {
+            const run = item.run;
+            if (ctx.history !== undefined) ctx.history.transact(() => run(), item.id);
+            else run();
+          }
           if (item.keepOpen === true) paint(rows.indexOf(row));
           else handle.close();
         });

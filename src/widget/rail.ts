@@ -19,7 +19,7 @@ import {
   iconSprite, iconUse, chromeIconSvg, toolCursor, DRAWING_TOOL_ICONS,
   type MagnetMode,
 } from 'openalgo-charts/draw';
-import { h, glyph, editableIds, TIP_DWELL_MS, type TipSpec, type WidgetContext } from './context';
+import { h, glyph, editableIds, historyPress, historyReady, TIP_DWELL_MS, type TipSpec, type WidgetContext } from './context';
 
 export const MAGNET_MODES: readonly MagnetMode[] = ['off', 'weak', 'strong'];
 
@@ -619,14 +619,14 @@ export function mountRail(ctx: WidgetContext, host: HTMLElement, opts: RailOptio
       cls: 'oac-rail__btn--chrome',
       glyphEl: chromeGlyph(doc, 'undo'),
       tip: () => ({ title: widgetText(ctx, 'Undo'), chord: ctx.keymap.format('Mod+Z'), side: 'right' }),
-      onClick: () => { draw.undo(); refreshControls(); },
+      onClick: () => { historyPress(ctx, 'undo'); refreshControls(); },
     });
     box.appendChild(ctl.undo);
     ctl.redo = makeBtn({
       cls: 'oac-rail__btn--chrome',
       glyphEl: chromeGlyph(doc, 'redo'),
       tip: () => ({ title: widgetText(ctx, 'Redo'), chord: ctx.keymap.format('Mod+Y'), side: 'right' }),
-      onClick: () => { draw.redo(); refreshControls(); },
+      onClick: () => { historyPress(ctx, 'redo'); refreshControls(); },
     });
     box.appendChild(ctl.redo);
     return box;
@@ -660,8 +660,8 @@ export function mountRail(ctx: WidgetContext, host: HTMLElement, opts: RailOptio
     setState(ctl.lock, { off: none, on: locked, pressed: locked, glyph: locked ? 'unlock' : 'lock' });
     setState(ctl.eye, { off: none, on: hidden, pressed: hidden, glyph: hidden ? 'eye-off' : 'eye' });
     setState(ctl.trash, { off: none });
-    setState(ctl.undo, { off: !draw.canUndo() });
-    setState(ctl.redo, { off: !draw.canRedo() });
+    setState(ctl.undo, { off: !historyReady(ctx, 'undo') });
+    setState(ctl.redo, { off: !historyReady(ctx, 'redo') });
     // The accessible name says what the button would do now, not what it
     // said when it was built or last hovered.
     for (const b of Object.values(ctl)) ctx.tips.refreshLabel(b);
@@ -793,6 +793,8 @@ export function mountRail(ctx: WidgetContext, host: HTMLElement, opts: RailOptio
   for (const ev of ['draw:select', 'drawing:select', 'drawing:change', 'draw:add', 'draw:remove', 'draw:update', 'draw:paste', 'draw:cut']) {
     offs.push(chart.on(ev, refreshControls));
   }
+  // A study, a pane or a setting is a step too, and none of them is a drawing event.
+  if (ctx.history !== undefined) offs.push(ctx.history.subscribe(refreshControls));
 
   applyMagnet();
   applyStay();

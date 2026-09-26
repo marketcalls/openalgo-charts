@@ -655,6 +655,11 @@ export function decodeOrder(r: RawOrder, path = 'order'): OrderDecodeResult {
  * and showing `BUY` is exactly the fail-open this replaced.
  *
  * `getOrders` does not use this: it quarantines such rows outright.
+ *
+ * @deprecated Removed in 3.0.0. Use {@link decodeOrder} (since 1.6.0), which
+ * returns the reason a row could not be read, or
+ * {@link OpenAlgoTradeFeed.getOrderBook}, which sets such rows aside as
+ * `quarantined`.
  */
 export function mapOrder(r: RawOrder): DecodedOrder {
   const res = decodeOrder(r);

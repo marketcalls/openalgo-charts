@@ -94,8 +94,10 @@ export {
 // shows a tool reads from one source.
 export {
   DRAWING_TOOL_ICONS, drawingToolIcon, drawingToolIconIds,
+  DRAWING_TOOL_ACCENTS, drawingToolAccent,
   ICON_VIEWBOX, ICON_STROKE, ICON_ATTRS,
   CHROME_ICONS, CHROME_ICON_FILLED, chromeIcon, chromeIconIds,
+  CHROME_ICON_ACCENTS, chromeIconAccent,
   CHROME_ICON_VIEWBOX, CHROME_ICON_STROKE, CHROME_ICON_ATTRS,
   type IconAttrs,
 } from './icons';
@@ -109,6 +111,7 @@ export {
   DrawingController,
   type DrawingControllerOptions,
   type DrawingChangeKind,
+  type DrawingChangeEvent,
   type DrawingEditOptions,
   type DrawingPlacementOptions,
 } from './controller';
@@ -153,6 +156,8 @@ export type {
   DrawingInput,
   DrawingPatch,
   DrawingPolicy,
+  // Where `placeInStack` puts a drawing: next to another drawing or a series-band entry.
+  DrawingStackTarget,
   DrawingPoint,
   // Viewport anchoring: a drawing pinned to the screen instead of to time and price.
   DrawingSpace,
@@ -178,6 +183,12 @@ export type {
 // What `new DrawingController(chart)` accepts. Exported so a host wiring the
 // controller to something other than a Chart can state what it must provide.
 export type { DrawingChartHost } from './controller';
+
+// Where a study's price input is picked and anchored. The controller draws a
+// paired input's anchor there; a host's own settings form asks the same
+// question before it offers a pick.
+export { studyInputTarget } from './input-anchors';
+export type { StudyInputTarget, InputAnchorStep } from './input-anchors';
 
 export type { ShortcutEvent } from './tools';
 

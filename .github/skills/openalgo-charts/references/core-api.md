@@ -67,8 +67,8 @@ does not need to be loaded again.
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `document` | `Document` | `container.ownerDocument` | Element factory (SSR / multi-window). |
-| `pixelRatio` | `() => number` | `window.devicePixelRatio ?? 1` | Called per frame; canvases resize to media x dpr. |
-| `raf` | `{ schedule, cancel? }` | `requestAnimationFrame` | Injectable frame scheduler (deterministic tests). |
+| `pixelRatio` | `() => number` | `window.devicePixelRatio ?? 1` | Called per frame; canvases resize to media x dpr. Read again whenever the device ratio changes: the chart watches a `(resolution: Xdppx)` query, made again for each new ratio, and the window's `resize`, and re-sizes and repaints every canvas at once. |
+| `raf` | `{ schedule, cancel? }` | `requestAnimationFrame` | Injectable frame scheduler (deterministic tests). Supplied, it runs every frame the chart paints, including the repaint after a resize or a new pixel ratio, which the default one paints at once inside the callback that reports it. |
 | `theme` | `ChartTheme` | `DEFAULT_THEME` | See [themes-and-styling](themes-and-styling.md). |
 | `priceAxisWidth` | `number` | `56` | Media px. Also the width reserved for a left axis when one exists. |
 | `timeAxisHeight` | `number` | `22` | Media px, bottom pane only. |
@@ -268,8 +268,9 @@ overrides and retains explicit price-overlay overrides. `IndicatorState.priceSca
 stores the whole-study override and `plotPriceScaleIds` stores explicit plot
 overrides. Omission restores descriptor defaults. See [scales-and-panes](scales-and-panes.md#reassign-a-whole-study)
 for shared formatting, fixed-range ownership and saved scales.
-`movePriceAxis` refuses mixed local study assignments and explicit price overlays;
-its `priceAxisState().movable` result reflects that conservative legacy-operation
+`movePriceAxis` (deprecated, removed in 3.0.0: use `setPriceAxisPlacement`) refuses
+mixed local study assignments and explicit price overlays;
+its `priceAxisState().movable` result (deprecated with it) reflects that conservative legacy-operation
 limit, even though saved state can represent mixed plot assignments. Uniform local and
 primitive-only studies adopt a successful whole-axis move. `setPriceScale` remains
 the operation for moving all local study resources while keeping overlays fixed.
@@ -297,7 +298,8 @@ and legacy template parsing retain structurally valid maps for later validation.
 ## Lifecycle and sizing
 
 - `chart.destroy()`: the only teardown method. **There is no `chart.remove()`.** It stops the render loop and kinetic animation, removes every indicator, disconnects the `ResizeObserver`, unbinds all pointer/wheel/keyboard listeners, destroys every pane, and clears the container's cursor hint.
-- `chart.applySize(width, height)`: media px; no-ops when unchanged. A `ResizeObserver` on the container calls it automatically, so manual calls are only needed in hosts without `ResizeObserver`.
+- `chart.applySize(width, height)`: media px; no-ops when unchanged. A `ResizeObserver` on the container calls it automatically, so manual calls are only needed in hosts without `ResizeObserver`. The chart paints inside that observer's callback, which runs after the frame's animation callbacks and before the browser paints, so a resize never shows a cleared canvas for a frame.
+- **Device pixels.** Pane boundaries land on whole device pixels: every boundary between panes is rounded onto one (within half a device pixel of its weighted share; the outer edge stays the container's), at the ratio the panes were laid out at, so each canvas covers whole device pixels, and where the browser reports a canvas's `devicePixelContentBoxSize` (Chromium, Firefox) the backing store takes exactly that size. At a whole-number ratio (1, 2, 3) the separator between panes is the pane's 1 px top border, the canvases starting under it, as in every earlier release; a chart whose panes share the height in whole pixels is laid out and painted exactly as before. At a fractional ratio (1.25, 1.5) it is a box one device pixel tall laid over the lower pane's first row, the canvases starting at the pane's own top. A pane's height can differ from its exact weighted share by up to one device pixel. `exportSVG` lays panes out at ratio 1 on every screen.
 - `chart.applyOptions(opts)` takes a runtime subset only: `theme`, `grid`, `canvas`, `statusLine`, `priceScale`, `priceFormatter`, `timeFormatter`, `timezone`, `crosshairMode`. Nothing else from `ChartOptions` is re-appliable.
 
 ## Object inventory and management
@@ -350,6 +352,8 @@ zero-based; the widget displays pane numbers starting at 1 and names the price p
 | `setVisible(id, on)` / `setLocked(id, on)` | Delegates to the owning subsystem when the capability exists. |
 | `remove(id)` / `openSettings(id)` / `focus(id)` | Delegates the supported action. |
 | `register(provider)` | Adds explicit host-owned state; returns idempotent registration cleanup. |
+| `stack(paneIndex)` | The pane's stack rows in draw order, back to front (see Draw order below). |
+| `canPlace(id, targetId, where)` / `place(id, targetId, where)` | Whether a row can move directly `'above'` or `'below'` another row of its pane's stack, and the move. `false` for a move the bands cannot paint or one that changes nothing. |
 | `refresh()` | Re-reads provider state without polling. |
 | `paneCount()` / `primaryPaneIndex()` | The pane count (a move target list adds one new pane after it) and the price pane's slot, so a list can name the price pane in any slot. |
 | `destroy()` | Releases chart/provider observations without deleting objects; idempotent. |
@@ -570,8 +574,8 @@ The getter returns null for an invalid ID, missing pane or destroyed chart;
 layout returns an empty array for a missing pane or destroyed chart. Successful
 changes emit `priceAxisPlacementChanged` with `{ paneIndex, scaleId, side, order }`
 and `objects:change`.
-`movePriceAxis` retains its legacy resource reassignment behavior; use placement
-to move a column while preserving IDs.
+`movePriceAxis` retains its legacy resource reassignment behavior and is
+deprecated, removed in 3.0.0; use placement to move a column while preserving IDs.
 
 Attached series, including hidden series, and explicitly bound primitives occupy
 columns. An unused configured scale retains placement but reserves no width.
@@ -587,7 +591,7 @@ do not yet preserve pane column placement.
 
 ## Option accessors
 
-Beyond `applyOptions`, the chart reads and writes its own option blocks so a settings dialog has something to bind to: `setCanvasOptions` / `canvasOptions`, `setNavigationOptions` / `navigationOptions`, `setGridOptions` / `gridOptions`, `setStatusLineOptions` / `statusLineOptions`, `setPriceScaleOptions` / `priceScaleOptions`, `setAutoScale`, `setAxisChromeOptions` / `axisChromeOptions`, `setEvents` / `setEventOptions` / `eventOptions`, `tradingSettings` / `setTradingSettings`, `primarySeries` / `primarySeriesInfo`, `theme`, `crosshairMode`, `setTimezone` / `timezone`. One axis at a time there is `priceAxisState`, `setPriceAxisOptions`, `setPriceAxisAutoFit`, `setPriceAxisLockRatio`, `priceAxisPlacement`, `setPriceAxisPlacement`, `priceAxisLayout` and the legacy `movePriceAxis`. The declarative schema over the settings is in [settings-and-menus](settings-and-menus.md).
+Beyond `applyOptions`, the chart reads and writes its own option blocks so a settings dialog has something to bind to: `setCanvasOptions` / `canvasOptions`, `setNavigationOptions` / `navigationOptions`, `setGridOptions` / `gridOptions`, `setStatusLineOptions` / `statusLineOptions`, `setPriceScaleOptions` / `priceScaleOptions` (the price pane's own scale) / `priceScaleDefaults` (the chart-wide defaults a new pane starts from, which a one-axis change leaves alone), `setAutoScale`, `setAxisChromeOptions` / `axisChromeOptions`, `setEvents` / `setEventOptions` / `eventOptions`, `tradingSettings` / `setTradingSettings`, `primarySeries` / `primarySeriesInfo`, `theme`, `crosshairMode`, `setTimezone` / `timezone`. One axis at a time there is `priceAxisState`, `setPriceAxisOptions`, `setPriceAxisAutoFit`, `setPriceAxisLockRatio`, `priceAxisPlacement`, `setPriceAxisPlacement`, `priceAxisLayout` and the deprecated `movePriceAxis`. Each of these setters that has no event of its own is followed by `layout:change` (see [events-and-state](events-and-state.md)). `chart.setSessionCalendar(calendar)` sets the trading hours the axis follows past the last bar and repaints; see [data-and-time](data-and-time.md). The declarative schema over the settings is in [settings-and-menus](settings-and-menus.md).
 
 ## Render model
 
@@ -608,7 +612,7 @@ The effective level per pane is `max(globalLevel, paneLevel)`. Crosshair moves r
 
 ## Render backends
 
-The per-frame series pass on each pane goes through an `IRenderBackend` (`src/render/backend.ts`). The pane paints everything else (background, grid, axes, primitives) on the 2D context the backend hands back from `overlay2d()`, so a backend only has to own the one pass a GPU can speed up. `Canvas2dBackend` ships in the base tier, registers itself under `'canvas2d'`, and draws through the very same 2D context the pane already holds, so its op stream is byte for byte the one every chart drew before the port existed (`tests/e2e/render-parity.spec.ts` holds it to zero differing pixels).
+The per-frame series pass on each pane goes through an `IRenderBackend` (`src/render/backend.ts`). The pane paints everything else (background, grid, axes, primitives) on the 2D context the backend hands back from `overlay2d()`, so a backend only has to own the one pass that maps onto a batch of GPU geometry. How the two backends compare in frame time has not been measured. `Canvas2dBackend` ships in the base tier, registers itself under `'canvas2d'`, and draws through the very same 2D context the pane already holds, so its op stream is byte for byte the one every chart drew before the port existed (`tests/e2e/render-parity.spec.ts` holds it to zero differing pixels).
 
 ```ts
 interface IRenderBackend {
@@ -626,7 +630,7 @@ interface IRenderBackend {
 
 `mount` takes the pane's existing 2D context as its second argument (the pane's base `CanvasLayer` already asked the canvas for one; a second `getContext` would split a frame across two contexts). A backend that owns its canvas ignores it.
 
-Choosing one: `chart.rendererKind` (a `RenderBackendKind`; `chart.renderer` is the same value under the name it first shipped with) reports what the chart actually paints with. It differs from the `renderer` option when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in, and from the moment a GPU backend degrades (see the fallback below). The registry behind the option is exported for a tier or host that brings a backend:
+Choosing one: `chart.rendererKind` (a `RenderBackendKind`; the deprecated `chart.renderer`, removed in 3.0.0, is the same value under the name it first shipped with) reports what the chart actually paints with. It differs from the `renderer` option when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in, and from the moment a GPU backend degrades (see the fallback below). The registry behind the option is exported for a tier or host that brings a backend:
 
 | Export | What it does |
 |---|---|
@@ -699,6 +703,10 @@ the rules in [primitives-and-plugins](./primitives-and-plugins.md).
   `new IndicatorDrawings(priceScale?)` optionally measures prices on the scale the
   callback returns each frame, given that frame's `PrimitiveRenderContext`, instead
   of the pane's binding for the layer.
+- `IndicatorBackground` - the primitive behind a descriptor's `background` hook, one
+  per shading target (the study's own pane, and, since 2.5.6, the price pane or a named plot's pane:
+  see [background targets](indicators.md#background-targets-256)).
+  Full-height per-bar columns in the bottom layer, behind every series.
 
 **Calendar boundaries, zone-aware.** The `zone` argument defaults to
 `DEFAULT_TIMEZONE`; never let it fall through to the browser's local zone.
@@ -732,8 +740,8 @@ unrecognised status stays visible instead of being silently dropped.
 - `watermarkRect(position, margin, w, h, plotW, plotH)` and
   `tableOrigin(position, margin, w, h, plotW, plotH)` - corner placement
 
-**Interaction.** `beginPick(host, kind, cb)` starts a price or time pick and returns
-its callable `PickHandle`; call it to tear the pick down. `handle.active()` is
+**Interaction.** `beginPick(host, kind, cb)` starts a price, time or `'point'` pick
+and returns its callable `PickHandle`; call it to tear the pick down. `handle.active()` is
 true only while this invocation owns the capture, including after synchronous
 cancellation or replacement during a start notification. `isRebasing(mode)` reports whether
 a `PriceScaleMode` re-bases the series, which is true for `percentage` and
@@ -746,6 +754,51 @@ selected scale converts pane-local coordinates, including hidden overlays.
 Panning and primitive controls do not select values. Active drawing placement
 refuses the pick; starting placement, data replacement, context changes, restore
 and destruction cancel it. Cancelled picks emit `pick:end` with a null value.
+
+`chart.beginPick('point', cb, options?)` captures a time and a price from one
+click and hands `cb` a `PickPoint`, `{ time, price }`: the time of the bar under
+the click (projected past the last bar) and the price on the target scale, which
+`priceScaleId` names as it does for a price pick. `pick:start` and `pick:end`
+carry `kind: 'point'`, and `pick:end.value` is the point or null. It answers only
+when both halves resolve, so a study input pairing a time with a price
+(`timeKey`, see [indicators](indicators.md#paired-time-and-price-inputs)) is
+never written half from one click and half from another.
+
+## Plot rectangle
+
+`chart.plotRect(paneIndex): PlotRect | null` is a pane's plot in container media
+px: `{ left, top, width, height }`, inside the price axis columns and above the
+time axis strip, the same size a primitive on that pane paints into. Lay an HTML
+overlay against it rather than working the rectangle out from `priceToCoordinate`,
+the axis layout and the time scale. It is null for a pane collapsed to its header
+strip, one hidden behind a maximized pane, and an index with no pane. It scales
+the pane first, as `priceToCoordinate` does, so a pane no frame has painted yet
+(just added or moved) answers with its own prices, not the 0..1 placeholder. The
+draw tier measures viewport drawings by it, so a pinned drawing and a host overlay
+read one rectangle.
+
+```ts
+const rect = chart.plotRect(0)!;
+badge.style.left = `${rect.left + rect.width - 120}px`;
+badge.style.top = `${rect.top + 8}px`;
+```
+
+## Tick schedule on the chart
+
+`chart.setTickSchedule(schedule | null)` hands the chart the instrument's
+price-dependent ticks (a `TickSchedule`; anything without `round` and `step`
+throws a `TypeError` there, not on the first drag), and
+`chart.tickSchedule()` reads it back, null for a constant tick, the default.
+`Instrument.applyTo` sets it from `instrument.tickSchedule`; a host keeping its
+own instrument metadata calls it directly. `chart.snapPrice(paneIndex, price)`
+then rounds a price on the price pane with the band the price falls in rather
+than the scale's one `minMove` (the grid every band lies on, which accepts 105.87
+where a 0.25 band trades only 105.75 and 106), and a dragged price alert lands on
+that band's tick, its range bound stopping a whole band tick inside an off-tick
+opposite bound. Other panes keep their own scale's tick. It also reaches
+`chart.trading`, now or when that layer is built. It describes the loaded
+instrument and is not saved in the chart state. With no schedule every path
+rounds exactly as before.
 
 ## Types that name a public signature
 
@@ -780,6 +833,77 @@ synchronously as `branding:changed` after `setBranding`. Host-accessible links s
 to this event and unsubscribe on teardown, so disabling or replacing a logo cannot leave
 an old destination in the toolbar.
 
+
+## Study policies
+
+`IndicatorPolicy` (from `openalgo-charts`) restricts what a user may do with a study,
+flag by flag; each defaults to `true`, mirroring the drawing policy. Pass it to
+`chart.addIndicator(id, settings, { policy })`, read it with `indicator.policy()` (only
+the flags that are `false`) and replace it with `indicator.setPolicy(policy | null)`,
+which is always the host's act. `parseIndicatorPolicy(input)` validates one and keeps
+only the four boolean flags (it throws on a non-boolean flag).
+
+| Flag | `false` restricts |
+|---|---|
+| `removable` | `chart.removeIndicator(id)`, `indicator.remove()`, `chart.removePane(index)` for a pane holding it; the legend close button; `ChartObjects` `remove`; the widget's menu row and picker remove button (greyed, note "protected"). |
+| `configurable` | `indicator.setSettings(patch)`, `setPriceScale`, `setPlotPriceScales`; the legend gear (no `indicatorSettings` event); `ChartObjects` `settings`; the widget settings dialog declines. |
+| `movable` | `chart.moveIndicator`, `chart.reorderIndicator`, `chart.moveInSeriesStack` for it; `ChartObjects` `reorder`, `move`, `place`. Others still move past it; pane controls still move its pane. |
+| `listed` | Its row in `ChartObjects` and every panel on it, the widget's picker list and alert source lists. The legend still shows it. |
+
+Every restricted call treats its caller as the user and returns `false` with nothing
+changed; the owning host passes `{ force: true }` (`IndicatorEditOptions`). `setSettings`
+and `remove` now return a boolean. A restore is the host's act and replaces a protected
+study. Hiding stays allowed. `IndicatorState.policy` saves only the restrictions, so an
+unrestricted layout is unchanged; a malformed policy refuses the restore. A legend row
+whose buttons the host set (`indicator.legend().setOptions({ actions })`) keeps them
+through every restack; the policy only withholds close and settings from them. Workspace
+documents keep policies. Portable templates leave out every study the host keeps from
+the user (not `removable` or not `listed`) and the studies reading its output, and copy
+any other study without its policy; a `replace` template plan keeps the host's studies.
+
+`chart.addIndicator(indicatorId, settings?, { instanceId })` gives a new study that id
+instead of a fresh one, so a host bringing a removed study back (an undo) restores its
+identity for the studies reading its output and the alerts naming it. An id a study on
+the chart holds throws; a removed study's id is free to take back. A new study without
+one never reuses a removed study's id.
+
+## Draw order
+
+A pane paints in bands, back to front: `'bottom'` primitives and drawings behind the
+series; the series band; `'normal'` primitives (price lines, markers, study levels);
+`'top'` primitives and drawings in front. The series band's entries are the price source
+and each study living on the pane that plots a series there:
+
+- `chart.seriesStack(paneIndex?)`: entry ids in paint order, `'source:primary'` and
+  `'indicator:<instance id>'` (the inventory's ids).
+- `chart.moveInSeriesStack(id, target, 'above' | 'below', options?)`: move the source or a
+  study directly above or below another entry of the same pane. Studies take their slots
+  in the study list in the new order, so their fills, levels and markers follow. The
+  drawings placed on an entry move with it. `false` for another pane, a no-op, or a study
+  that is not `movable` (unless forced). A moved source saves `ChartState.sourceAbove`
+  (the study id it sits on, written only then); it stays the pane's instrument for the
+  readout, the last-price line and a rebased axis.
+- `chart.setPrimitiveStackAbove(primitive, entry | null)`: paint an attached primitive
+  right after that entry's last series on its pane; a batching backend flushes first.
+  While the entry plots nothing there the primitive paints in its own band.
+- Hits rank by paint band first: whatever paints over the series (`'normal'` and
+  `'top'` primitives in their own bands) beats whatever paints with or behind it (a
+  primitive or drawing placed in the series band, a drawing behind the series, a
+  `'bottom'` primitive) wherever both answer, whatever the distance; on either side
+  the nearest wins, then the higher band. Press, hover, click and the context menu
+  all use it, so a box placed under an order line gives the line the press.
+- Context menus rank a drawing or placed primitive against a series by paint order: a
+  hit whose `PrimitiveHit.paintedBy` paints under the series under the pointer gives
+  way to it (the pane sets `paintedBy` on a hit from a primitive placed in the band).
+
+`ChartObjects.stack(paneIndex)` joins them: drawings behind the series, each entry followed
+by the drawings placed on it, then drawings in front. Rows gain `band` (`ChartObjectBand`:
+`'below' | 'series' | 'above'`), `stackAbove` for a drawing in the series band, and the
+`place` capability. `place(id, target, where)` moves a drawing anywhere in its pane and a
+source or study only between whole slots; an entry between another entry and a drawing
+placed on it, out of the series band, or onto another pane is refused. A drawing source
+supports placement through the optional `ChartObjectDrawingSource.placeInStack`.
+`ChartObjectDrawing` gains optional `stackAbove`. `reorder` keeps its per-kind order.
 
 ## Study movement and object order (2.5.3)
 

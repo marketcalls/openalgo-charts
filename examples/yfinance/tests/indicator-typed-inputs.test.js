@@ -8,7 +8,7 @@ import { Chart, darkTheme, registerIndicator } from '../../../src/index.ts';
 import { DrawingController } from '../../../src/draw/index.ts';
 import { createOverlayStack, WidgetBus, WidgetStorage } from '../../../src/widget/context.ts';
 import { installDom } from '../../../tests/widget-form.test.ts';
-import { renderInputRows, collectInputRows, initIndicators, openSettings, closeSettings, collectSettings } from '../src/indicators.js';
+import { renderInputRows, collectInputRows, initIndicators, openSettings, closeSettings, collectSettings, renderIndicatorChips } from '../src/indicators.js';
 import { openOverlay, topOverlay, overlayKeydown } from '../src/ui.js';
 
 const inputs = [
@@ -126,6 +126,25 @@ describe('reference typed indicator controls', () => {
     expect(h.modal.hidden).toBe(true);
     expect(h.dom.doc.body.querySelector('.oac-input-pick')).toBeNull();
   });
+  it('stages both halves of a paired point from one pick and applies them in one patch', () => {
+    const paired = [
+      { key: 'at', type: 'timestamp', label: 'Anchor time', default: 1700000000, pick: true },
+      { key: 'level', type: 'price', label: 'Anchor price', default: 2, min: 0, max: 100, pick: true, timeKey: 'at', anchor: true },
+    ];
+    const h = fixture({ inputs: paired });
+    const trigger = h.host.querySelector('[data-input-action="level"]');
+    expect(trigger.textContent).toBe('Pick point on chart');
+    trigger.click();
+    const scale = h.chart.panes()[0].priceScale, expected = scale.yToPrice(150);
+    h.chart.emit('click', { paneIndex: 0, point: { x: 250, y: 150 }, price: -999, time: 1700000060.4, id: null });
+    expect(collectInputRows(h.host)).toMatchObject({ at: 1700000060, level: expected });
+    // Staged, as every other field of this dialog is, until Apply.
+    expect(h.inst.settings()).toMatchObject({ at: 1700000000, level: 2 });
+    const write = vi.spyOn(h.inst, 'setSettings');
+    expect(collectSettings()).toBe(true);
+    expect(write).toHaveBeenCalledOnce();
+    expect(h.inst.settings()).toMatchObject({ at: 1700000060, level: expected });
+  });
   it('resets native defaults and keeps an invalid draft editable until then', () => {
     const h = fixture(); h.inst.setSettings({ level: 80, note: 'changed' });
     h.field('level').value = 'bad'; expect(collectSettings()).toBe(false);
@@ -198,5 +217,36 @@ describe('reference typed indicator controls', () => {
     const patch = collectInputRows(h.host);
     expect(Object.getOwnPropertyDescriptor(patch, key)?.value).toBe('after\nnext');
     expect(Object.getPrototypeOf(patch)).toBe(Object.prototype);
+  });
+});
+
+describe('host policies in the reference settings and chips', () => {
+  it('reports settings the host locked while the dialog was open, on Apply and on Reset', () => {
+    const h = fixture();
+    const before = h.inst.settings().level;
+    h.inst.setPolicy({ configurable: false });
+    h.field('level').value = '5';
+    expect(collectSettings()).toBe(false);
+    expect(h.inst.settings().level).toBe(before);
+    expect(h.dom.doc.getElementById('status').textContent).toBe('Reference typed settings are protected by the host');
+    h.dom.doc.getElementById('status').textContent = '';
+    h.dom.doc.getElementById('set-reset').click();
+    expect(h.dom.doc.getElementById('status').textContent).toBe('Reference typed settings are protected by the host');
+    // Still open on the study, with its values as they are.
+    expect(h.modal.hidden).toBe(false);
+  });
+
+  it('draws a protected study as a chip with no remove button, and leaves an unlisted one out', () => {
+    const h = fixture();
+    const pinned = h.chart.addIndicator(h.inst.indicatorId, {}, { policy: { removable: false } });
+    h.chart.addIndicator(h.inst.indicatorId, {}, { policy: { listed: false } });
+    renderIndicatorChips();
+    const chips = [...h.dom.doc.getElementById('indlist').querySelectorAll('.chip')];
+    // The unlisted study has no chip; the two listed ones keep their order.
+    expect(chips).toHaveLength(2);
+    expect(chips[0].querySelector('button')).not.toBeNull();
+    expect(chips[1].querySelector('button')).toBeNull();
+    expect(chips[1].classList.contains('is-protected')).toBe(true);
+    expect(chips[1].title).toBe(`${pinned.name} is protected by the host`);
   });
 });

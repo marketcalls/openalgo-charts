@@ -1,7 +1,7 @@
 import { el, esc, currentTheme, toggleTheme } from './ui.js';
 import { attachTip, hideTip } from './hover.js';
 import { cycleMagnet, magnetMode, focusChart, syncNavigationControls } from './rail.js';
-import { INTERVALS, intervalLabel, intervalName, periodsFor, clampPeriod } from './intervals.js';
+import { INTERVALS, intervalLabel, intervalName, periodsFor, clampPeriod, foldedInterval } from './intervals.js';
 import { popupMenu } from './menus.js';
 import { openCompare, comparisonState } from './compare.js';
 import { enterReplay, askExitReplay } from './replay.js';
@@ -15,10 +15,12 @@ import { openAlerts } from './alerts.js';
 import { capturePaneTarget, selectedPane } from './pane-target.js';
 import { autosave } from './persist.js';
 import { rememberIndicators, renderIndicatorChips } from './indicators.js';
+import { recordChartType } from './history.js';
 import { mountSymbolPicker, mountIndicatorPicker } from '/dist/openalgo-charts.widget.mjs';
 import { referenceSymbolSearch } from './symbol-search.js';
 import { toggleInspection } from './inspection.js';
 import { openGoTo } from './goto.js';
+import { extendedSessionAvailable, sessionLabel, sessionOf } from './session.js';
 
 let app;
 let symbolPicker = null;
@@ -193,6 +195,7 @@ export function changeRequest(target, patch) {
     app.loadSecondary();
   } else {
     for (const key of ['symbol', 'interval', 'period']) el(key).value = request[key];
+    el('session').value = sessionOf(request);
     app.load();
   }
   renderToolbar();
@@ -202,17 +205,27 @@ function changeType(target, chartType, pfmode) {
   if (!currentTarget(target)) return;
   const busy = target.pane === 2 ? app.loading2 || app.loadFailed2 : app.loading || app.loadFailed;
   if (busy) { el('status').textContent = 'wait for chart history before changing its type'; return; }
-  if (target.pane === 2) {
-    app.p2.chartType = chartType;
-    app.p2.pfmode = pfmode;
-    app.rebuildSecondary({ typeChanged: true });
-  } else {
-    el('ctype').value = chartType;
-    el('pfmode').value = pfmode;
-    app.render();
-  }
-  renderToolbar();
-  autosave();
+  const pane = target.pane;
+  const from = pane === 2
+    ? { chartType: app.p2.chartType || 'candlestick', pfmode: app.p2.pfmode || 'atr' }
+    : { chartType: el('ctype').value, pfmode: el('pfmode').value };
+  // The type is a rebuild here, so the switch is recorded as a command that
+  // rebuilds again: one step on that chart's timeline.
+  const show = (type) => {
+    if (pane === 2) {
+      app.p2.chartType = type.chartType;
+      app.p2.pfmode = type.pfmode;
+      app.rebuildSecondary({ typeChanged: true });
+    } else {
+      el('ctype').value = type.chartType;
+      el('pfmode').value = type.pfmode;
+      app.render();
+    }
+    renderToolbar();
+    autosave();
+  };
+  show({ chartType, pfmode });
+  recordChartType(pane, from, { chartType, pfmode }, show);
 }
 
 /** Rebuild shared controls from their explicitly selected chart. */
@@ -325,6 +338,26 @@ export function renderToolbar() {
     onSelect: () => changeRequest(target, { period: p }),
   }))));
   bar.appendChild(range);
+  // Trading session. Extended hours are the source's own pre and post market
+  // bars, served only for intraday bars of a US listed stock, so the row is
+  // greyed with the reason everywhere else. A chart already on extended hours
+  // keeps that choice through an interval change and says it is unavailable,
+  // rather than quietly showing regular hours under the old label.
+  const session = sessionOf(request);
+  const wire = foldedInterval(request.interval)?.foldFrom || request.interval;
+  const extendedServed = extendedSessionAvailable(request.symbol, wire);
+  const sessionButton = tbtn('<span>' + esc(sessionLabel(session)) + '</span>' + ticon('chevron'), 'Trading session',
+    extendedServed ? 'regular or extended hours' : 'extended hours are served only for intraday bars of US listed stocks');
+  sessionButton.id = 'session-menu';
+  sessionButton.setAttribute('aria-haspopup', 'menu');
+  if (session === 'extended') sessionButton.classList.add('is-on');
+  sessionButton.addEventListener('click', () => popupMenu(sessionButton, [
+    { label: sessionLabel('regular'), on: session === 'regular', onSelect: () => changeRequest(target, { session: 'regular' }) },
+    { label: sessionLabel('extended'), on: session === 'extended', disabled: !extendedServed,
+      reason: extendedServed ? '' : `Not available for ${request.symbol || 'this symbol'} at ${request.interval}`,
+      onSelect: () => changeRequest(target, { session: 'extended' }) },
+  ], { role: 'menu' }));
+  bar.appendChild(sessionButton);
   // Go to a date or range, loading a longer period when the date is older
   // than the one on screen.
   const goTo = tbtn('<span>Go to</span>', 'Go to a date or range', 'loads older history when it is needed');

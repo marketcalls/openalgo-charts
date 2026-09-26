@@ -378,7 +378,7 @@ Every request sends `apikey` in the body. Non-OK responses surface OpenAlgo's ow
 
 **`modify` requires the full order context, so it throws for an order this feed has never seen.** OpenAlgo's `modifyorder` needs symbol/action/exchange/pricetype/product/quantity, not just the delta. The feed caches that context on `place` and on `getOrders`; modifying an order placed elsewhere means calling `getOrders()` first.
 
-`mapOrder` / `mapPosition` (exported) coerce OpenAlgo's string-or-number fields and map `order_status` into the chart's vocabulary (`open`/`trigger pending` -> `working`, `pending` -> `pending`, `complete` -> `filled`, `cancelled`, `rejected`, default `working`). A `trigger_price` of 0 is normalized to `undefined` so an order line does not render at zero.
+`decodeOrder` / `mapPosition` (exported) coerce OpenAlgo's string-or-number fields and map `order_status` into the chart's vocabulary (`open`/`trigger pending` -> `working`, `pending` -> `pending`, `complete` -> `filled`, `cancelled`, `rejected`; anything else is `'unknown'` with the broker's text in `rawStatus`). `decodeOrder` returns `{ ok: true, order }` or `{ ok: false, issue }` instead of guessing a side or a number. A `trigger_price` of 0 is normalized to `undefined` so an order line does not render at zero. `mapOrder` is deprecated (removed in 3.0.0): it hands back a placeholder row marked `status: 'unknown'` where `decodeOrder` reports the issue, so new code should not call it.
 
 ## Writing a custom DataFeed
 
@@ -498,3 +498,85 @@ shows no price.
 
 Types: `InstrumentKey`, `QuoteSnapshot`, `QuoteRequest`, `QuoteStreamStatus`,
 `QuoteStreamHandlers`, `QuoteFeed`, `NewsRequest`, `NewsItem`, `NewsPage`, `NewsFeed`.
+
+## Data variants: session, adjustment, currency, unit (2.5.6)
+
+Base exports: `normalizeDataVariant`, `dataVariantKey`, `unsupportedDataVariant`,
+`dataVariantError`, `publishDataContext`, and the types `DataVariant`, `DataSession`,
+`DataAdjustment`, `DataVariantDimension`, `DataVariantCapabilities`, `DataVariantQuery`,
+`DataContextTarget`. Indicators tier: `inheritedDataVariant`.
+
+Regular and extended hours, adjusted and raw prices, and a quote currency or unit are
+each a **different series from the provider**, not a view of one series. Extended hours
+add bars the regular series does not have; an adjusted history rewrites every price
+before a corporate action. So a variant is identity, like the symbol:
+
+```ts
+interface DataVariant {
+  session?: 'regular' | 'extended';
+  adjustment?: 'adjusted' | 'raw';
+  currency?: string;   // the provider's own name, compared exactly
+  unit?: string;       // the provider's own name, compared exactly
+}
+// BarsRequest.variant?: DataVariant        absent is the provider's default series
+// DataFeed.dataVariants?(query): DataVariantCapabilities | Promise<...>
+interface DataVariantCapabilities { sessions?; adjustments?; currencies?; units? }
+```
+
+- **Never convert or adjust locally.** A variant is served by a provider that declares
+  it, or it is unsupported. There is no fallback that derives extended hours, raw prices
+  or another currency from the default series: it would look exactly like the provider's
+  own and be wrong in ways nobody could see.
+- **Declaring.** `dataVariants({ symbol, exchange, interval, signal })` lists what the
+  provider serves for that instrument and interval. A dimension absent or empty serves
+  only the default. A feed without the method serves only its default series.
+  `unsupportedDataVariant(capabilities, variant)` returns the first undeclared field
+  (`'session'`, `'adjustment'`, `'currency'`, `'unit'`) or null.
+- **The default is its own identity.** `{}` and no variant are the provider's default;
+  `{ session: 'regular' }` asks for regular hours by name, whatever the default is.
+  `normalizeDataVariant` returns a frozen copy in a fixed field order, undefined for the
+  default, and throws a `TypeError` for an unknown value or field.
+- **Keys.** `dataVariantKey(variant)` is `''` for the default, so `barCacheKey` and
+  every other key that appends it stays byte-identical for a request with no variant:
+  entries persisted before variants existed still match. `withBarCache` keys each
+  variant separately (`invalidate({ symbol, exchange, interval, variant })` drops one),
+  forwards `dataVariants`, and `HistoryRequestPool` never shares a request between two
+  variants.
+- **`DataLoadingController`.** `load(req)` normalises the variant (a request naming `{}`
+  carries no `variant` field at all), asks the feed's declaration before the cache or the
+  network, and publishes status `'unsupported'` with `snapshot.unsupported` (the
+  dimension) and a `DataVariantUnsupportedError` when it is not declared: nothing is
+  fetched, streamed, refreshed or paged. A declaration that rejects or times out is
+  status `'error'`, and until the provider answers nothing fetches or pages the variant
+  either: `loadMore` does nothing and `refresh` (the widget's Retry) asks the
+  declaration again through a new load. A new `load` with another variant is a new
+  source: the previous request is aborted, the stream released and the bars cleared.
+  Hosts that switch exhaustively on `DataLoadingStatus` gain the `'unsupported'` case.
+- **OpenAlgo adapters.** `OpenAlgoDataFeed.getBars` and `OpenAlgoLiveDataFeed.subscribeBars`
+  refuse any non-default variant with `dataVariantError` (name
+  `DataVariantUnsupportedError`): the history API has one series per instrument.
+  `FakeDataFeed.getBars` and `subscribeBars` refuse the same way, since the synthetic
+  feed has one series too, whether it is called directly or through `withBarCache`.
+- **Chart data context.** `ChartDataContext.variant` carries the variant to studies and
+  hosts. Set it with `publishDataContext(chart, context)`, not `chart.setDataContext`:
+  `setDataContext` compares symbol, exchange, interval and OI only, so a change of
+  variant alone would be ignored. The helper passes through an interval-less context so
+  the chart treats the change as a new source (requested bars aborted, source revisions
+  restarted, studies told `'context'`), without changing the instrument, so event
+  markers, linked drawings and news stay. `Instrument.applyTo` keeps the context variant.
+  On that detour the chart emits `data:context` twice (the passing context with its
+  interval cleared, then the real one). The passing context is marked, and requested
+  studies, Tier 2 studies and `AlertController` skip it, so nothing is fetched, reported
+  or saved for it; a host listener sees both and should act on the context current once
+  the call returns.
+- **Alerts.** `AlertScope.variant` records a non-default variant (the default adds no
+  field); an alert evaluates only on its own variant, and a fixed price is not drawn in
+  another currency or unit. See [alerts](alerts.md).
+- **Requested contexts.** `IndicatorBarsRequest.variant` names the series another
+  instrument is asked in. `createRequestedIndicator` and `createTier2Indicator`'s
+  `requestBars` inherit `inheritedDataVariant(chart variant)`, the session and the
+  adjustment (how bars are observed) but not the currency or unit (what the other
+  instrument is quoted in), unless the request names a variant itself (`{}` included).
+  A change of the chart's variant alone restarts both kinds of study.
+- Widget, grid and workspace carry it too: see [widget](widget.md) and
+  [workspaces](workspaces.md).

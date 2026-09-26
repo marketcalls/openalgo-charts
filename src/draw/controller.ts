@@ -18,19 +18,20 @@
 // is a different type, and a consumer passing the real one got "separate
 // declarations of a private property". The entry is external to tier builds,
 // so this survives as `from 'openalgo-charts'` and stays one identity.
-import type { IPrimitive, DataLayer, AlertDrawingValue, AlertDrawingInfo } from 'openalgo-charts';
+import type { IPrimitive, DataLayer, AlertDrawingValue, AlertDrawingInfo, PlotRect } from 'openalgo-charts';
 import type {
   Drawing, DrawingInput, DrawingPatch, DrawingPoint, DrawingStyle, DrawingTool, DrawingsDocument,
-  MagnetMode, ScreenPoint, DrawingGroup, DrawingSpace, ViewportPoint,
+  MagnetMode, ScreenPoint, DrawingGroup, DrawingSpace, DrawingStackTarget, ViewportPoint,
 } from './types';
 import { DRAWING_STATE_VERSION } from './types';
-import { DrawingLayer, placeViewportAnchors, type DrawingPointerKind } from './layer';
+import { DrawingLayer, placeViewportAnchors, sortByZIndex, type DrawingPointerKind } from './layer';
 import { getDrawingTool, hasDrawingTool, viewportDrawingTool } from './tools';
 import { readViewportPoints } from './viewport';
 import { boundsOf } from './geometry';
 import { DrawingClipboard, cloneDrawing, type ClipboardPort } from './clipboard';
 import { migrateDrawings, migrateGroups } from './migrate';
 import { rdpSimplify } from './freehand';
+import { InputAnchors, type InputAnchorHost, type InputAnchorStep } from './input-anchors';
 
 /**
  * The slice of the chart this controller needs.
@@ -80,18 +81,18 @@ export interface DrawingChartHost {
   coordinateToTime?(x: number): number;
   /**
    * Optional, for drawings anchored to the viewport (`space: 'viewport'`):
-   * the time axis, whose `width` is the plot width a viewport `x` is a
-   * fraction of. A host without it still paints them, since the layer reads
-   * the plot size from its render context, but cannot place, move or convert
-   * them.
+   * the time axis, which turns a data anchor's time into a place on the plot
+   * and back when a drawing is pinned or unpinned.
    */
-  readonly timeScale?: { readonly width: number; indexToX(index: number): number; xToIndex(x: number): number };
+  readonly timeScale?: { indexToX(index: number): number; xToIndex(x: number): number };
   /**
-   * Optional: a pane's price columns in container px. On a chart with no bars
-   * to measure against, the innermost left column is where the plot, and so
-   * a viewport drawing's `x`, begins.
+   * Optional, for drawings anchored to the viewport: a pane's plot in
+   * container px, as `Chart.plotRect` reports it, which is what a viewport
+   * anchor is a fraction of. A host without it still paints them, since the
+   * layer reads the plot size from its render context, but cannot place,
+   * move or convert them.
    */
-  priceAxisLayout?(paneIndex?: number): readonly { side: 'left' | 'right'; x: number; width: number }[];
+  plotRect?(paneIndex: number): PlotRect | null;
   /**
    * Optional. It keeps a paste from a chart with more panes than this one
    * landing on a pane the user cannot see: adding a primitive creates the pane
@@ -107,21 +108,20 @@ export interface DrawingChartHost {
    * puts the price pane below its studies; without it the price pane is slot 0.
    */
   primaryPaneIndex?(): number;
+  /**
+   * Optional, both: a pane's series band, back to front, and the call that
+   * paints a layer directly above one of its entries. Without them no drawing
+   * can be placed in the series band, and one saved there paints by its
+   * `zIndex`.
+   */
+  seriesStack?(paneIndex: number): readonly string[];
+  setPrimitiveStackAbove?(primitive: IPrimitive, above: string | null): boolean;
 }
 
 /** The pane-local price projection a chart pane carries, in media px. */
 interface PaneProjection {
   priceToY(price: number): number;
   yToPrice(y: number): number;
-  /** Its scale's height is the pane's plot height, what a viewport `y` is a fraction of. */
-  readonly priceScale?: { readonly height: number };
-}
-
-/** A pane's plot on screen: its top in container px, and its size. */
-interface PlotFrame {
-  top: number;
-  width: number;
-  height: number;
 }
 
 export interface DrawingControllerOptions {
@@ -164,6 +164,14 @@ export interface DrawingControllerOptions {
    */
   pasteOffsetBars?: number;
   pasteOffsetPixels?: number;
+  /**
+   * Draw the anchor of every study input that declares one (a `price` input
+   * with a `timeKey` and `anchor: true`): a handle at the point the pair
+   * names that drags both as one settings change and one step of this undo
+   * history. Default true; false draws none, and the inputs are still edited
+   * in settings and picked with `Chart.beginPick('point')`.
+   */
+  inputAnchors?: boolean;
 }
 
 /** How `DrawingController.setTool` arms a tool. */
@@ -177,8 +185,28 @@ export interface DrawingPlacementOptions {
   space?: DrawingSpace;
 }
 
-/** What `drawing:change` reports happened to the listed ids. */
+/**
+ * What `drawing:change` reports happened to the listed ids. The list is empty
+ * for a step of the undo history that changed no drawing, a study input
+ * anchor's drag and its undo or redo, so a control showing whether Undo is
+ * available still refreshes.
+ */
 export type DrawingChangeKind = 'add' | 'update' | 'remove' | 'reorder' | 'undo' | 'redo';
+
+/** The `drawing:change` payload. */
+export interface DrawingChangeEvent {
+  ids: string[];
+  kind: DrawingChangeKind;
+  /** Set on a change another chart's link applied; it records no step here. */
+  linked?: true;
+  /**
+   * The undo step this change was recorded as, on the change that closes it.
+   * Absent for everything the history does not hold: a host's forced edit, a
+   * linked commit, a restore, and a move along the branches (`undo`, `redo`).
+   * {@link DrawingController.historySteps} lists the step by this number.
+   */
+  step?: number;
+}
 
 /** Options for a call that changes, groups or deletes drawings. */
 export interface DrawingEditOptions {
@@ -234,7 +262,10 @@ interface ClickPayload extends PointerFacts {
   point: { x: number; y: number };
   /** Set on the release half of a press-drag-release gesture. */
   viaDrag?: boolean;
-  /** Modifier state at the click; any of them makes a selection additive. */
+  /**
+   * The flat copy of `modifiers` the chart still sends on a click. It goes in
+   * 3.0.0 with the matching `ChartClickEvent` fields, so `modifiers` is read first.
+   */
   shiftKey?: boolean;
   ctrlKey?: boolean;
   metaKey?: boolean;
@@ -268,10 +299,14 @@ interface CrosshairPayload extends PointerFacts {
   samples?: PointerSample[];
 }
 
-/** The two layers of one pane: under the series and over it. */
+/**
+ * The layers of one pane: under the series, over it, and one inside the
+ * series band for each entry a drawing is placed above.
+ */
 interface PaneLayers {
   bottom: DrawingLayer;
   top: DrawingLayer;
+  series: Map<string, DrawingLayer>;
 }
 
 /**
@@ -302,6 +337,9 @@ const STROKE_EPSILON_PX = 1.5;
 const REST_PRESSURE = 0.5;
 
 let nextId = 1;
+// Shared by every controller on the page, so a chart rebuilt with a new
+// controller never hands out a step a history still holds for the old one.
+let nextStep = 1;
 
 const sameIds = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((id, i) => id === b[i]);
@@ -331,9 +369,14 @@ function magnetModeOf(value: boolean | MagnetMode | undefined): MagnetMode {
   return 'off';
 }
 
-/** Whether Shift is held, from either form the payload carries it in. */
-const shiftOf = (p: PointerFacts & { shiftKey?: boolean }): boolean =>
-  p.modifiers?.shift === true || p.shiftKey === true;
+/**
+ * Whether a key is held, from either form the payload carries it in. The flat
+ * flags on a click are deprecated (removed in 3.0.0): `modifiers` is read
+ * first so nothing here depends on them, and they are still read so that a
+ * synthetic payload carrying only them behaves the same until then.
+ */
+const held = (p: PointerFacts & { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean },
+  key: 'shift' | 'ctrl' | 'meta'): boolean => p.modifiers?.[key] === true || p[`${key}Key` as const] === true;
 
 /** `v` held to `0..size`: a pixel on a plot of that size. */
 const within = (v: number, size: number): number => (v < 0 ? 0 : v > size ? size : v);
@@ -356,10 +399,14 @@ const cutInto = (b0: number, b1: number, a0: number, a1: number, size: number) =
 const pointerKindOf = (p: PointerFacts): DrawingPointerKind =>
   p.pointerType === 'touch' || p.pointerType === 'pen' ? p.pointerType : 'mouse';
 
-type ControllerOptions = Required<Omit<DrawingControllerOptions, 'defaultStyle' | 'clipboard' | 'clipboardFallbackToMemory' | 'magnet'>>
+type ControllerOptions = Required<Omit<DrawingControllerOptions, 'defaultStyle' | 'clipboard' | 'clipboardFallbackToMemory' | 'magnet' | 'inputAnchors'>>
   & { defaultStyle: DrawingStyle; magnet: MagnetMode };
 
-interface DrawingHistoryEntry { before: string; after: string }
+// `external` is a step of the history that is not a drawing edit, a study
+// anchor's drag: its snapshots are the drawings as they stood, unchanged by it.
+// `step` is the chart-wide history's number for the entry, so drawing edits
+// interleave with the chart's own steps in one timeline.
+interface DrawingHistoryEntry { before: string; after: string; step: number; external?: InputAnchorStep }
 
 /** @internal Reserved persistence metadata; a duplicate is a new drawing lineage. */
 export const DRAWING_LINK_METADATA_KEY = 'openalgo-charts/drawing-link';
@@ -405,6 +452,8 @@ export class DrawingController {
    * a drag that follows the hand and one that stutters through the candles.
    */
   private readonly _lifted = new Set<string>();
+  /** The slots the series-band drawings were last listed in; see `_slotSignature`. */
+  private _slotKey = '';
   /** Shift as of the last pointer report: what angle lock reads mid-preview. */
   private _shift = false;
   /** The device behind the last pointer report, for target sizing. */
@@ -413,6 +462,9 @@ export class DrawingController {
   private _undo: DrawingHistoryEntry[] = [];
   private _redo: DrawingHistoryEntry[] = [];
   private _pendingHistory: DrawingHistoryEntry | null = null;
+  /** Depth of `untracked` runs, and the drawings as they were before the host's edit in progress. */
+  private _untracked = 0;
+  private _hostEdit: string | null = null;
   /** The host's patches the recorded steps have yet to take, merged per drawing. */
   private readonly _hostPatches = new Map<string, DrawingPatch>();
   /**
@@ -431,6 +483,9 @@ export class DrawingController {
     redo: DrawingHistoryEntry[];
   } | null = null;
   private readonly _off: (() => void)[] = [];
+  private _anchors: InputAnchors | null = null;
+  /** The host's timeline an anchor step goes to instead of this history; see `delegateInputAnchorSteps`. */
+  private _anchorSteps: ((step: InputAnchorStep) => void) | null = null;
   private _lastCursor: { time: number; price: number; paneIndex: number } | null = null;
   /**
    * Bar under the cursor, carried by the crosshair event, with the time the
@@ -480,7 +535,20 @@ export class DrawingController {
       const { from, to } = value as { from: number; to: number };
       this._remapPanes(index => index === from ? to : index === to ? from : index);
     }));
+    // A study added, removed, moved or restacked changes which slot a drawing
+    // placed in the series band paints in, and nothing else of it: only the
+    // layers are re-listed, and only when a slot changed. Writing the chart
+    // state here would announce a change of its own and come straight back.
+    for (const event of ['objects:change', 'indicatorRemoved']) {
+      this._off.push(chart.on(event, () => { if (this._slotKey !== this._slotSignature()) this._syncLayers(); }));
+    }
     this._sync();
+    if (options.inputAnchors !== false && typeof (chart as InputAnchorHost).indicators === 'function') {
+      this._anchors = new InputAnchors(chart as InputAnchorHost, {
+        record: (step, outside) => this._recordStep(step, outside),
+        placing: () => this._tool !== null,
+      });
+    }
   }
 
   // ── public API ──────────────────────────────────────────────────────────
@@ -635,11 +703,16 @@ export class DrawingController {
     return this._destroyed || (!options.force && group?.members.some(member => pinned(this.get(member)))) ? undefined : group;
   }
 
-  /** Move one step through the rendered stack, preserving the side of the series. */
+  /**
+   * Move one step through the rendered stack, within the slot it paints in:
+   * its side of the series, or the entry it is placed above. `placeInStack`
+   * moves it between slots.
+   */
   public reorder(id: string, direction: -1 | 1): boolean {
     const drawing = this.get(id);
     if (!drawing || this._destroyed || (direction !== -1 && direction !== 1)) return false;
-    const band = this._drawings.filter(item => item.paneIndex === drawing.paneIndex && (item.zIndex < 0) === (drawing.zIndex < 0))
+    const entries = this._entries(drawing.paneIndex), slot = this._slotOf(drawing, entries);
+    const band = this._drawings.filter(item => item.paneIndex === drawing.paneIndex && this._slotOf(item, entries) === slot)
       .sort((a, b) => a.zIndex - b.zIndex);
     const index = band.indexOf(drawing);
     const target = index + direction;
@@ -649,11 +722,70 @@ export class DrawingController {
     const members = new Set(band);
     let cursor = 0;
     this._drawings = this._drawings.map(item => members.has(item) ? band[cursor++] : item);
-    band.forEach((item, position) => { item.zIndex = drawing.zIndex < 0 ? position - band.length : position; });
+    band.forEach((item, position) => { item.zIndex = slot === 'below' ? position - band.length : position; });
     this._sync();
     for (const item of band) this._chart.emit('draw:update', { drawing: item });
     this._emitChange(band.map(item => item.id), 'reorder');
     return true;
+  }
+
+  /**
+   * Move a drawing directly above or below `target` in its pane's paint
+   * order, as one undo step. Next to another drawing it joins the slot that
+   * drawing paints in; above a series-band entry (`chart.seriesStack`) it is
+   * placed on that entry, under the drawings already there; below one it goes
+   * on top of the slot under that entry, the drawings behind the series when
+   * the entry is the first. A slot's drawings are renumbered, below the series
+   * up to -1 and elsewhere from 0. False, with nothing recorded, for a target
+   * on another pane, one the host cannot report, or a move that changes nothing.
+   * Like `reorder`, it is outside a drawing's policy.
+   */
+  public placeInStack(id: string, target: DrawingStackTarget, where: 'above' | 'below'): boolean {
+    const d = this.get(id);
+    if (d === undefined || this._destroyed || (where !== 'above' && where !== 'below') || target === null || typeof target !== 'object') return false;
+    const entries = this._entries(d.paneIndex);
+    let slot: string, index: number;
+    if ('drawing' in target) {
+      const t = this.get(target.drawing);
+      if (t === undefined || t === d || t.paneIndex !== d.paneIndex) return false;
+      slot = this._slotOf(t, entries);
+      index = this._slotMembers(d.paneIndex, slot, entries).filter(m => m !== d).indexOf(t) + (where === 'above' ? 1 : 0);
+    } else {
+      const at = entries.indexOf((target as { entry: string }).entry);
+      if (at < 0) return false;
+      slot = where === 'above' ? 'entry:' + entries[at] : at === 0 ? 'below' : 'entry:' + entries[at - 1];
+      index = where === 'above' ? 0 : this._slotMembers(d.paneIndex, slot, entries).filter(m => m !== d).length;
+    }
+    const members = this._slotMembers(d.paneIndex, slot, entries);
+    if (this._slotOf(d, entries) === slot && members.indexOf(d) === index) return false;
+    this._pushUndo();
+    const next = members.filter(m => m !== d);
+    next.splice(index, 0, d);
+    if (slot.startsWith('entry:')) d.stackAbove = slot.slice('entry:'.length);
+    else delete d.stackAbove;
+    next.forEach((m, position) => { m.zIndex = slot === 'below' ? position - next.length : position; });
+    this._sync();
+    for (const m of next) this._chart.emit('draw:update', { drawing: m });
+    this._emitChange(next.map(m => m.id), 'reorder');
+    return true;
+  }
+
+  /** A pane's series band as the chart reports it, or none on a host that cannot. */
+  private _entries(paneIndex: number): readonly string[] {
+    return this._chart.seriesStack?.(paneIndex) ?? [];
+  }
+
+  /**
+   * The slot a drawing paints in: `entry:<id>` while the entry it is placed
+   * above is in its pane's series band, else its side of the series by `zIndex`.
+   */
+  private _slotOf(d: Drawing, entries: readonly string[]): string {
+    return d.stackAbove !== undefined && entries.includes(d.stackAbove) ? 'entry:' + d.stackAbove : d.zIndex < 0 ? 'below' : 'above';
+  }
+
+  /** The drawings of one slot of a pane, in paint order. */
+  private _slotMembers(paneIndex: number, slot: string, entries: readonly string[]): Drawing[] {
+    return sortByZIndex(this._drawings.filter(d => d.paneIndex === paneIndex && this._slotOf(d, entries) === slot));
   }
 
   private _remapPanes(map: (index: number) => number | null): void {
@@ -913,13 +1045,15 @@ export class DrawingController {
       this._applyPatch(held as Drawing, rest);
       // Data is stored as an absent space, so the held patch names it outright.
       if (rest.space !== undefined) held.space = rest.space;
+      // Likewise a drawing taken out of the series band.
+      if (rest.stackAbove !== undefined) (held as DrawingPatch).stackAbove = rest.stackAbove;
       if (points) held.points = d.points;
       this._hostPatches.set(d.id, held);
       // History cannot reach a read-only drawing's content until its policy
       // changes, and that change is a rewrite which takes this patch first,
       // so moving one (a trailing level, every tick) costs no rewrite. Its
       // place in the stack is within history's reach.
-      rewrite ||= !pinned(d) || !!rest.policy || rest.zIndex !== undefined;
+      rewrite ||= !pinned(d) || !!rest.policy || rest.zIndex !== undefined || rest.stackAbove !== undefined;
     }
     if (rewrite) this._rebase();
     this._sync();
@@ -972,6 +1106,8 @@ export class DrawingController {
     if (patch.visible !== undefined) d.visible = patch.visible;
     if (patch.zIndex !== undefined && Number.isFinite(patch.zIndex)) d.zIndex = patch.zIndex;
     if (patch.policy !== undefined) d.policy = { ...d.policy, ...patch.policy };
+    if (typeof patch.stackAbove === 'string' && patch.stackAbove !== '') d.stackAbove = patch.stackAbove;
+    else if (patch.stackAbove === null) delete d.stackAbove;
   }
 
   /** Delete one drawing. A read-only one goes only with `options.force`. */
@@ -1058,21 +1194,24 @@ export class DrawingController {
   private _setSelection(next: string[]): void {
     const changed = !sameIds(next, this._selection);
     this._selection = next;
-    for (const l of this._layers.values()) {
-      l.bottom.setSelected(next);
-      l.top.setSelected(next);
-    }
+    for (const layer of this._allLayers()) layer.setSelected(next);
     if (!changed) return;
     this._chart.emit('draw:select', { id: this.selected() });
     this._chart.emit('drawing:select', { ids: next.slice() });
   }
 
   private _emitChange(ids: readonly string[], kind: DrawingChangeKind): void {
-    if (this._pendingHistory !== null) {
-      this._pendingHistory.after = this._historyText();
+    const recorded = this._pendingHistory;
+    if (recorded !== null) {
+      recorded.after = this._historyText();
       this._pendingHistory = null;
     }
-    this._chart.emit('drawing:change', { ids: ids.slice(), kind });
+    this._takeInHostEdit();
+    const change: DrawingChangeEvent = { ids: ids.slice(), kind };
+    // A trim can push the step out of the branch while it is being recorded,
+    // and a step nothing holds is not one to report.
+    if (recorded !== null && this._undo.includes(recorded)) change.step = recorded.step;
+    this._chart.emit('drawing:change', change);
   }
 
   // ── z-order ─────────────────────────────────────────────────────────────
@@ -1093,7 +1232,7 @@ export class DrawingController {
     this._emitChange([id], 'reorder');
   }
 
-  /** In front of every other drawing on its pane. Stays on its side of the series. */
+  /** In front of every other drawing in its slot: its side of the series, or the entry it is placed above. */
   public bringToFront(id: string): void {
     const d = this.get(id);
     if (d === undefined) return;
@@ -1102,7 +1241,7 @@ export class DrawingController {
     this._reorder(d, z, 'end');
   }
 
-  /** Behind every other drawing on its pane. Stays on its side of the series. */
+  /** Behind every other drawing in its slot: its side of the series, or the entry it is placed above. */
   public sendToBack(id: string): void {
     const d = this.get(id);
     if (d === undefined) return;
@@ -1111,22 +1250,38 @@ export class DrawingController {
     this._reorder(d, z, 'start');
   }
 
-  /** Under the series (`zIndex` -1). A no-op for a drawing already there. */
+  /**
+   * Under the series (`zIndex` -1), out of the series band when it was placed
+   * in it. A no-op for a drawing already there.
+   */
   public sendBehindSeries(id: string): void {
     const d = this.get(id);
-    if (d !== undefined && d.zIndex >= 0) this.setZIndex(id, -1);
+    // A placement kept for a study that is gone goes too: the user chose a side.
+    if (d !== undefined && (d.stackAbove !== undefined || this._slotOf(d, this._entries(d.paneIndex)) !== 'below')) this._crossSeries(d, -1);
   }
 
-  /** Over the series (`zIndex` 0). A no-op for a drawing already there. */
+  /**
+   * Over the series (`zIndex` 0), out of the series band when it was placed
+   * in it. A no-op for a drawing already there.
+   */
   public bringAboveSeries(id: string): void {
     const d = this.get(id);
-    if (d !== undefined && d.zIndex < 0) this.setZIndex(id, 0);
+    if (d !== undefined && (d.stackAbove !== undefined || this._slotOf(d, this._entries(d.paneIndex)) !== 'above')) this._crossSeries(d, 0);
   }
 
-  /** The other drawings sharing `d`'s pane and side of the series. */
+  private _crossSeries(d: Drawing, z: number): void {
+    this._pushUndo();
+    d.zIndex = z;
+    delete d.stackAbove;
+    this._sync();
+    this._chart.emit('draw:update', { drawing: d });
+    this._emitChange([d.id], 'reorder');
+  }
+
+  /** The other drawings sharing `d`'s pane and slot. */
   private _band(d: Drawing): Drawing[] {
-    const below = d.zIndex < 0;
-    return this._drawings.filter((o) => o !== d && o.paneIndex === d.paneIndex && (o.zIndex < 0) === below);
+    const entries = this._entries(d.paneIndex), slot = this._slotOf(d, entries);
+    return this._drawings.filter((o) => o !== d && o.paneIndex === d.paneIndex && this._slotOf(o, entries) === slot);
   }
 
   private _reorder(d: Drawing, z: number, where: 'start' | 'end'): void {
@@ -1364,6 +1519,44 @@ export class DrawingController {
     return time + (px / FALLBACK_BAR_SPACING_PX) * this._barSeconds();
   }
 
+  /**
+   * Move a study's input anchor (a price input declared with `timeKey` and
+   * `anchor: true`) to `point` as the user, the way dragging its handle does:
+   * the time snaps to the bar under it, both halves stay inside the bounds the
+   * inputs declare, a study the user may not configure refuses it, and the move
+   * is one undo step in this history. For a host control that sets the point
+   * another way, such as a point pick on the chart, so Undo takes it back like
+   * a drag. A point written through the study's settings instead (a settings
+   * dialog's Pick point) is one step of this history as well, unless it is
+   * written inside `untracked` or forced on a study the user may not
+   * configure, which are the host's own. False when the study has no anchor for `key` (or the controller was
+   * built without input anchors), the study refuses, or it already holds the point.
+   */
+  public moveInputAnchor(studyId: string, key: string, point: { time: number; price: number }): boolean {
+    return this._anchors?.move(studyId, key, point.time, point.price) ?? false;
+  }
+
+  /**
+   * Hand the step each study input anchor move makes (a handle dragged, a
+   * `moveInputAnchor`) to a timeline of the host's instead of this history,
+   * until the returned function gives them back. For a host keeping one undo
+   * history for the whole chart that already records the settings patch the
+   * move writes, as the widget's `ChartHistory` does: held here as well, one
+   * move would be taken back twice, and a press here would reach a step the
+   * other timeline had already taken back. `record` is called once the patch
+   * is written, in the same turn, with the step's own `undo` and `redo`
+   * (each false once the settings have moved on from it); this history
+   * records nothing for it and emits no `drawing:change`. A move made inside
+   * `untracked` is the host's own and reaches neither. A later call takes
+   * the steps from an earlier one. A point written to the settings some other
+   * way, which this history otherwise holds as a step of its own, is not
+   * handed over: the host's timeline sees that write itself.
+   */
+  public delegateInputAnchorSteps(record: (step: InputAnchorStep) => void): () => void {
+    this._anchorSteps = record;
+    return () => { if (this._anchorSteps === record) this._anchorSteps = null; };
+  }
+
   // ── history and persistence ─────────────────────────────────────────────
 
   public undo(): boolean {
@@ -1372,7 +1565,7 @@ export class DrawingController {
     // nothing any more, so the press goes on to the step before it.
     for (let snap = this._undo.pop(); snap !== undefined; snap = this._undo.pop()) {
       this._redo.push(snap);
-      if (this._applyHistory(snap.after, snap.before, 'undo')) return true;
+      if (snap.external ? this._external(snap.external.undo(), 'undo') : this._applyHistory(snap.after, snap.before, 'undo')) return true;
     }
     return false;
   }
@@ -1381,7 +1574,7 @@ export class DrawingController {
     this._onDragEnd();
     for (let snap = this._redo.pop(); snap !== undefined; snap = this._redo.pop()) {
       this._undo.push(snap);
-      if (this._applyHistory(snap.before, snap.after, 'redo')) return true;
+      if (snap.external ? this._external(snap.external.redo(), 'redo') : this._applyHistory(snap.before, snap.after, 'redo')) return true;
     }
     return false;
   }
@@ -1479,6 +1672,60 @@ export class DrawingController {
   public canRedo(): boolean { return this._redo.length > 0; }
 
   /**
+   * The steps each branch holds, oldest first, by the number `drawing:change`
+   * reported them under. For a host that keeps one timeline across drawings
+   * and its own edits: a step missing from both branches has been taken away
+   * (a reset, a trim, a host edit that left it nothing to do), and pressing
+   * undo for it would reach an older step instead. A step still being
+   * recorded, a drag in progress, is not listed until its change closes it.
+   */
+  public historySteps(): { undo: number[]; redo: number[] } {
+    const closed = (entry: DrawingHistoryEntry): boolean => entry !== this._pendingHistory;
+    return { undo: this._undo.filter(closed).map(entry => entry.step), redo: this._redo.map(entry => entry.step) };
+  }
+
+  /**
+   * Run `fn` as the host's own act. An edit it makes records no undo step and
+   * leaves both branches as they are, and every step already recorded takes
+   * it in, the way a forced call does, so no later undo or redo reverses it.
+   * Unlike `force` it reaches no read-only drawing, and `undo` or `redo`
+   * inside it still moves along the branches. For a host keeping one timeline
+   * across drawings and its own changes, whose own changes are never steps.
+   */
+  public untracked<T>(fn: () => T): T {
+    this._untracked++;
+    try { return fn(); }
+    finally {
+      // An edit a throw cut short is still the host's, and must not join the next one.
+      if (--this._untracked === 0) this._takeInHostEdit();
+    }
+  }
+
+  /** Give every recorded step the host's edit, drawing by drawing and group by group. */
+  private _takeInHostEdit(): void {
+    const from = this._hostEdit;
+    if (from === null) return;
+    this._hostEdit = null;
+    const was = migrateDrawings(JSON.parse(from));
+    const now = this._document(this._drawings);
+    const take = <T extends { id: string }>(list: T[], before: readonly T[], after: readonly T[]): T[] => {
+      const left = new Map(before.map(item => [item.id, JSON.stringify(item)]));
+      const right = new Map(after.map(item => [item.id, item]));
+      const changed = new Set([...left.keys(), ...right.keys()]
+        .filter(id => left.get(id) !== (right.has(id) ? JSON.stringify(right.get(id)) : undefined)));
+      // Changed where a step has it, gone everywhere, and made everywhere: a
+      // drawing the host changed is not put into a step from before it existed.
+      const out = list.filter(item => !changed.has(item.id) || right.has(item.id)).map(item => (changed.has(item.id) ? right.get(item.id)! : item));
+      for (const id of changed) if (!left.has(id) && !out.some(item => item.id === id)) out.push(right.get(id)!);
+      return out;
+    };
+    this._rebase(document => {
+      document.drawings = take(document.drawings, was.drawings, now.drawings);
+      document.groups = take(document.groups ?? [], was.groups ?? [], now.groups ?? []);
+    });
+  }
+
+  /**
    * Serialisable document, the same shape `ChartState.drawings` carries.
    * Transient drawings (`policy.persistent` false) are left out, and so is
    * their group membership.
@@ -1525,6 +1772,7 @@ export class DrawingController {
     this._destroyed = true;
     this._linkedPreviews.clear();
     this._chart.emit('draw:destroy', { controller: this });
+    this._anchors?.destroy();
     this._setPlacementMode(false);   // never leave the chart unable to pan
     for (const off of this._off) off();
     this._off.length = 0;
@@ -1532,8 +1780,14 @@ export class DrawingController {
       l.top.setBelow(null);
       this._chart.removePrimitive(l.top);
       this._chart.removePrimitive(l.bottom);
+      for (const layer of l.series.values()) this._chart.removePrimitive(layer);
     }
     this._layers.clear();
+  }
+
+  /** Every layer of every pane. */
+  private _allLayers(): DrawingLayer[] {
+    return [...this._layers.values()].flatMap(l => [l.bottom, l.top, ...l.series.values()]);
   }
 
   // ── interaction ─────────────────────────────────────────────────────────
@@ -1549,7 +1803,7 @@ export class DrawingController {
       ? null : { time, price, paneIndex };
     const bar = p.bar ?? null;
     this._lastBar = bar === null || barTime === null ? null : { time: barTime, ...bar };
-    this._shift = shiftOf(p);
+    this._shift = held(p, 'shift');
     this._notePointer(p);
     // The pointer left the plot: nothing is under it any more.
     if (time === null && price === null) this._setHovered(null);
@@ -1576,10 +1830,7 @@ export class DrawingController {
   private _setHovered(id: string | null): void {
     if (id === this._hovered) return;
     this._hovered = id;
-    for (const l of this._layers.values()) {
-      l.bottom.setHovered(id);
-      l.top.setHovered(id);
-    }
+    for (const layer of this._allLayers()) layer.setHovered(id);
     this._chart.emit('drawing:hover', { id });
   }
 
@@ -1588,10 +1839,7 @@ export class DrawingController {
     const kind = pointerKindOf(p);
     if (kind === this._pointerKind) return;
     this._pointerKind = kind;
-    for (const l of this._layers.values()) {
-      l.bottom.setPointerType(kind);
-      l.top.setPointerType(kind);
-    }
+    for (const layer of this._allLayers()) layer.setPointerType(kind);
   }
 
   /**
@@ -1840,11 +2088,12 @@ export class DrawingController {
       // Reject an unmappable click outright: a NaN anchor serialises as null
       // and produces a drawing that can never be rendered or hit-tested.
       if (p.price === null || !Number.isFinite(p.price) || !Number.isFinite(p.time)) return;
-      this._shift = shiftOf(p);
+      this._shift = held(p, 'shift');
       this._placePoint(this._aimPoint({ time: p.time, price: p.price }, p.paneIndex), p.paneIndex);
       return;
     }
-    const additive = p.shiftKey === true || p.ctrlKey === true || p.metaKey === true;
+    // Shift, Ctrl or Cmd adds to the selection.
+    const additive = (['shift', 'ctrl', 'meta'] as const).some(key => held(p, key));
     if (p.id !== null && p.id.startsWith('draw:')) {
       this.select(p.id.slice('draw:'.length).split('#')[0], additive);
       return;
@@ -1937,7 +2186,7 @@ export class DrawingController {
     const handle = handleStr === undefined ? null : Number(handleStr);
 
     this._notePointer(p);
-    this._shift = shiftOf(p);
+    this._shift = held(p, 'shift');
     if (this._dragStart === null || this._dragStart.id !== rawId || this._dragStart.handle !== handle) {
       // Grabbing the body of an unselected shape selects it first, on its own:
       // the selection is what moves, and a drag that moved something other than
@@ -1967,7 +2216,7 @@ export class DrawingController {
       // costs; a drag with nothing to lift never touches it.
       let lifted = false;
       for (const m of moving) {
-        if (m.zIndex < 0) { this._lifted.add(m.id); lifted = true; }
+        if (!this._onTop(m)) { this._lifted.add(m.id); lifted = true; }
       }
       this._moveDrag(p, d, handle);
       if (lifted) this._sync();
@@ -2099,11 +2348,11 @@ export class DrawingController {
   // ── viewport space ──────────────────────────────────────────────────────
   //
   // A viewport anchor is a fraction of its pane's plot. The layer scales it
-  // by the plot size in its render context; everything here goes through the
-  // same two numbers read off the chart (the time axis width and the pane
-  // scale's height, which the chart sets to exactly the plot's), and through
-  // the pane's own readout scale for y, the scale a gesture's price was read
-  // from. Plot-relative px therefore agree with what the layer painted.
+  // by the plot size in its render context; everything here scales it by the
+  // plot the chart reports (`plotRect`), the same rectangle the chart hands
+  // that render context, and reads y through the pane's own readout scale,
+  // the scale a gesture's price was read from. Plot-relative px therefore
+  // agree with what the layer painted.
 
   /**
    * The drawing's anchors in container media px, the space `timeToCoordinate`
@@ -2126,9 +2375,8 @@ export class DrawingController {
     }
     const frame = this._plotFrame(d.paneIndex);
     if (frame === null) return null;
-    const left = this._plotLeft();
     return placeViewportAnchors(d, d.viewportPoints ?? [], frame.width, frame.height)
-      .map((p) => ({ x: left + p.x, y: frame.top + p.y }));
+      .map((p) => ({ x: frame.left + p.x, y: frame.top + p.y }));
   }
 
   /** A pane's price projection, when the host exposes one. */
@@ -2138,55 +2386,27 @@ export class DrawingController {
   }
 
   /**
-   * Where a pane's plot is and how big, or null when it has none on screen:
-   * a folded pane maps no price, and a pane hidden by a maximize has no
-   * height. A fraction of either would be a fraction of nothing.
+   * Where a pane's plot is and how big, or null when it has none on screen
+   * (folded to a strip, or hidden behind a maximized pane): a fraction of
+   * either would be a fraction of nothing. It needs a pane projection too,
+   * since every gesture reads its y back through one.
    */
-  private _plotFrame(paneIndex: number): PlotFrame | null {
-    const pane = this._pane(paneIndex);
-    const toY = this._chart.priceToCoordinate;
-    const width = this._chart.timeScale?.width ?? 0;
-    const height = pane?.priceScale?.height ?? 0;
-    if (pane === null || toY === undefined || !(width > 0) || !(height > 0)) return null;
-    const price = pane.yToPrice(0);
-    const y = toY.call(this._chart, price, paneIndex);
-    if (y === null || !Number.isFinite(y)) return null;
-    return { top: y - pane.priceToY(price), width, height };
-  }
-
-  /**
-   * The plot's left edge in container px: the chart-wide left axis column.
-   * Any bar maps to both a container x and a plot x, and their gap is the
-   * column; a chart with no bars reads it off the left price columns.
-   */
-  private _plotLeft(): number {
-    const ts = this._chart.timeScale;
-    const toX = this._chart.timeToCoordinate;
-    const dl = this._chart.dataLayer;
-    const t = dl.length > 0 ? dl.indexToTime(0) : undefined;
-    if (ts !== undefined && toX !== undefined && t !== undefined) {
-      const left = toX.call(this._chart, t) - ts.indexToX(dl.timeToIndexFloat(t));
-      if (Number.isFinite(left)) return left;
-    }
-    let left = 0;
-    const panes = this._chart.panes?.().length ?? 1;
-    for (let i = 0; i < panes; i++) {
-      for (const slot of this._chart.priceAxisLayout?.(i) ?? []) if (slot.side === 'left') left = Math.max(left, slot.x + slot.width);
-    }
-    return left;
+  private _plotFrame(paneIndex: number): PlotRect | null {
+    const rect = this._pane(paneIndex) === null ? null : this._chart.plotRect?.(paneIndex) ?? null;
+    return rect !== null && rect.width > 0 && rect.height > 0 ? rect : null;
   }
 
   /**
    * A gesture's position on its pane's plot, in media px. y reads the price
    * back through the pane's readout scale, the exact inverse of how the chart
-   * read it; x is the pointer's container x less the left column, or, for a
-   * payload without one, the time through the time axis.
+   * read it; x is the pointer's container x less the plot's left edge, or,
+   * for a payload without one, the time through the time axis.
    */
   private _gesturePlot(p: { time: number; price: number; point?: { x: number } | null }, paneIndex: number): ScreenPoint | null {
     const pane = this._pane(paneIndex);
     const ts = this._chart.timeScale;
     if (pane === null || !Number.isFinite(p.price)) return null;
-    const x = p.point !== undefined && p.point !== null ? p.point.x - this._plotLeft()
+    const x = p.point !== undefined && p.point !== null ? p.point.x - (this._plotFrame(paneIndex)?.left ?? Number.NaN)
       : ts === undefined ? Number.NaN : ts.indexToX(this._chart.dataLayer.timeToIndexFloat(p.time));
     const y = pane.priceToY(p.price);
     return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
@@ -2257,7 +2477,7 @@ export class DrawingController {
    * stored is what is painted, and no drag can leave the box where the
    * pointer cannot reach it.
    */
-  private _pinPlot(d: Drawing, pts: readonly ScreenPoint[], frame: PlotFrame): ViewportPoint[] {
+  private _pinPlot(d: Drawing, pts: readonly ScreenPoint[], frame: PlotRect): ViewportPoint[] {
     const fraction = (p: ScreenPoint): ViewportPoint => ({ x: p.x / frame.width, y: p.y / frame.height });
     return placeViewportAnchors(d, pts.map(fraction), frame.width, frame.height).map(fraction);
   }
@@ -2268,7 +2488,7 @@ export class DrawingController {
    * holds in from a stored place off the plot (a host's value, a larger
    * chart) moves at once, with no dead travel before it starts.
    */
-  private _shiftPinned(d: Drawing, points: readonly ViewportPoint[], dxPx: number, dyPx: number, frame: PlotFrame): ViewportPoint[] {
+  private _shiftPinned(d: Drawing, points: readonly ViewportPoint[], dxPx: number, dyPx: number, frame: PlotRect): ViewportPoint[] {
     const at = placeViewportAnchors(d, points, frame.width, frame.height);
     return this._pinPlot(d, at.map((p) => ({ x: p.x + dxPx, y: p.y + dyPx })), frame);
   }
@@ -2325,7 +2545,7 @@ export class DrawingController {
   private _layerFor(paneIndex: number): PaneLayers {
     let pair = this._layers.get(paneIndex);
     if (pair === undefined) {
-      pair = { bottom: new DrawingLayer('bottom'), top: new DrawingLayer('top') };
+      pair = { bottom: new DrawingLayer('bottom'), top: new DrawingLayer('top'), series: new Map() };
       this._chart.addPrimitive(pair.bottom, paneIndex);
       this._chart.addPrimitive(pair.top, paneIndex);
       pair.top.setBelow(pair.bottom);
@@ -2336,44 +2556,103 @@ export class DrawingController {
     return pair;
   }
 
-  /** Whether a drawing paints on the top layer: over the series, or lifted for a drag. */
-  private _onTop(d: Drawing): boolean {
-    return d.zIndex >= 0 || this._lifted.has(d.id);
+  /**
+   * Whether a drawing paints on the top layer: over the series and outside
+   * the series band, or lifted for a drag.
+   */
+  private _onTop(d: Drawing, entries = this._entries(d.paneIndex)): boolean {
+    return this._lifted.has(d.id) || this._slotOf(d, entries) === 'above';
   }
 
   /** Push the current list into each pane's layers and into the chart state. */
   private _sync(): void {
     this._groups = migrateGroups(this._groups, this._drawings);
-    const byPane = new Map<number, { below: Drawing[]; above: Drawing[] }>();
-    for (const committed of this._drawings) {
-      const d = this._linkedPreviews.get(committed.id) ?? committed;
-      let lists = byPane.get(d.paneIndex);
-      if (lists === undefined) {
-        lists = { below: [], above: [] };
-        byPane.set(d.paneIndex, lists);
-      }
-      (this._onTop(d) ? lists.above : lists.below).push(d);
-    }
-    for (const [pane, lists] of byPane) {
-      const l = this._layerFor(pane);
-      l.bottom.setDrawings(lists.below);
-      l.top.setDrawings(lists.above);
-    }
-    // Panes that lost their last drawing must be cleared, not left stale.
-    for (const [pane, l] of this._layers) {
-      if (!byPane.has(pane)) {
-        l.bottom.setDrawings([]);
-        l.top.setDrawings([]);
-      }
-      l.bottom.setSelected(this._selection);
-      l.top.setSelected(this._selection);
-    }
+    this._syncLayers();
     // A hover or a selection on a drawing that has just gone, or has just
     // been made unselectable, would otherwise outlive it until the pointer
     // next moves.
     this._pruneSelection();
     if (this._hovered !== null && !this._selectable(this._hovered)) this._setHovered(null);
     this._chart.setDrawingState(this.toJSON());
+  }
+
+  /** Each drawing placed in the series band, with the slot it resolves to now. */
+  private _slotSignature(): string {
+    const stacks = new Map<number, readonly string[]>();
+    let key = '';
+    for (const d of this._drawings) {
+      if (d.stackAbove === undefined) continue;
+      let entries = stacks.get(d.paneIndex);
+      if (entries === undefined) stacks.set(d.paneIndex, entries = this._entries(d.paneIndex));
+      key += d.id + '\u0000' + this._slotOf(d, entries) + '\u0000';
+    }
+    return key;
+  }
+
+  /** List every drawing on the layer of the slot it paints in. */
+  private _syncLayers(): void {
+    this._slotKey = this._slotSignature();
+    const byPane = new Map<number, { below: Drawing[]; above: Drawing[]; series: Map<string, Drawing[]> }>();
+    const stacks = new Map<number, readonly string[]>();
+    for (const committed of this._drawings) {
+      const d = this._linkedPreviews.get(committed.id) ?? committed;
+      let lists = byPane.get(d.paneIndex);
+      if (lists === undefined) {
+        lists = { below: [], above: [], series: new Map() };
+        byPane.set(d.paneIndex, lists);
+      }
+      let entries = stacks.get(d.paneIndex);
+      if (entries === undefined) stacks.set(d.paneIndex, entries = this._entries(d.paneIndex));
+      const slot = this._lifted.has(d.id) ? 'above' : this._slotOf(d, entries);
+      if (slot === 'above') lists.above.push(d);
+      else if (slot === 'below') lists.below.push(d);
+      else {
+        const list = lists.series.get(slot.slice('entry:'.length));
+        if (list) list.push(d); else lists.series.set(slot.slice('entry:'.length), [d]);
+      }
+    }
+    for (const [pane, lists] of byPane) {
+      const l = this._layerFor(pane);
+      l.bottom.setDrawings(lists.below);
+      l.top.setDrawings(lists.above);
+      this._syncSeriesLayers(pane, l, lists.series, stacks.get(pane) ?? []);
+    }
+    // Panes that lost their last drawing must be cleared, not left stale.
+    for (const [pane, l] of this._layers) {
+      if (!byPane.has(pane)) {
+        l.bottom.setDrawings([]);
+        l.top.setDrawings([]);
+        this._syncSeriesLayers(pane, l, new Map(), []);
+      }
+      for (const layer of [l.bottom, l.top, ...l.series.values()]) layer.setSelected(this._selection);
+    }
+  }
+
+  /**
+   * One series-band layer per entry a drawing on this pane is placed above,
+   * made on first use and dropped when its last drawing leaves, each painted
+   * by the chart right after its entry. The top layer answers for them,
+   * front to back, then for the layer under the series.
+   */
+  private _syncSeriesLayers(pane: number, l: PaneLayers, groups: ReadonlyMap<string, Drawing[]>, entries: readonly string[]): void {
+    for (const [entry, layer] of l.series) {
+      if (groups.has(entry)) continue;
+      l.series.delete(entry);
+      this._chart.removePrimitive(layer);
+    }
+    for (const [entry, list] of groups) {
+      let layer = l.series.get(entry);
+      if (layer === undefined) {
+        layer = new DrawingLayer('series');
+        this._chart.addPrimitive(layer, pane);
+        this._chart.setPrimitiveStackAbove?.(layer, entry);
+        layer.setPointerType(this._pointerKind);
+        layer.setHovered(this._hovered);
+        l.series.set(entry, layer);
+      }
+      layer.setDrawings(list);
+    }
+    l.top.setBelow([...entries].reverse().flatMap(entry => l.series.get(entry) ?? []).concat(l.bottom));
   }
 
   /**
@@ -2435,10 +2714,44 @@ export class DrawingController {
     if (ring !== null && !this._layers.has(pane)) this._layerFor(pane).top.setSnapPoint(ring);
   }
 
+  /**
+   * Record a step that is not a drawing edit, a study anchor's move, in the
+   * same history, so Undo walks it and the drawings in the order they were
+   * made. Like any new edit it clears the redo branch. An `outside` move was
+   * written to the settings by someone else (a settings dialog's Pick point):
+   * it ends no drawing drag, and a host timeline the steps are handed to saw
+   * that write itself, so only this history takes it.
+   */
+  private _recordStep(step: InputAnchorStep, outside = false): void {
+    if (!outside) this._onDragEnd();
+    // The host's own act, like any edit inside `untracked`: a step nowhere.
+    if (this._untracked > 0) return;
+    const owner = this._anchorSteps;
+    if (owner !== null) { if (!outside) owner(step); return; }
+    const text = this._historyText();
+    this._undo.push({ before: text, after: text, step: nextStep++, external: step });
+    if (this._undo.length > this._opts.historyLimit) this._undo.shift();
+    this._redo = [];
+    this._external(true, 'update');
+  }
+
+  /**
+   * Announce a move of the history that changed no drawing, with no ids, so
+   * a host's Undo and Redo controls, which refresh on `drawing:change`,
+   * follow it. Passes `applied` through.
+   */
+  private _external(applied: boolean, kind: DrawingChangeKind): boolean {
+    if (applied) this._chart.emit('drawing:change', { ids: [], kind });
+    return applied;
+  }
+
   private _pushUndo(): void {
     this._onDragEnd();
     const before = this._historyText();
-    this._pendingHistory = { before, after: before };
+    // The host's own act: no step, both branches kept, and the recorded
+    // steps take the change in once it is made.
+    if (this._untracked > 0) { this._hostEdit ??= before; return; }
+    this._pendingHistory = { before, after: before, step: nextStep++ };
     this._undo.push(this._pendingHistory);
     if (this._undo.length > this._opts.historyLimit) this._undo.shift();
     this._redo = []; // a new edit invalidates the redo branch
@@ -2479,7 +2792,8 @@ export class DrawingController {
     const keep = (entry: DrawingHistoryEntry): boolean => {
       entry.before = rewrite(entry.before);
       entry.after = rewrite(entry.after);
-      return entry === this._pendingHistory || this._applyHistory(entry.before, entry.after);
+      // A step outside the drawings keeps whatever the host did to them.
+      return entry === this._pendingHistory || entry.external !== undefined || this._applyHistory(entry.before, entry.after);
     };
     // A drag holds the branches as they were when it began, for a cancel to
     // put back. They share their steps with the live ones, and taking an

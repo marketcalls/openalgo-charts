@@ -57,8 +57,11 @@ export type { DateNavigatorOptions, DateNavigationTarget, DateNavigationResult, 
 export { openDateNavigation, DATE_NAVIGATION_CSS } from './date-navigation-dialog';
 export type { DateNavigationDialogOptions } from './date-navigation-dialog';
 
+export { ChartHistory } from './history';
+export type { ChartHistoryOptions, ChartHistoryCommand, ChartHistoryStep, ChartHistoryChange, ChartHistoryError } from './history';
+
 export {
-  WidgetBus, WidgetStorage, STORAGE_PREFIX, defaultStorage,
+  WidgetBus, WidgetStorage, STORAGE_PREFIX, defaultStorage, historyPress, historyReady,
   registerWidgetDialog, registerWidgetDialogs, unregisterWidgetDialog, widgetDialog, registeredWidgetDialogs,
   createOverlayStack, createTipController, TIP_DWELL_MS,
   esc, h, glyph, inTextField, focusable, focusables, placeBeside, placeBelow, placeTip, boxIn,
@@ -117,6 +120,8 @@ export type {
 } from './dialogs/index';
 export { renderForm, controlsFromInputs, controlsFromFields } from './form';
 export type { FormControl, FormKind, FormOptions, FormHandle, FormTranslationOptions } from './form';
+export { inputConditionMet, inputStates } from './input-conditions';
+export type { InputState } from './input-conditions';
 export { mountIndicatorInputControls } from './indicator-input-controls';
 export type { IndicatorInputControlsOptions, IndicatorInputControlsHandle } from './indicator-input-controls';
 export { createAlertUi } from './alert-ui';

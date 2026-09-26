@@ -59,14 +59,16 @@ it on teardown (component unmount, route change) so listeners never leak.
 | `zoom` | `{ from, to, logicalFrom, logicalTo }` | The user zooms (wheel or pinch). |
 | `resize` | `{ width, height }` | The container size changes (CSS px). |
 | `lazy-load` | `{ from, to, direction }` | The viewport nears the oldest bar and history paging should run. |
-| `priceAxisMoved` | `{ paneIndex, from, to }` | A pane's price axis moved to the other strip, via `chart.movePriceAxis`. The scale object travels with it, so a menu holding a `scaleId` should follow. |
+| `priceAxisMoved` | `{ paneIndex, from, to }` | Deprecated, removed in 3.0.0 with `chart.movePriceAxis`, the only call that emits it: listen for `priceAxisPlacementChanged`, which `chart.setPriceAxisPlacement` emits. A pane's price axis moved to the other strip. The scale object travels with it, so a menu holding a `scaleId` should follow. |
+| `priceAxisPlacementChanged` | `{ paneIndex, scaleId, side, order }` | `chart.setPriceAxisPlacement` moved or reordered a price scale's column. The scale keeps its id; `side` and `order` are where it now draws. |
+| `layout:change` | `{ setter }` (`LayoutChangeEvent`) | A setter that changes the saved layout and has no event of its own ran: `setPaneWeight`, `setPriceAxisOptions`, `setPriceAxisAutoFit`, `setPriceAxisLockRatio`, `setPriceScaleOptions`, `setAutoScale`, `setGridOptions`, `setCanvasOptions`, `setStatusLineOptions`, `setWatermarkOptions`, `setTradingSettings`, `setAxisChromeOptions`, `setEventOptions` or `applyOptions`. Once per outermost call, after the change; never during a restore, which has its own start and end events. Save the layout here, or record an undo step. |
 | `paneRemoved` / `paneMaximized` / `paneResized` | `{ paneIndex }` | The pane layout changed through a legend button or a divider drag. `paneMoved` reports `{ from, to }` instead: two neighbours swapped, the price pane included on a chart built with `movablePrimaryPane`. `setPrimaryPaneIndex` emits one per step; read `chart.primaryPaneIndex()` after one. |
 | `paneCollapsed` | `{ paneIndex, collapsed }` | A study pane folded to its header strip or opened again, from `setPaneCollapsed`, its legend button or a host menu. |
 | `indicatorRemoved` / `indicatorSettings` | `{ instanceId, indicatorId, paneIndex }` | An indicator legend's close or gear button was pressed. |
 | `indicatorSource` | `{ instanceId, indicatorId, paneIndex }` | The source button of a descriptor with `hasSource: true` was pressed. The [host supplies the code and viewer](/docs/indicators#source-access-and-legend-controls). |
 | `indicator:alert` | `IndicatorAlertPayload` | A condition an indicator descriptor declared came true on a new bar. See [Indicator alerts](#indicator-alerts). |
 | `indicator:data-status` | `{ id, indicatorId, status: IndicatorDataStatus }` | An indicator's managed data state changed: a Tier-2 fetch is loading, ready, empty, unsupported or failed, and since 2.4.0 a `calc` that threw (`{ state: 'error', error }`) or recovered (`ready`). |
-| `pick:start` / `pick:end` | `{ kind }` / `{ kind, value }` | `chart.beginPick` armed, and then resolved or was cancelled (`value` is `null` when cancelled). See [Picking a price or a bar](/docs/interactions#picking-a-price-or-a-bar). |
+| `pick:start` / `pick:end` | `{ kind }` / `{ kind, value }` | `chart.beginPick` armed, and then resolved or was cancelled (`value` is `null` when cancelled). `kind` is `'price'`, `'time'` or `'point'`, whose `value` is `{ time, price }`. See [Picking a price or a bar](/docs/interactions#picking-a-price-or-a-bar). |
 | `replay:*` | `ReplayState` | The [market replay](/docs/market-replay) playhead starts, moves, plays, pauses, ends or stops. |
 | `trading:*` | see [Trading events](#trading-events) | The user interacts with a position, order, or bracket. |
 | `alert:triggered` / `alert:updated` / `alerts:changed` | see [Trader alerts](/docs/alerts) | An `AlertController` reports a trigger or a committed change. Drag previews do not emit saved changes. |
@@ -514,7 +516,7 @@ Every trading event is mirrored onto the main bus, so
 | `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` |
 
 `newPrice` is the pointer's price unless the chart has a tick schedule, from
-[`chart.trading.setTickSchedule`](/docs/trading-api#price-ticks-while-dragging) or from
+[`chart.setTickSchedule`](/docs/trading-api#price-ticks-while-dragging) or from
 an instrument with `tickBands` applied with `applyTo`, in which case it is the nearest
 price on the instrument's ticks.
 
@@ -560,7 +562,9 @@ built-in events:
   state persistence.** These live in your app or your feed. The engine exposes
   the hooks (`setData`, `update`, `prependData`, `setHistoryLoader`,
   `setTheme`-style options) so you own the policy. See
-  [Data Loading](/docs/data-loading) and [Live Data](/docs/live-data).
+  [Data Loading](/docs/data-loading) and [Live Data](/docs/live-data). For undo and
+  redo the widget tier's [`ChartHistory`](/docs/undo-history) builds one timeline from
+  these events, and a bare chart can use it too.
 
 This keeps the base bundle small and the API easy to reason about: a handful of
 events you will actually use, each with a plain payload and a one-call

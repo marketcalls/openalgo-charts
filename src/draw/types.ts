@@ -223,9 +223,20 @@ export interface Drawing {
   /**
    * Paint order. Below zero paints under the series, at or above zero paints
    * over it. Ties break by array order, so two drawings at 0 paint in the
-   * order they sit in the list.
+   * order they sit in the list. With `stackAbove` it orders the drawings
+   * placed above the same entry.
    */
   zIndex: number;
+  /**
+   * Placed inside the series band, directly above one entry of its pane's
+   * `chart.seriesStack()`: `'source:primary'` or `'indicator:<id>'`. It paints
+   * after that entry's series and before the next entry's. While the entry
+   * plots no series on this drawing's pane (a study removed or moved away) it
+   * paints by `zIndex` as if absent, and returns when the entry does. Absent
+   * means the drawing is not in the series band. See
+   * `DrawingController.placeInStack`.
+   */
+  stackAbove?: string;
   /** Epoch ms, set by the controller when the drawing is added. */
   createdAt?: number;
 }
@@ -254,7 +265,17 @@ export type DrawingInput = Omit<Drawing, 'id' | 'zIndex' | 'createdAt'> & {
  * `DrawingController.update` returns false.
  */
 export type DrawingPatch = Partial<Pick<Drawing,
-  'points' | 'style' | 'text' | 'props' | 'locked' | 'visible' | 'zIndex' | 'policy' | 'space' | 'viewportPoints'>>;
+  'points' | 'style' | 'text' | 'props' | 'locked' | 'visible' | 'zIndex' | 'policy' | 'space' | 'viewportPoints'>>
+  & {
+    /** A series-band entry to paint directly above, or null to leave the series band. */
+    stackAbove?: string | null;
+  };
+
+/**
+ * What `DrawingController.placeInStack` puts a drawing next to: another
+ * drawing of its pane, or an entry of its pane's series band.
+ */
+export type DrawingStackTarget = { drawing: string } | { entry: string };
 
 /** The persisted shape's version; bumped when {@link Drawing} changes. */
 export const DRAWING_STATE_VERSION = 2;

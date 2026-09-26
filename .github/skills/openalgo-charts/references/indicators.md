@@ -236,13 +236,14 @@ const rsi = chart.addIndicator('rsi', {}, { paneIndex: macd.paneIndex }); // sha
 | `name` | `string` | Display name. |
 | `paneIndex` | `number` | Mutable: the chart re-indexes it when panes move or are removed. |
 | `settings()` | `IndicatorSettings` | A **copy**. Mutating it does nothing. |
-| `setSettings(patch)` | `void` | Merge, restyle, recompute, re-run `attach`. |
+| `setSettings(patch, options?)` | `boolean` | Merge, restyle, recompute, re-run `attach`. `false` for a study whose policy is not `configurable` unless `options.force`. |
+| `policy()` / `setPolicy(policy \| null)` | `IndicatorPolicy` / `void` | Host restrictions (`removable`, `configurable`, `movable`, `listed`); see [study policies](core-api.md#study-policies). |
 | `series(plotKey)` | `SeriesApi \| undefined` | Backing series, for direct styling. |
 | `values()` | `IndicatorValues` | Live **reference** into the last `calc` result. Do not mutate. |
 | `visible()` / `setVisible(on)` | `boolean` / `void` | The legend eye toggle; hides plots and fills without removing. |
 | `legend()` | `PaneLegend \| null` | This indicator's legend row. |
 | `updateLegendValues(index?)` | `void` | Refresh readings for a bar index; omit for the latest bar. |
-| `remove()` | `void` | Tears down series, levels, fills, legend. Idempotent. |
+| `remove(options?)` | `boolean` | Tears down series, levels, fills, legend. Idempotent. `false` when already gone, or not `removable` without `options.force`. |
 
 `recompute()` exists on `IndicatorInstance` but is **not** on the `IndicatorApi` type: the runtime calls it. Since 1.8.4 a data change only *marks* the indicators stale and requests a frame; the recompute happens in that frame, before the paint.
 
@@ -387,6 +388,57 @@ The packaged widget and the reference host both draw a small `?` ring that is
 focusable, so the help is reachable without a pointer. An empty string draws
 nothing, which is the difference between no help and a mark with nothing behind
 it. `ChartSettingsColorPairInput` carries the same field.
+
+## Conditional inputs and inline rows (2.5.6)
+
+Every `IndicatorInput` variant also takes the `IndicatorInputPresentation`
+fields, and `ChartSettingsColorPairInput` takes `visibleWhen` and `activeWhen`
+(not `inline`: a pair already holds a switch and two swatches, so it is always a
+row of its own). They are data a settings form reads; `calc` never sees them and
+always receives every setting, hidden or not.
+
+| Field | Type | Form behaviour |
+| --- | --- | --- |
+| `visibleWhen` | `IndicatorInputCondition` | Shown only while it holds. A hidden input leaves the form and the tab order; its draft is kept for when it returns. |
+| `activeWhen` | `IndicatorInputCondition` | Editable only while it holds. Otherwise disabled, value readable, reason "Depends on {labels}". |
+| `inline` | string | Consecutive inputs with the same id share one row, led by the first one's label. A `multiline` input, a colour pair, a new `group`, or a different id starts a new row. |
+
+`IndicatorInputCondition` is `{ key, is }`, `{ key, isNot }`, `{ all: [...] }` or
+`{ any: [...] }`. `is` and `isNot` take one `IndicatorInputConditionValue`
+(string, number or boolean) or a list of them and compare strictly against the
+setting's own value (5 is not '5'). `all` of nothing holds, `any` of nothing does
+not, and a shape the reader cannot read counts as met.
+
+```ts
+inputs: [
+  { key: 'length', type: 'number', label: 'Length', default: 14, inline: 'len' },
+  { key: 'source', type: 'source', label: 'Source', default: 'close', inline: 'len' },
+  { key: 'mode', type: 'select', label: 'Mode', default: 'line',
+    options: [{ label: 'Line', value: 'line' }, { label: 'Bands', value: 'bands' }] },
+  { key: 'width', type: 'number', label: 'Band width', default: 2, visibleWhen: { key: 'mode', is: 'bands' } },
+  { key: 'showSignal', type: 'boolean', label: 'Signal', default: false, inline: 'signal' },
+  { key: 'signalLength', type: 'number', label: 'Length', default: 9, inline: 'signal',
+    activeWhen: { key: 'showSignal', is: true } },
+]
+```
+
+Rules cascade: an input whose `visibleWhen` reads a hidden input is hidden, and
+one whose `activeWhen` reads a hidden or inactive input is inactive. A condition
+that reads a colour pair's switch or either of its colours reads the pair. A key
+with no input in the list (another tab) is decided by its value, and a cycle ends.
+
+The widget's generated forms (`renderForm`, so `mountIndicatorSettings` and the
+chart settings dialog) and the reference host re-read the rules on every edit and
+every sync, announce what was shown, hidden, made available or unavailable in a
+polite live region, and move focus off a control that just left. Both read an edit
+once it is committed, not at every keystroke: a number is clamped to its bounds, a
+blank number box gets its last value back, and a typed draft the form refuses
+leaves the last accepted value deciding, so the two forms answer alike. A hidden or
+disabled draft never blocks OK or Apply: an invalid one is not written and the
+stored value stands, a valid one is kept. Defaults resets hidden inputs too, and
+Cancel restores the settings and so the rows they show. A host with its own form
+reads the same rules through `inputStates` and `inputConditionMet` from
+`openalgo-charts/widget` (see [widget](./widget.md)).
 
 ## The settings model
 
@@ -537,7 +589,7 @@ A plot cannot express this: a plot is a column of prices drawn as a line or a hi
 - Missing or NaN plot values use the instrument bar at the same time only when the indicator is on the price pane and its marker series shares the primary series' price scale. Finite plot points retain precedence. Own-pane oscillators and independent scales never receive instrument-price fallback; without an anchor their bar-relative marker is skipped.
 - `series.createMarkers(fallbackBars)` and `new SeriesMarkers(seriesId, fallbackBars, priceScale)` accept optional callbacks. `fallbackBars` returns current `readonly Bar[]`; the optional constructor `priceScale` returns the current `PriceScale`. Series-created layers supply that scale callback automatically, including after an axis move. Missing shared-axis times are skipped even when a fallback bar exists. `atPrice`, `paneTop` and `paneBottom` do not require a series bar.
 - **Markers are a separate primitive from the plots.** `setVisible(false)` hides both because the runtime re-runs the hook with an empty result, but a plot-level style patch does not touch them.
-- **Marker groups.** A marker can name an `IndicatorOutputTarget`: `overlay: true` anchors it to the instrument's candles on the price pane (so `belowBar` sits under the low) even from a study in its own pane, and `plot: key` anchors it to that declared plot's series, pane and scale. Each target is its own `SeriesMarkers` layer created on that series: it follows the series through `setPlotPriceScales`, `setPriceScale` and `moveIndicator` (a price-pane group stays on the price pane), is cleared while the study is hidden and refilled in place when shown, is released when a visible pass returns nothing for it, and goes with the study or its pane. A target that resolves to the series the study's own marks anchor to (`overlay: true` from an on-price study with `markerAnchor: 'price'`, or `plot` naming the first plot) is not a separate layer: those marks join the study's own layer in the order returned, so marks at one bar stack, and they split out again if a move changes that anchor. A `plot` group fills a missing or NaN value from the instrument bar whenever that plot is on the price pane and shares the primary series' price scale, whether or not it is the first plot, so marks naming an `overlay` first plot of a study in its own pane keep a layer of their own: the study's own marks there never take the instrument bar. A study's layers stack as: its own marks, its marker groups, its own shapes, its drawing targets, each kind's targets in target order (price pane, then plots in declaration order), which is also the order a pass creates them in. A group created after the first pass (a target returned again, or for the first time) is restacked through the host's `resourcesChanged`, called from inside the pass: during that call every instance reports its targeted layers alone, so the host puts the targeted layers on each pane back in study order, each study's in the order above, and moves nothing else. The runtime republishes no study's bar colours during that call, since study order has not changed. A study's own layer created on a later pass is never restacked, and neither is anything of a study that names no target, even when another study routes on the same pass: it stays where it landed, exactly as before targets. Marks with no target keep `markerAnchor` and the first plot byte for byte. An overlay group waits for a primary series. An unknown plot, or `plot` together with `overlay: true`, throws before any marker layer changes, and so does an invalid style on any mark: `addIndicator` throws, and a later pass publishes an error status while every marker layer keeps the last good pass. The rest of the pass is not rolled back: a pass syncs plots and fills, markers, the table, drawings, then background, bar colours, levels and alerts, so outputs before the failing one stay applied and those after it wait for the next good pass. Marks in groups on different series (the candles and a plot, or two plots) do not stack against each other at a shared bar: each is measured against a different value.
+- **Marker groups.** A marker can name an `IndicatorOutputTarget`: `overlay: true` anchors it to the instrument's candles on the price pane (so `belowBar` sits under the low) even from a study in its own pane, and `plot: key` anchors it to that declared plot's series, pane and scale. Each target is its own `SeriesMarkers` layer created on that series: it follows the series through `setPlotPriceScales`, `setPriceScale` and `moveIndicator` (a price-pane group stays on the price pane), is cleared while the study is hidden and refilled in place when shown, is released when a visible pass returns nothing for it, and goes with the study or its pane. A target that resolves to the series the study's own marks anchor to (`overlay: true` from an on-price study with `markerAnchor: 'price'`, or `plot` naming the first plot) is not a separate layer: those marks join the study's own layer in the order returned, so marks at one bar stack, and they split out again if a move changes that anchor. A `plot` group fills a missing or NaN value from the instrument bar whenever that plot is on the price pane and shares the primary series' price scale, whether or not it is the first plot, so marks naming an `overlay` first plot of a study in its own pane keep a layer of their own: the study's own marks there never take the instrument bar. A study's layers stack as: its own marks, its marker groups, its own shapes, its drawing targets, its own shading, its shading targets, each kind's targets in target order (price pane, then plots in declaration order), which is also the order a pass creates them in. Shading paints in the pane's bottom layer, behind every series, so the order only decides which study's shading covers another's. A group created after the first pass (a target returned again, or for the first time) is restacked through the host's `resourcesChanged`, called from inside the pass: during that call every instance reports its targeted layers alone, so the host puts the targeted layers on each pane back in study order, each study's in the order above, and moves nothing else. The runtime republishes no study's bar colours during that call, since study order has not changed. A study's own layer created on a later pass is never restacked, and neither is anything of a study that names no target, even when another study routes on the same pass: it stays where it landed, exactly as before targets. Marks with no target keep `markerAnchor` and the first plot byte for byte. An overlay group waits for a primary series. An unknown plot, or `plot` together with `overlay: true`, throws before any marker layer changes, and so does an invalid style on any mark: `addIndicator` throws, and a later pass publishes an error status while every marker layer keeps the last good pass. The rest of the pass is not rolled back: a pass syncs plots and fills, markers, the table, drawings, then background, bar colours, levels and alerts, so outputs before the failing one stay applied and those after it wait for the next good pass. Marks in groups on different series (the candles and a plot, or two plots) do not stack against each other at a shared bar: each is measured against a different value.
 
 ```ts
 markers: ({ bars, values }) => crossings(values.momentum).map(i => ({
@@ -731,6 +783,64 @@ The widget and reference host retain invalid drafts, restore the same dialog
 after chart picking, and cancel pending selection on teardown. Existing compiled
 adapters keep their current input types and compiled format.
 
+### Paired time and price inputs
+
+A `price` input can name a declared `timestamp` input with `timeKey`: the two are
+one point on the chart, a bar time and a price that belong together (the start of
+an anchored path, a level that begins at an event). Add `anchor: true` for a
+handle on the chart at that point.
+
+```ts
+registerIndicator({
+  id: 'anchored-growth', name: 'Anchored growth', placement: 'onchart',
+  inputs: [
+    { key: 'from', type: 'timestamp', label: 'Anchor time', default: 0, pick: true },
+    { key: 'price', type: 'price', label: 'Anchor price', default: 0, pick: true, timeKey: 'from', anchor: true },
+  ],
+  plots: [{ key: 'path', title: 'Path', type: 'line' }],
+  calc: (bars, s) => { /* ... */ },
+});
+```
+
+- **Validation.** `timeKey` must name a declared `timestamp` input, not the price
+  itself, and no other price may pair with the same timestamp; `anchor` must be a
+  boolean and needs a `timeKey`. Both raise `IndicatorInputError` at registration.
+  The values stay two ordinary settings, saved as they always were.
+- **One pick.** The widget and the reference host offer **Pick point on chart** on
+  the price row: one click captures both through `chart.beginPick('point')` and
+  commits them in one settings patch (the widget at once, the reference host on
+  Apply). The timestamp row keeps its own time-only pick.
+- **Pane and scale.** The point lives where a pick of the price reads it: the
+  explicit `pick` target, or the one scale on one pane the study's plots are drawn
+  on. `studyInputTarget(chart, study, key)` from `openalgo-charts/draw` answers it,
+  null when it cannot be told (plots on two scales and no explicit target), in
+  which case there is no pick and no anchor.
+- **The anchor.** The drawing tier's `DrawingController` draws it for every study
+  that declares one (`inputAnchors: false` turns them off): a ring in the study's
+  first plot colour, with guides to both axes while it is in hand. A drag previews
+  the point, the time snapping to the bar under the pointer and both halves held
+  inside the inputs' `min` and `max`, and the release writes one settings patch as
+  the user, which a study whose policy is `configurable: false` refuses (its anchor
+  does not take the pointer at all). Escape cancels the drag and writes nothing.
+- **Undo.** Each drag is one step of the drawing history, in order with the
+  drawings, so the host's Undo and Redo (`draw.undo()`, Ctrl+Z) take it back and
+  forward; a step whose study has been removed is passed over. Recording it and
+  walking it emit `drawing:change` with empty `ids`, so a host's Undo control
+  refreshes. A host control that sets the point another way (its own point pick)
+  calls `draw.moveInputAnchor(studyId, key, point)` so that move is snapped and
+  bounded as a drag is, and a step. A point written through `setSettings` instead,
+  as a settings dialog's Pick point does, is a step of the drawing history too: its
+  undo takes the pick back first, then the drag before it, and never a drawing made
+  before them. A write inside `draw.untracked`, or forced on a study the user may
+  not configure, is the host's own and no step. With the widget tier's `ChartHistory`
+  on the chart (the widget and the reference host build one), the history takes
+  these steps instead (`draw.delegateInputAnchorSteps`) and records every settings
+  patch, a dialog's pick included, so each move is undone once, in order.
+- **Conflicts.** An active drawing tool takes the press (the anchor gives no hit
+  while placing), a pick in progress takes the click, and choosing a tool, starting
+  a pick or replacing the data context cancels a drag in hand. A hidden study shows
+  no anchor, and removing the study removes it.
+
 An indicator is data, not code in the core: the chart never switches on an id, and each plot names a registered chart type, so you add no drawing code. `calc` must return one array per plot key, exactly `bars.length` long, with `null` in warmup slots (the line renderer breaks across them and autoscale skips them).
 
 ```ts
@@ -758,7 +868,7 @@ registerIndicator({
 chart.addIndicator('my-momentum', { length: 14 });
 ```
 
-Optional descriptor members: `fills`, `markers`, `markerAnchor` / `hasSource` (2.4.6), `levels`, `range`, `attach`, `calcTail`, `table`, `tables`, `draws` (1.7.1), and `background` / `barColors` / `alerts` (1.7.1), plus `colorBy` (per-bar colour), `priceScaleId` / `overlay`, and `ohlc` (1.8.1) on an individual plot. Returned drawings and markers can carry `overlay` / `plot` output targets (see the markers and drawings sections).
+Optional descriptor members: `fills`, `markers`, `markerAnchor` / `hasSource` (2.4.6), `levels`, `range`, `attach`, `calcTail`, `table`, `tables`, `draws` (1.7.1), and `background` / `barColors` / `alerts` (1.7.1), plus `colorBy` (per-bar colour), `priceScaleId` / `overlay`, and `ohlc` (1.8.1) on an individual plot. Returned drawings and markers, and the columns of `background`'s list form (`IndicatorBackgroundSpec`), can carry `overlay` / `plot` output targets (see the markers and drawings sections, and [background targets](#background-targets-256) for shading).
 
 ### Assigning scales to study plots
 
@@ -1045,6 +1155,12 @@ not equate these revisions or script executions with provider tick counts.
 Older custom `IndicatorHost` implementations may omit `sourceState` and execution
 metadata; they retain the prior timestamp heuristic and sticky realtime flag.
 
+In `addIndicatorLevel(level, paneIndex)`, read `level.lineStyle`. The instance
+always resolves it (a level with neither field draws dashed), and it carries
+`'dotted'`. `level.dashed` is deprecated, still sent until 3.0.0, and equals
+`lineStyle === 'dashed'`. A descriptor's own `levels()` may keep writing the
+`dashed` shorthand: that input form is not deprecated.
+
 ## Alerts (1.8.1)
 
 A crossover of an indicator's own columns is something only that indicator can name, so the condition is declared as data and the runtime watches it.
@@ -1117,6 +1233,24 @@ barColors: ({ values }) => values.bias.map((v) =>
 - **Pass a translucent `rgba()`.** The layer sits below the series but **above the grid**, so an opaque colour hides the grid lines inside its band.
 - Contributes nothing to autoscale, is anchored to the first bar's **time** (so a page of history does not slide it off its bars), coalesces adjacent same-colour bars into one fill, and culls everything outside the visible range. Return `[]` to clear the layer.
 - `IndicatorBackground` is exported and works as a plain primitive: `new IndicatorBackground()`, `chart.addPrimitive(p, paneIndex)`, `setColors(colors, bars)`, `setVisible(on)`.
+
+### Background targets (2.5.6)
+
+`background` may instead return a list of `IndicatorBackgroundSpec` columns: `{ colors, overlay?, plot? }`, `colors` being the plain form's one entry per bar. The runtime tells the forms apart by their entries (the plain form holds only colours and gaps).
+
+```ts
+background: ({ values }) => [
+  { overlay: true, colors: values.momentum.map((v) =>              // behind the candles
+    v === null ? null : v > 0 ? 'rgba(38,166,154,0.08)' : 'rgba(239,83,80,0.08)') },
+  { colors: values.momentum.map((v) => (v !== null && Math.abs(v) > 5 ? 'rgba(79,140,255,0.10)' : null)) },  // own pane
+],
+```
+
+- A column naming no target is the study's own layer, handled exactly as the plain form: unbound, in the study's pane, created on the first non-empty column, kept through empty passes, moved with the study, hidden rather than released. A list that leaves it out clears it; the plain form and a one-column list with no target paint the same operations.
+- `overlay: true` fills the price pane (in whatever slot it sits) at full height behind the candles, binds no scale and stays on the price pane through `moveIndicator`.
+- `plot: key` fills that plot's pane and binds the layer to the plot's effective scale, rebinding it on `setPlotPriceScales` and `setPriceScale` so no axis column is held for a plot that has left it. An `overlay` plot takes it to the price pane; a local plot moves with the study.
+- Each target is its own `IndicatorBackground` layer owned by the instance: created on the first column with entries, kept while the target is returned (even all `null` or empty), released by a pass that returns no column for it, cleared while a study input is unavailable, hidden with the study, released on `remove()` or with the study's pane, and recreated on `restoreState`. A layer created after the first pass is restacked into study order among the targeted layers on its pane (see the marker groups bullet). `[]` clears the own layer and releases every target.
+- One column per target: a second column for the price pane, for one plot, or with no target throws, as do a column without a `colors` array, a hole, and colours mixed with columns. An unknown plot, or `plot` with `overlay: true`, throws too. All of it is checked before any shading layer changes; `addIndicator` throws and a later pass publishes an error status. As with the other targets, the outputs that pass synced before shading (plots, fills, markers, the table, drawings) stay applied, and bar colours, levels and alerts wait for the next good pass, on a settings change too: the restack after it republishes the last good bar colours rather than running `barColors` on the failed pass.
 
 `barColors` rules:
 
@@ -1466,6 +1600,16 @@ null. Provider capability absence, a null selector and legacy replay without
 an availability clock report unsupported and clear values. Removal and chart
 destruction cancel requests and prevent stale publication. This helper adds no
 transport, page merging or live subscription; the host announces external changes.
+
+**Data variants (2.5.6).** A request that names no `variant` is sent in the
+chart's session and adjustment: `inheritedDataVariant(dataContext.variant)` from
+`openalgo-charts/indicators`, so a benchmark lines up with extended-hours bars bar for
+bar. The currency and unit stay behind, since they belong to the instrument asked
+for. Name a `variant` in the request to override (`{}` asks for the provider's
+default); a malformed one publishes `error`. A change of the chart's variant alone
+starts a new generation, as a change of symbol does. Tier 2's `ctx.requestBars`
+inherits the same way, `ctx.dataContext.variant` is visible to `fetch`, and a
+variant-only change refetches. See [feeds-and-live](feeds-and-live.md).
 
 ## Optional missing-value policies on established helpers
 

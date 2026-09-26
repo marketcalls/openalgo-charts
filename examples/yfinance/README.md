@@ -23,9 +23,22 @@ Choose **Indicators > Examples > Routed signal sample** to add a momentum study 
 its own pane whose Buy and Sell plates and 30-bar range box are drawn on the
 candles. Those outputs name the price pane; the dots and the latest reading stay
 with the histogram. Turn off **Signals on price** in its settings to send the
-plates back to the study's pane. Moving the study to another pane leaves the plates
-on the candles, and moving the price axis to the left takes the plates and the box
-with the candles; hiding or removing it takes every routed layer with it.
+plates back to the study's pane. The candles are also shaded green or red by the sign
+of the momentum: that shading column names the price pane too, and **Momentum
+shading** sends it behind the histogram instead or turns it off. Moving the study to
+another pane leaves the plates and the shading on the candles, and moving the price
+axis to the left takes the plates and the box with the candles; hiding or removing it
+takes every routed layer with it.
+
+Choose **Indicators > Examples > Anchored growth sample** to add a path that grows
+from one point, a bar time and a price that belong together. It starts two thirds
+across the view at that bar's close, where its orange ring sits. Drag the ring to move
+the time and the price together; Ctrl+Z, the rail's Undo or the phone bar's Undo takes
+the drag back, and Escape during a drag cancels it. In its settings, **Pick point on
+chart** sets both from one click and Apply writes them as one change. Each drag and
+each settings session is one step of the chart's timeline, so undo walks a pick, the
+drags before it and your drawings back one at a time, in the order you made them.
+While a drawing tool is active, a press on the ring places the drawing instead.
 
 Choose **Indicators > Examples > Source signal sample** to add the host-owned
 2.4.6 demonstration to the focused chart. It alternates Up and Down labels every
@@ -52,8 +65,11 @@ The editor keeps its opening timezone throughout the draft.
 
 The toolbar's **Data** and **Objects** controls open a resizable information
 dock for the selected chart. Data follows the crosshair and lists the candle
-and running study values. Objects groups sources, studies and drawings by pane
-and exposes only actions each object supports. Each chart keeps its own dock
+and running study values. Objects groups sources, studies and drawings by pane,
+each pane in draw order from back to front, and exposes only actions each object
+supports. Drag a row onto the upper or lower half of another, or use Earlier and
+Later, to put a drawing behind the series, between two studies or in front, or the
+candles over a study; a drop the chart cannot paint is refused. Each chart keeps its own dock
 choice and width through rebuilds and saved layouts. A narrow chart shows the
 dock as a sheet. The host mounts the library's `mountPanelDock`,
 `mountDataWindow` and `createObjectsPanelContent` with a `ChartObjects` model;
@@ -123,6 +139,7 @@ without it.
 ```
 GET /api/history?symbol=AAPL&interval=1d&period=1y
 GET /api/history?symbol=AAPL&interval=5m&from=<utc seconds>&to=<utc seconds>
+GET /api/history?symbol=AAPL&interval=5m&period=1mo&session=extended
 ```
 
 | Parameter | Rule |
@@ -131,6 +148,7 @@ GET /api/history?symbol=AAPL&interval=5m&from=<utc seconds>&to=<utc seconds>
 | `interval` | One of `1m 2m 5m 15m 30m 60m 90m 1h 1d 5d 1wk 1mo 3mo` (default `1d`). |
 | `period` | One of `1d 5d 1mo 3mo 6mo 1y 2y 5y 10y ytd max` (default `1y`). |
 | `from`, `to` | Optional UTC seconds that pin the window. `to` alone ends the period there; `from` overrides the period's length. Both must be positive, before the year 2100, and `from` before `to`. |
+| `session` | `regular` (the default) or `extended`, which adds the source's own pre and post market bars (`prepost` upstream). Extended hours exist only for intraday bars of a US listed stock: a plain ticker of one to five letters with an optional share class, such as `AAPL` or `BRK-B`. |
 
 A success is the `Bar[]` the chart consumes directly, `{ time: <UTC seconds>,
 open, high, low, close, volume }`, with any row the source left without a
@@ -140,7 +158,8 @@ with the status that matches, and never a traceback: that goes to the terminal.
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `bad_symbol`, `bad_interval`, `bad_period`, `bad_range` | A parameter failed the rule above. The message names the rule. |
+| 400 | `bad_symbol`, `bad_interval`, `bad_period`, `bad_range`, `bad_session` | A parameter failed the rule above. The message names the rule. |
+| 400 | `unsupported_session` | Extended hours asked of an instrument or interval the source has none for. Refused rather than answered with regular hours under the extended label. |
 | 404 | `no_data` | The source has no bars for that ask: an unknown symbol, or a range it does not serve. |
 | 404 | `not_found` | No such endpoint under `/api/`. |
 | 429 | `rate_limited` | The source is throttling this address. `Retry-After` says when to try again. |
@@ -195,6 +214,9 @@ daemon threads, so a yfinance call that hangs cannot hold the process open.
 day, as long as the window is pinned with `to`. It is what the end-to-end
 suite runs against, and what a fresh clone can run before installing anything.
 
+- `session=extended` adds two hours either side of the synthetic session on the
+  same grid, so the regular bars are the same observations in both series and
+  only the pre and post market bars differ.
 - Each symbol has its own base price, drift and three waves whose periods the
   symbol's hash picks, so two symbols never move together and a comparison
   overlay has something to show. Every bar's open is the previous bar's close.
@@ -278,11 +300,12 @@ examples/yfinance/
     volume.js         volume visibility and the symbol legend row
     bracket.js        the bracket panel: entry, target and stop pills
     orders.js         resting orders, market fills, the net position, trade state
-    ticks.js          host instrument metadata with a tick schedule: snapping and the tick in force
+    ticks.js          host instrument metadata: the tick schedule, and the venue hours the space past the last candle follows
     account.js        the sandbox broker: account figures and selection, preview, durations, native close, reverse and brackets
     indicators.js     the indicator picker and the generated settings form
     indicator-input-controls.js typed field validation, symbol search and chart picking
     indicator-source.js the opt-in sample and chart-owned read-only source dialog
+    anchored-study.js the opt-in sample whose anchor time and price are one point, with a handle
     chart-settings.js the chart settings dialog, built from chartSettingsSchema()
     compare.js        multi-symbol comparison
     replay.js         market replay: the bar picker and the transport
@@ -294,6 +317,8 @@ examples/yfinance/
     clipboard.js      the drawing clipboard and its chords
     menus.js          the right-click menu (including Move pane up/down and Collapse pane), the price-axis menu, the popup menu
     session-marks.js  host-owned price marks: read-only, never saved, not listed
+    host-study.js     a host-owned study the user cannot remove, configure or move
+    session.js        regular or extended trading hours as the engine's data variant
     toolbar.js        the shell bar, chart types, chart-only full screen
     rail.js           the drawing rail: groups, pins, magnet, stay mode, selection controls, keyboard
     rail-flyout.js    the rail's flyout, context menu and dwell tooltip
@@ -476,24 +501,28 @@ exists to show one engine surface carrying real use, not just being present.
 | Module | Proves |
 |---|---|
 | `expression.js` | A symbol box holding arithmetic (`AAPL/MSFT`, `NSEIX:NIFTY1!/NSE:RELIANCE+NASDAQ:META`) charts the result. `parseExpression` names the legs before anything is fetched, so exactly those are loaded, in parallel, with the first failure winning: a ratio missing a leg is not a chart with a gap. `evaluateExpression` folds them onto the first leg's time grid, gapping any bar the others did not trade rather than carrying a stale price forward. Closes are exact; a high and low can be bounded by interval arithmetic, which is offered rather than assumed because the bound assumes each leg hit its extreme at the worst possible moment. |
-| `feed.js` | A `DataFeed` is one method. The bar cache wrapper (`withBarCache`) keys on symbol, exchange and interval, snaps `from` to the bar grid so a reload inside the same bar hits, stops `to` at the last seen bar while the venue is shut, and refetches only the forming bar. A 404, 429 or 5xx becomes a typed error (`NotFoundError`, `RateLimitedError`, `NetworkError`) with a deadline and one retry, so the readout can say "check the symbol" or "try again in a minute" rather than printing whatever the server wrote. A staleness badge says when the newest bar is older than the venue's clock allows. |
+| `feed.js` | A `DataFeed` is one method. The bar cache wrapper (`withBarCache`) keys on symbol, exchange, interval and the data variant, snaps `from` to the bar grid so a reload inside the same bar hits, stops `to` at the last seen bar while the venue is shut (for an extended-hours chart, shut means outside its pre and post market too), and refetches only the forming bar. A 404, 429 or 5xx becomes a typed error (`NotFoundError`, `RateLimitedError`, `NetworkError`) with a deadline and one retry, so the readout can say "check the symbol" or "try again in a minute" rather than printing whatever the server wrote. A staleness badge says when the newest bar is older than the venue's clock allows, on the clock of the chart's session: an extended-hours chart can go stale in the pre and post market. |
 | `intervals.js` | The interval registry accepts codes the built-in grammar does not (`1wk`, a calendar month, a quarter). Monthly and quarterly bars are folded from daily ones through `bucketStartOf`, so a month runs first-to-first in the chart's zone and February is 29 days long in 2024. Ranges are clamped to what the interval can serve. |
-| `indicators.js` | The picker is built from `registeredIndicators()`, so built-ins and the host's opt-in example appear grouped by category. The gear opens a form generated from the descriptor's `inputs`; the same code renders MACD, Bollinger or your own indicator. |
+| `history.js` | One undo timeline per chart through the widget tier's `ChartHistory`: a study added or removed (with its settings, pane and scale), its settings, the chart type, the price scales, pane moves, folds and heights, and drawings, in the order they were made. Ctrl+Z and Ctrl+Y and the mobile bar walk the focused chart's; the drawing toolbar's Undo and Redo and the rail's walk the main chart's, as the rest of that toolbar and the rail act on the main chart. The study settings dialog is one step per session, however many tabs commit its form, and an appearance change a linked chart applies from the other one is never a step of its own. The chart is rebuilt on every load and type switch, so the timeline lives on the app and each new chart is attached to it; the type switch itself is recorded as a command that rebuilds again. The chart settings dialog is one step per session, and a Cancel leaves none. Comparisons, the volume row and a loaded layout are the demo's own and go through `ignore`; a loaded layout starts a new timeline. No undo writes bars, fires an alert or places an order. |
+| `indicators.js` | The picker is built from `registeredIndicators()`, so built-ins and the host's opt-in example appear grouped by category. The gear opens a form generated from the descriptor's `inputs`; the same code renders MACD, Bollinger or your own indicator. An input's `visibleWhen` and `activeWhen` are read against the drafts on every committed edit with the widget's own `inputStates`, so a row appears, leaves or greys out as the settings it depends on change (a number box commits as the widget's does, clamped to its bounds, a blank one getting its last value back); a hidden draft is kept, an invalid hidden one never blocks Apply, and the change is announced in a polite live region. Inputs sharing an `inline` id sit on one row. |
 | `indicator-input-controls.js` | Validates typed drafts and connects shared symbol lookup and chart picking to the reference modal, preserving its Apply and Cancel behavior. |
 | `indicator-source.js` | Registers the Source signal sample and resolves source requests against the emitting chart and live instance. The read-only dialog shows the actual host factory and closes when its owner is removed or destroyed. |
-| `routed-study.js` | Registers the Routed signal sample: a momentum histogram in its own pane whose Buy and Sell plates and range box name the price pane (`overlay: true`), while its crossing dots and "Now" label (`plot: 'momentum'`) stay with the histogram. The Signals on price input sends the plates back to the study's pane. |
+| `anchored-study.js` | Registers the Anchored growth sample, whose anchor time and price are one point (`timeKey`) with a handle on the chart (`anchor: true`): the settings form picks both from one click, and the drawing controller draws the ring, commits a drag as one settings change, and hands the step to the chart's timeline (`history.js`), which walks it with the drawings. `indicators.js` seeds a new sample at a bar in view, since its defaults cannot know the loaded history. |
+| `routed-study.js` | Registers the Routed signal sample: a momentum histogram in its own pane whose Buy and Sell plates, range box and momentum shading name the price pane (`overlay: true`), while its crossing dots and "Now" label (`plot: 'momentum'`) stay with the histogram. The Signals on price input sends the plates back to the study's pane; Momentum shading sends the shading there as a column naming no target, or turns it off. |
 | `chart-settings.js` | The settings dialog is generated from `chartSettingsSchema()`, including the paired up and down colour control on one row, and a control the current context cannot back is drawn disabled with its state visible. |
 | `transforms.js` | Heikin Ashi, Renko, Range Bars, Line Break, Point and Figure and Kagi from the transform tier; P&F reveals its box-sizing mode (ATR, percent, fixed). |
 | `volume.js` | Volume rides an overlay price scale (`priceScaleId: ''`) inside the price pane, pinned to the bottom fifth, so the right-hand axis stays a clean price ladder. It hides and shows from the legend eye and the right-click menu, and the choice survives a reload and a chart-type switch. |
-| `status.js`, `axis-chrome.js`, `timezone.js` | The status line, the clock and the countdown are fed by the host: venue, session hours by IANA zone (never a fixed offset), and long names. The chart zone is a runtime setting the demo carries across a rebuild. |
+| `status.js`, `axis-chrome.js`, `timezone.js` | The status line, the clock and the countdown are fed by the host: venue, session hours by IANA zone (never a fixed offset), and long names. A chart on extended hours reads "Pre-market" or "Post-market" while its extra bars are arriving rather than "Market closed". The chart zone is a runtime setting the demo carries across a rebuild. |
 | `orders.js`, `bracket.js` | Chart trading: right-click for single orders, Buy and Sell brackets with OCO target and stop, drag any line to re-price it, and per-symbol trade state that survives a symbol switch. |
-| `ticks.js` | Price-dependent ticks supplied by the host. Load `BANDED` in fixture mode: it trades around 100 with a 0.01 tick below 100 and a 0.05 tick from 100 (synthetic rules, not any venue's). Right-click prices, dragged order lines, market fills and every bracket leg snap to the band they land in, the status line names the tick in force, and a bracket exit stays one tick of its own band from the entry as it crosses the boundary. The rules are `InstrumentMetadata` with `tickBands`, validated by `Instrument` before anything snaps to them, and the price axis takes the instrument's `priceTick`, the grid both bands lie on. Every other symbol keeps two-decimal order prices. |
+| `ticks.js` | Price-dependent ticks supplied by the host. Load `BANDED` in fixture mode: it trades around 100 with a 0.01 tick below 100 and a 0.05 tick from 100 (synthetic rules, not any venue's). Right-click prices, dragged order lines, dragged price alerts, market fills and every bracket leg snap to the band they land in, the status line names the tick in force, and a bracket exit stays one tick of its own band from the entry as it crosses the boundary. The rules are `InstrumentMetadata` with `tickBands`, validated by `Instrument` before anything snaps to them, and the price axis takes the instrument's `priceTick`, the grid both bands lie on. The host hands the schedule to each chart with `chart.setTickSchedule`, which is what rounds a dragged alert by band. Every other symbol keeps two-decimal order prices. The same module gives each chart its venue's regular hours as a `SessionCalendar` (`dataLayer.setSessionCalendar`), so on an intraday chart a drawing placed past Friday's last candle ends on Monday's session bars; crypto and venues without hours keep the median bar spacing, and there is no holiday list, the same limit the status line states. |
 | `account.js` | The Account button opens a sandbox broker: the trade tier's `OrderEngine` and `AccountManager` against a `FakeBroker` with account ledgers, in analyzer mode. The widget tier's account summary shows the selected account's equity and margin and switches account; a live account the provider also offers is never listed. Place stays disabled until that exact ticket is previewed, durations (DAY, IOC, GTC, GTD with an expiry) and leverage are sent only because the provider declares them, and Close, Close part, Reverse and Place bracket are the provider's own commands, never an opposite order. Drop connection marks the figures stale; Reconnect reads the provider's order history for every account the panel has written to and settles every write from it (a lost answer by the token the provider echoes, a write the history never mentions released), so the legs of a bracket whose entry has filled stay live orders, before reading the account again. These orders are separate from the page's own simulated orders. |
 | `replay.js`, `replay-timing.js` | One replay transport drives the captured chart or all captured charts from a shared availability clock. Scope controls appear in the picker and transport. Finer history uses separate request slots and each chart's captured instrument, interval and timezone. Cancellation discards late responses; exit restores data and viewports. A coarse candle appears only when complete, or forms from a contiguous prefix of finer observations. Missing finer history has a visible completed-candle fallback. |
 | `compare.js`, `split.js`, `link.js` | Each selected chart owns its comparison symbols, scale mode, hidden rows and history requests. Each source has an independent scale, rebased at the first visible timestamp shared by all visible sources. Missing overlap shows "No common starting bar" and draws gaps. Replay readouts withhold forming comparison closes. The dialog retains its owner across focus changes; changing or closing a chart cancels stale loads. Source failures remain visible with Retry. The linked second chart has independent switches for crosshair, viewport, symbol and interval. Interval sync is off by default. |
-| `drawing.js`, `rail.js`, `rail-flyout.js` | The 2.0 drawing model from the host's side: the controller, the tool picker built from `BUILTIN_DRAWING_TOOLS` with the tier's own icon sprite and cursors, keyboard chords from `drawingShortcuts()`, and a rail whose flyouts and tooltips are host chrome built from the shipped glyphs. The toolbar's Del, Clear, Undo and Redo are off whenever pressing them would do nothing: Del and Clear leave read-only drawings alone, and Undo and Redo follow the controller's `canUndo()` and `canRedo()`. |
+| `drawing.js`, `rail.js`, `rail-flyout.js` | The 2.0 drawing model from the host's side: the controller, the tool picker built from `BUILTIN_DRAWING_TOOLS` with the tier's own icon sprite and cursors, keyboard chords from `drawingShortcuts()`, and a rail whose flyouts and tooltips are host chrome built from the shipped glyphs. The toolbar's Del, Clear, Undo and Redo are off whenever pressing them would do nothing: Del and Clear leave read-only drawings alone, and Undo and Redo follow the main chart's timeline (its `ChartHistory`'s `canUndo()` and `canRedo()`, the controller's own before the chart has one). |
 | `properties.js` | The floating properties bar is generated from `drawingSettingsSchema`, which declares only the fields a tool's `draw` reads: a field in the schema is a control with something behind it, a field absent from it is a control not shown. With several drawings selected it edits the fields their schemas share, as one undo entry. A read-only selection shows "Read-only" and a Duplicate button instead of controls the controller would refuse. For text, rectangle, ellipse and table the schema's `space` field becomes a pin toggle: pinned, the drawing keeps its place on screen through pan and zoom and scales with the chart, and unpinning puts it back on the bars under it. The bar and the inline text editor place themselves by `draw.screenPoints(id)`, since a pinned drawing has no time and price to map. |
+| `host-study.js` | Study policies from the host's side. **Add Protected VWAP** in the right-click menu adds a VWAP with `policy: { removable: false, configurable: false, movable: false }`. Hide it, read it and raise an alert on it as usual; its legend row has no gear and no close button, its Objects dock row has no remove, settings, move, Earlier or Later and does not drag, its chip has no remove button, and the settings dialog and menu rows say it is protected. The policy is saved with the layout, so a reload brings the study back protected, and importing or loading a layout keeps it (a layout file's own restricted studies are left out, `untrustedStudies` in `persist.js`); a saved indicator template leaves it out, so applying one never copies it. If the host locks a study while its settings are open, Apply and Reset say so instead of closing as if they had applied. The same row, now **Remove Protected VWAP**, takes it away with `removeIndicator(id, { force: true })`, the one call in the host that overrides the policy. |
 | `session-marks.js` | Drawing policies from the host's side. **Mark ... for This Session** in the right-click menu places a dashed price line with `policy: { editable: false, persistent: false, listed: false }`. Select it to read it, copy it, duplicate it into your own drawing or raise an alert from it; it cannot be dragged, nudged, restyled, cut or deleted, undo does not remove it, it is left out of saved layouts and it is absent from the Objects dock. The host keeps the marks per symbol for the life of the page and puts them back, with their ids, after every chart-type switch, reload and layout restore. **Clear Session Marks** removes them with `removeMany(ids, { force: true })`, the one call in the host that overrides the policy. |
+| `session.js` | Trading session as a data variant. The session menu beside the range offers regular hours and, for intraday bars of a US listed stock (the one place this source has them), extended hours: the source's own pre and post market bars, asked for with `session=extended` and never derived from the regular series. The feed declares what it serves through `dataVariants`, so a request for extended hours anywhere else is refused before it is sent and the chart says so, with a button back to regular hours, rather than showing regular bars under the extended label. The session is part of the bar cache key, the chart's data context, comparisons (asked for in their chart's session), replay's finer history, the saved layout and named workspaces. In fixture mode extended hours are two hours either side of the synthetic session, the same bars in between, byte for byte on every run. |
 | `clipboard.js` | One in-memory clipboard shared by both charts' controllers, so copy here and paste there works even when the browser refuses the OS clipboard; the OS read is bounded so a paste never hangs on a permission popup. |
 | `level-editor.js` | A ladder tool's levels (retracement, extension, channel, fan, time zones, the Gann pair) edited one row each: enable, ratio, colour, label, add, remove, reset. Every edit is one undo entry through the controller. |
 | `text-editor.js` | Inline text editing over the painted text, sized by the same rules the text tool paints with, with every pointer and key event stopped at the box so the chart under it does not pan. |
@@ -830,7 +859,9 @@ server is what that browser talks to: `tests/e2e/yfinance.spec.ts` drives the
 page through the rail, the mouse and the transport, and reads the result back
 through the `?test=1` handle. `tests/e2e/yfinance-mobile.spec.ts` adds fixture-mode touch
 drawing, undo, navigation, reduced-motion and portrait-to-landscape checks for the compact
-host controls.
+host controls. `tests/e2e/yfinance-history.spec.ts` walks a study from the picker, a line
+placed with two clicks, a price scale inverted from its axis menu and a chart-type rebuild
+back and forth with Ctrl+Z, Ctrl+Y and the rail's Redo.
 
 ## Notes
 
@@ -911,3 +942,29 @@ pane or asks `primaryPaneIndex()` for its order and price lines, volume,
 legends, price levels, replay marks, session marks, alert and order rows and
 axis chords, keeps `primaryPane` in its named-workspace allowlist, and forwards
 `plan.primaryPane` when it applies a template.
+
+### One undo timeline
+
+Each chart keeps one timeline: a study added from the picker or removed from its
+chip or legend, its settings, the chart type, a price scale's mode, invert, auto-fit
+or placement from the axis menu, pane moves, folds and heights, the chart settings
+and study settings dialogs (one step per session; Cancel leaves none), a drag of a
+study's anchor ring and drawings, in the order they were made. A study brought back
+returns to its pane, height and fold, with the drawings its pane held, and under the
+id it had. The protected VWAP is the host's: adding or removing it from the menu is
+never a step, and no undo or redo removes, reconfigures or moves it, though a study
+you move past it in its pane's stack is a step like any other and goes back past it.
+
+Ctrl+Z and Ctrl+Y (and Ctrl+Shift+Z) over a chart and the mobile bar's Undo and Redo
+walk the focused chart's timeline. The rail and the drawing toolbar belong to the main
+chart, as their tools, lock, hide and delete do, so their Undo and Redo walk the main
+chart's timeline whichever chart has the focus. With appearance linked, a change one
+chart makes reaches the other outside that chart's timeline: undoing it on the chart
+that made it takes it back on both.
+
+The chart is rebuilt on every load and chart-type switch, and the timeline carries
+over: each new chart and drawing controller is attached to it. The chart type is a
+rebuild here, so the switch is recorded as a command that rebuilds with the type
+it replaced. Comparisons, the volume row and a loaded layout or workspace are the
+host's own and never steps; loading a layout or a workspace starts a new timeline.
+Undo never refetches or rewrites bars, fires an alert or places an order.

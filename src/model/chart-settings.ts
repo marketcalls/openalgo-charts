@@ -29,7 +29,7 @@
  * changes: a key names the option it writes, not the tab it is shown on.
  */
 import type { AxisChromeOptions, Chart, ChartEventOptions, ChartNavigationOptions, ChartWatermarkOptions } from '../core/chart';
-import type { IndicatorInput } from './indicator-registry';
+import type { IndicatorInput, IndicatorInputPresentation } from './indicator-registry';
 import { getChartType } from './chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
 import type { CanvasOptions, CanvasLineStyle, GridOptions, ScaleCanvasOptions } from '../render/grid';
@@ -62,8 +62,12 @@ export type ChartSettingsTabId = 'price' | 'readout' | 'axes' | 'appearance' | '
  * `enabled` is absent when the pair has no visibility flag behind it (a candle
  * body is always drawn), which is the difference between a row whose checkbox
  * does something and one whose checkbox would be a lie.
+ *
+ * It takes `visibleWhen` and `activeWhen`, and a condition that reads any of
+ * its three value keys reads the pair. It takes no `inline`: the row already
+ * holds a switch and two swatches, so it always stands on its own.
  */
-export interface ChartSettingsColorPairInput {
+export interface ChartSettingsColorPairInput extends Omit<IndicatorInputPresentation, 'inline'> {
   key: string;
   type: 'colorPair';
   label: string;

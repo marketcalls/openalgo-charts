@@ -14,14 +14,19 @@ const PLOT_H = 500;
 
 /**
  * The draw host's fake chart with the rest of what a viewport drawing needs:
- * a time axis whose width is the plot's, and a pane whose scale height is the
- * plot's and whose projection matches `priceToCoordinate`. The plot starts at
- * container x 0, so the fractions below can be worked out by hand.
+ * a time axis, a pane whose projection matches `priceToCoordinate`, and the
+ * plot rectangle the chart reports (`plotRect`), which a pane folded to no
+ * height has none of. The plot starts at container x 0, so the fractions
+ * below can be worked out by hand.
  */
 function viewportChart() {
   const chart = fakeChart();
   chart.timeScale = { width: PLOT_W, indexToX: (i) => i * PX_PER_BAR, xToIndex: (x) => x / PX_PER_BAR };
   chart.panes = () => [{ priceToY, yToPrice: (y) => (500 - y) / 2, priceScale: { height: PLOT_H } }];
+  chart.plotRect = (paneIndex) => {
+    const height = chart.panes()[paneIndex]?.priceScale.height ?? 0;
+    return height > 0 ? { left: 0, top: 0, width: PLOT_W, height } : null;
+  };
   return chart;
 }
 

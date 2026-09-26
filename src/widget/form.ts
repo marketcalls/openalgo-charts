@@ -12,17 +12,23 @@
  * is a small square swatch, a bullish/bearish pair is one row, a control with
  * a reason it cannot act is drawn disabled with its state still readable.
  *
+ * A descriptor's `activeWhen` and `visibleWhen` are read here too, against
+ * the values the form holds, after every edit and every `sync`. An inactive
+ * control goes through the same disabled path as one the host says is
+ * unavailable, and a hidden one keeps its draft for when it comes back.
+ *
  * DOM-building only. Nothing here knows what a key means or where a value is
  * written: the dialog hands in the values and gets `onChange(key, value)` back
  * with the value already in the type the schema declared.
  */
 import { INDICATOR_SOURCES, registeredIntervals, parseSessionSpec } from 'openalgo-charts';
-import type { ChartSettingsInput } from 'openalgo-charts';
-import { chromeIconSvg } from 'openalgo-charts/draw';
+import type { ChartSettingsInput, IndicatorInputPresentation } from 'openalgo-charts';
+import { chromeIconSvg, CHROME_ICON_STROKE } from 'openalgo-charts/draw';
 import type { SettingsField } from 'openalgo-charts/draw';
 import type { OverlayOptions } from './context';
 import { widgetText, type WidgetTranslationOptions } from './localization';
 import { createColorPicker, type ColorPickerOptions } from './color-picker';
+import { inputStates } from './input-conditions';
 
 // ── the unified control model ─────────────────────────────────────────────
 
@@ -30,8 +36,14 @@ export type FormKind =
   | 'boolean' | 'number' | 'color' | 'text' | 'multiline' | 'select' | 'opacity' | 'colorPair' | 'custom'
   | 'symbol' | 'session' | 'price' | 'timestamp';
 
-/** One row of a generated form, whatever schema it came from. */
-export interface FormControl {
+/**
+ * One row of a generated form, whatever schema it came from. The presentation
+ * fields come from the input: `activeWhen` and `visibleWhen` are re-read on
+ * every change, and consecutive controls sharing `inline` share one row. A
+ * `colorPair`, a `custom` body and a `multiline` box always take a row of
+ * their own, whatever `inline` they carry.
+ */
+export interface FormControl extends IndicatorInputPresentation {
   /** The flat key `onChange` reports. A `colorPair` reports its halves' keys instead. */
   key: string;
   kind: FormKind;
@@ -66,7 +78,9 @@ export interface FormOptions extends WidgetTranslationOptions {
   /**
    * Why a control, or one option of a select, cannot act right now, or null
    * when it can. Drawn disabled with the reason as its title, never hidden: a
-   * greyed row is information, an absent one is a mystery.
+   * greyed row is information, an absent one is a mystery. Asked again after
+   * every edit and every `sync`, beside the control's `activeWhen`, and its
+   * reason wins where both apply because the host knows the context.
    */
   unavailable?(key: string, option?: string): string | null;
   /** Prefix for element ids, so two forms in one document never share one. */
@@ -85,11 +99,18 @@ export interface FormOptions extends WidgetTranslationOptions {
 
 export interface FormHandle {
   el: HTMLElement;
-  /** Re-read `values` into every control the user is not currently in. */
+  /**
+   * Re-read `values` into every control the user is not currently in, hidden
+   * ones included, then re-read which controls are shown and editable.
+   */
   sync(values: FormValues): void;
-  /** Every control's current value, keyed the way `onChange` reports it. */
+  /** Every control's current value, keyed the way `onChange` reports it; a hidden draft included. */
   values(): Record<string, unknown>;
-  /** Validate typed drafts without replacing them or committing settings. */
+  /**
+   * Validate typed drafts without replacing them or committing settings. A
+   * hidden or disabled control is skipped: it cannot be corrected from where
+   * the user is, so its draft never blocks a save, and it is never written.
+   */
   validate(): boolean;
   /** Attach a rejected native write to its field; null clears that error. */
   setError(key: string, message: string | null): void;
@@ -180,7 +201,13 @@ export function controlsFromInputs(inputs: readonly ChartSettingsInput[], transl
     }
     // Set once here rather than in seven branches: every variant carries the
     // field, and a branch that forgot it would drop the help text silently.
-    if (input.tooltip !== undefined && out.length > before) out[before].tooltip = input.tooltip;
+    if (out.length > before) {
+      const control = out[before];
+      if (input.tooltip !== undefined) control.tooltip = input.tooltip;
+      if (input.activeWhen !== undefined) control.activeWhen = input.activeWhen;
+      if (input.visibleWhen !== undefined) control.visibleWhen = input.visibleWhen;
+      if (input.type !== 'colorPair' && input.inline !== undefined) control.inline = input.inline;
+    }
   }
   return localizeControls(out, translation);
 }
@@ -302,7 +329,7 @@ const XMLNS = 'http://www.w3.org/2000/svg';
  */
 export function glyphSvg(path: string): string {
   return `<svg xmlns="${XMLNS}" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor"`
-    + ` stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+    + ` stroke-width="${CHROME_ICON_STROKE}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
 }
 
 /** A chrome glyph wrapped for the stylesheet's `.oac-glyph--chrome` sizing. */
@@ -671,6 +698,34 @@ interface Bound {
   write(value: unknown): void;
   control: HTMLElement;
   focus?: HTMLElement;
+  /** The title the control carries for a reason it cannot act, or for none. */
+  title(why: string | null): string;
+  /** The control this value belongs to, once its row is built. */
+  member?: Member;
+}
+
+/**
+ * What the state pass needs to know about one control's place on the page.
+ * Most controls own a whole row; a member of an inline row owns only its part
+ * of one, so hiding it must not hide its neighbours.
+ */
+interface Member {
+  control: FormControl;
+  fields: Bound[];
+  /** Hidden together when the control is. */
+  parts: HTMLElement[];
+  /** The values whose reasons decide whether the whole control reads as off. */
+  offKeys: string[];
+  /** Carries the dimmed class, and `offClass` names it. */
+  offEl: HTMLElement | null;
+  offClass: string;
+  /** Carry the reason where a pointer lands, since a disabled input takes none. */
+  titles: HTMLElement[];
+  row: HTMLElement;
+  head: HTMLElement | undefined;
+  /** What the last pass applied, so the next one can say what changed. */
+  shown: boolean;
+  enabled: boolean;
 }
 
 const activeForms = new WeakMap<HTMLElement, () => void>();
@@ -688,13 +743,26 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
   host.innerHTML = '';
   host.classList.add('oac-form');
   const bound: Bound[] = [];
+  const members: Member[] = [];
   const unavailable = opts.unavailable ?? ((): null => null);
   const idFor = (key: string): string => `${opts.idPrefix}-${key.replace(/[^A-Za-z0-9_-]/g, '-')}`;
   // The last value each control reported, so a `change` after a live `input`
   // of the same value is not a second edit.
   const last = new Map<string, unknown>();
   const errors = new Map<string, string>();
-  const rows = new Map<string, { control: HTMLElement; error: HTMLElement }>();
+  const rows = new Map<string, { control: HTMLElement; error: HTMLElement; member?: Member }>();
+  // What the conditions read: the values handed in, then every edit and sync.
+  // Written with defineProperty so an own `__proto__` setting stays a setting.
+  const current: Record<string, unknown> = { ...opts.values };
+  const put = (key: string, value: unknown): void => {
+    Object.defineProperty(current, key, { value, writable: true, enumerable: true, configurable: true });
+  };
+  const conditional = controls.some(c => c.activeWhen !== undefined || c.visibleWhen !== undefined);
+  // The control whose edit is being reported, so focus lost to that edit can
+  // go back to it rather than to the top of the form.
+  let editing: string | undefined;
+  let live: HTMLElement | null = null;
+  const errorShown = (key: string): boolean => errors.has(key) && rows.get(key)?.member?.shown !== false;
   const setError = (key: string, message: string | null): void => {
     const row = rows.get(key);
     if (message === null) errors.delete(key);
@@ -702,7 +770,7 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
     if (!row) return;
     row.control.setAttribute('aria-invalid', String(message !== null));
     row.error.textContent = message ?? '';
-    row.error.hidden = message === null;
+    row.error.hidden = !errorShown(key);
   };
   const validate = (key: string, value: unknown): string | null => {
     const spec = controls.find(control => control.key === key);
@@ -723,18 +791,18 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
     if (error !== null) return;
     if (last.has(key) && Object.is(last.get(key), value)) return;
     last.set(key, value);
-    opts.onChange(key, value);
-  };
-
-  const disable = (ctl: HTMLElement, why: string | null): void => {
-    if (why === null) return;
-    (ctl as HTMLInputElement).disabled = true;
-    ctl.title = why;
+    put(key, value);
+    editing = key;
+    try { opts.onChange(key, value); }
+    finally { editing = undefined; }
+    // A dialog that syncs from onChange has already re-read the states; one
+    // that does not still needs them re-read, and a rebuilt form needs nothing.
+    if (!destroyed) applyState(key);
   };
 
   /** One input of the kinds a single value covers. */
   function field(key: string, kind: FormKind, spec: FormControl, value: unknown): { ctl: HTMLElement; b: Bound } {
-    const why = unavailable(key);
+    const plain = (why: string | null): string => why ?? '';
     let ctl: HTMLElement;
     let b: Bound;
     switch (kind) {
@@ -751,7 +819,7 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         const read = (): number | undefined => input.value.trim() === '' ? undefined : Number(input.value);
         show(value);
         input.addEventListener('change', () => emit(key, read()));
-        ctl = input; b = { key, control: input, read, write: show };
+        ctl = input; b = { key, control: input, read, write: show, title: plain };
         break;
       }
       case 'boolean': {
@@ -760,7 +828,7 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         input.checked = value === true;
         input.addEventListener('change', () => emit(key, input.checked));
         ctl = input;
-        b = { key, control: input, read: () => input.checked, write: (v) => { input.checked = v === true; } };
+        b = { key, control: input, read: () => input.checked, write: (v) => { input.checked = v === true; }, title: plain };
         break;
       }
       case 'number': {
@@ -790,18 +858,20 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         b = {
           key, control: input,
           read: () => { const n = Number(input.value); return input.value.trim() === '' || !Number.isFinite(n) ? undefined : n; },
-          write: show,
+          write: show, title: plain,
         };
         break;
       }
       case 'color': {
         const picker = createColorPicker(doc, {
           id: idFor(key), label: spec.label, value, live: opts.live, translate: opts.translate,
-          disabledReason: why, openOverlay: opts.openOverlay, onChange: next => emit(key, next),
+          openOverlay: opts.openOverlay, onChange: next => emit(key, next),
         });
         disposers.push(picker.destroy);
         ctl = picker.el;
-        b = { key, control: picker.input, focus: picker.trigger, read: picker.read, write: picker.write };
+        // Unlike a text box a swatch says nothing about itself, so its name
+        // stays on it while it can act.
+        b = { key, control: picker.input, focus: picker.trigger, read: picker.read, write: picker.write, title: why => why ?? spec.label };
         return { ctl, b };
       }
       case 'opacity': {
@@ -820,9 +890,8 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         const wrap = el(doc, 'span', 'oac-opacity');
         wrap.appendChild(range);
         wrap.appendChild(out);
-        disable(range, why);
         ctl = wrap;
-        b = { key, control: range, read: () => Number(range.value) / 100, write: show };
+        b = { key, control: range, read: () => Number(range.value) / 100, write: show, title: plain };
         return { ctl, b };
       }
       case 'select': {
@@ -846,9 +915,8 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         };
         fill(value);
         select.addEventListener('change', () => emit(key, select.value));
-        disable(select, why);
         ctl = wrap;
-        b = { key, control: select, read: () => select.value, write: fill };
+        b = { key, control: select, read: () => select.value, write: fill, title: plain };
         return { ctl, b };
       }
       case 'multiline': {
@@ -859,7 +927,7 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         show(value);
         area.addEventListener('change', () => emit(key, area.value));
         ctl = area;
-        b = { key, control: area, read: () => area.value, write: show };
+        b = { key, control: area, read: () => area.value, write: show, title: plain };
         break;
       }
       case 'text':
@@ -871,24 +939,15 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         show(value);
         input.addEventListener('change', () => emit(key, input.value));
         ctl = input;
-        b = { key, control: input, read: () => input.value, write: show };
+        b = { key, control: input, read: () => input.value, write: show, title: plain };
         break;
       }
     }
-    disable(ctl, why);
     return { ctl, b };
   }
 
-  let lastGroup: string | undefined;
-  for (const c of controls) {
-    if (c.group !== undefined && c.group !== lastGroup) {
-      host.appendChild(el(doc, 'div', 'oac-head', c.group));
-    }
-    lastGroup = c.group ?? lastGroup;
-
-    const row = el(doc, 'div', 'oac-row');
-    row.dataset.key = c.key;
-    const label = el(doc, 'label', 'oac-row__label', c.kind === 'timestamp'
+  const labelFor = (c: FormControl, className: string): HTMLLabelElement => {
+    const label = el(doc, 'label', className, c.kind === 'timestamp'
       ? widgetText(opts, '{label} (UTC seconds)', { label: c.label }) : c.label);
     // The mark rides inside the label so it lands the same way in all three row
     // shapes below, and so a pointer-less device can still reach it by tab.
@@ -900,6 +959,65 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
       help.setAttribute('aria-label', c.tooltip);
       label.appendChild(help);
     }
+    return label;
+  };
+  const member = (c: FormControl, row: HTMLElement, head: HTMLElement | undefined, fields: Bound[], parts: HTMLElement[]): Member => {
+    const m: Member = { control: c, fields, parts, offKeys: fields.map(f => f.key), offEl: row, offClass: 'oac-row--off',
+      titles: [row], row, head, shown: true, enabled: true };
+    for (const f of fields) f.member = m;
+    members.push(m);
+    return m;
+  };
+  /** The error line under a control's row, and the control's link to it. */
+  const errorLine = (key: string, b: Bound, row: HTMLElement): HTMLElement => {
+    const error = el(doc, 'div', 'oac-input-error');
+    error.id = `${idFor(key)}-error`; error.hidden = true;
+    error.setAttribute('role', 'status');
+    b.control.setAttribute('aria-describedby', error.id);
+    row.appendChild(error);
+    rows.set(key, { control: b.control, error });
+    return error;
+  };
+  // Inline rows take the single-value kinds only: a pair is already a row of
+  // its own, a custom body is the dialog's, and a multi-line box needs the width.
+  const inlinable = (c: FormControl): boolean =>
+    c.inline !== undefined && c.kind !== 'custom' && c.kind !== 'colorPair' && c.kind !== 'multiline';
+
+  let lastGroup: string | undefined;
+  let head: HTMLElement | undefined;
+  let inline: { id: string; row: HTMLElement; ctl: HTMLElement } | null = null;
+  for (const c of controls) {
+    if (c.group !== undefined && c.group !== lastGroup) {
+      head = el(doc, 'div', 'oac-head', c.group);
+      host.appendChild(head);
+      inline = null;
+    }
+    lastGroup = c.group ?? lastGroup;
+    if (inline !== null && (!inlinable(c) || c.inline !== inline.id)) inline = null;
+
+    if (inline !== null) {
+      // A later member of an inline row: its own label and control, grouped so
+      // they hide and dim together without touching the members beside them.
+      const f = field(c.key, c.kind, c, opts.values[c.key]);
+      f.b.control.id = idFor(c.key);
+      const label = labelFor(c, 'oac-inline__label');
+      label.htmlFor = (f.b.focus ?? f.b.control).id;
+      bound.push(f.b);
+      const item = el(doc, 'span', 'oac-inline__item');
+      item.dataset.key = c.key;
+      if (c.kind === 'boolean') { item.appendChild(f.ctl); item.appendChild(label); }
+      else { item.appendChild(label); item.appendChild(f.ctl); }
+      inline.ctl.appendChild(item);
+      errorLine(c.key, f.b, inline.row);
+      const m = member(c, inline.row, head, [f.b], [item]);
+      m.offEl = item; m.offClass = 'oac-inline__item--off'; m.titles = [item];
+      rows.get(c.key)!.member = m;
+      continue;
+    }
+
+    const row = el(doc, 'div', 'oac-row');
+    row.dataset.key = c.key;
+    const label = labelFor(c, 'oac-row__label');
 
     if (c.kind === 'custom') {
       const body = opts.custom === undefined ? null : opts.custom(c, row);
@@ -910,22 +1028,22 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
       ctl.appendChild(body);
       row.appendChild(ctl);
       host.appendChild(row);
+      // The body is the dialog's own markup, so there is nothing here to
+      // disable: a condition can only show or hide it.
+      member(c, row, head, [], [row]).offEl = null;
       continue;
     }
 
     if (c.kind === 'colorPair' && c.pair !== undefined) {
       const pair = c.pair;
-      const whyUp = unavailable(pair.up.key);
-      const whyDown = unavailable(pair.down.key);
-      // Inert only when both halves are: one live half keeps the row live and
-      // dims the swatch with nothing to paint.
-      if (whyUp !== null && whyDown !== null) { row.classList.add('oac-row--off'); row.title = whyUp; }
+      const fields: Bound[] = [];
       if (pair.enabled !== undefined) {
         const sw = field(pair.enabled.key, 'boolean', c, opts.values[pair.enabled.key]);
         sw.ctl.classList.add('oac-row__sw');
         sw.ctl.id = idFor(pair.enabled.key);
         label.htmlFor = sw.ctl.id;
         bound.push(sw.b);
+        fields.push(sw.b);
         row.appendChild(sw.ctl);
       } else {
         row.appendChild(el(doc, 'span', 'oac-row__sw'));
@@ -937,35 +1055,36 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         f.b.control.id = idFor(half.key);
         // Which swatch is which is not obvious at 26px, and the row is too
         // tight for two more labels, so the name rides on the control.
-        const name = (f.b.control as HTMLInputElement).disabled ? `${half.label}: ${f.b.control.title}` : half.label;
-        f.b.control.title = name;
-        if (f.b.focus !== undefined) f.b.focus.title = name;
+        f.b.title = why => why === null ? half.label : `${half.label}: ${why}`;
         f.b.control.setAttribute('aria-label', `${c.label} ${half.label}`);
         f.b.focus?.setAttribute('aria-label', `${c.label} ${half.label}`);
         bound.push(f.b);
+        fields.push(f.b);
         ctl.appendChild(f.ctl);
       }
       if (pair.enabled === undefined) label.htmlFor = `${idFor(pair.up.key)}-trigger`;
       row.appendChild(ctl);
       host.appendChild(row);
+      // Inert only when both halves are: one live half keeps the row live and
+      // dims the swatch with nothing to paint.
+      member(c, row, head, fields, [row]).offKeys = [pair.up.key, pair.down.key];
       continue;
     }
 
     const f = field(c.key, c.kind, c, opts.values[c.key]);
-    const why = unavailable(c.key);
-    if (why !== null) { row.classList.add('oac-row--off'); row.title = why; }
     f.b.control.id = idFor(c.key);
     label.htmlFor = (f.b.focus ?? f.b.control).id;
     bound.push(f.b);
-    const error = el(doc, 'div', 'oac-input-error');
-    error.id = `${idFor(c.key)}-error`; error.hidden = true;
-    error.setAttribute('role', 'status');
-    f.b.control.setAttribute('aria-describedby', error.id);
-    rows.set(c.key, { control: f.b.control, error });
+    let parts: HTMLElement[] = [row];
+    let titles: HTMLElement[] = [row];
     if (c.kind === 'boolean') {
       f.ctl.classList.add('oac-row__sw');
       row.appendChild(f.ctl);
       row.appendChild(label);
+      if (inlinable(c)) {
+        row.appendChild(el(doc, 'div', 'oac-row__ctl'));
+        parts = [f.ctl, label]; titles = [label];
+      }
     } else if (c.kind === 'multiline') {
       row.classList.add('oac-row--block');
       row.appendChild(label);
@@ -974,12 +1093,129 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
       row.appendChild(el(doc, 'span', 'oac-row__sw'));
       row.appendChild(label);
       const ctl = el(doc, 'div', 'oac-row__ctl');
-      ctl.appendChild(f.ctl);
+      if (inlinable(c)) {
+        // The leading member keeps the row's label, and its control sits in an
+        // item like the others so an action button beside it goes with it.
+        const item = el(doc, 'span', 'oac-inline__item');
+        item.dataset.key = c.key;
+        item.appendChild(f.ctl);
+        ctl.appendChild(item);
+        parts = [label, item]; titles = [label, item];
+      } else {
+        ctl.appendChild(f.ctl);
+      }
       row.appendChild(ctl);
     }
-    row.appendChild(error);
+    if (inlinable(c)) {
+      row.classList.add('oac-row--inline');
+      row.dataset.inline = c.inline;
+      inline = { id: c.inline as string, row, ctl: row.lastChild as HTMLElement };
+    }
+    errorLine(c.key, f.b, row);
     host.appendChild(row);
+    const m = member(c, row, head, [f.b], parts);
+    m.titles = titles;
+    rows.get(c.key)!.member = m;
   }
+
+  if (conditional) {
+    // Polite, and inside the dialog, so the change is read after the edit
+    // that caused it without moving focus to say so.
+    live = el(doc, 'div', 'oac-sr');
+    live.setAttribute('role', 'status');
+    live.setAttribute('aria-live', 'polite');
+    host.appendChild(live);
+  }
+
+  // A pair's switch and swatches are named by the pair, as the reader counts them.
+  const labelOf = (key: string): string | undefined =>
+    controls.find(c => c.key === key || [c.pair?.enabled, c.pair?.up, c.pair?.down].some(part => part?.key === key))?.label;
+  const usable = (b: Bound): boolean => b.member?.shown !== false && !(b.control as HTMLInputElement).disabled;
+  const focusFirst = (): boolean => {
+    if (destroyed) return false;
+    for (const b of bound) {
+      if (!usable(b)) continue;
+      (b.focus ?? b.control).focus();
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * Show, hide, enable and disable every control from the values held now.
+   * It runs after the first paint, after each edit and after each sync, and
+   * says in the live region what appeared, left, or changed its availability.
+   */
+  function applyState(cause = editing, announce = true): void {
+    const before = doc.activeElement as HTMLElement | null;
+    const states = conditional ? inputStates(controls, current) : null;
+    const said: Record<'shown' | 'hidden' | 'on' | 'off', string[]> = { shown: [], hidden: [], on: [], off: [] };
+    for (const m of members) {
+      const state = states?.get(m.control.key);
+      const visible = state?.visible ?? true;
+      let reason: string | null = null;
+      if (state !== undefined && !state.active) {
+        const names = state.dependsOn.map(labelOf).filter((name): name is string => name !== undefined);
+        reason = names.length > 0 ? widgetText(opts, 'Depends on {inputs}', { inputs: names.join(', ') })
+          : widgetText(opts, 'Not used with the current settings');
+      }
+      for (const part of m.parts) part.hidden = !visible;
+      const why = new Map<string, string | null>();
+      for (const b of m.fields) {
+        const r = unavailable(b.key) ?? reason;
+        why.set(b.key, r);
+        for (const node of [b.control, b.focus]) {
+          if (node === undefined) continue;
+          (node as HTMLInputElement).disabled = r !== null;
+          node.title = b.title(r);
+        }
+      }
+      const off = m.fields.length > 0 && m.offKeys.every(key => why.get(key) !== null);
+      if (m.offEl !== null) {
+        m.offEl.classList.toggle(m.offClass, off);
+        const lead = why.get(m.offKeys[0]) ?? null;
+        for (const node of m.titles) node.title = off ? lead ?? '' : '';
+      }
+      const name = m.control.label;
+      if (m.shown !== visible) said[visible ? 'shown' : 'hidden'].push(name);
+      else if (visible && m.enabled === off) said[off ? 'off' : 'on'].push(name);
+      m.shown = visible;
+      m.enabled = !off;
+    }
+    // A row whose every member left goes too, and a head with nothing under it.
+    for (const outer of [(m: Member): HTMLElement => m.row, (m: Member): HTMLElement | undefined => m.head]) {
+      const groups = new Map<HTMLElement, boolean>();
+      for (const m of members) {
+        const node = outer(m);
+        if (node !== undefined) groups.set(node, (groups.get(node) ?? false) || m.shown);
+      }
+      for (const [node, any] of groups) node.hidden = !any;
+    }
+    for (const [key, row] of rows) row.error.hidden = !errorShown(key);
+
+    // Focus inside a control that just left, or just turned off, would fall to
+    // the page and out of the dialog's trap: hand it to the control whose edit
+    // caused this, or to the first control still usable.
+    if (before !== null && host.contains(before)
+      && (members.some(m => !m.shown && m.parts.some(part => part.contains(before))) || (before as HTMLInputElement).disabled)) {
+      const back = cause === undefined ? undefined : bound.find(b => b.key === cause);
+      if (back !== undefined && usable(back)) (back.focus ?? back.control).focus();
+      else focusFirst();
+    }
+
+    if (!announce || live === null) return;
+    const lines: string[] = [];
+    if (said.shown.length > 0) lines.push(widgetText(opts, 'Shown: {inputs}', { inputs: said.shown.join(', ') }));
+    if (said.hidden.length > 0) lines.push(widgetText(opts, 'Hidden: {inputs}', { inputs: said.hidden.join(', ') }));
+    if (said.on.length > 0) lines.push(widgetText(opts, 'Available: {inputs}', { inputs: said.on.join(', ') }));
+    if (said.off.length > 0) lines.push(widgetText(opts, 'Unavailable: {inputs}', { inputs: said.off.join(', ') }));
+    if (lines.length === 0) return;
+    const message = lines.join('. ');
+    // A screen reader reads a live region when its text changes, so the same
+    // words twice in a row are told apart by a trailing space it does not read.
+    live.textContent = live.textContent === message ? `${message}\u00a0` : message;
+  }
+  applyState(undefined, false);
 
   const destroy = (): void => {
     if (destroyed) return;
@@ -991,14 +1227,17 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
   return {
     el: host, destroy, setError,
     validate: () => {
+      const skipped = new Set(bound.filter(b => !usable(b)).map(b => b.key));
       for (const b of bound) {
+        if (skipped.has(b.key)) continue;
         const error = validate(b.key, b.read());
         if (error !== null || !errors.has(b.key)) setError(b.key, error);
       }
-      return errors.size === 0;
+      return [...errors.keys()].every(key => skipped.has(key));
     },
     sync: (values) => {
       if (destroyed) return;
+      for (const key of Object.keys(values)) put(key, values[key]);
       const active = doc.activeElement;
       for (const b of bound) {
         if (b.control === active) continue;
@@ -1009,20 +1248,13 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
         // model refused and wrote back over must be choosable again.
         if (last.has(b.key)) last.set(b.key, b.read());
       }
+      applyState();
     },
     values: () => {
       const out: Record<string, unknown> = {};
       for (const b of bound) out[b.key] = b.read();
       return out;
     },
-    focusFirst: () => {
-      if (destroyed) return false;
-      for (const b of bound) {
-        if ((b.control as HTMLInputElement).disabled) continue;
-        (b.focus ?? b.control).focus();
-        return true;
-      }
-      return false;
-    },
+    focusFirst,
   };
 }

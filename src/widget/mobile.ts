@@ -1,6 +1,6 @@
 import { widgetText } from './localization';
 import { registeredDrawingTools } from 'openalgo-charts/draw';
-import { h, editableIds, type WidgetContext } from './context';
+import { h, editableIds, historyPress, historyReady, type WidgetContext } from './context';
 import type { RailHandle } from './rail';
 import {
   chartTypeChoices, chartTypeLabel, intervalLabel,
@@ -85,6 +85,16 @@ export function mountMobile(ctx: WidgetContext, opts: MobileOptions): MobileHand
     });
     return button;
   };
+
+  /**
+   * Undo and redo for the whole chart, shown disabled with nothing to take
+   * back: the same timeline as the desktop chords and rail.
+   */
+  const historyActions = (): HTMLButtonElement[] => (['undo', 'redo'] as const).map((direction) => {
+    const button = makeAction(direction, widgetText(ctx, direction === 'undo' ? 'Undo' : 'Redo'), () => { historyPress(ctx, direction); refresh(); });
+    button.setAttribute('aria-disabled', String(!historyReady(ctx, direction)));
+    return button;
+  });
 
   const identityOf = (element: HTMLElement): ActionIdentity | null => {
     const button = element.closest('[data-mobile-action]') as HTMLElement | null;
@@ -235,7 +245,7 @@ export function mountMobile(ctx: WidgetContext, opts: MobileOptions): MobileHand
           controls.append(
             makeAction('finish', widgetText(ctx, 'Finish'), () => { ctx.draw.finish(); refresh(); }),
             makeAction('cancel', widgetText(ctx, 'Cancel'), () => { ctx.draw.cancel(); refresh(); }),
-            makeAction('undo', widgetText(ctx, 'Undo'), () => { ctx.draw.undo(); refresh(); }),
+            ...historyActions(),
             makeAction('magnet', widgetText(ctx, 'Magnet: {mode}', { mode: widgetText(ctx, `schema.magnet.${opts.rail?.magnetMode() ?? 'off'}`, {}, opts.rail?.magnetMode() ?? 'off') }), () => { opts.rail?.cycleMagnet(); refresh(); }),
             makeAction('stay', widgetText(ctx, 'Stay: {mode}', { mode: opts.rail?.stayMode() ? widgetText(ctx, 'on') : widgetText(ctx, 'off') }), () => {
               if (opts.rail !== null) opts.rail.setStayMode(!opts.rail.stayMode());
@@ -269,6 +279,8 @@ export function mountMobile(ctx: WidgetContext, opts: MobileOptions): MobileHand
     if (opts.onDataWindow) bar.appendChild(makeAction('data-window', widgetText(ctx, 'schema.ui.dataWindow', {}, 'Data'), (anchor) => { opts.onDataWindow?.(anchor); }));
     bar.appendChild(makeAction('more', widgetText(ctx, 'More'), (anchor) => {
       openSheet(widgetText(ctx, 'More'), anchor, (body, close) => {
+        // First: a step taken on a narrow screen needs a way back that does not depend on a tool being armed.
+        body.append(...historyActions());
         if (opts.onCapture) body.appendChild(makeAction('capture', widgetText(ctx, 'Capture'), () => {
           close();
           opts.onCapture?.(anchor);
@@ -388,6 +400,7 @@ export function mountMobile(ctx: WidgetContext, opts: MobileOptions): MobileHand
   for (const event of ['draw:tool', 'draw:select', 'drawing:select', 'drawing:change', 'draw:add', 'draw:remove', 'draw:update']) {
     offs.push(ctx.chart.on(event, refresh));
   }
+  if (ctx.history !== undefined) offs.push(ctx.history.subscribe(refresh));
   offs.push(ctx.bus.on('symbol', refresh));
   offs.push(ctx.bus.on('interval', refresh));
   offs.push(ctx.bus.on('theme', refresh));

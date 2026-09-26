@@ -54,6 +54,21 @@ follow `zonedWallClockToUtcSeconds`; a nonexistent boundary throws instead of
 inventing an opening time. Supply a date exception for such a schedule. Overlapping
 active windows throw because there is no unambiguous session anchor.
 
+`sessionFrom(utcSeconds)` returns the window active at the instant, or else the
+next one to open, scanning about a year of opening dates and returning null when
+none opens. Yesterday's overnight window still running is returned on its opening
+date. Boundaries resolve and throw exactly as for `sessionAt`.
+
+`SessionCalendar` carries the same hours without price, quantity or interval rules:
+`new SessionCalendar({ timezone, sessions, exceptions })` validates, detaches and
+freezes them by the rules above, throws `Invalid session calendar: ...`, and reads
+with `sessionAt` and `sessionFrom`. `applyTo(chart)` sets it as the chart's
+calendar for times past the last bar and repaints, through
+`chart.setSessionCalendar(calendar)`, which a host setting hours it built itself
+(any object with `sessionFrom`) calls directly; `null` clears them.
+`chart.dataLayer.setSessionCalendar` sets the same without asking for a frame, for
+a host about to load bars or move the view, either of which repaints.
+
 Construction validates and detaches metadata, freezes its nested arrays/objects
 and omits unrelated source fields. Empty identities, unknown timezones, invalid
 dates/windows, nonpositive ticks/quantity steps and unsupported intervals reject.
@@ -64,7 +79,13 @@ Registration supplies bucketing semantics; the metadata list supplies venue supp
 `pricePrecision` accepts 0 through 12 and must be able to represent `priceTick`.
 `formatPrice` affects display only, preserving unrounded source values. `applyTo`
 sets chart timezone, the price tick, primary price-scale formatting and data
-context, including the independent `hasOpenInterest` capability. Oscillators and
+context, including the independent `hasOpenInterest` capability. It also sets the
+instrument through `chart.setSessionCalendar`, so times past the last bar
+follow its sessions: the bar after Friday's last one is Monday's first, closed
+dates are skipped and daily bars step through trading dates. A later instrument
+replaces it, a data context moved to another symbol or exchange drops it,
+`setSessionCalendar(null)` clears it, and a calendar the recent bars do not sit in
+is ignored for the median recent bar interval. Oscillators and
 volume retain their own formatting. The chart must have a primary series. Clear
 old source bars before changing symbol, exchange or interval; an incompatible
 application rejects before mutating the chart. Reapply metadata after replacing
@@ -104,9 +125,12 @@ every band, and `applyTo` sets that as the price scale's `minMove`.
 `validatePrice`, `OrderEngine.placeOrder` and `OrderEngine.requestModify` snap on the
 band each price lands in and check price limits after snapping.
 
-`applyTo` also hands the same schedule to `chart.trading`, so dragged order and
-bracket lines snap to it. It does not build the trading layer (that would take the
+`applyTo` also hands the same schedule to the chart (`chart.setTickSchedule`, read
+back with `chart.tickSchedule()`), so a dragged price alert and `chart.snapPrice` on
+the price pane round in the band a price falls in; a host with its own metadata calls
+`chart.setTickSchedule` itself. The chart passes it to `chart.trading`, so dragged
+order and bracket lines snap to it. It does not build the trading layer (that would take the
 host's drag subscription); a layer built later starts from it. Applying a
 constant-tick instrument clears it, so after a symbol switch no drag snaps to the
-previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to
+previous instrument's bands. Call `chart.setTickSchedule` after `applyTo` to
 override it. For a depth ladder, pass the schedule as `DomLadder`'s `tickSchedule`.

@@ -492,10 +492,14 @@ export const ICHIMOKU: IndicatorDescriptor = {
   }],
   calc: (bars, s) => {
     const n = bars.length;
-    const conv = num(s, 'conversionPeriod', 9);
-    const base = num(s, 'basePeriod', 26);
-    const lag = num(s, 'laggingSpanPeriod', 52);
-    const disp = num(s, 'displacement', 26);
+    // Whole bars, the way the other built-ins read a length: `mid` indexes
+    // bars with the period, so a fractional one read a bar that does not exist
+    // and threw, and a fractional displacement found nothing to copy.
+    const period = (k: string, d: number): number => Math.max(1, Math.round(num(s, k, d)));
+    const conv = period('conversionPeriod', 9);
+    const base = period('basePeriod', 26);
+    const lag = period('laggingSpanPeriod', 52);
+    const disp = Math.round(num(s, 'displacement', 26));
 
     // Donchian midpoint over `p` bars.
     const mid = (p: number): number[] => {

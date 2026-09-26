@@ -61,6 +61,13 @@ names accounts, the workspace chip watchlists and the widget chip the watchlist 
 news panels; the description names the movable price pane, viewport drawings and
 tick schedules.
 
+Rechecked on 2.5.6: base 125.39 kB, indicators 36.44 kB, draw 48.42 kB, profile
+14.96 kB, transform 4.50 kB, trade 16.69 kB, workspace 10.47 kB, webgl 6.39 kB and
+widget 92.72 kB; all tiers 355.97 kB. Registry counts are unchanged. Study policies,
+the draw order, data variants, the session calendar and the widget's undo timeline
+change no box or arrow: they live inside the base engine, draw and widget chips the
+diagram already has.
+
 Source references: `src/index.ts`, `src/feed/data-controller.ts`,
 `src/feed/instrument.ts`, `src/model/bar.ts`, `src/core/pane.ts`,
 `src/alerts/controller.ts`, `src/replay/group.ts`, `src/link/group.ts`,

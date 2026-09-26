@@ -129,6 +129,16 @@ describe('comparison chart ownership', () => {
     expect(spec.error).toBe(result === 'empty' ? 'No data for this interval' : 'History unavailable');
   });
 
+  it('asks for a comparison in its chart session and fetches it again when the session changes', async () => {
+    app.p2.session = 'extended';
+    await addCompareSymbol('TSLA');
+    expect(fetchBars).toHaveBeenLastCalledWith('TSLA', '1h', '1mo', expect.objectContaining({ variant: { session: 'extended' } }));
+    app.p2.session = 'regular';
+    await syncComparisons(2);
+    expect(fetchBars).toHaveBeenCalledTimes(2);
+    expect(fetchBars.mock.calls[1][3].variant).toBeUndefined();
+  });
+
   it('restores hidden sources, independent scale modes and legacy colours without runtime handles', async () => {
     await addCompareSymbol('TSLA');
     setCompareMode('indexed-to-100');

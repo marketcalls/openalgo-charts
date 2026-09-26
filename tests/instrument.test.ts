@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Instrument, type InstrumentMetadata } from '../src/feed/instrument';
+import { Instrument, SessionCalendar, type InstrumentMetadata } from '../src/feed/instrument';
 import { orderConstraintsForInstrument } from '../src/trade/instrument';
 import { validatePrice, validateQuantity } from '../src/trade/validation';
 import { CandleBuilder } from '../src/feed/candle-builder';
 import { Chart } from '../src/core/chart';
 import type { PriceScaleId } from '../src/model/series';
 import { fakeDocument } from './helpers/fake-dom';
+import { roundToTick } from '../src/helpers/math';
 import '../src/indicators/index';
 
 const cash = (): InstrumentMetadata => ({
@@ -44,6 +45,23 @@ describe('instrument metadata', () => {
     { calendar: { sessions: [], exceptions: { '2026-02-30': [] } } },
   ])('rejects invalid contract before use: %j', patch => {
     expect(() => new Instrument({ ...cash(), ...patch })).toThrow();
+  });
+
+  // A host that logs or shows the refusal sees the same first fault as before
+  // SessionCalendar shared this validation: the calendar object is checked
+  // straight after the input, and its weekly sessions last.
+  it.each([
+    [{ timezone: 'Mars/City', calendar: 5 }, 'expected a plain object'],
+    [{ priceTick: 0, calendar: Object.defineProperty({}, 'sessions', { get: () => [], enumerable: true }) }, 'accessors are not metadata'],
+    [{ symbol: '', calendar: { sessions: ['bad'] } }, 'symbol'],
+    [{ exchange: '', calendar: { sessions: ['bad'] } }, 'exchange'],
+    [{ quantityStep: 0, calendar: { sessions: ['bad'] } }, 'quantity step'],
+    [{ hasOpenInterest: 'yes', calendar: { sessions: ['bad'] } }, 'invalid OI capability'],
+    [{ hasOpenInterest: 'yes', calendar: { sessions: [], exceptions: { '2026-02-30': [] } } }, 'invalid exception date'],
+    [{ intervals: ['0m'], calendar: { sessions: [], exceptions: { '2026-02-30': [] } } }, 'unsupported interval 0m'],
+    [{ timezone: 'Mars/City', calendar: { sessions: ['bad'] } }, 'unknown timezone'],
+  ])('reports the first fault of several in a fixed order: %j', (patch, message) => {
+    expect(() => new Instrument({ ...cash(), ...patch })).toThrow(new Error(`Invalid instrument: ${message}`));
   });
 
   it('preserves explicit and unknown OI capabilities independently of observations', () => {
@@ -124,6 +142,68 @@ describe('instrument calendar', () => {
     const update = builder.onTick({ time: tickTime, price: 100, ltq: 5, oi: 70 });
     expect(update?.bar.time).toBe(time('2026-01-28T04:45:00Z'));
     expect(update?.bar.oi).toBe(70);
+  });
+});
+
+describe('the next session', () => {
+  it('answers the active window, else the next opening, across breaks, weekends and closed dates', () => {
+    const instrument = new Instrument(cash());
+    // Inside Wednesday's session: that session.
+    expect(instrument.sessionFrom(time('2026-01-28T05:00:00Z'))).toEqual({
+      date: '2026-01-28', open: time('2026-01-28T03:45:00Z'), close: time('2026-01-28T10:00:00Z'),
+    });
+    // At the exclusive close: Thursday's.
+    expect(instrument.sessionFrom(time('2026-01-28T10:00:00Z'))?.date).toBe('2026-01-29');
+    // Friday evening: Monday, skipping the weekend.
+    expect(instrument.sessionFrom(time('2026-01-30T12:00:00Z'))?.date).toBe('2026-02-02');
+    // Saturday 24th: Monday 26th is closed and Tuesday 27th is shortened.
+    expect(instrument.sessionFrom(time('2026-01-24T06:00:00Z'))).toEqual({
+      date: '2026-01-27', open: time('2026-01-27T04:30:00Z'), close: time('2026-01-27T07:30:00Z'),
+    });
+    const split = new Instrument({ ...cash(), timezone: 'UTC', calendar: { sessions: ['0900-1200:23456', '1300-1600:23456'] } });
+    expect(split.sessionFrom(time('2026-01-28T12:30:00Z'))?.open).toBe(time('2026-01-28T13:00:00Z'));
+  });
+
+  it('keeps an overnight window on its opening date and returns null when nothing opens', () => {
+    const overnight = new Instrument({ ...cash(), timezone: 'UTC', calendar: { sessions: ['2200-0200:23456'] } });
+    expect(overnight.sessionFrom(time('2026-01-27T01:00:00Z'))?.date).toBe('2026-01-26');
+    expect(overnight.sessionFrom(time('2026-01-27T03:00:00Z'))?.open).toBe(time('2026-01-27T22:00:00Z'));
+    const never = new Instrument({ ...cash(), calendar: { sessions: [] } });
+    expect(never.sessionFrom(time('2026-01-27T03:00:00Z'))).toBeNull();
+    expect(() => never.sessionFrom(NaN)).toThrow(/Invalid instrument/);
+  });
+});
+
+describe('a session calendar without instrument rules', () => {
+  it('validates, detaches and reads like the instrument it could belong to', () => {
+    const source = { timezone: 'Asia/Kolkata', sessions: ['0915-1530:23456'], exceptions: { '2026-01-26': [] as string[] } };
+    const calendar = new SessionCalendar(source);
+    source.sessions[0] = '0000-0000';
+    expect(calendar.timezone).toBe('Asia/Kolkata');
+    expect(calendar.calendar.sessions).toEqual(['0915-1530:23456']);
+    expect(Object.isFrozen(calendar.calendar)).toBe(true);
+    const instrument = new Instrument(cash());
+    for (const at of ['2026-01-24T06:00:00Z', '2026-01-28T05:00:00Z', '2026-01-28T10:00:00Z']) {
+      expect(calendar.sessionAt(time(at))).toEqual(new Instrument({ ...cash(), calendar: { sessions: ['0915-1530:23456'], exceptions: { '2026-01-26': [] } } }).sessionAt(time(at)));
+    }
+    expect(calendar.sessionFrom(time('2026-01-24T06:00:00Z'))?.date).toBe('2026-01-27');
+    expect(instrument.sessionFrom(time('2026-01-24T06:00:00Z'))?.date).toBe('2026-01-27');
+  });
+
+  it.each([
+    [{ timezone: 'Mars/City', sessions: [] }, /Invalid session calendar: unknown timezone/],
+    [{ timezone: 'UTC', sessions: ['9999-9999'] }, /Invalid session calendar: invalid session/],
+    [{ timezone: 'UTC', sessions: [], exceptions: { '2026-02-30': [] } }, /Invalid session calendar: invalid exception date/],
+    [{ sessions: [] }, /Invalid session calendar: timezone/],
+    [null, /Invalid session calendar/],
+  ])('refuses %j', (input, message) => {
+    expect(() => new SessionCalendar(input)).toThrow(message);
+  });
+
+  it('reports its own name for a boundary a daylight-saving gap removes', () => {
+    const skipped = new SessionCalendar({ timezone: 'America/New_York', sessions: ['0230-0400'] });
+    expect(() => skipped.sessionAt(time('2026-03-08T07:45:00Z'))).toThrow(/Invalid session calendar: session boundary/);
+    expect(skipped.sessionAt(time('2026-03-09T07:00:00Z'))?.date).toBe('2026-03-09');
   });
 });
 
@@ -292,6 +372,16 @@ describe('instrument ticks on chart drags', () => {
     new Instrument(banded()).applyTo(c, '1m');
     end('ord:o1', 19.971);
     expect(modify.mock.calls.map(([event]) => event.newPrice)).toEqual([20.05, 20.031, 19.98]);
+  });
+
+  it('gives the chart the schedule its alert drags round with, and clears it for a constant tick', () => {
+    const c = chart();
+    new Instrument(banded()).applyTo(c, '1m');
+    expect(c.tickSchedule()?.tickAt(20.03)).toBe(0.05);
+    expect(c.snapPrice(0, 20.031)).toBe(20.05);
+    new Instrument(cash()).applyTo(c, '1m');
+    expect(c.tickSchedule()).toBeNull();
+    expect(c.snapPrice(0, 20.031)).toBe(roundToTick(20.031, cash().priceTick));
   });
 
   it('lets the host override the instrument after applying it', () => {

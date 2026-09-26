@@ -25,14 +25,16 @@
  */
 import {
   AlertController, ChartObjects, DataLoadingController, ShortcutManager, createChart, darkTheme, lightTheme, registeredIntervals, registeredChartTypes, tryResolveInterval, resolveInterval, isKnownInterval,
-  type Chart, type ChartOptions, type ChartTheme, type DataFeed, type Bar, type SeriesApi, type SeriesType,
+  dataVariantKey, normalizeDataVariant, publishDataContext,
+  type Chart, type ChartOptions, type ChartTheme, type DataFeed, type Bar, type SeriesApi, type SeriesType, type DataVariant,
   type RestoreReport, type BarsRequest, type DataLoadingOptions, type DataLoadingSnapshot, type AlertTriggeredPayload, type TradingCapabilityRequest, type TradingCapabilitySource,
 } from 'openalgo-charts';
 import { DrawingController, drawingShortcuts, keyToDrawingAction, type DrawingKeyContext } from 'openalgo-charts/draw';
 import {
-  WidgetBus, WidgetStorage, createOverlayStack, createTipController, defaultStorage, h, widgetDialog,
+  WidgetBus, WidgetStorage, createOverlayStack, createTipController, defaultStorage, h, historyPress, widgetDialog,
   type OverlayOptions, type StorageLike, type WidgetBusEvents, type WidgetContext, type WidgetDialogName,
 } from './context';
+import { ChartHistory } from './history';
 import { Keymap, openShortcutsPanel, type KeyEventLike, type KeyScope } from './keymap';
 import { mountRail, toolName, type RailHandle, type RailOptions, type RailPrefs } from './rail';
 import { mountStatusline, type StatuslineHandle } from './statusline';
@@ -57,6 +59,7 @@ import { mountWatchlistPanel, type WatchlistPanelOptions } from './watchlist-pan
 import { mountNewsPanel, type NewsPanelOptions } from './news-panel';
 import { mountAccountSummary } from './account-summary';
 import type { AccountStateSource } from 'openalgo-charts/trade';
+import { dataVariantLabel } from './data-status';
 
 /** The intervals offered when the host names none: the registry's codes are appended. */
 export const DEFAULT_INTERVALS: readonly string[] = ['1m', '5m', '15m', '1h', '1d', '1w'];
@@ -96,6 +99,12 @@ export interface WidgetOptions extends Omit<ChartOptions, 'theme'> {
   exchange?: string;
   /** Interval code the registry knows (a built-in token or one passed to `registerInterval`). Default `1d`. */
   interval?: string;
+  /**
+   * Which of the feed's series to show: a session, an adjustment, a currency
+   * or a unit. Default: the feed's own default series. The feed must declare
+   * it through `dataVariants`, or the chart reports it unsupported.
+   */
+  variant?: DataVariant;
   /** The interval pills, each a known code. Default: `DEFAULT_INTERVALS` plus every registered code. */
   intervals?: readonly string[];
   /** Primary series type. Default `candlestick`. Must be a registered chart type. */
@@ -163,6 +172,8 @@ export interface WidgetState {
   interval: string;
   chartType: string;
   theme: WidgetThemeName;
+  /** The data variant, absent for the feed's default. Optional in older records. */
+  variant?: DataVariant;
   chart: WidgetChartState;
   rail: RailPrefs | null;
   /** Optional in older records. Width is bounded when restored. */
@@ -176,7 +187,7 @@ export interface WidgetRestoreReport {
   chart?: RestoreReport;
 }
 
-export type WidgetEventName = 'symbol' | 'interval' | 'theme' | 'layout' | 'data' | 'status';
+export type WidgetEventName = 'symbol' | 'interval' | 'variant' | 'theme' | 'layout' | 'data' | 'status';
 
 export interface Widget {
   /** Managed data owner, or null when the host supplies series data directly. */
@@ -186,6 +197,13 @@ export interface Widget {
   readonly alerts: AlertController;
   /** Shared inventory and supported actions for drawings, indicators and registered profiles. */
   readonly objects: ChartObjects;
+  /**
+   * One undo timeline for the chart: studies, their settings, the chart type,
+   * price scales, panes and drawings. Ctrl+Z, Ctrl+Y, the rail and the mobile
+   * controls all walk it. A host's own change that should not be a step goes
+   * through `history.ignore`; loading a layout with `restoreState` clears it.
+   */
+  readonly history: ChartHistory;
   /** The `.oac-widget` element. */
   readonly root: HTMLElement;
   /** What every mounted piece was handed; a host mounting its own panel wants the same. */
@@ -195,10 +213,19 @@ export interface Widget {
   symbol(): string;
   exchange(): string;
   interval(): string;
+  /** The data variant in use, undefined for the feed's default series. */
+  variant(): Readonly<DataVariant> | undefined;
   chartType(): string;
   theme(): WidgetThemeName;
   setSymbol(symbol: string, exchange?: string): void;
   setInterval(code: string): void;
+  /**
+   * Show another of the feed's series for the same instrument. A change is a
+   * new source: the load in flight is cancelled, the bars are cleared and the
+   * variant is loaded, or reported unsupported when the feed does not declare
+   * it. Undefined returns to the default. Throws a TypeError for a malformed one.
+   */
+  setDataVariant(variant: DataVariant | undefined): void;
   /** Select a renderer while retaining series state. Transform data remains host-owned. */
   setChartType(id: string): void;
   setTheme(theme: WidgetThemeName | ChartTheme): void;
@@ -236,9 +263,18 @@ export interface Widget {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/**
+ * A stored variant: undefined for the default series, null for one this build
+ * cannot read. That one falls back to the default series rather than failing
+ * the widget, and its saved view is dropped, since it was taken on other bars.
+ */
+function savedVariant(value: unknown): Readonly<DataVariant> | undefined | null {
+  try { return normalizeDataVariant(value); } catch { return null; }
+}
+
 /** The options the shell consumes; the rest of `WidgetOptions` is the chart's. */
 const WIDGET_ONLY_KEYS: ReadonlyArray<keyof WidgetOptions> = [
-  'feed', 'symbol', 'exchange', 'interval', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'statusline',
+  'feed', 'symbol', 'exchange', 'interval', 'variant', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'statusline',
   'mobile', 'loading', 'persist', 'storage', 'locale', 'translate', 'indicators', 'symbolSearch', 'lookbackBars', 'now', 'onOrder', 'styleNonce',
   'tradingCapabilities', 'tradingMode', 'tradingLocked', 'account',
   'eventDetails',
@@ -308,6 +344,7 @@ class WidgetContextImpl implements WidgetContext {
   public readonly draw: DrawingController;
   public readonly objects: ChartObjects | undefined;
   public readonly alerts: AlertController | undefined;
+  public readonly history: ChartHistory | undefined;
   public readonly root: HTMLElement;
   public readonly document: Document;
   public readonly keymap: Keymap;
@@ -331,6 +368,7 @@ class WidgetContextImpl implements WidgetContext {
     this.draw = parts.draw;
     this.objects = parts.objects;
     this.alerts = parts.alerts;
+    this.history = parts.history;
     this.root = parts.root;
     this.document = parts.document;
     this.keymap = parts.keymap;
@@ -358,6 +396,7 @@ class WidgetImpl implements Widget {
   public readonly draw: DrawingController;
   public readonly objects: ChartObjects;
   public readonly alerts: AlertController;
+  public readonly history: ChartHistory;
   public readonly root: HTMLElement;
   public readonly context: WidgetContext;
   private readonly _series: SeriesApi;
@@ -389,6 +428,7 @@ class WidgetImpl implements Widget {
   private _symbol: string;
   private _exchange: string;
   private _interval: string;
+  private _variant: Readonly<DataVariant> | undefined;
   private _chartType: string;
   private _chartTypeRequest = 0;
   private _themeName: WidgetThemeName;
@@ -432,6 +472,9 @@ class WidgetImpl implements Widget {
     for (const code of options.intervals ?? []) resolveInterval(code);
     const savedInterval = saved !== null && isKnownInterval(saved.interval) ? saved.interval : '1d';
     this._interval = options.interval ?? savedInterval;
+    // Like the interval: a malformed variant is an error at the call site, and
+    // `_readSaved` has already dropped one the stored record could not name.
+    this._variant = options.variant !== undefined ? normalizeDataVariant(options.variant) : saved?.variant;
     const wantType = options.chartType ?? saved?.chartType ?? 'candlestick';
     if (options.chartType !== undefined && !registeredChartTypes().includes(options.chartType)) {
       throw new Error(`openalgo-charts widget: "${options.chartType}" is not a registered chart type`);
@@ -515,6 +558,19 @@ class WidgetImpl implements Widget {
         else if (object.kind === 'drawing') mountDrawingProperties(this.context, undefined, { ids: [object.sourceId] });
       },
     });
+    // Before any chrome, so the first action a control takes is already a step.
+    this.history = new ChartHistory(this.chart, {
+      draw: this.draw,
+      series: () => this._series,
+      // Through the shell, so the top bar and the persisted layout follow.
+      setChartType: id => this.setChartType(id),
+      onError: ({ direction, error }) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        this._toasts.toast(direction === 'undo'
+          ? widgetText(this.context, 'That step could not be undone: {error}', { error: reason })
+          : widgetText(this.context, 'That step could not be redone: {error}', { error: reason }), 'error');
+      },
+    });
 
     // ── shared furniture ───────────────────────────────────────────────
     const overlays = createOverlayStack(root, doc);
@@ -529,6 +585,7 @@ class WidgetImpl implements Widget {
       draw: this.draw,
       objects: this.objects,
       alerts: this.alerts,
+      history: this.history,
       root,
       document: doc,
       keymap: this._keymap,
@@ -673,7 +730,8 @@ class WidgetImpl implements Widget {
 
     // ── the saved layout, onto the dataset it belongs to ───────────────
     if (saved?.chart !== undefined) {
-      const same = saved.symbol === this._symbol && saved.exchange === this._exchange && saved.interval === this._interval;
+      const same = saved.symbol === this._symbol && saved.exchange === this._exchange && saved.interval === this._interval
+        && dataVariantKey(saved.variant) === dataVariantKey(this._variant);
       const report = this.chart.restoreState(same ? saved.chart : stripView(saved.chart));
       if (report.applied) {
         this._keepView = same;
@@ -704,6 +762,7 @@ class WidgetImpl implements Widget {
   public symbol(): string { return this._symbol; }
   public exchange(): string { return this._exchange; }
   public interval(): string { return this._interval; }
+  public variant(): Readonly<DataVariant> | undefined { return this._variant; }
   public chartType(): string { return this.chart.seriesType(this._series) ?? this._chartType; }
   public theme(): WidgetThemeName { return this._themeName; }
   /** The engine palette in force, for the context's `chartTheme` getter. */
@@ -761,6 +820,22 @@ class WidgetImpl implements Widget {
     this._scheduleSave();
     if (this._opts.feed) void this.reload();
     this._bus.emit('interval', { interval: c });
+  }
+
+  public setDataVariant(variant: DataVariant | undefined): void {
+    const next = normalizeDataVariant(variant);
+    if (dataVariantKey(next) === dataVariantKey(this._variant)) return;
+    this._variant = next;
+    this._cancelNavigation();
+    this._keepView = false;
+    this._pendingView = null;
+    if (this.dataController === null) {
+      this._series.setData([]);
+      this._publishDataContext();
+    }
+    this._scheduleSave();
+    if (this._opts.feed) void this.reload();
+    this._bus.emit('variant', { variant: next });
   }
 
   public setChartType(id: string): void {
@@ -856,9 +931,12 @@ class WidgetImpl implements Widget {
     // Capabilities belong to the instrument, so an interval change retains them
     // while a symbol change waits for fresh metadata from the host.
     const sameInstrument = previous?.symbol === this._symbol && previous.exchange === this._exchange;
-    this.chart.setDataContext({
+    // The variant is part of the source, so it goes through the helper that
+    // makes a change of variant alone count as one.
+    publishDataContext(this.chart, {
       symbol: this._symbol, exchange: this._exchange, interval: this._interval,
       ...(sameInstrument && previous.hasOpenInterest !== undefined ? { hasOpenInterest: previous.hasOpenInterest } : {}),
+      ...(this._variant ? { variant: this._variant } : {}),
     });
   }
 
@@ -866,11 +944,13 @@ class WidgetImpl implements Widget {
     const controller = this.dataController;
     if (controller === null || this._destroyed) return;
     const current = controller.getState().request;
-    const same = current?.symbol === this._symbol && current.exchange === this._exchange && current.interval === this._interval;
+    const same = current?.symbol === this._symbol && current.exchange === this._exchange && current.interval === this._interval
+      && dataVariantKey(current.variant) === dataVariantKey(this._variant);
     if (same) { await controller.refresh(); return; }
     const nowSec = this._opts.loading?.now?.() ?? Math.floor((this._opts.now ?? Date.now)() / 1000);
     const request: BarsRequest = { symbol: this._symbol, exchange: this._exchange, interval: this._interval,
-      ...loadWindow(this._interval, this._opts.lookbackBars ?? DEFAULT_LOOKBACK_BARS, nowSec) };
+      ...loadWindow(this._interval, this._opts.lookbackBars ?? DEFAULT_LOOKBACK_BARS, nowSec),
+      ...(this._variant ? { variant: this._variant } : {}) };
     this._initialView = true;
     this._displayedBars = null;
     this._series.setData([]);
@@ -953,7 +1033,13 @@ class WidgetImpl implements Widget {
       this._statusline?.refresh();
     }
     if (previous?.status === state.status && previous.error === state.error && !['load', 'refresh', 'prepend', 'resume'].includes(state.reason)) return;
-    if (state.status === 'loading') this.context.status(widgetText(this.context, 'Loading {symbol} {interval}', { symbol, interval }));
+    if (state.status === 'unsupported') {
+      // Nothing was fetched and a retry would ask the same provider the same
+      // question, so this says what is missing and leaves the choice to the user.
+      const variant = dataVariantLabel(this.context, state.request.variant, state.unsupported);
+      this.context.status(widgetText(this.context, 'Not available from this source: {variant}', { variant }), 'error');
+      this._bus.emit('data', { symbol, interval, bars: 0, error: state.error?.message });
+    } else if (state.status === 'loading') this.context.status(widgetText(this.context, 'Loading {symbol} {interval}', { symbol, interval }));
     else if (state.status === 'refreshing') this.context.status(widgetText(this.context, 'History is stale. Refreshing {symbol} {interval}', { symbol, interval }));
     else if (state.status === 'error' || state.status === 'stale') {
       this.context.status(state.status === 'stale' ? widgetText(this.context, 'History is stale for {symbol} {interval}. Reload to retry.', { symbol, interval }) : widgetText(this.context, 'Could not load {symbol} {interval}', { symbol, interval }), 'error');
@@ -976,6 +1062,7 @@ class WidgetImpl implements Widget {
       interval: this._interval,
       chartType: this.chartType(),
       theme: this._themeName,
+      ...(this._variant ? { variant: this._variant } : {}),
       chart: this.chart.getState(),
       rail: this._rail?.prefs() ?? null,
       panels: this._dock?.state(),
@@ -983,10 +1070,27 @@ class WidgetImpl implements Widget {
   }
 
   public restoreState(state: unknown): WidgetRestoreReport {
+    // A loaded layout is a new document, not a step: nothing recorded before
+    // it describes the chart it builds, and nothing it sets is the user's edit.
+    const report = this.history.ignore(() => this._restoreState(state));
+    if (report.applied) this.history.clear();
+    return report;
+  }
+
+  private _restoreState(state: unknown): WidgetRestoreReport {
     if (!isRecord(state)) return { applied: false, reason: 'not a widget state object' };
     if (state.version !== undefined && state.version !== WIDGET_STATE_VERSION) {
       return { applied: false, reason: `widget state version ${String(state.version)} is not ${WIDGET_STATE_VERSION}` };
     }
+    // Read before anything is applied: a variant this build cannot name would
+    // be served as some other series, so the whole state is refused. A state
+    // that names none was saved on the feed's default series (getState leaves
+    // the default out, and nothing saved before variants could name another),
+    // so it restores onto the default whatever this widget shows now. Keeping
+    // the current variant instead would land its view on bars it never saw.
+    let variant: Readonly<DataVariant> | undefined;
+    try { variant = normalizeDataVariant(state.variant); }
+    catch (error) { return { applied: false, reason: error instanceof Error ? error.message : 'invalid data variant' }; }
     if (state.theme === 'dark' || state.theme === 'light') this.setTheme(state.theme);
     if (typeof state.chartType === 'string' && registeredChartTypes().includes(state.chartType)) this.setChartType(state.chartType);
     if (state.rail !== undefined && this._rail !== null) this._rail.restorePrefs(state.rail);
@@ -994,7 +1098,8 @@ class WidgetImpl implements Widget {
     const symbol = typeof state.symbol === 'string' ? state.symbol.toUpperCase() : this._symbol;
     const exchange = typeof state.exchange === 'string' ? state.exchange : this._exchange;
     const interval = typeof state.interval === 'string' && isKnownInterval(state.interval) ? state.interval : this._interval;
-    const same = symbol === this._symbol && exchange === this._exchange && interval === this._interval;
+    const sameVariant = dataVariantKey(variant) === dataVariantKey(this._variant);
+    const same = symbol === this._symbol && exchange === this._exchange && interval === this._interval && sameVariant;
     let chart: RestoreReport | undefined;
     if (isRecord(state.chart)) {
       const doc = state.chart as unknown as WidgetChartState;
@@ -1013,6 +1118,10 @@ class WidgetImpl implements Widget {
         this._symbol = symbol;
         this._exchange = exchange;
         this._bus.emit('symbol', { symbol, exchange });
+      }
+      if (!sameVariant) {
+        this._variant = variant;
+        this._bus.emit('variant', { variant });
       }
       this._statusline?.setSymbol(this._symbol, this._exchange, this._interval);
       this._topbar?.refresh();
@@ -1033,6 +1142,8 @@ class WidgetImpl implements Widget {
   private _readSaved(): WidgetState | null {
     const raw = this._storage.get(STATE_KEY);
     if (!isRecord(raw) || raw.version !== WIDGET_STATE_VERSION) return null;
+    const variant = savedVariant(raw.variant);
+    const chart = isRecord(raw.chart) ? (raw.chart as unknown as WidgetChartState) : undefined;
     const out: WidgetState = {
       version: WIDGET_STATE_VERSION,
       symbol: typeof raw.symbol === 'string' ? raw.symbol : '',
@@ -1040,7 +1151,8 @@ class WidgetImpl implements Widget {
       interval: typeof raw.interval === 'string' && raw.interval !== '' ? raw.interval : '1d',
       chartType: typeof raw.chartType === 'string' ? raw.chartType : 'candlestick',
       theme: raw.theme === 'light' ? 'light' : 'dark',
-      chart: isRecord(raw.chart) ? (raw.chart as unknown as WidgetChartState) : (undefined as unknown as WidgetChartState),
+      ...(variant ? { variant } : {}),
+      chart: (chart && variant === null ? stripView(chart) : chart) as WidgetChartState,
       rail: isRecord(raw.rail) ? (raw.rail as unknown as RailPrefs) : null,
       panels: sanitizePanelDockState(raw.panels),
     };
@@ -1115,8 +1227,9 @@ class WidgetImpl implements Widget {
         return false;
       }
       switch (action.type) {
-        case 'undo': draw.undo(); break;
-        case 'redo': draw.redo(); break;
+        // The chart-wide timeline: a drawing, a study and a pane in the order they were made.
+        case 'undo': historyPress(this.context, 'undo'); break;
+        case 'redo': historyPress(this.context, 'redo'); break;
         case 'delete': draw.removeMany(targets()); break;
         case 'duplicate': draw.duplicate(targets()); break;
         case 'nudge': draw.nudge(targets(), action.dx, action.dy); break;
@@ -1133,12 +1246,13 @@ class WidgetImpl implements Widget {
     const G = 'Drawing';
     // The arrows are layered: with nothing selected they decline and the
     // engine's pan runs, so they are not a conflict with it.
-    const edit = (combo: string, label: string, hidden = false, layered = false): void => {
-      km.register(combo, editing, 'widget', { label, group: G, hidden, layered });
+    const edit = (combo: string, label: string, hidden = false, layered = false, group = G): void => {
+      km.register(combo, editing, 'widget', { label, group, hidden, layered });
     };
-    edit('Mod+Z', 'Undo');
-    edit('Mod+Shift+Z', 'Redo');
-    edit('Mod+Y', 'Redo', true);
+    // Undo and redo reach every step on the chart, not only drawings.
+    edit('Mod+Z', 'Undo', false, false, 'Widget');
+    edit('Mod+Shift+Z', 'Redo', false, false, 'Widget');
+    edit('Mod+Y', 'Redo', true, false, 'Widget');
     edit('Mod+C', 'Copy the selected drawing');
     edit('Mod+X', 'Cut the selected drawing');
     edit('Mod+V', 'Paste drawings');
@@ -1205,6 +1319,9 @@ class WidgetImpl implements Widget {
       'alert:created', 'alert:updated', 'alert:removed', 'alert:triggered', 'alert:expired', 'alerts:restored', 'alerts:checkpoint']) {
       this._cleanups.push(this.chart.on(ev, () => this._scheduleSave()));
     }
+    // An undo can set what the chart does not announce, a pane height or a
+    // scale option, and the saved layout has to follow it all the same.
+    this._cleanups.push(this.history.subscribe(() => this._scheduleSave()));
     this._cleanups.push(this.chart.on('alert:triggered', payload => {
       const event = payload as AlertTriggeredPayload;
       this.context.toast(event.message ?? event.title, 'success');
@@ -1239,6 +1356,7 @@ class WidgetImpl implements Widget {
     this._statusline?.destroy();
     this._toasts.destroy();
     this._keymap.destroy();
+    this.history.destroy();
     this.objects.destroy();
     this.alerts.destroy();
     this.draw.destroy();

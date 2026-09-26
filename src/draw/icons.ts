@@ -13,16 +13,23 @@
  * result read as sixty icons rather than as one set, however carefully any
  * single glyph was made. A shipped set is worth more than a better glyph.
  *
- * # Two tiers, one weight
+ * # Two tiers, one line
  *
  * Tool glyphs live on a 24-unit grid and are shown at 24px in the rail. Host
  * chrome (undo, close, the settings tab rail) is shown at 16px beside them, and
  * a 24-grid glyph scaled to 16 lands its 2-unit stroke on 1.33 pixels, blurred
  * across two rows on every edge. So chrome has its own registry drawn on a
- * 16-unit grid with a 1.5 stroke. The two strokes are deliberately not in exact
- * proportion: a small glyph needs a slightly heavier relative stroke than a
- * large one to read as the same weight, and `tests/draw-icons.test.ts` holds
- * the chrome tier inside that band rather than at parity.
+ * 16-unit grid. Both tiers draw a 2-unit stroke, and since each is shown at its
+ * grid size, that is the same 2px line on screen in both rails: a lock under
+ * the tools reads as part of the same set, only smaller.
+ *
+ * The chrome stroke was 1.5 through 2.5.5, chosen to match the tool weight as a
+ * fraction of the box. On integer coordinates a 1.5 stroke covers 0.75 of two
+ * pixel rows, so no edge was ever solid (0.18 of its inked pixels, against 0.59
+ * for the tools). A 1px stroke on half-unit coordinates was tried as well: as
+ * crisp on straight edges, but faint on every curve and visibly lighter than
+ * the tool rail beside it, on both themes. Two it is, with the few glyphs that
+ * were too dense for it redrawn with more air.
  *
  * # The grid
  *
@@ -32,16 +39,21 @@
  *
  *  - **One viewBox per tier.** 24 by 24 for tools, 16 by 16 for chrome, so a
  *    host sets the size once per surface.
- *  - **A margin all round.** Live area 2 to 22 on the tool grid, 1 to 15 on the
- *    chrome grid. Without it, glyphs that happen to reach the edge look larger
- *    than their neighbours and the rail reads as ragged.
- *  - **Integer coordinates.** With `STROKE` of 2, an orthogonal edge centred on
+ *  - **A margin all round.** Live area 2 to 22 on the tool grid, 2 to 14 on the
+ *    chrome grid, so the ink stops a pixel short of the box. Without it,
+ *    glyphs that happen to reach the edge look larger than their neighbours
+ *    and the rail reads as ragged.
+ *  - **Integer coordinates.** With a stroke of 2, an orthogonal edge centred on
  *    an integer covers exactly two device pixels at 1:1, which is what makes it
- *    crisp. Half-unit coordinates were the previous set's crispness bug: at a
- *    1.5 stroke on integers, nothing landed on a pixel boundary at any size.
- *  - **One stroke weight per tier.** Three different weights across identically
- *    sized boxes is the single most visible tell of a set assembled rather than
- *    drawn.
+ *    crisp.
+ *  - **One stroke weight.** Different weights across identically sized boxes
+ *    is the single most visible tell of a set assembled rather than drawn.
+ *  - **The whole glyph in its path.** The marks that tell siblings apart (a
+ *    segment ends in two dots, a ray starts at one, a path ends in a head)
+ *    are small closed shapes drawn in the path itself, so a host that renders
+ *    the path data and nothing else still gets every one of them. An accent
+ *    registry repeats those marks for a fill on top: a dot then paints solid
+ *    rather than as a ring, which adds weight, never identity.
  *
  * # Rendering
  *
@@ -85,31 +97,72 @@ export const ICON_ATTRS = {
 } as const satisfies IconAttrs;
 
 /**
+ * A round mark of radius `r` centred on a grid point: two half-turn arcs, so
+ * the path closes where it starts. Stroked with the glyph's line, radius 1
+ * paints a solid dot of radius 2, twice the line, which is what makes it read
+ * as an anchor; radius 2 is a ring the accent fills.
+ */
+function dot(x: number, y: number, r = 1): string {
+  return `M${x - r} ${y}a${r} ${r} 0 0 0 ${2 * r} 0a${r} ${r} 0 0 0 ${-2 * r} 0z`;
+}
+
+/*
+ * The closed marks of the tool glyphs, written once: each is drawn in its
+ * glyph's path and repeated in `DRAWING_TOOL_ACCENTS` for the fill.
+ */
+const MAGNET_CAPS = 'M5 3h2v3H5zM17 3h2v3h-2z';
+const SEGMENT_ENDS = dot(6, 18) + dot(18, 6);
+const RAY_ORIGIN = dot(4, 18);
+const EXTENDED_DOTS = dot(8, 16) + dot(16, 8);
+const ARROW_HEAD = 'M20 4l-2 8-6-6z';
+const HRAY_ORIGIN = dot(8, 12);
+const CROSS_CENTRE = dot(12, 12);
+const PATH_HEAD = 'M20 8l-6 2 4 4z';
+const POLYLINE_VERTICES = dot(4, 19, 2) + dot(9, 7, 2) + dot(14, 16, 2);
+const LONG_DIRECTION = 'M10 11l3-4 3 4z';
+const SHORT_DIRECTION = 'M10 13l3 4 3-4z';
+
+/**
  * Path data by tool id, plus a few keys a host toolbar needs that are not
  * themselves tools (`cursor`, the group headers).
  *
  * Values are the `d` attribute of one `<path>`. Multiple subpaths are joined
  * into the same string rather than split across elements, so a host renders one
- * node per glyph.
+ * node per glyph, and that node is the whole glyph: its dots and heads are in
+ * the string as outlines. `DRAWING_TOOL_ACCENTS` repeats those marks for a
+ * host that also wants them filled.
  */
 export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
   // ── chrome ──────────────────────────────────────────────────────────────
-  cursor: 'M12 3v6M12 15v6M3 12h6M15 12h6',
-  magnet: 'M6 4v8a6 6 0 0 0 12 0V4M6 9h4M14 9h4',
+  // A pointer, not a cross: the button puts the chart back in its plain mode,
+  // and a cross beside the cross-line tool and a plus read as the same button.
+  cursor: 'M6 3v15l4-4h7zM11 15l3 6',
+  magnet: 'M6 7v5a6 6 0 0 0 12 0V7' + MAGNET_CAPS,
 
   // ── lines ───────────────────────────────────────────────────────────────
-  'trend-line': 'M4 20 20 4',
-  ray: 'M4 20 20 4M2 18 6 22',
-  'extended-line': 'M2 22 22 2',
-  arrow: 'M4 20 18 6M18 6h-6M18 6v6',
+  // Told apart by their ends, which is what differs between the tools: two
+  // anchor dots, one origin dot and an open end, dots inside a line that runs
+  // to both edges, and a head. The ray also leaves at a shallower angle: on
+  // the segment's diagonal, its open end ran through the segment's second
+  // dot and the two overlapped by 87 percent at 24px. A line that extends
+  // runs to the edge of the live area; one that stops ends on its dot.
+  'trend-line': 'M6 18 18 6' + SEGMENT_ENDS,
+  ray: 'M4 18 22 6' + RAY_ORIGIN,
+  'extended-line': 'M2 22 22 2' + EXTENDED_DOTS,
+  arrow: 'M4 20 15 9' + ARROW_HEAD,
   'horizontal-line': 'M2 12h20',
-  'horizontal-ray': 'M6 12H22M4 10V14',
+  // The ray leaves from its anchor a third of the way in and runs to the far
+  // edge. Trimmed from the same line with its dot held only in the accent, it
+  // was the horizontal line at 86 percent overlap for a host drawing the path.
+  'horizontal-ray': 'M8 12h14' + HRAY_ORIGIN,
   'vertical-line': 'M12 2v20',
-  'cross-line': 'M2 12h20M12 2v20',
+  'cross-line': 'M2 12h20M12 2v20' + CROSS_CENTRE,
   'trend-angle': 'M4 20 18 8M4 20h12M8 20a8 8 0 0 0 2-5',
-  'info-line': 'M4 20 20 4M8 8h8',
-  path: 'M2 18 8 8l4 6 4-10',
-  polyline: 'M2 18 8 8l4 6 4-10 4 4',
+  'info-line': 'M6 18 18 6M3 3h8v5H3z' + SEGMENT_ENDS,
+  // A path points somewhere and a polyline only joins its vertices, which is
+  // the difference between the tools: a head on one, vertex rings on the other.
+  path: 'M3 20 7 7l5 9 5-5' + PATH_HEAD,
+  polyline: 'M4 19 9 7l5 9 6-11' + POLYLINE_VERTICES,
 
   // ── channels ────────────────────────────────────────────────────────────
   'parallel-channel': 'M2 16 14 4M8 22 20 10',
@@ -175,9 +228,9 @@ export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
   measure: 'M4 16h16M4 12v8M20 12v8M8 4h8M12 4v6',
   'anchored-vwap': 'M4 4v16M4 15 8 12 12 14 16 8 20 6M2 4h4',
   'fixed-range-volume-profile': 'M4 3v18M4 5h8v3H4M4 10h16v3H4M4 15h12v3H4',
-  'price-range': 'M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4',
-  'date-range': 'M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4',
-  'date-price-range': 'M4 6h16v12H4zM4 12h16M12 6v12',
+  'price-range': 'M12 4v16M7 9l5-5 5 5M7 15l5 5 5-5',
+  'date-range': 'M4 12h16M9 7l-5 5 5 5M15 7l5 5-5 5',
+  'date-price-range': 'M5 6h14v12H5zM5 12h14M12 6v12',
 
   // ── cycles ──────────────────────────────────────────────────────────────
   'cyclic-lines': 'M4 4v16M10 4v16M16 4v16M22 4v16',
@@ -185,16 +238,25 @@ export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
   'sine-line': 'M2 12c3-9 6-9 9 0 3 9 6 9 9 0',
 
   // ── positions and forecast ──────────────────────────────────────────────
-  'long-position': 'M3 15h18v5H3zM3 5h18v5H3zM12 10v5',
-  'short-position': 'M3 5h18v5H3zM3 15h18v5H3zM12 10v5',
+  // A position is one frame split at the entry into its two zones, the
+  // target the taller, with a tick out to the left at the entry price and
+  // the direction solid in the target. A short is the long turned over.
+  // They were one picture in 2.5.5, and the box over a thin stop bar that
+  // replaced it read as an eject key or a laptop. The risk-reward pair
+  // measures instead: from one entry line, the reward as a tall span with a
+  // cap, the risk as a short one the other way, flipped for the short.
+  'long-position': 'M2 14h4M6 3h15v17H6zM6 14h15' + LONG_DIRECTION,
+  'short-position': 'M2 10h4M6 4h15v17H6zM6 10h15' + SHORT_DIRECTION,
   forecast: 'M3 18 9 10l4 4 8-10M13 4h8v8',
-  'risk-reward-long': 'M3 14h18v6H3zM3 4h18v6H3zM12 10v4M6 7h4',
-  'risk-reward-short': 'M3 4h18v6H3zM3 14h18v6H3zM12 10v4M6 17h4',
+  'risk-reward-long': 'M2 14h20M8 14V3M5 3h6M17 14v6M14 20h6',
+  'risk-reward-short': 'M2 10h20M8 10v11M5 21h6M17 10V4M14 4h6',
 
   // ── annotations ─────────────────────────────────────────────────────────
   text: 'M4 5h16M12 5v14M8 19h8',
   note: 'M4 20 9 15M9 5h13v10H9zM4 20v-4',
-  callout: 'M3 4h18v11H3zM8 15l-2 5 6-5',
+  // A callout's tail runs back to a point it annotates, well clear of the
+  // box; a balloon's is a stub under its own anchor, and a comment's smaller.
+  callout: 'M3 3h18v9H11l-6 8 1-8H3z',
   balloon: 'M3 4h18v12H9l-4 4v-4H3z',
   comment: 'M3 5h18v10H3zM6 15v4l4-4',
   signpost: 'M12 21V9M5 3h14v6H5z',
@@ -209,6 +271,32 @@ export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The fills of the tool glyphs' marks, by tool id: anchor dots, pole caps and
+ * arrowheads. Optional: most glyphs have none.
+ *
+ * Every mark here is also drawn, as an outline, in the glyph's own path, so a
+ * host that renders only `DRAWING_TOOL_ICONS` still shows each one. This adds
+ * the fill: a second `<path>` painted in `currentColor` with no stroke of its
+ * own, after the glyph's path. The markup builders in `icon-svg.ts` add it; a
+ * host wrapping the path data itself adds
+ * `<path d="..." fill="currentColor" stroke="none"/>` for the same result.
+ */
+export const DRAWING_TOOL_ACCENTS: Readonly<Record<string, string>> = {
+  magnet: MAGNET_CAPS,
+  'trend-line': SEGMENT_ENDS,
+  ray: RAY_ORIGIN,
+  'extended-line': EXTENDED_DOTS,
+  arrow: ARROW_HEAD,
+  'horizontal-ray': HRAY_ORIGIN,
+  'cross-line': CROSS_CENTRE,
+  'info-line': SEGMENT_ENDS,
+  path: PATH_HEAD,
+  polyline: POLYLINE_VERTICES,
+  'long-position': LONG_DIRECTION,
+  'short-position': SHORT_DIRECTION,
+};
+
+/**
  * The glyph for a tool, or `undefined` when it has none.
  *
  * Undefined rather than a placeholder: a host that renders an empty box has a
@@ -216,6 +304,11 @@ export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
  */
 export function drawingToolIcon(toolId: string): string | undefined {
   return DRAWING_TOOL_ICONS[toolId];
+}
+
+/** The filled accent for a tool glyph, or `undefined` when it has none. */
+export function drawingToolAccent(toolId: string): string | undefined {
+  return DRAWING_TOOL_ACCENTS[toolId];
 }
 
 /** Every id this set covers, for a host building a palette from it. */
@@ -229,11 +322,14 @@ export function drawingToolIconIds(): string[] {
 export const CHROME_ICON_VIEWBOX = '0 0 16 16';
 
 /**
- * Chrome stroke width in viewBox units. Not the tool stroke scaled (that would
- * be 1.33): at 16px a glyph needs a touch more relative weight than at 24px to
- * read as the same line, and 1.5 is where the two rails match by eye.
+ * Chrome stroke width in viewBox units. The same 2 as the tool tier, which at
+ * the two native sizes is the same 2px line on screen. It was 1.5 through 2.5.5:
+ * matched to the tool weight as a fraction of the box, and never crisp, since
+ * a 1.5 stroke on whole units puts every edge three quarters of the way
+ * across a pixel. See the file comment for the 1px alternative and why it
+ * lost.
  */
-export const CHROME_ICON_STROKE = 1.5;
+export const CHROME_ICON_STROKE = 2;
 
 /** Attributes a host should apply to the `<svg>` around a chrome glyph. */
 export const CHROME_ICON_ATTRS = {
@@ -245,10 +341,22 @@ export const CHROME_ICON_ATTRS = {
   strokeLinejoin: 'round',
 } as const satisfies IconAttrs;
 
+/* The closed marks of the chrome glyphs, as above for the tools. */
+const CHROME_MAGNET_CAPS = 'M3 2h2v2H3zM11 2h2v2h-2z';
+const CHROME_PUPIL = dot(8, 8);
+const CHROME_KNOBS = dot(5, 5, 2) + dot(11, 11, 2);
+const CHROME_LENS = dot(8, 9);
+
 /**
  * Path data for host chrome: the buttons around the chart rather than the
- * tools in it. Same rules as the tool tier (one path per glyph, no presentation
- * attributes, integer coordinates) on the 16 grid with a 1..15 live area.
+ * tools in it. Same rules as the tool tier (the whole glyph in one path, its
+ * marks included; no presentation attributes; integer coordinates) on the 16
+ * grid with a 2..14 live area.
+ *
+ * At a 2px line a 16px glyph has room for about four parallel strokes with a
+ * pixel between them, so the dense glyphs are drawn with that in mind: two
+ * sliders rather than three, a lens and a pupil as small solid dots rather
+ * than rings, and no plus squeezed inside a square.
  *
  * The pair `cursor` / `magnet` / `text` also exist in the tool registry, at 24.
  * They are drawn twice on purpose: a rail button and a toolbar button are
@@ -257,28 +365,37 @@ export const CHROME_ICON_ATTRS = {
  */
 export const CHROME_ICONS: Readonly<Record<string, string>> = {
   // ── pointer and snapping ────────────────────────────────────────────────
-  cursor: 'M8 2v4M8 10v4M2 8h4M10 8h4',
-  magnet: 'M3 2v6a5 5 0 0 0 10 0V2M3 5h3M10 5h3',
+  // A pointer, not the cross it was: that cross overlapped `plus` by 92
+  // percent at 16px.
+  cursor: 'M4 2v10l3-3h5zM8 10l2 4',
+  magnet: 'M4 5v3a4 4 0 0 0 8 0V5' + CHROME_MAGNET_CAPS,
 
   // ── state ───────────────────────────────────────────────────────────────
-  lock: 'M3 7h10v7H3zM5 7V5a3 3 0 0 1 6 0v2',
-  unlock: 'M3 7h10v7H3zM5 7V5a3 3 0 0 1 6 0',
-  eye: 'M1 8c2-4 4-6 7-6s5 2 7 6c-2 4-4 6-7 6s-5-2-7-6zM10 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0',
-  'eye-off': 'M1 8c2-4 4-6 7-6s5 2 7 6c-2 4-4 6-7 6s-5-2-7-6zM2 2l12 12',
-  star: 'M8 1l2 5h5l-4 3 1 5-4-3-4 3 1-5-4-3h5z',
+  // Unlocked swings the shackle off to the side. Leaving it in place with
+  // one leg shortened, as before, let the round cap close the gap: the two
+  // overlapped by more than 99 percent at 16px.
+  lock: 'M3 8h10v6H3zM5 8V6a3 3 0 0 1 6 0v2',
+  unlock: 'M3 8h10v6H3zM8 8V5a3 3 0 0 0-6 0',
+  eye: 'M2 8c2-3 4-5 6-5s4 2 6 5c-2 3-4 5-6 5s-4-2-6-5z' + CHROME_PUPIL,
+  'eye-off': 'M2 8c2-3 4-5 6-5s4 2 6 5c-2 3-4 5-6 5s-4-2-6-5zM3 3l10 10',
+  star: 'M8 2l2 4h4l-3 3 1 5-4-3-4 3 1-5-3-3h4z',
   // A pentagram rather than the outline: filled with the default nonzero rule
   // its centre has a winding of two and fills solid, so one path is both a
   // star and its filled state. See CHROME_ICON_FILLED.
-  'star-filled': 'M8 1 12 14 1 6h14L4 14z',
+  'star-filled': 'M8 2l4 12-10-8h12L4 14z',
 
   // ── editing ─────────────────────────────────────────────────────────────
   trash: 'M2 4h12M6 4V2h4v2M3 4l1 10h8l1-10',
-  settings: 'M2 4h12M2 8h12M2 12h12M5 2v4M11 6v4M7 10v4',
+  settings: 'M2 5h12M2 11h12' + CHROME_KNOBS,
   undo: 'M3 6h7a4 4 0 0 1 0 8H6M6 3 3 6l3 3',
   redo: 'M13 6H6a4 4 0 0 0 0 8h4M10 3l3 3-3 3',
   copy: 'M6 6h8v8H6zM10 6V2H2v8h4',
-  paste: 'M4 3H3v11h10V3h-1M6 2h4v2H6z',
-  duplicate: 'M6 6h8v8H6zM10 6V2H2v8h4M10 8v4M8 10h4',
+  // A board with its clip and two lines of content: the empty board beside
+  // the trash can's lid and handle overlapped it by 72 percent at 16px.
+  paste: 'M3 3h10v11H3zM6 2h4v2H6zM6 8h4M6 11h4',
+  // The copy of a square, as a square and a plus: a plus inside the front
+  // square of `copy` leaves no pixel between the two at this weight.
+  duplicate: 'M8 8h6v6H8zM5 2v6M2 5h6',
   front: 'M2 9h6v5H2zM11 14V2M8 5l3-3 3 3',
   back: 'M2 2h6v5H2zM11 2v12M8 11l3 3 3-3',
   text: 'M3 3h10M8 3v10M6 13h4',
@@ -291,12 +408,27 @@ export const CHROME_ICONS: Readonly<Record<string, string>> = {
   minus: 'M2 8h12',
   search: 'M7 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 11l3 3',
   grid: 'M2 2h12v12H2zM2 8h12M8 2v12',
-  link: 'M6 10l4-4M7 4l1-1a3 3 0 0 1 4 4l-1 1M9 12l-1 1a3 3 0 0 1-4-4l1-1',
-  unlink: 'M7 4l1-1a3 3 0 0 1 4 4l-1 1M9 12l-1 1a3 3 0 0 1-4-4l1-1M4 4l8 8',
+  // Two half links and the bar between them; unlinked drops the bar and
+  // marks the break.
+  link: 'M6 5H5a3 3 0 0 0 0 6h1M10 5h1a3 3 0 0 1 0 6h-1M6 8h4',
+  unlink: 'M6 5H5a3 3 0 0 0 0 6h1M10 5h1a3 3 0 0 1 0 6h-1M8 2v1M8 13v1',
 
   // ── capture ─────────────────────────────────────────────────────────────
-  camera: 'M2 5h3l1-2h4l1 2h3v8H2zM8 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  camera: 'M2 5h3l1-2h4l1 2h3v8H2z' + CHROME_LENS,
   download: 'M8 2v9M4 7l4 4 4-4M2 14h12',
+};
+
+/**
+ * The fills of the chrome glyphs' marks, as `DRAWING_TOOL_ACCENTS` is for the
+ * tools: each mark is outlined in the glyph's path, and this paints it solid.
+ * At 16px a ring of a 2px line is mostly line already, so the fill matters
+ * most for the slider knobs.
+ */
+export const CHROME_ICON_ACCENTS: Readonly<Record<string, string>> = {
+  magnet: CHROME_MAGNET_CAPS,
+  eye: CHROME_PUPIL,
+  settings: CHROME_KNOBS,
+  camera: CHROME_LENS,
 };
 
 /**
@@ -309,6 +441,11 @@ export const CHROME_ICON_FILLED: ReadonlySet<string> = new Set(['star-filled']);
 /** The chrome glyph for an id, or `undefined` when there is none. */
 export function chromeIcon(id: string): string | undefined {
   return CHROME_ICONS[id];
+}
+
+/** The filled accent for a chrome glyph, or `undefined` when it has none. */
+export function chromeIconAccent(id: string): string | undefined {
+  return CHROME_ICON_ACCENTS[id];
 }
 
 /** Every id the chrome tier covers. */

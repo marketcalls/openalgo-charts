@@ -387,6 +387,15 @@ describe('applying a layout', () => {
 
   it('recovers an unambiguous legacy request and keeps state-only layouts usable', () => {
     expect(primaryLayoutSelection(V1_DOC).request).toEqual({ symbol: 'AAPL', interval: '1d', period: '1y' });
+    // A session is part of the dataset: a regular view does not land on extended bars.
+    expect(datasetKey({ symbol: 'AAPL', interval: '5m', period: '1mo' })).toBe('AAPL|5m|1mo');
+    expect(datasetKey({ symbol: 'AAPL', interval: '5m', period: '1mo', session: 'regular' })).toBe('AAPL|5m|1mo');
+    expect(datasetKey({ symbol: 'AAPL', interval: '5m', period: '1mo', session: 'extended' })).toBe('AAPL|5m|1mo|extended');
+    expect(primaryLayoutSelection({ request: { symbol: 'AAPL', interval: '5m', period: '1mo', session: 'extended' } }).request)
+      .toEqual({ symbol: 'AAPL', interval: '5m', period: '1mo', session: 'extended' });
+    expect(primaryLayoutSelection({ dataset: 'AAPL|5m|1mo|extended' }).request)
+      .toEqual({ symbol: 'AAPL', interval: '5m', period: '1mo', session: 'extended' });
+    expect(() => primaryLayoutSelection({ request: { symbol: 'AAPL', interval: '5m', period: '1mo', session: 'overnight' } })).toThrow();
     expect(primaryLayoutSelection({ version: 1 }).request).toBeNull();
     expect(primaryLayoutSelection({ dataset: 'A|B|1d|1y' }).request).toBeNull();
     expect(primaryLayoutSelection({ dataset: 'AAPL|unsupported|1y' }).request).toBeNull();
@@ -526,6 +535,24 @@ describe('layout files', () => {
     expect(await importLayoutFile('{oops')).toBe(false);
     expect(app.chart.restored).toHaveLength(1);
     expect(toastsShown(dom).pop()).toContain('not a layout');
+  });
+
+  it('leaves out a study a file restricts, and keeps the protected study of this host through the import', async () => {
+    const doc = { ...upgradeLayout(V1_DOC), dataset: 'MSFT|1h|1mo',
+      indicators: [
+        { indicatorId: 'rsi', settings: {}, paneIndex: 1 },
+        { indicatorId: 'vwap', settings: {}, paneIndex: 0, instanceId: 'theirs', policy: { removable: false } },
+      ],
+      secondary: { state: { indicators: [{ indicatorId: 'sma', settings: {}, paneIndex: 0, policy: { listed: false } }] } } };
+    const parsed = parseLayoutFile(JSON.stringify({ layout: doc }));
+    expect(parsed.indicators).toEqual([{ indicatorId: 'rsi', settings: {}, paneIndex: 1 }]);
+    expect(parsed.secondary.state.indicators).toEqual([]);
+    // The chart holds the host's protected study: the import brings the file's studies and keeps it.
+    const own = { indicatorId: 'vwap', settings: {}, paneIndex: 0, instanceId: 'vwap-9', policy: { removable: false, configurable: false, movable: false } };
+    app.chart.state.indicators = [own];
+    app.chart.indicators = () => [{ id: 'vwap-9', indicatorId: 'vwap', policy: () => own.policy }];
+    expect(await importLayoutFile(JSON.stringify({ layout: doc }))).toBe(true);
+    expect(app.chart.restored[0].indicators).toEqual([{ indicatorId: 'rsi', settings: {}, paneIndex: 1 }, own]);
   });
 
   it('drops every drawing policy from a file, so a shared layout cannot plant a drawing no control removes', async () => {

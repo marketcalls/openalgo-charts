@@ -8,8 +8,17 @@
  *   base canvas (2D context, z 0): background, grid, the series pass, the
  *     normal-layer primitives, the axis strip (ladder, last-price tag, value
  *     tags, trading pills). Repainted on Light and Full.
- *   top canvas (2D context, z 1): crosshair, hover highlights, primitives
- *     being dragged. Repainted on Cursor.
+ *   top canvas (2D context, z 1): the crosshair and its tags, and the
+ *     top-layer primitives (drawings over the series or lifted for a drag,
+ *     legends, tables, trading buttons, trade markers). Repainted on Cursor.
+ *     Order and position lines are normal-layer price lines on the base canvas.
+ *
+ * Both canvases are the pane's height. Their backing store is `media x dpr`,
+ * or the device-pixel box the browser reports where it reports one
+ * (`CanvasLayer.setDeviceSize`), and the chart puts every pane boundary on a
+ * device pixel, so neither canvas is ever stretched by a fraction of a pixel.
+ * Under the rule between panes (`setSeparator`) they start one CSS pixel down
+ * at a whole-number ratio and at the pane's top at a fractional one.
  *
  * A GPU backend adds no canvas to the pile. It rasterises the series pass on
  * one page-wide offscreen surface shared by every pane of every chart and
@@ -21,7 +30,7 @@
  * browser's cap on live WebGL contexts never limits how many panes a page
  * can show.
  */
-import { CanvasLayer } from './canvas';
+import { CanvasLayer, hairlineHeight, separatorIsBorder } from './canvas';
 import { PriceScale } from '../scale/price-scale';
 import { type TimeScale } from '../scale/time-scale';
 import { type DataLayer } from '../model/data-layer';
@@ -41,7 +50,7 @@ import {
 } from '../render/axis';
 import { drawCrosshair, drawCrosshairTag, resolveCrosshairStyle } from '../render/crosshair';
 import { isInvisible } from '../render/pill';
-import { bestHit, type IPrimitive, type PrimitiveHit, type PrimitiveHost, type PrimitiveRenderContext } from '../primitives/primitive';
+import type { IPrimitive, PrimitiveHit, PrimitiveHost, PrimitiveRenderContext, ZOrder } from '../primitives/primitive';
 import { PaneLegend } from '../primitives/pane-legend';
 import { backendDegradation, type IRenderBackend, type RendererFallbackReason } from '../render/backend';
 import { Canvas2dBackend } from '../render/canvas2d-backend';
@@ -117,6 +126,12 @@ export interface PaneRenderContext {
    * document that is meant to sit on the host's own page.
    */
   paintBackground?: boolean;
+  /**
+   * The series a series-band entry ('source:primary', 'indicator:<id>') paints
+   * last on this pane, or undefined when it has none here. A primitive placed
+   * above that entry paints right after it.
+   */
+  stackSlot?(entry: string): SeriesRecord | undefined;
 }
 
 /**
@@ -135,10 +150,15 @@ function seriesTagColor(style: SeriesStyle, up: boolean): string | undefined {
   return undefined;
 }
 
+/** Where a z-order band paints, back to front; the series band sits between 1 and 2. */
+const HIT_RANK: Record<ZOrder, number> = { bottom: 0, normal: 2, top: 3 };
+
 export class Pane {
   public readonly element: HTMLElement;
   public readonly base: CanvasLayer;
   public readonly top: CanvasLayer;
+  /** The rule over the pane's top edge, shown on every pane but the one against the chart's top. */
+  private readonly _separator: HTMLElement;
   /**
    * What paints this pane's series onto `base`. Everything else on that canvas
    * (background, grid, axes, primitives) the pane draws itself on the 2D
@@ -166,6 +186,14 @@ export class Pane {
   private readonly _series: SeriesRecord[] = [];
   private readonly _primitives: IPrimitive[] = [];
   private readonly _primitiveScales = new Map<IPrimitive, PriceScaleId>();
+  /** Primitives painted inside the series band, each with the entry it sits directly above. */
+  private readonly _stackAbove = new Map<IPrimitive, string>();
+  /**
+   * The chart's price source when it is on this pane. It is the instrument the
+   * readout, the last-price line and the rebasing modes describe wherever it
+   * paints: moved over a study it is no longer the first series here.
+   */
+  private _source: SeriesRecord | null = null;
   private _destroyed = false;
   private _width = 0;
   private _height = 0;
@@ -181,9 +209,11 @@ export class Pane {
     this.element.style.width = '100%';
     this.element.style.flex = '1 1 auto';
     this.element.style.overflow = 'hidden';
-    // The rule between stacked panes. A CSS border rather than a canvas line:
-    // it lands on the DOM box boundary, so it cannot drift from the pane it
-    // separates when weights change, and costs nothing to repaint.
+    // The rule between stacked panes is DOM rather than a canvas line: it sits
+    // on the box boundary, so it cannot drift from the pane it separates when
+    // weights change, and costs nothing to repaint. At a whole-number ratio it
+    // is this 1 px border, the canvases starting under it and their last row
+    // clipped; see `setSeparator` for the fractional ones.
     this.element.style.borderTopStyle = 'solid';
     this.element.style.borderTopWidth = '0px';
     this.element.style.boxSizing = 'border-box';
@@ -191,6 +221,19 @@ export class Pane {
     this.top = new CanvasLayer(doc, 1);
     this.element.appendChild(this.base.element);
     this.element.appendChild(this.top.element);
+    // The rule at a fractional ratio: a box laid over the canvases' first rows.
+    const rule = doc.createElement('div');
+    const s = rule.style;
+    s.position = 'absolute';
+    s.left = '0';
+    s.top = '0';
+    s.width = '100%';
+    s.height = '0px';
+    s.zIndex = '2';
+    s.pointerEvents = 'none';
+    s.display = 'none';
+    this._separator = rule;
+    this.element.appendChild(rule);
     this._backend = backend;
     // The base canvas already holds a 2D context (CanvasLayer asks for it on
     // construction), so the backend is handed that one rather than left to ask
@@ -481,6 +524,26 @@ export class Pane {
     for (let i = 0; i < this._series.length; i++) if (members.has(this._series[i])) this._series[i] = local[index++];
   }
 
+  /** Name the chart's price source on this pane, or null when it is elsewhere or gone. */
+  public setSourceSeries(record: SeriesRecord | null): void {
+    this._source = record;
+  }
+
+  /** The price source when it shows a price here, else undefined. */
+  private _shownSource(): SeriesRecord | undefined {
+    const s = this._source;
+    return s !== null && s.style.visible !== false && getChartType(s.type).isPriceSeries && this._series.includes(s) ? s : undefined;
+  }
+
+  /** Move one series to just before `before`, or to the end for null: the price source taking its place. */
+  public moveSeries(record: SeriesRecord, before: SeriesRecord | null): void {
+    const from = this._series.indexOf(record);
+    if (from < 0 || record === before) return;
+    this._series.splice(from, 1);
+    const at = before === null ? -1 : this._series.indexOf(before);
+    this._series.splice(at < 0 ? this._series.length : at, 0, record);
+  }
+
   /** Reorder owned visuals within each renderer layer. */
   public reorderPrimitives(ordered: readonly IPrimitive[]): void {
     const members = new Set(ordered);
@@ -495,11 +558,60 @@ export class Pane {
     if (index < 0 || target === this || target._destroyed || target.hasPrimitive(primitive)) return false;
     const scaleId = this._primitiveScales.get(primitive);
     if (scaleId !== undefined) target._scaleFor(scaleId);
+    const entry = this._stackAbove.get(primitive);
     this._primitives.splice(index, 1);
     this._primitiveScales.delete(primitive);
+    this._stackAbove.delete(primitive);
     target._primitives.push(primitive);
     if (scaleId !== undefined) target._primitiveScales.set(primitive, scaleId);
+    if (entry !== undefined) target._stackAbove.set(primitive, entry);
     return true;
+  }
+
+  /**
+   * Paint an attached primitive in the series band, directly above the entry
+   * `above` names, instead of in its own z-order band; null puts it back. An
+   * entry with no series on this pane leaves it in its own band.
+   */
+  public setPrimitiveStackAbove(primitive: IPrimitive, above: string | null): boolean {
+    if (this._destroyed || !this.hasPrimitive(primitive)) return false;
+    if (above === null) this._stackAbove.delete(primitive);
+    else this._stackAbove.set(primitive, above);
+    return true;
+  }
+
+  /** The entry a primitive is placed above, or null for one in its own band. */
+  public primitiveStackAbove(primitive: IPrimitive): string | null {
+    return this._stackAbove.get(primitive) ?? null;
+  }
+
+  /**
+   * The placed primitives this frame can honour, keyed by the series each
+   * paints right after, or null when there are none (the common case, which
+   * then costs nothing).
+   */
+  private _slotted(live: readonly IPrimitive[], ctx: PaneRenderContext): Map<IPrimitive, SeriesRecord> | null {
+    if (this._stackAbove.size === 0 || ctx.stackSlot === undefined) return null;
+    let out: Map<IPrimitive, SeriesRecord> | null = null;
+    for (const primitive of live) {
+      const entry = this._stackAbove.get(primitive);
+      const after = entry === undefined ? undefined : ctx.stackSlot(entry);
+      if (after !== undefined && this._series.includes(after)) (out ??= new Map()).set(primitive, after);
+    }
+    return out;
+  }
+
+  /**
+   * Whether `primitive` paints under `record`: in the band behind the series,
+   * or in the series band after an earlier series. The chart asks when a
+   * drawing and a series are both under the pointer, so the one painted on top
+   * takes the context menu.
+   */
+  public paintsBelowSeries(primitive: IPrimitive, record: SeriesRecord, ctx: PaneRenderContext): boolean {
+    const entry = this._stackAbove.get(primitive);
+    const after = entry === undefined ? undefined : ctx.stackSlot?.(entry);
+    const at = after === undefined ? -1 : this._series.indexOf(after);
+    return at >= 0 ? at < this._series.indexOf(record) : primitive.zOrder() === 'bottom';
   }
 
   /**
@@ -545,6 +657,7 @@ export class Pane {
     if (i < 0) return false;
     this._primitives.splice(i, 1);
     this._primitiveScales.delete(primitive);
+    this._stackAbove.delete(primitive);
     primitive.detached?.();
     return true;
   }
@@ -553,6 +666,7 @@ export class Pane {
   public destroy(): void {
     this._destroyed = true;
     this._primitiveScales.clear();
+    this._stackAbove.clear();
     for (const p of this._primitives) p.detached?.();
     this._primitives.length = 0;
     this._backend.destroy();
@@ -578,7 +692,7 @@ export class Pane {
       hoverKey: ctx.hoverKey ?? null,
       dragId: ctx.dragId ?? null,
       bars: () => {
-        for (const s of this._series) {
+        for (const s of this._source !== null && this._series.includes(this._source) ? [this._source, ...this._series] : this._series) {
           if (getChartType(s.type).isPriceSeries) return ctx.dataLayer.seriesBars(s.dataId);
         }
         return [];
@@ -600,15 +714,65 @@ export class Pane {
     return ctx.collapsed === true ? this._primitives.filter(p => p instanceof PaneLegend) : this._primitives;
   }
 
-  /** Topmost primitive hit at media-px (x,y) relative to this pane's plot. */
-  public hitTestPrimitives(x: number, y: number, ctx: PaneRenderContext): PrimitiveHit | null {
-    const prc = this._primitiveContext(ctx);
-    return bestHit(this._live(ctx).map((p) => {
-      if (!p.hitTest) return null;
+  /**
+   * Topmost primitive hit at media-px (x,y) relative to this pane's plot.
+   * `except` is left out, for the chart's corner mark, which yields to
+   * anything else at the point.
+   *
+   * What paints over the series (the overlay band and the front) beats what
+   * paints with or behind it (a drawing or a primitive placed in the series
+   * band, a drawing sent behind the series, a bottom primitive), whatever the
+   * distance: a box under an order line gives the press to the line, as the
+   * eye does. On either side the nearest wins, then the one painted later in
+   * band order, as `bestHit` ranks them. A hit painted by a primitive placed
+   * in the series band names it (`paintedBy`), so the chart can rank it
+   * against a series painted over it too.
+   */
+  public hitTestPrimitives(x: number, y: number, ctx: PaneRenderContext, except?: IPrimitive | null): PrimitiveHit | null {
+    const prc = this._primitiveContext(ctx), live = this._live(ctx), slotted = this._slotted(live, ctx);
+    let best: PrimitiveHit | null = null, bestRank = 0;
+    for (const p of live) {
+      if (!p.hitTest || p === except) continue;
       const context = this._boundPrimitiveContext(p, prc, ctx);
-      const hit = p.hitTest(x, y, context);
-      return hit !== null && this._primitiveScales.has(p) ? { ...hit, priceScale: context.priceScale } : hit;
-    }));
+      let hit = p.hitTest(x, y, context);
+      if (hit === null) continue;
+      if (this._primitiveScales.has(p)) hit = { ...hit, priceScale: context.priceScale };
+      const painter = hit.paintedBy ?? p, after = slotted?.get(painter);
+      if (after !== undefined) hit = { ...hit, paintedBy: painter };
+      const rank = after !== undefined ? 1 + (this._series.indexOf(after) + 1) / (this._series.length + 1)
+        : HIT_RANK[painter === p ? hit.zOrder : painter.zOrder()];
+      // Over the series (rank 2 and up) first, then the nearest, then the higher band.
+      const side = +(rank >= 2) - +(bestRank >= 2);
+      if (best === null || side > 0 || side === 0 && (hit.distance < best.distance || hit.distance === best.distance && rank > bestRank)) {
+        best = hit; bestRank = rank;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Draw the rule over this pane's top edge in `color` at device pixel ratio
+   * `dpr`, or none with a null colour.
+   *
+   * At a whole-number ratio it is the pane's 1 px top border, with the
+   * canvases starting under it: 1 px is whole device pixels there, and it is
+   * the layout, and the pane-local y, that every earlier release showed. At a
+   * fractional ratio a 1 px border is 1.25 or 1.5 device pixels, which starts
+   * the canvases part way into a pixel, and the browser then resamples the
+   * whole pane and blends the rule into it. There the rule is a box
+   * `hairlineHeight(dpr)` tall, one device pixel, laid over the canvases'
+   * first rows, and the canvases start on the pane's own top.
+   */
+  public setSeparator(color: string | null, dpr: number): void {
+    const border = separatorIsBorder(dpr) ? color : null;
+    const over = border === null ? color : null;
+    const box = this.element.style;
+    box.borderTopWidth = border === null ? '0px' : '1px';
+    box.borderTopColor = border ?? 'transparent';
+    const s = this._separator.style;
+    s.display = over === null ? 'none' : '';
+    s.height = `${over === null ? 0 : hairlineHeight(dpr)}px`;
+    s.background = over ?? 'transparent';
   }
 
   public resize(width: number, height: number, dpr: number): void {
@@ -766,7 +930,10 @@ export class Pane {
     range: { from: number; to: number },
     honorOffset = false,
   ): number | null {
-    for (const s of this._series) {
+    // The price source first: what a rebased axis quotes against must not
+    // change when the source is moved over a study.
+    const source = this._shownSource();
+    for (const s of source ? [source, ...this._series] : this._series) {
       if (s.style.visible === false || !match(s)) continue;
       const shift = honorOffset ? s.style.barOffset ?? 0 : 0;
       for (const ib of ctx.dataLayer.visibleBars(s.dataId, range.from - shift, range.to - shift)) {
@@ -836,13 +1003,19 @@ export class Pane {
 
     // bottom-layer primitives (background zones) draw behind series
     const prc = this._primitiveContext(ctx);
-    for (const p of live) if (p.zOrder() === 'bottom') p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
+    const slotted = this._slotted(live, ctx);
+    for (const p of live) if (p.zOrder() === 'bottom' && !slotted?.has(p)) p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
 
     // series (registry-driven — the core never switches on type)
     const range = ctx.timeScale.visibleRange();
     // Last-price line/tag follows the pane's readout series (the main one),
     // whichever side its scale is drawn on.
     const readout = this._readoutScale();
+    // The instrument owns the last-price line: the price source when it shows
+    // here, else the first price series on the readout scale, as it always was.
+    const source = this._shownSource();
+    const instrument = source !== undefined && this._scaleFor(source.scaleId) === readout ? source
+      : this._series.find(s => s.style.visible !== false && getChartType(s.type).isPriceSeries && this._scaleFor(s.scaleId) === readout);
     let lastEntry: { close: number; up: boolean; showLine: boolean; showTag: boolean } | null = null;
     // Every visible axis describes its own sources, even when the pane's main
     // readout belongs to the other side or a hidden scale.
@@ -851,7 +1024,9 @@ export class Pane {
       ? conflationGroupSize(ctx.timeScale.barSpacing, dpr, 0.5, ctx.conflationFactor)
       : 1;
     for (const s of this._series) {
-      if (s.style.visible === false || !open) continue;
+      // What sits directly above this series paints right after it, hidden or
+      // not: the slot belongs to the entry, not to whether it is showing.
+      if (s.style.visible === false || !open) { this._paintSlot(slotted, s, g, prc, ctx, target); continue; }
       const scale = this._scaleFor(s.scaleId);
       const priceToY = (p: number): number => scale.priceToY(p);
       const entry = getChartType(s.type);
@@ -876,7 +1051,7 @@ export class Pane {
       const last = ctx.dataLayer.lastIndexedBar(s.dataId);
       if (last !== null) {
         const color = seriesTagColor(s.style, last.bar.close >= last.bar.open);
-        if (scale === readout && entry.isPriceSeries && lastEntry === null) {
+        if (s === instrument && lastEntry === null) {
           // The first price series on the readout scale is the instrument, and
           // it owns the last-price line and the countdown tag.
           lastEntry = {
@@ -895,6 +1070,7 @@ export class Pane {
           }
         }
       }
+      this._paintSlot(slotted, s, g, prc, ctx, target);
     }
     // Still inside the clip and before the normal-layer primitives: a backend
     // that batched the series has to land them under the price lines and
@@ -958,7 +1134,7 @@ export class Pane {
     for (const slot of slots) paintAxis(slot);
 
     // normal-layer primitives (price lines, markers, events) draw over series
-    for (const p of live) if (p.zOrder() === 'normal') p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
+    for (const p of live) if (p.zOrder() === 'normal' && !slotted?.has(p)) p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
 
     if (ctx.showTimeAxis) {
       // The zone goes to the axis rather than being pre-baked into a formatter
@@ -973,6 +1149,23 @@ export class Pane {
         dpr, ctx.sessionClock, axisStyle);
     }
     g.restore(); // end plot shift
+  }
+
+  /**
+   * Paint the primitives placed directly above `record`. A backend that
+   * batches series flushes first, so the batch so far lands under them and
+   * the series after them on top, the way it keeps a 2D fallback type in order.
+   */
+  private _paintSlot(slotted: Map<IPrimitive, SeriesRecord> | null, record: SeriesRecord, g: CanvasRenderingContext2D,
+    prc: PrimitiveRenderContext, ctx: PaneRenderContext, target: CanvasRenderingContext2D | undefined): void {
+    if (slotted === null) return;
+    let flushed = false;
+    for (const [p, after] of slotted) {
+      if (after !== record) continue;
+      if (!flushed && target === undefined) this._backend.endFrame();
+      flushed = true;
+      p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
+    }
   }
 
   /**
@@ -995,7 +1188,11 @@ export class Pane {
     g.save();
     if (layout.plotLeft > 0) g.translate(Math.round(layout.plotLeft * dpr), 0);
     const prc = this._primitiveContext(ctx);
-    for (const p of this._live(ctx)) if (p.zOrder() === 'top') p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
+    const live = this._live(ctx);
+    // Resolved only for a top primitive placed in the series band: this runs on
+    // every pointer move, and a drawing's series layers are not top primitives.
+    const slotted = this._stackAbove.size === 0 ? null : this._slotted(live.filter(p => p.zOrder() === 'top' && this._stackAbove.has(p)), ctx);
+    for (const p of live) if (p.zOrder() === 'top' && !slotted?.has(p)) p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
     if (cross !== null) {
       const style = resolveCrosshairStyle(ctx.theme, ctx.canvasOptions?.crosshair, dpr);
       // A strip has no plot to cross; its time tag below still follows the pointer.
@@ -1045,12 +1242,15 @@ export class Pane {
   }
 
   /**
-   * The scale this pane's price readout belongs to: the one its first visible
-   * price series maps to, falling back to the right scale. A pane whose series
+   * The scale this pane's price readout belongs to: the one the chart's price
+   * source maps to while it shows here, else the one its first visible price
+   * series maps to, falling back to the right scale. A pane whose series
    * sit on the left axis has nothing on the right one, and reading the
    * crosshair price off it would tag the cursor with the 0..1 placeholder.
    */
   private _readoutScale(): PriceScale {
+    const source = this._shownSource();
+    if (source !== undefined) return this._scaleFor(source.scaleId);
     for (const s of this._series) {
       if (s.style.visible === false) continue;
       if (getChartType(s.type).isPriceSeries) return this._scaleFor(s.scaleId);

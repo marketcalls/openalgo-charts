@@ -146,8 +146,10 @@ describe('descriptors that name no target', () => {
       { kind: 'IndicatorDrawings', pane: 0, overlay: false, scale: 'right' },
     ]);
     expect(paneLayers.every(layer => layer.ops.length > 0) && priceLayers.every(layer => layer.ops.length > 0)).toBe(true);
-    expect(await digest(paneLayers.map(layer => layer.ops))).toBe('53bd135f90d67b4e86db39afd7837a05d8c2bc94d5308f2ccbc712af31fbd07d');
-    expect(await digest(priceLayers.map(layer => layer.ops))).toBe('25f04af979b9d3e88e7b1a818355bb0671666a039180df3eedaeacfb705a9eb8');
+    // Re-pinned when pane boundaries moved onto whole device pixels: with that
+    // rounding bypassed, these op streams still hash to the digests pinned before.
+    expect(await digest(paneLayers.map(layer => layer.ops))).toBe('fa75466e0876a1a537e6859d4bf8f96a02ee4be5671ae9a3d2fd16c9de6d8723');
+    expect(await digest(priceLayers.map(layer => layer.ops))).toBe('e6737b9553bd21ee5cfe92260aa35ea63819a5146141eb449efbf061918bf833');
   });
 
   it('leave a layer first made on a live pass above the studies after it, and restack nothing', () => {
@@ -312,6 +314,22 @@ describe('drawing targets', () => {
     const painted = () => ownedLayers(chart, study).filter(layer => layer.kind === 'IndicatorDrawings').map(layer => layer.ops.length > 0);
     expect(painted()).toEqual([true, true]);
     study.setVisible(false);
+    expect(painted()).toEqual([false, false]);
+    study.setVisible(true);
+    expect(painted()).toEqual([true, true]);
+  });
+
+  it('makes a target layer hidden when the study is hidden, and shows it with the study', () => {
+    const { chart } = mount();
+    const study = chart.addIndicator(routedDraws(), { zone: 'study' });
+    study.setVisible(false);
+    // A pass while hidden routes a shape somewhere new: its layer must not paint yet.
+    study.setSettings({ zone: 'price' });
+    expect(drawLayers(chart, study)).toEqual([
+      { pane: 1, scale: 'right', overlay: false, ids: ['ray'] },
+      { pane: 0, scale: null, overlay: true, ids: ['zone'] },
+    ]);
+    const painted = () => ownedLayers(chart, study).filter(layer => layer.kind === 'IndicatorDrawings').map(layer => layer.ops.length > 0);
     expect(painted()).toEqual([false, false]);
     study.setVisible(true);
     expect(painted()).toEqual([true, true]);
@@ -962,6 +980,26 @@ describe('routed layer lifecycle', () => {
     // Earlier outputs of the same pass are not rolled back.
     expect(study.values().osc[0]).toBe(2);
     expect(markerLayers(chart, study).map(layer => layer.ids)).toEqual([['next']]);
+  });
+
+  it('holds back the bar colours of a settings change whose drawing target is rejected', () => {
+    const id = `targets-settings-colours-${seq++}`;
+    registerIndicator({
+      id, name: 'Coloured settings', placement: 'pane', plots: PLOTS, calc: CALC,
+      inputs: [{ key: 'bad', type: 'boolean', label: 'Bad', default: false }],
+      barColors: ({ bars, settings }) => bars.map(() => (settings.bad === true ? '#ff0000' : '#00ff00')),
+      draws: ({ bars, settings }) => [{ kind: 'box', from: { time: bars[10].time, price: 124 }, to: { time: bars[20].time, price: 112 },
+        ...(settings.bad === true ? { plot: 'missing' } : { overlay: true }) } as never],
+    });
+    const { chart } = mount();
+    const study = chart.addIndicator(id);
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+    // The settings path reorders every study's resources after its pass, which must not run the colours of a failed one.
+    study.setSettings({ bad: true });
+    expect(study.dataStatus()?.state).toBe('error');
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+    expect(chart.moveIndicator(study.id, chart.panes().length)).toBe(true);
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
   });
 
   it('keeps a study\'s marks under its shapes on the candles when a later study restacks the pane', () => {

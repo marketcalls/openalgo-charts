@@ -30,8 +30,8 @@ const quantityCheck = validateQuantity(150, orderConstraintsForInstrument(instru
 
 The chart must already have a primary series. Clear old bars before applying a
 different source or interval; unsupported intervals reject before chart mutation.
-`applyTo` updates the timezone, price tick, primary price-scale formatting and data
-context. Oscillators and volume keep their own units. Reapply after replacing the
+`applyTo` updates the timezone, price tick, primary price-scale formatting, data
+context and the [calendar for times past the last bar](#times-past-the-last-bar). Oscillators and volume keep their own units. Reapply after replacing the
 primary series or restoring its formatting. Hosts own stale-request cancellation.
 
 `InstrumentMetadata.pricePrecision` accepts 0 through 12 and must represent the
@@ -51,6 +51,10 @@ boundary, including 23/25-hour days. A nonexistent daylight-saving boundary or
 overlapping active windows throws; provide an explicit date exception rather than
 guessing. Feed adapters can use the resolved open as their candle-builder anchor.
 
+`sessionFrom` returns the session active at an instant, or else the next one to
+open, looking about a year ahead, and null when nothing opens in that time. An
+overnight session still running is returned on its opening date.
+
 `supportsInterval` matches exact provider tokens. Register custom interval codes
 before constructing the profile. OI support remains true, false or unknown,
 independently of zero or missing observations.
@@ -60,6 +64,62 @@ synthetic cash, futures and crypto profiles, a shortened session and an OI pane.
 It sends no orders. See the repository's
 [full integration guide](https://github.com/marketcalls/openalgo-charts/blob/master/docs/instruments.md)
 for streaming-builder lifetime and source-transition details.
+
+## Times past the last bar
+
+`applyTo` also hands the instrument to `chart.setSessionCalendar`, so the
+empty space right of the last candle is laid out in the instrument's sessions. On a
+five-minute chart whose last candle is Friday's 15:25, the next bar time is Monday's
+09:15: a trend line or a box drawn there ends on Monday's session, and a saved anchor
+at Monday 09:30 is drawn four bars past the last candle. Closed dates are skipped,
+shortened days end early and breaks are stepped over. Daily bars step through
+trading dates.
+
+Each session window keeps the offset the feed's bars keep from its opening, read
+from the recent bars in windows that open at the same time of day. Hourly bars
+stamped on the clock at a venue open 09:00 to 11:30 and 12:30 to 15:00 continue at
+09:00 in the morning and 12:00 before the afternoon opening, while a feed that
+starts again at each opening continues at 12:30. A window no recent bar sat in, such
+as a special session, takes the last bar's offset.
+
+A later instrument replaces these hours, and a data context moved to another symbol
+or exchange drops them, so a symbol the host holds no instrument for is not laid out
+in the last one's sessions.
+
+A host that knows a venue's hours but has no tick or quantity rules can apply a
+`SessionCalendar` instead:
+
+```ts
+import { SessionCalendar } from 'openalgo-charts';
+
+new SessionCalendar({
+  timezone: 'Asia/Kolkata',
+  sessions: ['0915-1530:23456'],
+  exceptions: { '2026-01-26': [] },
+}).applyTo(chart);
+```
+
+It is validated, detached and frozen like an instrument's calendar, throws
+`Invalid session calendar: ...`, and reads with the same `sessionAt` and
+`sessionFrom`. `applyTo` repaints, so drawings already past the last candle move
+to the times they now mean.
+
+A host that builds its own hours, from a venue list it keeps or any object with
+`sessionFrom`, sets them on the chart directly, and the chart repaints the same way;
+`null` clears them:
+
+```ts
+chart.setSessionCalendar(myVenueHours);   // drawings past the last bar move now
+chart.setSessionCalendar(null);           // back to the median spacing
+```
+
+`chart.dataLayer.setSessionCalendar(calendar)` sets the same without asking for a
+frame, for a host that loads bars or moves the view right after, either of which
+repaints; on an idle chart a drawing past the last bar would stay where it was painted
+until then. Hours a host set itself stay until it replaces them. Without a calendar, or when the recent bars do not sit in its sessions (regular
+hours against extended-hours data), the space past the last bar runs at the median
+of the recent bar intervals, never at a night- or weekend-sized last gap. The
+reference host does this with each venue's regular hours.
 
 ## Price-dependent ticks
 
@@ -115,10 +175,14 @@ fields, and `instrument.tickSchedule` is null, so `priceTick` stays its one snap
 rule everywhere. To validate orders, see
 [price-dependent ticks](/docs/trading#price-dependent-ticks).
 
-`applyTo` also hands the schedule to
-[`chart.trading`](/docs/trading-api#price-ticks-while-dragging), so dragged order and
+`applyTo` also hands the schedule to the chart, which `chart.tickSchedule()` reads back:
+a dragged [price alert](/docs/alerts#tick-snapping-and-keyboard-removal) and
+`chart.snapPrice` on the price pane then round in the band a price falls in. A host that
+keeps its own instrument metadata, as the yfinance reference host does, calls
+`chart.setTickSchedule(schedule)` itself; `null` returns to the constant tick. The chart
+passes it on to [`chart.trading`](/docs/trading-api#price-ticks-while-dragging), so dragged order and
 bracket lines snap in their band. It never builds the trading layer itself, which would
 take the host's drag subscription; a layer built later starts from the schedule.
 Applying a constant-tick instrument clears it, so after a symbol switch no drag snaps to
-the previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to
+the previous instrument's bands. Call `chart.setTickSchedule` after `applyTo` to
 override it, and pass the schedule as a `DomLadder`'s `tickSchedule` for a depth ladder.

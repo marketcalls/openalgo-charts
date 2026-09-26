@@ -336,6 +336,8 @@ select.field { cursor: pointer; padding-right: 24px; }
 .chip button { border: 0; background: transparent; color: var(--faint); cursor: pointer;
   font-size: 13px; line-height: 1; padding: 2px 3px; border-radius: 4px; }
 .chip button:hover { background: var(--elev-3); color: var(--danger-tx); }
+/* A study the host protects: no remove button, a dashed edge in its place. */
+.chip.is-protected { border-style: dashed; padding-right: 9px; }
 .spacer { flex: 1 1 auto; }
 .hint { color: var(--faint); font-size: 12px; font-style: italic; }
 
@@ -477,6 +479,10 @@ select.field { cursor: pointer; padding-right: 24px; }
 .chartstate__text:empty { display: none; }
 .chartstate__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .chartstate__actions .btn { height: 28px; padding: 0 12px; }
+/* `.btn` sets a display, which beats the hidden attribute: say it again here,
+   or a card shows the actions its state hid. */
+.chartstate__actions .btn[hidden] { display: none; }
+.chartstate[data-state="unsupported"] .chartstate__card { border-left-color: var(--amber); }
 .chartstate[data-state="empty"] .chartstate__card { border-left-color: var(--amber); }
 .chartstate[data-state="error"] .chartstate__card { border-left-color: var(--sell); }
 /* A load in flight is the dots alone. The card would only repeat the status
@@ -918,3 +924,18 @@ body[data-fullscreen-pane="2"] .p2plot .inspect-layout { left: 42px; }
   .gridbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .gridbar__status { display: none; }
 }
+
+/* Inline rows in the generated settings form: the lead input's label, then
+   each member's own label and control in the control column. The column takes
+   what the label leaves and wraps its members inside itself on a narrow card,
+   so a row of three never widens the card or scrolls it sideways. */
+.set-row--inline { grid-template-columns: 15px auto minmax(0, 1fr); }
+.set-row--inline .set-ctl { flex-wrap: wrap; row-gap: 4px; }
+.set-inline { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.set-inline > label { color: var(--mut); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.set-inline--off > label { color: var(--faint); cursor: not-allowed; }
+.set-row--inline .set-ctl input[type=number] { flex: 0 0 64px; width: 64px; }
+.set-row--inline .set-ctl select { flex: 0 1 auto; }
+/* A condition hides these through the hidden attribute, which a display rule
+   of their own would otherwise outrank. */
+.set-row[hidden], .set-group[hidden], .set-inline[hidden], .set-row > [hidden] { display: none; }

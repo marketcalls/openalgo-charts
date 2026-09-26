@@ -138,7 +138,7 @@ export const WIDGET_CSS = `
 .oac-widget .oac-glyph { display: inline-grid; place-items: center; line-height: 0; flex: none; }
 .oac-widget .oac-glyph > svg { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
 .oac-widget .oac-glyph--tool > svg { width: 24px; height: 24px; stroke-width: 2; }
-.oac-widget .oac-glyph--chrome > svg { width: 16px; height: 16px; stroke-width: 1.5; }
+.oac-widget .oac-glyph--chrome > svg { width: 16px; height: 16px; stroke-width: 2; }
 .oac-widget .oac-glyph--text { display: inline-grid; place-items: center; width: 24px; height: 24px;
   font-size: 12px; font-weight: 600; }
 .oac-widget .oac-chev { display: inline-grid; place-items: center; line-height: 0; color: ${v('mut')}; }

@@ -708,7 +708,7 @@ See also: [Live Data](/docs/live-data), [Data Feeds](/docs/data-feeds)
 
 A `TradeFeed` implementation that calls the OpenAlgo REST order-management endpoints and
 subscribes to live order and position updates via the API. Maps broker order objects to
-`TradingOrder` and `TradingPosition` records via `mapOrder` and `mapPosition`.
+`TradingOrder` and `TradingPosition` records, decoding each order row with `decodeOrder`.
 
 See also: [Trading API](/docs/trading-api), [Data Feeds](/docs/data-feeds)
 

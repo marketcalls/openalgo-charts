@@ -114,6 +114,7 @@ Everything `src/widget/index.ts` exports at runtime. The shell (`createWidget` a
 | `focusable(n)`, `focusables(root)` | functions | Focus-trap helpers. |
 | `placeBeside(anchor, size, bounds, gap?, pad?)`, `placeBelow(...)`, `placeTip(...)` | functions | Pure placement maths in root coordinates, flipping when there is no room. |
 | `boxIn(root, el)` | function | An element's box in the widget root's coordinate space. |
+| `historyPress(ctx, 'undo' \| 'redo')`, `historyReady(ctx, 'undo' \| 'redo')` | functions | One undo or redo press through `ctx.history`, and whether it would do anything; a custom context without a history falls back to `ctx.draw`. Every widget undo control calls these. (2.5.6) |
 | `WidgetContext`, `WidgetBusEvents`, `BusHandler`, `StorageLike`, `DialogMount`, `DialogHandle`, `WidgetDialogName`, `OverlayOptions`, `OverlayStack`, `TipSpec`, `TipSource`, `TipSide`, `TipController`, `Box`, `Size` | types | |
 
 ### The keymap (`keymap.ts`)
@@ -216,7 +217,10 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 | `renderForm(host, controls, opts)` | function | One control renderer for every generated form: switch column, label, control column; `colorPair` on one row. Returns a `FormHandle`. |
 | `controlsFromInputs(inputs)` | function | `ChartSettingsInput[]` (the engine's settings schema) to `FormControl[]`. |
 | `controlsFromFields(fields)` | function | A drawing tool's `SettingsField[]` to `FormControl[]`. |
-| `mountIndicatorInputControls(ctx, options)` | function | Adds symbol lookup and chart picking to an existing indicator form. Returns `IndicatorInputControlsHandle` with `cancelPick`, `refresh` and `destroy`. |
+| `mountIndicatorInputControls(ctx, options)` | function | Adds symbol lookup and chart picking to an existing indicator form. Returns `IndicatorInputControlsHandle` with `cancelPick`, `refresh` and `destroy`. An action beside a disabled field is disabled with the field's reason; call `refresh()` after the form re-reads its conditions. |
+| `inputStates(inputs, values)` | function | (2.5.6) `Map<key, InputState>` of `{ visible, active, dependsOn }` from each input's `visibleWhen` and `activeWhen`, cascading through inputs a condition reads. A colour pair's `enabled`, `up` and `down` keys, on the input or under a form control's `pair`, count as the pair. For a host that renders its own form. |
+| `inputConditionMet(condition, values)` | function | (2.5.6) Whether one `IndicatorInputCondition` holds for a settings bag. Reads own keys only; a malformed condition counts as met. |
+| `InputState` | type | (2.5.6) One input's `visible`, `active` and the `dependsOn` keys its `activeWhen` reads. |
 | `IndicatorInputControlsOptions`, `IndicatorInputControlsHandle` | types | Native typed-field host actions. |
 | `SettingsDialogOptions`, `IndicatorPickerOptions`, `IndicatorSettingsOptions`, `IndicatorSettingsTab`, `DrawingPropertiesOptions`, `LevelEditorOptions`, `TextEditorOptions`, `TextEditorHandle`, `ContextMenuHooks`, `ContextMenuOptions`, `MenuEntry`, `MenuItem`, `OrderRequest`, `PanelHandle`, `FormControl`, `FormKind`, `FormOptions`, `FormHandle` | types | |
 
@@ -228,6 +232,19 @@ field error without committing invalid settings. Prices and timestamps preserve
 their numeric value; timestamps are absolute UTC seconds, including fractions.
 An ordinary `time` field retains its existing clock-string contract.
 
+From 2.5.6, `FormControl` carries an input's `activeWhen`, `visibleWhen` and
+`inline`; `controlsFromInputs` threads them. `renderForm` re-reads them, and
+`FormOptions.unavailable`, after every edit and every `sync(values)`, so the host
+callback can depend on values too; its reason wins over "Depends on ...". A
+hidden control keeps its draft, `values()` still reports it, and `validate()`
+and `focusFirst()` skip hidden and disabled controls. A form with a condition
+adds a polite `role="status"` live region (`.oac-sr`) that says "Shown: ...",
+"Hidden: ...", "Available: ..." or "Unavailable: ...". Inline rows are
+`.oac-row--inline` with one `.oac-inline__item` per member; a dimmed member is
+`.oac-inline__item--off`. The new messages are localization keys:
+`Depends on {inputs}`, `Not used with the current settings`, `Shown: {inputs}`,
+`Hidden: {inputs}`, `Available: {inputs}`, `Unavailable: {inputs}`.
+
 `IndicatorInputControlsOptions` provides `instance`, `inputs`, `panel`,
 `field(key)` and atomic `onPatch(patch): boolean`. Optional `current()` fences
 stale dialogs; `suspend()` lets a custom host hide its modal while picking.
@@ -238,6 +255,18 @@ symbol and its `exchangeKey` commit together; a missing exchange defaults to
 an empty string. Without lookup, manual symbol entry remains available.
 Price picks resolve the study's actual pane and scale, including hidden scales;
 a mixed-scale study needs an explicit target. Drawing placement blocks picking.
+A price paired with a timestamp (`timeKey`) gets **Pick point on chart** instead:
+one click through `chart.beginPick('point')` fills both fields and reaches
+`onPatch` as one patch holding both keys, and cancelling writes neither. The
+hint reads "Pick {time} and {price} on the chart" (message keys
+`Pick point on chart` and `Pick {time} and {price} on the chart`). The target is
+`studyInputTarget` from the draw tier, the same one the chart's anchor uses. The
+widget's `DrawingController` draws an `anchor: true` pair's handle, and Mod+Z,
+the rail's Undo and the phone bar take a drag of it back, once: the widget's
+`ChartHistory` holds the step, and a pick in the settings dialog is part of the
+dialog's step on the same timeline. With the history destroyed, the same presses
+walk the drawing controller's own history, which holds the pick as a step of its
+own: the first undo takes it back, never a drawing made before it.
 Context changes, study removal and chart destruction cancel pending controls.
 
 Alert panels use optional `WidgetContext.alerts`, supplied automatically by
@@ -268,6 +297,7 @@ Color swatches stay compact. Theme overrides should target these tokens.
 | `exchange` | `string` | `''` | Passed to the feed with the symbol. |
 | `interval` | `string` | `'1d'` (or the saved one) | Must be a code the interval registry knows; an unknown code throws the engine's `UnknownIntervalError` at the call site. A saved code this build does not know falls back to `'1d'`. |
 | `intervals` | `readonly string[]` | `DEFAULT_INTERVALS` plus every registered code | The pill list. Each is validated the same way. |
+| `variant` | `DataVariant` | the feed's default series (or the saved one) | Which of the feed's series to show: `{ session: 'extended' }`, `{ adjustment: 'raw' }`, a currency or a unit. A malformed one throws a `TypeError` at the call site. The feed must declare it through `dataVariants`, or the data status reads "Not available from this source: ..." with no retry. Unreleased. |
 | `chartType` | `string` | `'candlestick'` | The primary series type; must be a registered chart type. |
 | `theme` | `'dark' \| 'light' \| ChartTheme` | `'dark'` | Drives the canvas and the chrome tokens. Note the engine's own default is light; the widget's is dark. |
 | `rail` | `boolean \| RailOptions` | on | `false` hides it. `RailOptions.tools` restricts which ids appear (order still follows `RAIL_GROUPS`); `favorites` seeds the pins when nothing is stored. |
@@ -320,10 +350,13 @@ widget.root;                         // the .oac-widget element
 widget.context;                      // the WidgetContext every mounted piece was handed
 widget.objects;                      // the owned base-tier ChartObjects inventory
 widget.alerts;                       // the owned AlertController, including drawing anchors
+widget.history;                      // the ChartHistory every undo control walks (2.5.6)
 widget.series;                       // the primary SeriesApi, retained by setChartType
 widget.symbol(); widget.exchange(); widget.interval(); widget.chartType(); widget.theme();
+widget.variant();                    // the DataVariant in use, undefined for the feed's default series
 widget.setSymbol(symbol, exchange?);
 widget.setInterval(code);            // throws UnknownIntervalError for a code the registry lacks
+widget.setDataVariant(variant);      // a new source: aborts, clears, reloads; undefined is the default
 widget.setChartType(id);             // registered renderer; retains handle, data, styles, scale and markers
 widget.setTheme('dark' | 'light' | theme);
 widget.openSettings();               // false when no dialog is registered under 'settings'
@@ -341,7 +374,7 @@ widget.destroy();                    // saves if persisting, removes the chrome,
 widget.isDestroyed;
 ```
 
-`getState()` returns `{ version: 1, symbol, exchange, interval, chartType, theme, chart: chart.getState(), rail: RailPrefs | null }`. `restoreState` validates field by field and returns `{ applied, reason?, chart?: RestoreReport }`; a saved viewport is applied only when the state was captured on the same symbol and interval, otherwise `stripView` drops it and the indicators, drawings and panes still land. With `persist`, the state is written under `oac-widget:<namespace>:state` (debounced by `SAVE_DEBOUNCE_MS`, flushed on `pagehide` and on `destroy`) and the rail's preferences under `oac-widget:<namespace>:rail`.
+`getState()` returns `{ version: 1, symbol, exchange, interval, chartType, theme, variant?, chart: chart.getState(), rail: RailPrefs | null }`; `variant` is present only for a non-default series, so a state without one (including every record saved before variants) restores onto the feed's default series, whatever variant the widget shows at the time, while one this build cannot read is refused before anything is applied. A persisted record whose variant this build cannot read opens on the default series without its saved view. The variant is part of the dataset, so a saved viewport lands only on the same variant too, and a `variant` bus event announces a change. The status line names a non-default variant (`.oac-statusline__variant`: localized "Regular hours", "Extended hours", "Adjusted prices", "Raw prices", then the provider's currency and unit names). `restoreState` validates field by field and returns `{ applied, reason?, chart?: RestoreReport }`; a saved viewport is applied only when the state was captured on the same symbol and interval, otherwise `stripView` drops it and the indicators, drawings and panes still land. With `persist`, the state is written under `oac-widget:<namespace>:state` (debounced by `SAVE_DEBOUNCE_MS`, flushed on `pagehide` and on `destroy`) and the rail's preferences under `oac-widget:<namespace>:rail`.
 
 ### Objects panel
 
@@ -369,6 +402,24 @@ selection, and external-indicator data status. Only supported actions appear; an
 action returning `false` or throwing reports through the existing toast. No primary
 source removal control is offered. Settings reuse the widget's current chart,
 indicator and drawing editors. Drawing actions use existing undo history.
+
+Each pane section lists its stack in draw order, back to front (`objects.stack(pane)`),
+a group at its first member's place and rows outside the stack after. A drawing row
+notes **Behind series** or **Above** and the row it sits on. Dragging a row onto the
+upper half of another puts it under that row in paint order, the lower half over it;
+`dragover` accepts only a drop `objects.canPlace` allows, marking the row
+`is-drop-before` / `is-drop-after`, so an unpaintable drop is refused before release.
+**Earlier** and **Later** step through the same order with `objects.place` (a source or
+study steps between whole slots); rows outside the stack keep `reorder`. A drop onto a
+row of another pane moves the row there first. A custom `objects` model without `stack`
+keeps the list order.
+
+Study policies reach the panel the same way: an unlisted study has no row, and a
+protected one offers only the actions its policy allows. Elsewhere the widget greys the
+context menu's settings and remove rows with the note "protected", greys the indicator
+picker's remove button, declines the settings dialog with a toast ("{name} settings are
+protected"), and leaves unlisted studies out of the picker's running list and the alert
+source lists. See [study policies](core-api.md#study-policies).
 
 Drawing policies reach the panel through the inventory: an unlisted drawing
 (`policy.listed: false`) has no row, a read-only one (`policy.editable: false`)
@@ -420,7 +471,7 @@ An automatic refresh that fails or returns no bars keeps the previous chart visi
 
 ## `WidgetContext`
 
-What the shell hands every mounted piece, and what a host's own panel wants: `chart`, `draw`, `root`, `document`, `theme` (`'dark' | 'light'`), `chartTheme`, `keymap`, `bus`, `storage` (a `WidgetStorage`), `locale`, `toast(message, kind?)`, `openOverlay(el, opts?)` (returns the closer), `status(text, kind?)`, `tips`, `overlays`, `symbol()` (`{ symbol, exchange }`), `interval()`.
+What the shell hands every mounted piece, and what a host's own panel wants: `chart`, `draw`, `root`, `document`, `theme` (`'dark' | 'light'`), `chartTheme`, `keymap`, `bus`, `storage` (a `WidgetStorage`), `locale`, `toast(message, kind?)`, `openOverlay(el, opts?)` (returns the closer), `status(text, kind?)`, `tips`, `overlays`, `symbol()` (`{ symbol, exchange }`), `interval()`, and optionally `objects`, `alerts` and `history` (the chart-wide `ChartHistory`; a dialog that previews live wraps its session in `ctx.history?.group(label)`).
 
 A dialog module of your own: build the panel with `createElement`, hand it to `ctx.openOverlay(el, { anchor, placement: 'below' })` or `{ placement: 'center', modal: true }`, stop propagation of its own `keydown` (except Escape and Tab) and `pointerdown` so the chart's pointer capture does not eat a click, and register chords in scope `'overlay'` if it wants any while open. Register it with `registerWidgetDialog(name, mount)` to have the shell open it by name.
 
@@ -794,3 +845,113 @@ widget.openNews();
   `loading`, `ready`, `empty`, `error`). `quoteChange(quote)` returns
   `{ change, percent }` or null without a positive `previousClose`.
 - `WATCHLIST_PANEL_CSS` and `NEWS_PANEL_CSS` are part of `WIDGET_COMPONENT_CSS`.
+
+## Chart-wide undo and redo (2.5.6)
+
+`ChartHistory` (widget tier, DOM-free) is one timeline for a chart: a study added or
+removed (with its settings, visibility, pane, stacking row and scale), study settings,
+visibility and scale assignment (`setPriceScale`, `setPlotPriceScales`), the chart type and
+the primary series' scale, price scale settings (mode, invert, margins, auto-fit, pinned
+ratio, axis placement), panes (moved, folded, resized, added or removed, and brought back with
+the studies and drawings they held), the chart settings `applyChartSettings` writes, and drawings. The widget
+builds one as `widget.history` and hands it to every piece as `ctx.history`; Ctrl+Z, Ctrl+Y
+and Ctrl+Shift+Z, the rail's Undo and Redo, and the mobile Drawing and More sheets all walk it.
+
+```ts
+import { ChartHistory } from 'openalgo-charts/widget';
+
+const history = new ChartHistory(chart, { draw, onError: e => console.warn(e) });
+history.undo(); history.redo();           // false when there is nothing, or the step failed
+history.canUndo(); history.canRedo();
+history.peekUndo();                       // { label?, changes: ChartHistoryChange[] } | null
+history.transact(() => chart.setPriceAxisOptions(0, 'right', { mode: 'logarithmic' }), 'Scale');
+const end = history.group('Chart settings');   // one step until end() runs; a no-op group is none
+history.ignore(() => hostOwnSetup());     // the host's own change, drawings included, never a step
+history.push({ label: 'Chart type', undo: () => rebuild('candlestick'), redo: () => rebuild('line') });  // none inside ignore
+history.attach(rebuiltChart, rebuiltDraw);    // a host that rebuilds its chart keeps the timeline
+history.subscribe(refreshButtons); history.clear(); history.destroy();
+```
+
+- **Recording.** Changes the chart announces (`objects:change`, `indicatorRemoved`,
+  `pane*`, `priceAxis*`, and `layout:change`, which follows `setPaneWeight`,
+  `setPriceAxisOptions`, `setPriceScaleOptions` and the other setters that had no event)
+  are compared before and after the turn they happened in, so one user action is one step
+  whatever made it: a legend button, a dialog, a menu, host code. A pane weight or a scale
+  option set in code is therefore a step of its own. A chart setting (the grid, the status
+  line) and a scale's auto-fit or pinned ratio are read only in a transaction's full
+  capture, so they are recorded inside `transact`; auto-fit announced on its own is a view,
+  never a step. The widget's context menu runs every row in `transact`, and its chart and
+  study settings dialogs are one `group` per session.
+- **Applying.** A step makes the chart look the way it did in exactly the fields it
+  changed, through the chart's public calls; it never restores a whole state (that would
+  rebuild every study, replay managed requests and reset the drawing history). A host's
+  change to a neighbouring field since is kept. A step of several stretches (a group or a
+  transaction with an `ignore` inside it) reads each stretch against the chart the stretch
+  before it in the press leaves, so none loses its part of the stack order.
+- **Scale defaults.** The chart-wide defaults a pane added later starts from
+  (`chart.priceScaleDefaults()`: mode, invert and both margins) are a field of each step,
+  apart from every pane's own axes. A chart-wide change (`setPriceScaleOptions`, the
+  settings dialog) is taken back with its defaults, so a pane added after the undo starts
+  from the old ones. One axis changed from its own menu leaves the defaults alone, even on
+  a chart with one pane, and is replayed on that axis alone: it never writes the defaults
+  and never announces a linked appearance change. The chart settings `scales.mode`,
+  `scales.inverted` and `scales.autoScale` are never compared: the defaults and the axes
+  carry them.
+- **Drawings** stay the controller's: each step is held by the number `drawing:change`
+  reported (`DrawingChangeEvent.step`, `DrawingController.historySteps()`), and undone by the
+  controller. After `attach` to a new controller, an old step is taken back from the drawings
+  either side of it, and so is a step the controller holds under one the history does not.
+- **The host's own changes** (`ignore`, and whatever a listener does while a press is applied)
+  are recorded nowhere, drawings included: they run through `DrawingController.untracked`,
+  so no undo or redo reverses them and the redo branch is kept. Inside `transact` or `group`
+  the step is recorded on either side of an `ignore`. A group that ends as no step (a
+  Cancel) gives the redo branch back.
+- **Panes** that come or go with no study bringing or taking them are `pane-add` and
+  `pane-remove` steps: one left with only drawings comes back with them, an empty one empty.
+  A pane holding a host's own series, and a pane the host made (`addPrimitive` at a new
+  index for a primitive of its own, or a drawing placed there), is the host's: never a
+  `pane-add` step, and never made or removed by an undo or redo.
+- **Linked charts**: a linked appearance change is the step of the chart that made it.
+  Followers apply it through their `ignore` (the grid and the yfinance split view do), and
+  walking the step re-announces the result on `style:change` so the followers follow.
+- **Never**: no bars are written, no alert fires (a study brought back reseeds silently), no
+  order is placed.
+- **Failure**: a step that cannot be applied is rolled back, dropped with every step behind
+  it, and reported to `onError`; the redo branch is kept. A new action clears redo.
+- **Layouts**: `chart.restoreState` and `widget.restoreState` start a new timeline.
+- **Study ids**: a study brought back is re-created under the instance id it had
+  (`addIndicator(id, settings, { instanceId })`), so its readers and the alerts naming it find
+  it again. Studies are told apart by the chart's own object for each, not by id or kind: when
+  a study the host placed under that id since holds it (`addIndicator` throws on an id in use),
+  of the same kind or another, the one brought back takes a fresh id with the settings the step
+  gives it, later steps and the studies reading it follow it, and the host's study keeps the
+  id, its pane and its settings and is never taken for the one a step means.
+- **Study policies**: no press overrides one. A study stays on the chart while `removable:
+  false`, keeps its settings and scales while `configurable: false` and its pane while
+  `movable: false`; the rest of the step applies, and a step left with nothing to do is dropped
+  and the press goes on, so `canUndo`, `canRedo` and the peeks stay true (`subscribe` hears a
+  policy change that moves them). A study that may not move is never moved by a call of its
+  own, but other studies pass it, as the chart lets them: a reorder that moves a free study
+  past a pinned one is a step and is taken back, and a study removed from above a pinned one
+  comes back above it. Two pinned studies never trade places. Adding a protected study and a
+  forced write or remove on one are the host's and never steps.
+- **Policies the host changes later**: a study an undo or redo brings back takes the policy
+  its host holds now, the one it last had on the chart, never an older one the step captured,
+  so a press never removes or weakens a restriction set after the step was made. A study that
+  left the chart by the host's hand (inside `ignore`, a forced remove, or left out of a chart
+  the host rebuilt and passed to `attach`) is the host's to bring back: the part of any step
+  that would re-add it is dropped, and a step left with nothing else to do is dropped with it.
+- **Study input anchors**: `ChartHistory` takes the anchor steps of its drawing controller
+  (`DrawingController.delegateInputAnchorSteps`) and records the settings patch a drag or a
+  `moveInputAnchor` wrote as the move ends, so each is one step, undone once and in order with
+  the drawings, and a settings dialog's Pick point on chart is part of that dialog's step. The
+  drawing controller holds none of them while the history is attached. Without a history the
+  drawing controller keeps them itself, and a point written through the settings (the Pick
+  point) is one of its steps too, so its undo takes a pick back first and never a drawing made
+  before it.
+- Types: `ChartHistoryOptions` (`draw`, `limit` default 100, `series`, `setChartType`,
+  `onError`), `ChartHistoryCommand`, `ChartHistoryStep`, `ChartHistoryChange` (`study-add`,
+  `study-remove`, `study-settings`, `study-visibility`, `study-scale`, `study-pane`,
+  `study-order`, `chart-type`, `series-scale`, `pane-add`, `pane-remove`, `pane-order`,
+  `pane-weight`, `pane-collapse`, `axis`, `settings`, `drawing`, `command`), `ChartHistoryError`
+  (`direction`, `step`, `error`).

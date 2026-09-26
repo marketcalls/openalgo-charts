@@ -12,6 +12,7 @@ import { runAbortable } from './abortable-request';
 import { IndicatorAlertPolicy } from './indicator-alert-policy';
 import { cloneIndicatorSettings, planIndicatorDependencies, type IndicatorDependencyNode } from './indicator-dependencies';
 import { validateIndicatorInputs } from './indicator-inputs';
+import { parseIndicatorPolicy, type IndicatorEditOptions, type IndicatorPolicy } from './indicator-policy';
 import type { PriceFormat, PriceScaleId, SeriesApi, SeriesDataState } from './series';
 import type { PriceLine } from '../primitives/price-line';
 import type { PaneLegend, LegendValue } from '../primitives/pane-legend';
@@ -46,6 +47,7 @@ import {
   type IndicatorLevelContext,
   type IndicatorLineStyle,
   type IndicatorOutputTarget,
+  type IndicatorBackgroundSpec,
   type IndicatorSettings,
   type IndicatorStore,
   type IndicatorValues,
@@ -195,7 +197,13 @@ export interface IndicatorHost {
     level: {
       price: number;
       color: string;
-      /** Kept for hosts predating `lineStyle`; always `lineStyle === 'dashed'`. */
+      /**
+       * Kept for hosts predating `lineStyle`; always `lineStyle === 'dashed'`.
+       *
+       * @deprecated Removed in 3.0.0. Read `lineStyle` (since 1.7.1), which
+       * also carries `'dotted'`. The instance resolves it before calling the
+       * host, so it is never absent.
+       */
       dashed: boolean;
       lineWidth: number;
       lineStyle: IndicatorLineStyle;
@@ -246,6 +254,8 @@ export interface IndicatorHost {
    * study's pass.
    */
   resourcesChanged?(): void;
+  /** A study's policy changed: the chart redraws its legend buttons and the inventory. */
+  policyChanged?(): void;
   /** Bars of the primary price series — the calculation input. */
   sourceBars(): readonly Bar[];
   /** Optional mutation metadata; absent hosts retain the legacy timestamp heuristic. */
@@ -332,14 +342,28 @@ export interface IndicatorHost {
 export interface IndicatorApi {
   /** Whole-study scale override, or null for descriptor assignments. */
   priceScaleId(): PriceScaleId | null;
-  /** Move local price resources together; null restores descriptor assignments. */
-  setPriceScale(scaleId: PriceScaleId | null): boolean;
+  /**
+   * Move local price resources together; null restores descriptor assignments.
+   * False, and nothing changes, for a study whose policy is not `configurable`
+   * unless `options.force` is set.
+   */
+  setPriceScale(scaleId: PriceScaleId | null, options?: IndicatorEditOptions): boolean;
   /** Effective scale for a declared plot, or null for an unknown key. */
   plotPriceScaleId(plotKey: string): PriceScaleId | null;
   /** Detached explicit per-plot assignments, before descriptor and study defaults. */
   plotPriceScaleIds(): Readonly<Record<string, PriceScaleId>>;
-  /** Atomically patch plot assignments; null clears an override. Invalid patches return false. */
-  setPlotPriceScales(assignments: Readonly<Record<string, PriceScaleId | null>>): boolean;
+  /**
+   * Atomically patch plot assignments; null clears an override. Invalid patches
+   * return false, and so does a study that is not `configurable` unless forced.
+   */
+  setPlotPriceScales(assignments: Readonly<Record<string, PriceScaleId | null>>, options?: IndicatorEditOptions): boolean;
+  /** The restrictions the host set, only the flags that are false. */
+  policy(): Readonly<IndicatorPolicy>;
+  /**
+   * Replace the policy; null lifts every restriction. The host's act, never
+   * restricted itself. Throws on a flag that is not a boolean.
+   */
+  setPolicy(policy: IndicatorPolicy | null): void;
   /** External data state, or null for a study without a managed lifecycle. */
   dataStatus(): Readonly<IndicatorDataStatus> | null;
   /** Observe changes; immediately receives the current managed status, if any. */
@@ -356,8 +380,11 @@ export interface IndicatorApi {
   readonly paneIndex: number;
   /** Current settings (a copy). */
   settings(): IndicatorSettings;
-  /** Merge a settings patch, recompute, and restyle. */
-  setSettings(patch: Readonly<IndicatorSettings>): void;
+  /**
+   * Merge a settings patch, recompute, and restyle. False, and nothing changes,
+   * when the study is removed, or is not `configurable` and `options.force` is not set.
+   */
+  setSettings(patch: Readonly<IndicatorSettings>, options?: IndicatorEditOptions): boolean;
   /** The series backing one plot key, for direct styling. */
   series(plotKey: string): SeriesApi | undefined;
   /** Latest computed values (a reference — do not mutate). */
@@ -370,8 +397,11 @@ export interface IndicatorApi {
   legend(): PaneLegend | null;
   /** Refresh the legend readings for a bar index; omit for the latest bar. */
   updateLegendValues(index?: number): void;
-  /** Remove every series, level, and legend row this indicator created. */
-  remove(): void;
+  /**
+   * Remove every series, level, and legend row this indicator created. False
+   * when it is already gone, or is not `removable` and `options.force` is not set.
+   */
+  remove(options?: IndicatorEditOptions): boolean;
 }
 
 let nextInstance = 1;
@@ -407,6 +437,7 @@ export class IndicatorInstance implements IndicatorApi {
   private _settings: IndicatorSettings;
   private _scaleOverride: PriceScaleId | null;
   private _plotScaleOverrides: Record<string, PriceScaleId>;
+  private _policy: Readonly<IndicatorPolicy>;
   /** Memo for `_descriptorSettings`, keyed on the zone and the settings identity. */
   private _zoned: { zone: string; base: IndicatorSettings; merged: IndicatorSettings } | null = null;
   private readonly _series = new Map<string, SeriesApi>();
@@ -445,6 +476,8 @@ export class IndicatorInstance implements IndicatorApi {
   /** Drawing layers for explicit targets: `null` is the price pane, a string names a plot. */
   private readonly _drawLayers = new Map<string | null, IndicatorDrawings>();
   private _background: IndicatorBackground | null = null;
+  /** Shading layers for explicit targets, keyed as the drawing layers are. */
+  private readonly _bgLayers = new Map<string | null, IndicatorBackground>();
   /**
    * Time of the newest bar the alerts have already judged. Bars at or before it
    * are history as far as this instance is concerned, so a full recompute (a
@@ -485,9 +518,12 @@ export class IndicatorInstance implements IndicatorApi {
     reservedIds?: ReadonlySet<string>,
     priceScaleId?: PriceScaleId,
     plotPriceScaleIds?: Readonly<Record<string, PriceScaleId>>,
+    policy?: IndicatorPolicy,
   ) {
     this._host = host;
     this._d = descriptor;
+    // Before anything is built: the legend row's buttons are chosen by it.
+    this._policy = policy === undefined ? Object.freeze({}) : parseIndicatorPolicy(policy);
     this._scaleOverride = priceScaleId ?? null;
     this._plotScaleOverrides = parseIndicatorPlotPriceScales(descriptor, plotPriceScaleIds);
     this.indicatorId = descriptor.id;
@@ -557,7 +593,7 @@ export class IndicatorInstance implements IndicatorApi {
     // refuses a descriptor that cannot compute at all. Release its resources
     // before propagating the error so a failed add leaves no orphaned legend.
     try { this.recompute(); }
-    catch (error) { this.remove(); throw error; }
+    catch (error) { this.remove({ force: true }); throw error; }
     this._constructed = true;
     this._attach();
   }
@@ -672,15 +708,29 @@ export class IndicatorInstance implements IndicatorApi {
       && Object.prototype.hasOwnProperty.call(this._plotScaleOverrides, plot.key)).map(plot => [plot.key, this._plotScaleOverrides[plot.key]]));
   }
 
-  public setPriceScale(scaleId: PriceScaleId | null): boolean {
-    if (this._removed || (scaleId !== null && !isPriceScaleId(scaleId))) return false;
+  public policy(): Readonly<IndicatorPolicy> { return this._policy; }
+
+  public setPolicy(policy: IndicatorPolicy | null): void {
+    const next = policy === null ? Object.freeze({}) : parseIndicatorPolicy(policy);
+    if (this._removed) return;
+    this._policy = next;
+    this._host.policyChanged?.();
+  }
+
+  /** Whether a call may make a change the policy reserves for the host. */
+  private _allows(flag: keyof IndicatorPolicy, options: IndicatorEditOptions | undefined): boolean {
+    return options?.force === true || this._policy[flag] !== false;
+  }
+
+  public setPriceScale(scaleId: PriceScaleId | null, options?: IndicatorEditOptions): boolean {
+    if (this._removed || !this._allows('configurable', options) || (scaleId !== null && !isPriceScaleId(scaleId))) return false;
     const assignments = this._overlayScaleOverrides();
     if (scaleId === this._scaleOverride && Object.keys(assignments).length === Object.keys(this._plotScaleOverrides).length) return false;
     return this._assignPriceScales(scaleId, assignments, false);
   }
 
-  public setPlotPriceScales(assignments: Readonly<Record<string, PriceScaleId | null>>): boolean {
-    if (this._removed) return false;
+  public setPlotPriceScales(assignments: Readonly<Record<string, PriceScaleId | null>>, options?: IndicatorEditOptions): boolean {
+    if (this._removed || !this._allows('configurable', options)) return false;
     let patch: [string, PriceScaleId | null][];
     try { patch = plotScaleEntries(this._d, assignments, true); } catch { return false; }
     const next = new Map(Object.entries(this._plotScaleOverrides));
@@ -720,7 +770,7 @@ export class IndicatorInstance implements IndicatorApi {
     if (local !== this._localScale()) for (const primitive of [...this._levels, this._draws, ...this._attachedPrimitives]) {
       if (primitive !== null) primitives.push({ primitive, scaleId: local });
     }
-    for (const [key, primitive] of this._drawLayers) {
+    for (const [key, primitive] of [...this._drawLayers, ...this._bgLayers]) {
       const scale = this._drawTarget(key, scaleId, assignments)[1];
       if (scale !== null && scale !== this._drawTarget(key)[1]) primitives.push({ primitive, scaleId: scale });
     }
@@ -796,7 +846,7 @@ export class IndicatorInstance implements IndicatorApi {
     }
     this._syncBarColors(bars);
     this._draws?.setVisible(on);
-    for (const layer of this._drawLayers.values()) layer.setVisible(on);
+    for (const layer of [...this._drawLayers.values(), ...this._bgLayers.values()]) layer.setVisible(on);
     this._background?.setVisible(on);
     this._legend?.setOptions({ hidden: !on });
     this._host.emit?.('objects:change', {});
@@ -838,7 +888,9 @@ export class IndicatorInstance implements IndicatorApi {
     routed(key => this._markerLayers.get(key)?.[0]);
     own(this._table, this._draws);
     routed(key => this._drawLayers.get(key));
-    own(this._background, ...this._attachedPrimitives);
+    own(this._background);
+    routed(key => this._bgLayers.get(key));
+    own(...this._attachedPrimitives);
     return { series, primitives };
   }
 
@@ -850,8 +902,16 @@ export class IndicatorInstance implements IndicatorApi {
     this._syncMarkers(this._host.sourceBars());
   }
 
-  /** Republish candle colors after a change in instance stacking order. */
-  public refreshBarColors(): void { if (!restacking) this._syncBarColors(this._host.sourceBars()); }
+  /**
+   * Republish candle colors after a change in instance stacking order. After a
+   * failed pass the hook is not run again: the values are that pass's, or none
+   * at all when `calc` threw, and its colours wait for a pass that succeeds.
+   */
+  public refreshBarColors(): void {
+    if (restacking) return;
+    if (this._calcFailed) this.republishBarColors();
+    else this._syncBarColors(this._host.sourceBars());
+  }
 
   /** Calculation order must not choose the visual color-overlay winner. */
   public republishBarColors(): void {
@@ -1081,7 +1141,6 @@ export class IndicatorInstance implements IndicatorApi {
     // Check every shape before any layer changes, so a rejected pass leaves
     // each target as the last good one drew it.
     if (groups.size > 0) new IndicatorDrawings().setItems(all);
-    let created = false;
     if (this._draws === null && items.length > 0 && this._host.addIndicatorPrimitive !== undefined) {
       this._draws = new IndicatorDrawings();
       this._draws.setVisible(this._visible);
@@ -1089,26 +1148,38 @@ export class IndicatorInstance implements IndicatorApi {
       this._host.bindIndicatorPrimitiveScale?.(this._draws, this._localScale());
     }
     this._draws?.setItems(items);
-    // A vacated target is released rather than kept empty, so a study that
-    // stops routing somewhere leaves nothing behind there. Using the target
-    // again creates a layer that the host restacks into study order.
-    for (const [key, layer] of this._drawLayers) {
+    this._syncRouted(this._drawLayers, groups,
+      (_, scale) => new IndicatorDrawings(scale === null ? rc => rc.readoutPriceScale : undefined), (layer, list) => layer.setItems(list));
+  }
+
+  /**
+   * Keep one owned layer per target a pass returned, for shapes and shading
+   * alike. A vacated target is released rather than kept empty, so a study
+   * that stops routing somewhere leaves nothing behind there. Using the target
+   * again creates a layer that the host restacks into study order. `make`
+   * declines, with null, a target not worth a layer yet.
+   */
+  private _syncRouted<L extends IndicatorDrawings | IndicatorBackground, G>(layers: Map<string | null, L>, groups: Map<string | null, G>,
+    make: (group: G, scale: PriceScaleId | null) => L | null, fill: (layer: L, group: G) => void): void {
+    let created = false;
+    for (const [key, layer] of layers) {
       if (groups.has(key)) continue;
       this._host.removeIndicatorPrimitive?.(layer);
-      this._drawLayers.delete(key);
+      layers.delete(key);
     }
-    for (const [key, list] of groups) {
-      let layer = this._drawLayers.get(key);
+    for (const [key, group] of groups) {
+      let layer = layers.get(key);
       if (layer === undefined) {
-        if (this._host.addIndicatorPrimitive === undefined) return;
         const [pane, scale] = this._drawTarget(key);
+        const made = this._host.addIndicatorPrimitive && make(group, scale);
+        if (!made) continue;
         created = true;
-        this._drawLayers.set(key, layer = new IndicatorDrawings(scale === null ? rc => rc.readoutPriceScale : undefined));
+        layers.set(key, layer = made);
         layer.setVisible(this._visible);
-        this._host.addIndicatorPrimitive(layer, pane);
+        this._host.addIndicatorPrimitive!(layer, pane);
         if (scale !== null) this._host.bindIndicatorPrimitiveScale?.(layer, scale);
       }
-      layer.setItems(list);
+      fill(layer, group);
     }
     this._restack(created);
   }
@@ -1130,17 +1201,34 @@ export class IndicatorInstance implements IndicatorApi {
    * Refresh the pane's per-bar shading, created lazily on first use the way the
    * drawing layer is. Hidden rather than detached when the indicator is hidden,
    * because a regime background is the cheapest layer here to keep around.
+   *
+   * The list form is told apart by its entries, since the plain form holds
+   * colours and gaps only. A targeted layer is created lazily too, on the first
+   * column with entries, and kept while its target is returned at all.
    */
   private _syncBackground(bars: readonly Bar[]): void {
     if (this._d.background === undefined) return;
-    const colors = this._d.background({ bars, values: this._values, settings: this._descriptorSettings() });
-    if (this._background === null) {
-      if (colors.length === 0 || this._host.addIndicatorPrimitive === undefined) return;
+    const out: readonly (string | null | IndicatorBackgroundSpec)[] =
+      this._d.background({ bars, values: this._values, settings: this._descriptorSettings() });
+    const listed = out.some(item => typeof item === 'object' && item !== null);
+    // Every column and target is checked before any shading layer changes; the
+    // outputs this pass synced earlier stay applied. `for...of` visits holes,
+    // which `every` would skip.
+    if (listed) for (const item of out) if (!Array.isArray((item as IndicatorBackgroundSpec | null)?.colors)) {
+      throw new Error('Indicator background must return colours or a list of columns');
+    }
+    const [local, groups] = listed ? this._route(out as readonly IndicatorBackgroundSpec[])
+      : [[{ colors: out as readonly (string | null)[] }], new Map<string | null, IndicatorBackgroundSpec[]>()];
+    for (const list of [local, ...groups.values()]) if (list.length > 1) throw new Error('Indicator background allows one column per target');
+    const colors = local[0]?.colors ?? [];
+    if (this._background === null && colors.length > 0 && this._host.addIndicatorPrimitive !== undefined) {
       this._background = new IndicatorBackground();
       this._background.setVisible(this._visible);
       this._host.addIndicatorPrimitive(this._background, this.paneIndex);
     }
-    this._background.setColors(colors, bars);
+    this._background?.setColors(colors, bars);
+    this._syncRouted(this._bgLayers, groups, ([spec]) => (spec.colors.length > 0 ? new IndicatorBackground() : null),
+      (layer, [spec]) => layer.setColors(spec.colors, bars));
   }
 
   /**
@@ -1489,7 +1577,7 @@ export class IndicatorInstance implements IndicatorApi {
     for (const { table } of this._tables.values()) table.setRows([]);
     this._draws?.setItems([]);
     for (const layer of this._drawLayers.values()) layer.setItems([]);
-    this._background?.setColors([], bars);
+    for (const layer of [this._background, ...this._bgLayers.values()]) layer?.setColors([], bars);
     for (const level of this._levels) this._host.removeIndicatorLevel(level);
     this._levels = [];
     this._publishedBarColors = null;
@@ -1540,8 +1628,8 @@ export class IndicatorInstance implements IndicatorApi {
     return this._values;
   }
 
-  public setSettings(patch: Readonly<IndicatorSettings>): void {
-    if (this._removed) return;
+  public setSettings(patch: Readonly<IndicatorSettings>, options?: IndicatorEditOptions): boolean {
+    if (this._removed || !this._allows('configurable', options)) return false;
     this._settings = this._validatedSettings({ ...this._settings, ...cloneIndicatorSettings(patch) });
     this._outputPending = true;
     this._host.indicatorOutputChanged?.(this.id, true);
@@ -1577,6 +1665,7 @@ export class IndicatorInstance implements IndicatorApi {
     this._attach();
     this._host.resourcesChanged?.();
     this._host.emit?.('objects:change', {});
+    return true;
   }
 
   /**
@@ -1832,8 +1921,8 @@ export class IndicatorInstance implements IndicatorApi {
     this._host.setPaneRange(this.paneIndex, range === undefined ? this._d.range?.(this._descriptorSettings()) ?? null : range);
   }
 
-  public remove(): void {
-    if (this._removed) return;
+  public remove(options?: IndicatorEditOptions): boolean {
+    if (this._removed || !this._allows('removable', options)) return false;
     this._removed = true;
     this._lifetime.abort();
     this._dataRetry = null;
@@ -1856,14 +1945,16 @@ export class IndicatorInstance implements IndicatorApi {
     for (const { table } of this._tables.values()) this._host.removeIndicatorTable(table);
     this._tables.clear();
     if (this._draws !== null) { this._host.removeIndicatorPrimitive?.(this._draws); this._draws = null; }
-    for (const layer of this._drawLayers.values()) this._host.removeIndicatorPrimitive?.(layer);
+    for (const layer of [...this._drawLayers.values(), ...this._bgLayers.values()]) this._host.removeIndicatorPrimitive?.(layer);
     this._drawLayers.clear();
+    this._bgLayers.clear();
     if (this._background !== null) { this._host.removeIndicatorPrimitive?.(this._background); this._background = null; }
     this._host.setIndicatorRange?.(this.id, this.paneIndex, this._localScale(), null, []);
     // Withdraw the candle colours before anything else forgets who owned them.
     if (this._d.barColors !== undefined) this._host.setBarColors?.(null, this.id);
     if (this._ownPane && !this._host.setIndicatorRange) this._host.setPaneRange(this.paneIndex, null);
     this._host.indicatorRemoved?.(this.id, !this._constructed && this._ownPane ? this.paneIndex : undefined);
+    return true;
   }
 }
 

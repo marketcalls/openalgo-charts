@@ -41,6 +41,40 @@ async function drawingInk(page: Page): Promise<number> {
   });
 }
 
+test('a Shift or Ctrl click on the canvas adds a drawing to the selection and toggles one out', async ({ page }, info) => {
+  const errors = await mount(page);
+  await expect.poll(() => drawingInk(page)).toBeGreaterThan(50);
+  // A second line under the first, both inside the initial view.
+  const ids = await page.evaluate(() => {
+    const { widget, lineId } = window.__objectsDemo;
+    const [a, b] = widget.draw.get(lineId)!.points;
+    const other = widget.draw.add({ tool: 'trend-line', paneIndex: 0, style: { color: '#ff00ff', lineWidth: 4 },
+      points: [{ time: a.time, price: a.price - 3 }, { time: b.time, price: b.price - 3 }] });
+    return [lineId, other.id];
+  });
+  const middle = (id: string) => page.evaluate((drawingId) => {
+    const { widget } = window.__objectsDemo;
+    const [a, b] = widget.draw.get(drawingId)!.points;
+    const rect = widget.root.querySelector('.oac-chart')!.getBoundingClientRect();
+    return { x: rect.left + widget.chart.timeToCoordinate((a.time + b.time) / 2),
+      y: rect.top + widget.chart.priceToCoordinate((a.price + b.price) / 2)! };
+  }, id);
+  const [first, second] = [await middle(ids[0]), await middle(ids[1])];
+  const selection = () => page.evaluate(() => window.__objectsDemo.widget.draw.selection());
+  await page.mouse.click(first.x, first.y);
+  await expect.poll(selection).toEqual([ids[0]]);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(second.x, second.y);
+  await page.keyboard.up('Shift');
+  await expect.poll(selection).toEqual(ids);
+  await page.screenshot({ path: info.outputPath('additive-selection.png') });
+  await page.keyboard.down('Control');
+  await page.mouse.click(first.x, first.y);
+  await page.keyboard.up('Control');
+  await expect.poll(selection).toEqual([ids[1]]);
+  expect(errors).toEqual([]);
+});
+
 test('drawing rows follow canvas selection and operate on the real drawing with undo', async ({ page }, info) => {
   const errors = await mount(page);
   await expect.poll(() => drawingInk(page)).toBeGreaterThan(50);

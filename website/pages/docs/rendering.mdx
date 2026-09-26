@@ -35,8 +35,8 @@ chart.on('renderer:fallback', ({ from, to, reason }) => log(reason));
 
 The choice is made **once, at construction**, because a backend that could change under
 a frame would have to be checked by every renderer. Read the result from
-`chart.rendererKind` (a `RenderBackendKind`; `chart.renderer` is the same value under the
-name it first shipped with). It differs from the option when the chosen backend declined,
+`chart.rendererKind` (a `RenderBackendKind`; the deprecated `chart.renderer` is the same
+value under the name it first shipped with, and goes in 3.0.0). It differs from the option when the chosen backend declined,
 and from the moment a GPU backend degrades.
 
 `renderBackend` takes a factory instead, one call per pane, bypassing `renderer` and the
@@ -96,9 +96,10 @@ never shows a blank frame. The event is the host's cue to update anything that s
 renderer.
 
 <Callout type="info">
-`renderer: 'auto'` is a speed-up for the series pass, not a second renderer for
-everything. Text, dashed lines, gradients, drawings, primitives and custom chart types
-stay on the 2D context, which already does them well.
+`renderer: 'auto'` moves the series pass of the standard chart types to the GPU; it is
+not a second renderer for everything. Text, dashed lines, gradients, drawings,
+primitives and custom chart types stay on the 2D context, which already does them well.
+The two backends have not been compared in frame time.
 </Callout>
 
 The tier's exports: `createWebGL2Backend(device?)` (one backend for one pane, or `null`

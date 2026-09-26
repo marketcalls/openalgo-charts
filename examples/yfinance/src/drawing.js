@@ -7,6 +7,7 @@ import {
 } from './rail.js';
 import { autosave } from './persist.js';
 import { followSessionMarks } from './session-marks.js';
+import { historyFor, historyPress, initHistory, onHistoryChange } from './history.js';
 
 let app;
 
@@ -45,7 +46,9 @@ export function attachDrawing() {
     }
   });
   for (const ev of ['draw:add', 'draw:remove', 'draw:update']) app.chart.on(ev, autosave);
-  for (const ev of ['paneResized', 'paneMoved', 'paneMaximized', 'paneCollapsed', 'paneRemoved', 'indicatorRemoved']) {
+  // `layout:change` covers the setters with no event of their own: a grid
+  // toggled from the keyboard, an axis set from its menu, a pane weight.
+  for (const ev of ['paneResized', 'paneMoved', 'paneMaximized', 'paneCollapsed', 'paneRemoved', 'indicatorRemoved', 'layout:change']) {
     app.chart.on(ev, autosave);
   }
   syncRail(app.draw.activeTool());
@@ -72,8 +75,11 @@ function syncDrawToolbar() {
   const state = drawToolbarState(app.draw);
   const del = el('drawdel');
   if (!del) return;
-  el('drawundo').disabled = !state.undo;
-  el('drawredo').disabled = !state.redo;
+  // Undo and Redo walk the main chart's whole timeline once it has one:
+  // a study or a pane is as much a step as a drawing.
+  const history = historyFor(1);
+  el('drawundo').disabled = !(history ? history.canUndo() : state.undo);
+  el('drawredo').disabled = !(history ? history.canRedo() : state.redo);
   del.disabled = state.del === 0;
   del.title = state.readOnly ? 'read-only' : 'delete selected';
   el('drawclear').disabled = state.clear === 0;
@@ -93,10 +99,12 @@ export function fillToolPicker() {
 
 export function initDrawing(a) {
   app = a;
+  initHistory(a);
   fillToolPicker();
   el('drawtool').addEventListener('change', () => { if (!app.draw) return; setDrawLock(false); app.draw.setTool(el('drawtool').value || null); });
-  el('drawundo').addEventListener('click', () => app.draw && app.draw.undo());
-  el('drawredo').addEventListener('click', () => app.draw && app.draw.redo());
+  el('drawundo').addEventListener('click', () => historyPress('undo', 1));
+  el('drawredo').addEventListener('click', () => historyPress('redo', 1));
+  onHistoryChange(syncDrawToolbar);
   // The whole selection, as one undo step; read-only drawings in it stay.
   el('drawdel').addEventListener('click', () => app.draw && app.draw.removeMany(app.draw.selection()));
   el('drawclear').addEventListener('click', () => app.draw && app.draw.clear());

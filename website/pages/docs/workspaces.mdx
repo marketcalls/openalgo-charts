@@ -73,7 +73,11 @@ creation/update timestamps. Document timestamps are milliseconds; chart bar
 and drawing times remain UTC seconds.
 
 Configuration includes chart snapshots, studies, drawings, alerts, viewport,
-host preferences and comparison definitions. Primary and comparison history
+host preferences and comparison definitions. A chart's optional `variant` names the
+provider series it showed (extended hours, raw prices, a currency or a unit; see
+[Data Variants](/docs/data-variants)). The parser stores the default as no field at
+all and refuses a variant it cannot name, since it would reopen as another series, and
+`createChartGrid` saves and reopens each cell's variant. Primary and comparison history
 are loaded separately. Credentials, account balances, orders, positions and
 armed execution state do not belong in portable workspaces.
 
@@ -117,7 +121,12 @@ and check its restore report. See [chart state](/docs/state),
 ## Reusable indicator templates
 
 Capture the whole template to retain pane weights, scale settings and effective
-plot assignments. `createTemplate(name, input)` and `saveTemplate(id, input)` accept
+plot assignments. A template is the user's own copy of the user's own studies, so
+it carries no [study policy](/docs/indicators#study-policies) and leaves out the
+studies the host keeps from the user (not `removable` or not `listed`) and any study
+reading their output; applying one in `replace` mode keeps those host studies, on
+their own panes, and the template's panes take the free slots around them. Workspace
+documents keep policies with the rest of each chart's state. `createTemplate(name, input)` and `saveTemplate(id, input)` accept
 this payload or a legacy `IndicatorState[]`. Repeated descriptors remain separate
 studies, and an empty template is valid.
 

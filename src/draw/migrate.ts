@@ -165,6 +165,9 @@ function migrateEntry(raw: unknown): Drawing | null {
     for (const key of POLICY_FLAGS) if (typeof raw.policy[key] === 'boolean') policy[key] = raw.policy[key];
     if (Object.keys(policy).length > 0) out.policy = policy;
   }
+  // A slot in the series band names an entry by its inventory id; anything
+  // else cannot name one, and the drawing paints by its z-index instead.
+  if (typeof raw.stackAbove === 'string' && raw.stackAbove !== '') out.stackAbove = raw.stackAbove;
   if (isNum(raw.createdAt)) out.createdAt = raw.createdAt;
   return out;
 }

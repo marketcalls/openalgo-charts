@@ -164,7 +164,60 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // the indicator gap recovery measure 75.07 KiB (76874 bytes); allow 75.08 KiB.
 // Watchlists, news, account state and viewport drawings live in the optional
 // tiers; the widget check below keeps the panels out of this import.
-const LIMIT_BYTES = 75.08 * 1024;
+// Sharing one luminance calculation between the canvas helpers and the widget
+// tokens took the import from 76874 to 76850 bytes (75.05 KiB); the budget
+// follows it down to 75.05 KiB.
+// Times past the last bar belong to every chart: drawing placement, study
+// shapes and linked viewports all read them. Replacing the last-gap
+// extrapolation with the median spacing and a lazily generated, bounded
+// session-calendar plan measures 76874 to 77551 bytes (75.07 to 75.73 KiB,
+// 0.66 KiB). Reading each session window's bar offset rather than one for all
+// brings it to 77575 bytes (75.76 KiB); allow 75.76 KiB. SessionCalendar
+// itself only rides in by type.
+// Study policies and the uniform draw order are core chart behaviour: every
+// study call a user control makes honours its policy, the legend drops the
+// buttons a policy withholds, the pane paints a primitive placed in the series
+// band between two studies (flushing a batching backend first), the context
+// menu ranks a drawing against the series painted over it, the price source
+// stays the instrument wherever it paints, and the chart state saves both.
+// Measured 75.07 to 76.63 KiB (1.56 KiB); allow 76.63 KiB. The inventory's
+// placement rules, the drawing layers and the panel stay out of this import.
+// A study's paired time and price are one point, and the chart answers what a
+// host asks about it: the pair's validation, the 'point' pick that captures
+// both from one click, the plot rectangle a host overlay and the draw tier's
+// pinned drawings both read (chart.plotRect), the tick schedule the chart now
+// holds so a dragged price alert rounds by band, and the corner mark yielding
+// the pointer to whatever lies over it. Measured 76.63 to 76.90 KiB (0.27
+// KiB), with the base bundle 121.49 to 121.76 kB; allow 76.91 KiB. The anchor
+// handle, its drag and its undo step live in the draw tier and stay out.
+// Review fixes add 0.17 KiB: a legend row keeps the buttons its host set, the
+// pane ranks a hit by the band it paints in before its distance, plotRect
+// scales the pane it answers for, addIndicator takes back a removed study's
+// id, and a tick schedule must round and step. Measured 76.90 to just over
+// 77.07 KiB, with the base bundle 121.76 to 121.97 kB; allow 77.08 KiB.
+// An alert scope names the data variant it was set on, and alert documents
+// round-trip on charts without a controller, so the parser that refuses a
+// variant this build cannot name ships here too: normalizeDataVariant and the
+// scope check. Measured 76874 to 77076 bytes (75.07 to 75.27 KiB); allow
+// 75.27 KiB. The alert controller and the loading controller's variant
+// handling still shake out.
+// Background targets route a study's shading to the price pane or a plot's
+// pane inside the indicator runtime, which every chart carries: the list form,
+// its checks and one layer per target, sharing the drawing targets' layer
+// upkeep. Measured 76874 to 77082 bytes (75.07 to 75.28 KiB). Holding the last
+// good bar colours through the restack after a failed settings pass takes it to
+// 77119 bytes (75.31 KiB); allow 75.32 KiB.
+// The notes above were measured branch by branch. Merged, they measure 80041
+// bytes (78.17 KiB). Handing study anchor steps to the chart-wide undo history
+// and keeping that history to the study policies live in the draw and widget
+// tiers and add nothing here (80041 bytes with and without them). The
+// device-pixel layout, layout:change, priceScaleDefaults and
+// setSessionCalendar take the merged build to 81172 bytes (79.27 KiB), and the
+// undo history's reconciliation on top of them, again in the draw and widget
+// tiers, leaves it there; allow 79.27 KiB. Keeping a canvas's reported device
+// size only while its new box can snap to it moves it to 81148 bytes
+// (79.25 KiB); the budget follows it down to 79.25 KiB.
+const LIMIT_BYTES = 79.25 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

@@ -300,6 +300,20 @@ describe('mountIndicatorPicker', () => {
     expect(rig.q('.oac-pick__running-empty')?.textContent).toBe('No running studies');
     handle.close();
   });
+  it('leaves a study its host keeps unlisted out of the running list, and greys the remove of a protected one', () => {
+    const rig = makeRig();
+    const shown = rig.chart.addIndicator('test-ma');
+    rig.chart.addIndicator('test-ma', {}, { policy: { listed: false } });
+    const pinned = rig.chart.addIndicator('test-ma', {}, { policy: { removable: false } });
+    const handle = mountIndicatorPicker(rig.ctx);
+    const running = rig.qa('.oac-pick__running-row');
+    expect(running.map(row => row.dataset.instanceId)).toEqual([shown.id, pinned.id]);
+    const remove = running[1].querySelector('.oac-pick__remove') as FakeElement;
+    expect(remove.disabled).toBe(true);
+    remove.click();
+    expect(rig.chart.indicators()).toContain(pinned);
+    handle.close();
+  });
   it('lists the registry by category, filters as you type, and adds on click or Enter', () => {
     const rig = makeRig();
     const added: string[] = [];
@@ -378,6 +392,34 @@ describe('mountIndicatorSettings', () => {
     expect(inst.settings()['ma:color']).toBe('#ff0000');
     // Through to the series the pane paints, not only the settings bag.
     expect(rig.chart.panes()[0].series().some((s) => s.style.color === '#ff0000')).toBe(true);
+  });
+
+  it('reports a write the host refused after locking the study, counts nothing, and still closes on Cancel', () => {
+    const rig = makeRig();
+    const inst = rig.chart.addIndicator('test-ma', { period: 30 });
+    const changed: string[] = [];
+    let closed: boolean | null = null;
+    mountIndicatorSettings(rig.ctx, undefined, { instanceId: inst.id,
+      onChange: (study) => changed.push(study.id), onClose: (ok) => { closed = ok; } });
+    const period = rig.q(`#oac-ind-${inst.id}-period`) as FakeElement;
+    period.value = '5';
+    period.fire('change');
+    expect(changed).toEqual([inst.id]);
+    inst.setPolicy({ configurable: false });
+    const locked = rig.q(`#oac-ind-${inst.id}-period`) as FakeElement;
+    locked.value = '9';
+    locked.fire('change');
+    expect(inst.settings().period).toBe(5);
+    expect(changed).toEqual([inst.id]);
+    expect(rig.toasts).toContain('error:Test MA settings are protected');
+    // The field shows what the study holds, not the refused value.
+    expect((rig.q(`#oac-ind-${inst.id}-period`) as FakeElement).value).toBe('5');
+    // Cancel cannot put the earlier edit back through the lock: it says so and closes.
+    (rig.qa('.oac-dialog__actions button')[0]).click();
+    expect(closed).toBe(false);
+    expect(rig.stack.size()).toBe(0);
+    expect(inst.settings().period).toBe(5);
+    expect(rig.toasts.filter(text => text === 'error:Test MA settings are protected')).toHaveLength(2);
   });
 
   it('Cancel puts back the touched keys, Defaults restores the tab, OK keeps', () => {

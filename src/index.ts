@@ -5,8 +5,8 @@ export { VERSION, version } from './version';
 
 export { createChart, Chart, compactVolume, PRICE_SCALE_MODES } from './core/chart';
 export type {
-  ChartOptions, ChartNavigationOptions, ChartWatermarkOptions, BrandingChangedEvent, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
-  ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState,
+  ChartOptions, ChartNavigationOptions, ChartWatermarkOptions, BrandingChangedEvent, PlotRect, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
+  ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState, LayoutChangeEvent, LayoutSetter,
   AxisChromeOptions, ZoomAnchor, DoubleClickAction, DoubleClickEvent, ExportSvgOptions,
   PointerModifiers, PointerKind, PointerSample, PointerInfo,
   ChartClickEvent, ChartEventClick, ChartDragEvent, ChartDragEndEvent, RendererFallbackEvent,
@@ -22,6 +22,7 @@ export { ChartObjects } from './model/chart-objects';
 export type {
   ChartObjectKind, ChartObjectCapabilities, ChartObjectSnapshot, ChartObjectDefinition,
   ChartObjectProvider, ChartObjectDrawing, ChartObjectDrawingSource, ChartObjectDrawingGroup, ChartObjectsOptions,
+  ChartObjectBand,
 } from './model/chart-objects';
 export { darkTheme, lightTheme, DEFAULT_THEME } from './theme';
 export type { ChartTheme } from './theme';
@@ -94,6 +95,9 @@ export {
 export type {
   IndicatorDescriptor,
   IndicatorInput,
+  IndicatorInputCondition,
+  IndicatorInputConditionValue,
+  IndicatorInputPresentation,
   IndicatorPlot,
   PlotBarColor,
   IndicatorBarsRequest,
@@ -123,9 +127,13 @@ export type {
   IndicatorDrawing,
   IndicatorMarker,
   IndicatorOutputTarget,
+  IndicatorBackgroundSpec,
   DrawAnchor,
 } from './model/indicator-registry';
 export type { IndicatorApi, IndicatorHost } from './model/indicator-instance';
+// What a user may do with a study, and the host's way past it.
+export { parseIndicatorPolicy } from './model/indicator-policy';
+export type { IndicatorPolicy, IndicatorEditOptions } from './model/indicator-policy';
 
 // serialisable chart state (saved layouts / templates / drawings passthrough)
 export { CHART_STATE_VERSION, parsePaneState } from './model/chart-state';
@@ -192,7 +200,7 @@ export { IndicatorDrawings } from './primitives/indicator-draws';
 export { IndicatorBackground } from './primitives/indicator-background';
 // `chart.dataLayer` is public, so its type has to be nameable by a consumer —
 // and a tier that takes one in its own public API needs to name *this* one.
-export type { DataLayer, IndexedBar, SeriesId } from './model/data-layer';
+export type { DataLayer, IndexedBar, SeriesId, SessionCalendarSource } from './model/data-layer';
 export { PriceLine } from './primitives/price-line';
 export type { PriceLineOptions } from './primitives/price-line';
 // price-level family: previous close, session high/low, extended-hours opens
@@ -244,8 +252,8 @@ export { isWhitespace, toBar } from './model/bar';
 
 export type { DataFeed, TradeFeed, BarsRequest, BarsPageRequest, BarsPage, BarSubscriptionOptions, LiveBarMeta, MarketDepth, DepthLevel, OrderSide, OrderType, PlaceOrder, UnsubscribeFn } from './feed/types';
 export type { InstrumentKey, QuoteSnapshot, QuoteRequest, QuoteStreamStatus, QuoteStreamHandlers, QuoteFeed, NewsRequest, NewsItem, NewsPage, NewsFeed } from './feed/types';
-export { Instrument } from './feed/instrument';
-export type { InstrumentMetadata, InstrumentCalendar, InstrumentSession } from './feed/instrument';
+export { Instrument, SessionCalendar } from './feed/instrument';
+export type { InstrumentMetadata, InstrumentCalendar, InstrumentSession, SessionCalendarSpec } from './feed/instrument';
 export { TickSchedule } from './feed/tick-schedule';
 export type { TickBand } from './feed/tick-schedule';
 export { checkTradingCapability, assertTradingCapability, TradingCapabilityError } from './feed/trading-capabilities';
@@ -253,6 +261,12 @@ export type { TradingOperation, TradingCapabilities, TradingCapabilityRequest, T
 export { HistoryRequestPool, sharedHistoryRequests } from './feed/request-pool';
 export type { HistoryRequestPoolOptions } from './feed/request-pool';
 export { DataLoadingController } from './feed/data-controller';
+export {
+  normalizeDataVariant, dataVariantKey, unsupportedDataVariant, dataVariantError, publishDataContext,
+} from './feed/data-variant';
+export type {
+  DataVariant, DataSession, DataAdjustment, DataVariantDimension, DataVariantCapabilities, DataVariantQuery, DataContextTarget,
+} from './feed/data-variant';
 export type { DataLoadingOptions, DataLoadingSnapshot, DataLoadingStatus, HistoryLoadingStatus, DataUpdateReason } from './feed/data-controller';
 export type { ChartDataContext, IndicatorDataChange, IndicatorDataStatus } from './model/indicator-registry';
 export { OpenAlgoDataFeed, mapHistoryResponse, rowTimeToUtcSeconds } from './feed/openalgo-rest';
@@ -375,7 +389,7 @@ export type {
 } from './input/shortcuts';
 
 export { beginPick } from './input/pick';
-export type { PickKind, PickHost, PickOptions, PickHandle } from './input/pick';
+export type { PickKind, PickHost, PickOptions, PickHandle, PickPoint } from './input/pick';
 
 export { AlertController } from './alerts/controller';
 export { alertSettingsSchema } from './alerts/schema';

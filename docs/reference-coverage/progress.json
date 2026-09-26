@@ -343,12 +343,14 @@
     }
   ],
   "next": [
-    "Publish 2.5.5 through the release workflow, deploy the website and create the GitHub release.",
-    "Wave 2b: study protection policies (G06b), uniform stacking (H02), atomic time and price pick, alert-drag rounding to tick schedules and a plot rectangle accessor (single chart.ts writer); non-drawing action history (G07); series variants (P02); background output targets; conditional study inputs.",
+    "Publish 2.5.6 through the release workflow, deploy the website and create the GitHub release.",
+    "Charts 90 program Release 2 (2.5.7): split src/core/chart.ts by responsibility, move only, as the one change in that release.",
+    "Releases 3 to 6 (2.5.8, 2.5.9, 2.5.10 and 2.6.0) follow the plan, then five fresh reviewers rescore every area.",
+    "Validate the removal of the depth_level key against the OpenAlgo server before 3.0.0.",
     "Defer issue #22."
   ],
   "release": {
-    "version": "2.5.5",
+    "version": "2.5.6",
     "authorized": true,
     "status": "verified-candidate",
     "steps": [
@@ -360,12 +362,12 @@
       "Create release and verify published artifacts"
     ],
     "companion": {
-      "version": "0.7.2",
+      "version": "0.8.0",
       "authorized": true,
       "status": "published-and-public-artifacts-verified",
       "requirement": "Compare all shipped numerical indicators with equivalent calculations in both language engines, fix confirmed deviations and publish both companion packages from one versioned source.",
       "sourceCommit": "f9ab00e4e9238b442ae0ad3639f52bc5dc45394b",
-      "releaseUrl": "https://github.com/marketcalls/openscript/releases/tag/v0.7.2",
+      "releaseUrl": "https://github.com/marketcalls/openscript/releases/tag/v0.8.0",
       "correctivePatch": {
         "version": "0.7.1",
         "status": "published-and-public-artifacts-verified",
@@ -373,37 +375,40 @@
         "releaseUrl": "https://github.com/marketcalls/openscript/releases/tag/v0.7.1",
         "published": "npm openalgo-script 0.7.1 and PyPI openscript 0.7.1 on 2026-09-25"
       },
-      "published": "npm openalgo-script 0.7.2 and PyPI openscript 0.7.2 on 2026-09-25: overflow-safe running totals (pvt, vwap, vwapAnchor, ad, adOsc, cmf) and cmf engine agreement on negative window volume"
+      "published": "npm openalgo-script 0.8.0 and PyPI openscript 0.8.0 on 2026-09-26: the chart adapter gates the tables hook and per-bar band colours on the chart version (chartVersion), both available from charts 2.5.4. The published 0.8.0 passes the chart repository's script-engine integration checks against 2.5.6."
     },
     "scope": [
-      "Indicator gap recovery (numeric batches A and B) and the documented numerical contract",
-      "Opt-in movable primary price pane (G04 part 2)",
-      "Viewport-pinned drawings (G05)",
-      "Price-dependent tick schedules (P03)",
-      "Named watchlists, quote rows and a news reader (H05)",
-      "Account state, order preview, durations and native position commands (P01)"
+      "Study protection policies (G06b) and one draw order across sources, studies and drawings (H02)",
+      "Chart-wide undo timeline in the widget (G07)",
+      "Data variants: session, adjustment, currency and unit as provider series (P02)",
+      "Paired time and price inputs with an on-pane anchor, background output targets and conditional study inputs",
+      "Future-anchor spacing and the session calendar (90 program D1)",
+      "Device-pixel pane layout and paint on resize (R6, R7)",
+      "Claims in README and ARCHITECTURE backed by code or measurement (R11)",
+      "Deprecation tags with removal versions and a lint check (E3); shared indicator helpers (E5)",
+      "Distinct icons, a duplicate-glyph test with a raster check, accent paths and a 2px chrome stroke (I1, I2, I3, I6)"
     ],
     "previous": {
-      "version": "2.5.4",
+      "version": "2.5.5",
       "status": "published",
-      "releaseUrl": "https://github.com/marketcalls/openalgo-charts/releases/tag/v2.5.4"
+      "releaseUrl": "https://github.com/marketcalls/openalgo-charts/releases/tag/v2.5.5"
     }
   },
   "validation": {
-    "chartTests": 8228,
-    "chartTestFiles": 359,
+    "chartTests": 9245,
+    "chartTestFiles": 408,
     "compiledProgramTests": 18,
-    "demoTests": 542,
-    "demoTestFiles": 50,
+    "demoTests": 653,
+    "demoTestFiles": 62,
     "browserEvidence": "The merged 2.5.4 candidate runs 1118 browser cases across Chromium, Firefox and WebKit. Four stale expectations (navigation snapshot keys, the persistent legend count row, the external-study refetch after a history resync and a drawing-policy fixture whose two lines crossed at the click point) were corrected; the first three also failed on the pre-merge baseline, and the fourth arrived with the drawing-policy tests. Startup waits that time out under ten parallel browsers against one fixture server occur at the same rate on the pre-merge baseline. Read-only drawing selection and menu screenshots inspected.",
     "website": "63 static pages built successfully. All 1405 generated API files in the static output match the warning-free source API build byte-for-byte.",
-    "chartOnlyBrotliKiB": 75.07,
-    "chartOnlyBudgetKiB": 75.08,
-    "baseBrotliKB": 119.15,
-    "indicatorBrotliKB": 36.34,
-    "workspaceBrotliKB": 9.99,
-    "allTiersBrotliKB": 335.15,
-    "budgetChange": "Wave-1 merges (go-to-date, pane collapse, output targets, drawing policies, chart grid) set every limit to the smallest two-decimal value that passes on the measured 2.5.4 build: base 117.42 kB (117419 bytes), base plus trade 125.43 kB, draw 42.53 kB, widget 71.34 kB, terminal 267.56 kB, all tiers 310.09 kB and chart-only 74.44 KiB (76220 bytes).",
+    "chartOnlyBrotliKiB": 79.25,
+    "chartOnlyBudgetKiB": 79.25,
+    "baseBrotliKB": 125.39,
+    "indicatorBrotliKB": 36.44,
+    "workspaceBrotliKB": 10.47,
+    "allTiersBrotliKB": 355.97,
+    "budgetChange": "The 2.5.6 build sets every limit to the smallest two-decimal value that passes: base 125.39 kB, base plus trade 142.08 kB, indicators 36.44 kB, draw 48.42 kB, widget 92.72 kB, terminal 302.97 kB, workspace 10.47 kB and all tiers 355.98 kB; the chart-only import measures 81148 bytes under a 79.25 KiB ceiling.",
     "review": "Independent typed-input review found reentrant destruction, pane-slot replacement and context changes during pick:end. Eight actual-chart regressions failed before capture lifetime fences and now pass. No additional blocker found in scalar validation, exchange defaults, restore preflight or public exports. A final host review reproduced four failures involving constructor and __proto__ exchange keys; safe own-property defaults, patches and staged collection now preserve them through selection, Defaults, Cancel and Apply.",
     "packageVerification": "Full verify passes lint, typecheck, 7826 unit tests, seven endurance checks, build, all 478 example-host tests, declaration identity, measured size budgets and optional-tier removal checks. The installed public companion 0.7.0 passes 18 compiled-program integration checks and public adapter typechecking. API documentation generates without warnings. The separately discovered Python extreme-directional defect is outside those integration fixtures and remains tracked for correction.",
     "latestEngineSourceReview": "Companion source f9ab00e4e9238b442ae0ad3639f52bc5dc45394b passes 2161 JavaScript tests, 956 Python tests and 102 conformance cases, with 19 compiler-only skips. Strict gates pass 6836 cases and 1504908 accepted calls with zero exact-bit, absence, oracle or execution differences. Both public 0.7.0 packages are published. Downloaded public artifacts pass 363 programs across all 116 keys, 124977 exact cells and 6756 independent expected cells. Archived source/build bytes and registry integrity match; attestation digest/source/workflow claims checked without cryptographic signature verification.",

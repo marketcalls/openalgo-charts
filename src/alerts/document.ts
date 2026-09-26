@@ -1,4 +1,5 @@
 import { CONDITIONS } from './conditions';
+import { normalizeDataVariant } from '../feed/data-variant';
 import type { Alert, AlertsDocument } from './types';
 
 const text = (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0;
@@ -34,6 +35,11 @@ export function validateAlert(alert: Alert): void {
   for (const key of ['symbol', 'exchange', 'interval']) {
     if (scope[key] !== undefined && typeof scope[key] !== 'string') throw new Error('Invalid alert scope');
   }
+  // A variant this build cannot name would evaluate on some other series.
+  if (scope.variant !== undefined) {
+    try { normalizeDataVariant(dataRecord(scope.variant)); }
+    catch { throw new Error('Invalid alert scope variant'); }
+  }
   for (const key of ['expiresAt', 'lastTriggeredAt', 'lastTriggeredTime', 'lastClosedTime', 'lastTouchedTime'] as const) {
     if (alert[key] !== undefined && !Number.isFinite(alert[key])) throw new Error(`Invalid alert ${key}`);
   }
@@ -43,7 +49,7 @@ export function validateAlert(alert: Alert): void {
 export function copyAlert(alert: Alert): Alert {
   return { ...alert, source: alert.source.kind === 'drawing'
     ? { ...alert.source, ...(alert.source.input ? { input: { ...alert.source.input } } : {}) }
-    : { ...alert.source }, scope: { ...alert.scope } };
+    : { ...alert.source }, scope: { ...alert.scope, ...(alert.scope.variant ? { variant: { ...alert.scope.variant } } : {}) } };
 }
 
 function dataRecord(input: unknown): Record<string, unknown> {

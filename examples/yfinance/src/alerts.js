@@ -59,7 +59,8 @@ export function alertContextEntries(app, event, pane = 1) {
   if (!chart || !ui) return [];
   const scope = () => {
     const context = chart.getDataContext();
-    return JSON.stringify([context?.symbol, context?.exchange, context?.interval]);
+    // The session is part of the series an alert is set on, like the interval.
+    return JSON.stringify([context?.symbol, context?.exchange, context?.interval, context?.variant?.session ?? null]);
   };
   const initialScope = scope();
   const current = () => app['chart' + suffix] === chart && app['alertUi' + suffix] === ui && scope() === initialScope;

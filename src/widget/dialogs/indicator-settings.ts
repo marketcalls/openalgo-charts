@@ -19,6 +19,7 @@ import {
   button, controlsFromInputs, dialogFrame, el, glyphSvg, openPanel, renderForm, tabList,
   type FormHandle, type PanelHandle,
 } from '../form';
+import { STYLE_GLYPH } from '../glyphs';
 
 export type IndicatorSettingsTab = 'inputs' | 'style';
 
@@ -35,8 +36,6 @@ export interface IndicatorSettingsOptions {
   /** Runs once when the dialog is gone; `committed` is false after Cancel or Escape. */
   onClose?(committed: boolean): void;
 }
-
-const STYLE_GLYPH = 'M3 13c2.5 0 3.5-1.5 4-3.5M7.5 9.5 13 4a1.4 1.4 0 0 1 2 2l-5.5 5.5';
 
 function studySource(value: unknown): value is IndicatorStudySource {
   if (value === null || typeof value !== 'object') return false;
@@ -86,6 +85,8 @@ export function mountIndicatorSettings(
   const resolved = resolveInstance(ctx, anchor, opts);
   if (resolved.inst === null) return declined(ctx, resolved.why ?? widgetText(ctx, 'No indicator to configure'));
   const inst: IndicatorApi = resolved.inst;
+  // Every write would be refused, so the dialog says why instead of opening.
+  if ((inst as Partial<IndicatorApi>).policy?.().configurable === false) return declined(ctx, widgetText(ctx, '{name} settings are protected', { name: inst.name }));
   const descriptor: IndicatorDescriptor = getIndicator(inst.indicatorId);
 
   const tabs: Array<{ id: IndicatorSettingsTab; label: string; icon: string; inputs: readonly IndicatorInput[] }> = [];
@@ -96,6 +97,9 @@ export function mountIndicatorSettings(
 
   const before = detached(inst.settings());
   const dirty = new Set<string>();
+  // Edits preview live, one write per keystroke or colour drag; the session
+  // is one step, and a Cancel that restores every key leaves none.
+  const endStep = ctx.history?.group('Study settings') ?? ((): void => {});
   let activeTab: IndicatorSettingsTab = tabs.some((t) => t.id === opts.tab) ? (opts.tab as IndicatorSettingsTab) : tabs[0].id;
   let form: FormHandle | null = null;
   let inputControls: IndicatorInputControlsHandle | null = null;
@@ -112,11 +116,17 @@ export function mountIndicatorSettings(
   const report = (error: unknown): void => {
     ctx.toast(error instanceof Error ? error.message : widgetText(ctx, 'The study settings could not be applied'), 'error');
   };
+  // The host can lock the study while the dialog is open: a refused write
+  // changed nothing, so it is reported and never counted as an edit.
+  const locked = (): string => widgetText(ctx, '{name} settings are protected', { name: inst.name });
   const write = (patch: IndicatorSettings): boolean => {
     writeError = null;
     if (!current()) { cancel(); return false; }
-    try { inst.setSettings(detached(patch)); }
-    catch (error) {
+    try {
+      if (inst.setSettings(detached(patch)) === false) {
+        writeError = locked(); ctx.toast(writeError, 'error'); return false;
+      }
+    } catch (error) {
       writeError = error instanceof Error ? error.message : widgetText(ctx, 'The study settings could not be applied');
       report(error); return false;
     }
@@ -195,6 +205,9 @@ export function mountIndicatorSettings(
           return;
         }
         form?.sync(shown());
+        // The sync re-read the descriptor's conditions; a pick or a search
+        // beside a field that just went out of play must follow it.
+        inputControls?.refresh();
       },
     });
     inputControls = mountIndicatorInputControls(ctx, {
@@ -208,6 +221,7 @@ export function mountIndicatorSettings(
         }
         for (const key of Object.keys(patch)) form?.setError(key, null);
         form?.sync(shown());
+        inputControls?.refresh();
         return true;
       },
     });
@@ -233,7 +247,7 @@ export function mountIndicatorSettings(
     event.preventDefault(); event.stopPropagation(); cancel();
   });
   const handle = openPanel(ctx, frame.el, { placement: 'center', modal: true, dismissOnEscape: false,
-    onClose: () => { offRemoved(); offDestroy(); inputControls?.destroy(); form?.destroy(); },
+    onClose: () => { offRemoved(); offDestroy(); inputControls?.destroy(); form?.destroy(); endStep(); },
   }, () => {
     cancel();
     // A host destroying its overlay cannot keep a rejected rollback open.
@@ -252,8 +266,11 @@ export function mountIndicatorSettings(
     }
     if (committed || dirty.size === 0) return true;
     const back: IndicatorSettings = Object.fromEntries([...dirty].map(key => [key, before[key]]));
-    try { inst.setSettings(detached(back)); }
-    catch (error) { report(error); renderPane(); return false; }
+    try {
+      // Locked since the edits: nothing this dialog does can take them back,
+      // so it says so and closes rather than holding the user in it.
+      if (inst.setSettings(detached(back)) === false) ctx.toast(locked(), 'error');
+    } catch (error) { report(error); renderPane(); return false; }
     dirty.clear();
     opts.onChange?.(inst);
     return true;

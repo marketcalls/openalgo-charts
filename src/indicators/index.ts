@@ -128,3 +128,4 @@ export {
 export {
   createRequestedIndicator, type RequestedIndicatorDescriptor, type RequestedIndicatorContext,
 } from './requested-indicator';
+export { inheritedDataVariant } from './inherited-variant';

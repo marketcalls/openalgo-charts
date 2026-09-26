@@ -21,6 +21,7 @@ import {
   button, controlsFromFields, dialogFrame, el, glyphSvg, openPanel, placePanel, renderForm, selectionPoint,
   type ButtonSpec, type FormHandle, type PanelHandle,
 } from '../form';
+import { ABOVE_GLYPH, BEHIND_GLYPH } from '../glyphs';
 import { mountLevelEditor } from './level-editor';
 import { mountTextEditor } from './text-editor';
 
@@ -91,9 +92,6 @@ export function resolvedDrawingValues(d: Drawing, schema: SettingsSchema, tool: 
   return out;
 }
 
-const ABOVE_GLYPH = 'M3 4h10M8 14V6M5 9l3-3 3 3';
-const BEHIND_GLYPH = 'M3 12h10M8 2v8M5 7l3 3 3-3';
-
 function toolOf(id: string): DrawingTool | null {
   try { return getDrawingTool(id); } catch { return null; }
 }
@@ -157,7 +155,9 @@ export function mountDrawingProperties(ctx: WidgetContext, anchor?: HTMLElement,
     const primary = live[0];
     const locked = primary.locked === true;
     const hidden = primary.visible === false;
-    const behind = primary.zIndex < 0;
+    // Between studies it is on neither side of the series, so neither toggle is pressed.
+    const between = primary.stackAbove !== undefined && ctx.chart.seriesStack(primary.paneIndex).includes(primary.stackAbove);
+    const behind = !between && primary.zIndex < 0;
     const why = lockedOut();
     const add = (spec: ButtonSpec, act: string, pressed?: boolean, edits = false): void => {
       const b = button(doc, { ...spec, iconOnly: true });
@@ -177,7 +177,7 @@ export function mountDrawingProperties(ctx: WidgetContext, anchor?: HTMLElement,
     add({ label: widgetText(ctx, 'Bring to front'), icon: 'front', onClick: () => { for (const id of ids) draw.bringToFront(id); } }, 'front');
     add({ label: widgetText(ctx, 'Send to back'), icon: 'back', onClick: () => { for (const id of ids) draw.sendToBack(id); } }, 'back');
     add({ label: widgetText(ctx, 'In front of the series'), svg: glyphSvg(ABOVE_GLYPH),
-      onClick: () => { for (const id of ids) draw.bringAboveSeries(id); } }, 'above', !behind);
+      onClick: () => { for (const id of ids) draw.bringAboveSeries(id); } }, 'above', !behind && !between);
     add({ label: widgetText(ctx, 'Behind the series'), svg: glyphSvg(BEHIND_GLYPH),
       onClick: () => { for (const id of ids) draw.sendBehindSeries(id); } }, 'behind', behind);
     sep();

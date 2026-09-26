@@ -77,7 +77,7 @@ Unset `color` falls back to `theme.lineColor`, unset `lineWidth` to `1.5`. `styl
 The time axis is gapless (weekends, holidays, and session breaks collapse) so a pixel anchor would slide the instant the viewport, interval, or dataset changed. Anchors resolve through `DataLayer.timeToIndexFloat`, which is *fractional*, and that has two consequences worth relying on:
 
 - An anchor can sit **inside a collapsed gap** (a Saturday between Friday and Monday) and still map to a stable x.
-- An anchor can sit **past the last bar**, which is where trend projections, `forecast`, and the position tools' targets live.
+- An anchor can sit **past the last bar**, which is where trend projections, `forecast`, and the position tools' targets live. The bar times there come from the session calendar when the host set one (`chart.setSessionCalendar`, `SessionCalendar.applyTo`, `Instrument.applyTo` or `chart.dataLayer.setSessionCalendar`), so an endpoint drawn past Friday's close lands on Monday's session; without one they run at the median recent bar interval, never at a night- or weekend-sized last gap. See [times past the last bar](data-and-time.md#times-past-the-last-bar).
 
 Drag deltas are computed in data space too (`p.time - start.from.time`), so translating a shape keeps it on the same bars.
 
@@ -192,32 +192,44 @@ Everything else comes from the shared text block, `drawing.text`: `value`,
 The tier ships a glyph for every tool, as path data:
 
 ```ts
-import { drawingToolIcon, ICON_ATTRS } from 'openalgo-charts/draw';
+import { drawingToolIcon, drawingToolAccent, ICON_ATTRS } from 'openalgo-charts/draw';
 
+const accent = drawingToolAccent('trend-line');   // the two anchor dots, for a fill
 <svg {...ICON_ATTRS} width={24} height={24}>
   <path d={drawingToolIcon('trend-line')} />
+  {accent && <path d={accent} fill="currentColor" stroke="none" />}
 </svg>
 ```
+
+Each path is the whole glyph. The marks that tell siblings apart (a trend
+line ends in two dots, a ray starts at one, a path ends in a head) are drawn in
+the path itself as small closed outlines, so a host that renders only the path
+data still shows every one of them. An **accent** repeats those marks for a
+fill on top: it adds weight, never identity. The builders below always draw it,
+as a second `<path>` with `fill="currentColor" stroke="none"`; a host wrapping
+the raw path data may do the same, and loses only the fill if it does not.
 
 | Export | |
 |---|---|
 | `DRAWING_TOOL_ICONS` | `Record<string, string>` of tool id to `d` attribute |
 | `drawingToolIcon(id)` | One glyph, or `undefined` when there is none |
+| `DRAWING_TOOL_ACCENTS` / `drawingToolAccent(id)` | The optional fill per tool glyph: marks its path already outlines, as a second `d`; `undefined` when a glyph has none |
 | `drawingToolIconIds()` | Every id the set covers |
 | `ICON_VIEWBOX` | `'0 0 24 24'` |
 | `ICON_STROKE` | `2` |
 | `ICON_ATTRS` | The whole attribute bag for the `<svg>` (an `IconAttrs`) |
 | `CHROME_ICONS` | `Record<string, string>` of chrome id (undo, redo, lock, trash, magnet, ...) to `d` attribute, on a 16 grid |
 | `chromeIcon(id)` / `chromeIconIds()` | One chrome glyph or `undefined`; every chrome id |
-| `CHROME_ICON_VIEWBOX` / `CHROME_ICON_STROKE` / `CHROME_ICON_ATTRS` | `'0 0 16 16'`, `1.5`, the attribute bag |
+| `CHROME_ICON_ACCENTS` / `chromeIconAccent(id)` | The chrome fills (the eye's pupil, the camera lens, slider knobs, pole caps), each also outlined in its glyph's path |
+| `CHROME_ICON_VIEWBOX` / `CHROME_ICON_STROKE` / `CHROME_ICON_ATTRS` | `'0 0 16 16'`, `2` (1.5 through 2.5.5; pass `{ stroke: 1.5 }` to keep the old weight), the attribute bag |
 | `CHROME_ICON_FILLED` | The chrome ids painted solid rather than stroked (`chromeIconSvg` consults it; a host wrapping raw path data must too) |
-| `iconSvg(id, opts?)` / `chromeIconSvg(id, opts?)` | A complete inline `<svg>` string in `currentColor`; `size` in px or `'1em'` (an `IconSvgOptions`). Throws on an unknown id |
-| `iconSprite(ids?)` / `iconUse(id, opts?)` | One hidden symbol sheet (ids `oac-icon-<id>`, `ICON_SYMBOL_PREFIX`) and the per-glyph `<use>`; symbols carry no presentation attributes, so stroke and fill inherit from the frame |
-| `toolCursor(id, opts?)` | A CSS `cursor` value carrying the glyph over a contrasting halo; `size` 1..128 (default 20), `hotspot` (default the centre), `color`, `halo`, `fallback` (a `ToolCursorOptions`) |
+| `iconSvg(id, opts?)` / `chromeIconSvg(id, opts?)` | A complete inline `<svg>` string in `currentColor`, the accent included; `size` in px or `'1em'` (an `IconSvgOptions`). Throws on an unknown id |
+| `iconSprite(ids?)` / `iconUse(id, opts?)` | One hidden symbol sheet (ids `oac-icon-<id>`, `ICON_SYMBOL_PREFIX`) and the per-glyph `<use>`; symbols carry no stroke weight, so it inherits from the frame, and an accent carries only `fill="currentColor" stroke="none"` |
+| `toolCursor(id, opts?)` | A CSS `cursor` value carrying the glyph over a contrasting halo, its accent filled; `size` 1..128 (default 20), `hotspot` (default the centre), `color`, `halo`, `fallback` (a `ToolCursorOptions`) |
 
 The path data is data, not DOM: the host still builds its own rail and
 flyouts. The string builders derive from that one set, so the rail, a flyout
-and the armed cursor cannot drift apart. What the host no longer does is draw
+and the tool cursor cannot drift apart. What the host no longer does is draw
 a glyph per tool before it can show a toolbar, which is what every adopter had
 to do before, each drifting on weight and grid independently until the set
 read as many icons rather than one. Measure the count with
@@ -225,15 +237,26 @@ read as many icons rather than one. Measure the count with
 than there are tools (the cursor, the magnet, and glyphs drawn ahead of tools
 not yet registered).
 
-**Render at 24px, or an integer multiple.** With a 2-unit stroke on integer
-coordinates, an orthogonal edge covers exactly two device pixels at 1:1. At 18px
-the 0.75 scale puts it on 1.5 pixels and every edge is anti-aliased across two
-rows: that is a host sizing choice and no path data can fix it.
+**Render at 24px, or an integer multiple, and chrome at 16px.** With a 2-unit
+stroke on integer coordinates, a horizontal or vertical edge covers exactly two
+device pixels at 1:1; diagonals and curves are anti-aliased at any size. At
+18px the 0.75 scale puts the line on 1.5 pixels and every edge is anti-aliased
+across two rows: that is a host sizing choice and no path data can fix it. The
+chrome tier uses the same 2-unit stroke from 2.5.6 (it was 1.5), so both rails
+show one 2px line. A host that wants the old weight passes it explicitly
+(`chromeIconSvg(id, { stroke: 1.5 })`, or `stroke-width: 1.5` in its own frame
+or stylesheet), and gets the softer edges that came with it.
 
 The set is held to one grid by `tests/draw-icons.test.ts`, which checks each
-glyph for the live area, whole units, a single weight, complexity and span. A
-set of this size cannot be kept consistent by review, and the checks caught two
-faults on the first run that reading the paths did not.
+glyph and accent for the live area (2..22 and 2..14), whole units, a single
+weight, complexity and span, that every accent mark is also in its glyph's
+path, that no hollow shape is filled in by the glyph's other strokes, and
+rejects two glyphs that are the same drawing written differently.
+`tests/e2e/icon-raster.spec.ts` rasterises both tiers in Chromium, Firefox and
+WebKit, as the builders draw them and as bare path data, and fails when two
+glyphs overlap at an intersection over union of 0.85 or more (only the star,
+eye and link state pairs may), when a named sibling pair reaches 0.7, or when a
+tier stops being crisp. A glyph added to either registry has to pass both.
 
 ## Tool catalogue
 
@@ -303,7 +326,8 @@ Tool-specific `defaultStyle` values that change behaviour, not just colour:
 
 - **`text` is its own block (`DrawingText`)**, not a set of keys on `style`: `{ value, color?, fontSize?, fontFamily?, bold?, italic?, align?, valign?, wrap?, wrapWidth?, background?, backgroundColor?, backgroundOpacity?, border?, borderColor?, position? }`. A 1.9.x `style.text` / `fontColor` / `textAlign` / `textVAlign` / `textPosition` / `fontWeight` / `fontStyle` is lifted into it on load and paste. The text tool is its content; a shape's text is a label placed by `position`.
 - **`style.levels` is `FibLevel[]`** (`{ ratio, color?, enabled?, label? }`; `enabled: false` hides a rung without forgetting it, `label` prints instead of the ratio), not `number[]`. A bare ratio takes the conventional colour from `levelColor(ratio)` (`LEVEL_NEUTRAL` for 0, 1, 2, 3 and anything unnamed); the migration attaches those colours, and `cloneLevels` copies a ladder so a tool default is never shared. `formatRatio` prints a level label, `CYCLE_PALETTE` / `cycleColor(i)` colour a sequence, and `DEFAULT_FIB`, `DEFAULT_FIB_FAN`, `DEFAULT_GANN_BOX`, `DEFAULT_GANN_FAN`, `DEFAULT_FIB_TIME_ZONE` are the frozen defaults.
-- **`zIndex` is paint order.** Below zero paints under the series, at or above zero over it; ties break by list order, so `drawings()` is the paint order. `sortByZIndex(list)` is the stable sort the layer uses, and `DrawingLayerOrder` (`'bottom' | 'top'`) is which of the two layers a pane primitive is. A default of 0 paints exactly where 1.9.2 painted.
+- **`zIndex` is paint order.** Below zero paints under the series, at or above zero over it; ties break by list order, so `drawings()` is the paint order. `sortByZIndex(list)` is the stable sort the layer uses, and `DrawingLayerOrder` (`'bottom' | 'series' | 'top'`) is which layer a pane primitive is. A default of 0 paints exactly where 1.9.2 painted.
+- **`stackAbove` places a drawing in the series band.** It names an entry of `chart.seriesStack(paneIndex)` (`'source:primary'` or `'indicator:<id>'`); the drawing paints right after that entry's series and before the next entry's, and `zIndex` orders the drawings on the same entry. The controller keeps a `'series'` layer per used entry, placed with `chart.setPrimitiveStackAbove`, and the front layer answers hits for every layer of the pane, front to back (body hits from a lower layer carry `paintedBy`). While the entry plots no series on the drawing's pane it paints in front by `zIndex`; `stackAbove` is kept, saved, migrated (a non-string is dropped) and carried by duplicate and the clipboard. `DrawingPatch.stackAbove` sets it or, with `null`, clears it. A host without `seriesStack` / `setPrimitiveStackAbove` (both optional on `DrawingChartHost`) paints every drawing by `zIndex`.
 - **`props`** is a JSON-safe bag for a tool's extras (a table's cells, a callout's tail side), persisted verbatim.
 - **`DRAWING_STATE_VERSION`** (`2`) is the document version `toJSON` writes.
 
@@ -354,8 +378,36 @@ new DrawingController(chart, {
   clipboard: undefined,     // ClipboardPort; defaults to navigator.clipboard, null disables it
   pasteOffsetBars: 2,       // how far a paste is nudged along time
   pasteOffsetPixels: 16,    // how far a paste is nudged down the price axis
+  inputAnchors: true,       // draw the anchor of every paired study input that declares one
 });
 ```
+
+**Study input anchors.** A study `price` input paired with a `timestamp`
+(`timeKey`) and declared with `anchor: true` gets a handle at its point, drawn by
+the controller on the pane and scale `studyInputTarget(chart, study, key)` names
+(the same target a pick of that price uses; `StudyInputTarget` is
+`{ paneIndex, priceScaleId }`). A drag writes both settings in one patch and is one
+step of this controller's undo history, in order with the drawings; `undo()` and
+`redo()` walk it, and a step whose study has gone is passed over. A point written
+through the study's settings instead (a settings dialog's Pick point, a price typed
+in) is one step of this history as well, so an undo takes it back first and never
+passes over it to a drawing made before it; a write inside `untracked`, or forced on
+a study the user may not configure, is the host's own and no step. The
+step emits `drawing:change` with `ids: []` (and again on undo and redo), so a
+control showing whether Undo is available refreshes. An active drawing tool or a pick takes
+the press instead, and choosing a tool, starting a pick or a `data:context` change drops a
+drag in hand. `draw.moveInputAnchor(studyId, key, { time, price })` moves an anchor the way
+a drag release does (snapped, bounded, refused for a study that is not `configurable`) as
+one step, for a host control that sets the point another way such as its own point pick;
+false for no such anchor, a refusal, or the point already held. A host keeping one timeline
+of its own takes these steps with `draw.delegateInputAnchorSteps(record)` (2.5.6):
+`record` gets each move's `InputAnchorStep` (`{ undo(): boolean; redo(): boolean }`, each
+false once the settings have moved on) as the move ends, this history records nothing and
+emits no `drawing:change` for it, and the returned function gives the steps back; the
+widget tier's `ChartHistory` does this. A point written through the settings is not
+handed over, since that timeline sees the write itself. A move inside `untracked` is a
+step nowhere. See
+[indicators](indicators.md#paired-time-and-price-inputs).
 
 | Member | Behaviour |
 |---|---|
@@ -375,16 +427,22 @@ new DrawingController(chart, {
 | `select(id \| ids \| null, additive = false)` / `selected()` / `selection()` | Selection. `additive` toggles each id (shift, ctrl or meta click does this for you); unknown ids and drawings with `policy.selectable: false` are ignored. `selected()` is the primary (first picked) id; `selection()` is the list in pick order. Events fire only when the selection actually changes. |
 | `duplicate(ids)` | Clones with the paste offset (`pasteOffsetBars` / `pasteOffsetPixels`), selects the clones, one undo step. Returns the clones. A clone carries no `policy`. |
 | `nudge(ids, dx, dy)` | Moves by a screen distance in media px (right and down positive); locked and read-only members stay. One undo step. Needs `timeToCoordinate` / `coordinateToTime` on the host for the horizontal half, else assumes the default 8 px bar spacing. |
-| `setZIndex(id, z)` / `bringToFront(id)` / `sendToBack(id)` | Paint order. The two shortcuts are **band-local**: they set `zIndex` to the max / min of the same pane on the same side of the series and move the drawing to the end / start of the list, never crossing the series. |
-| `sendBehindSeries(id)` / `bringAboveSeries(id)` | Set `zIndex` to -1 / 0. No-ops (no history) when already on that side. |
+| `setZIndex(id, z)` / `bringToFront(id)` / `sendToBack(id)` | Paint order. The two shortcuts are **slot-local**: they set `zIndex` to the max / min of the same pane's slot (its side of the series, or the entry it is placed above) and move the drawing to the end / start of the list, never crossing the series. |
+| `reorder(id, direction)` | One step within the same slot, one undo step. |
+| `placeInStack(id, target, where)` | Move directly `'above'` or `'below'` another drawing (`{ drawing: id }`) or a series-band entry (`{ entry }`, a `DrawingStackTarget`) of its pane; one undo step, renumbering the landing slot (below the series up to -1, elsewhere from 0). Next to a drawing it joins that drawing's slot; above an entry it goes on that entry; below an entry on top of the slot under it (behind the series for the first entry). `false` for another pane, an unknown target, or a no-op. Outside the drawing policy, like every stacking call. |
+| `sendBehindSeries(id)` / `bringAboveSeries(id)` | Set `zIndex` to -1 / 0 and leave the series band. No-ops (no history) when already on that side. |
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A step left with nothing to do, once a drawing in it is made read-only or the host's own act has overtaken it, is dropped, so `canUndo()` and `canRedo()` report only a press that changes something. |
+| `historySteps()` | `{ undo: number[], redo: number[] }`, oldest first: the steps each branch holds, by the number `drawing:change` reported them under. A step in neither branch was taken away (a reset, a trim, a host's forced edit). For a host keeping one timeline across drawings and its own edits, such as the widget tier's `ChartHistory`. A step still being recorded (a drag in progress) is not listed. Step numbers are unique across controllers on the page. (2.5.6) |
+| `untracked(fn)` | Runs `fn` as the host's own act and returns what it returns: an edit inside records no undo step and leaves both branches (redo included) as they are, and every recorded step takes it in, as a forced edit does, so no later undo or redo reverses it. Unlike `force` it reaches no read-only drawing; `undo`/`redo` inside it still move along the branches. `ChartHistory.ignore` and every history press run through it. (2.5.6) |
+| `delegateInputAnchorSteps(record)` | Hands the step each study input anchor move makes (a drag, `moveInputAnchor`) to `record` instead of this history, until the returned function gives them back; a later call takes them from an earlier one. `record` receives an `InputAnchorStep` (`{ undo(): boolean; redo(): boolean }`) once the patch is written. For a timeline that already records the settings patch the move writes, such as `ChartHistory`, which would otherwise see one move as two steps. A point written through the study's settings, which this history otherwise holds as a step, is not handed over: the timeline sees that write itself. (2.5.6) |
 | `copy(target?)` / `cut(target?)` / `paste()` | **Async.** See the clipboard section. |
 | `clipboard()` | The `DrawingClipboard` behind them, for reporting failures. |
 | `toJSON()` / `fromJSON(data)` | `{ version: 2, drawings }` (a `DrawingsDocument`) out, deep-copied, without transient drawings (`policy.persistent: false`); replace-all in (and clears history + selection, transient drawings included). `fromJSON` accepts a 1.9.x bare `Drawing[]` too and upgrades it. |
 | `migrateDrawings(input)` | The upgrade `fromJSON` runs, exported for a host reading a saved layout on its own: any 1.9.x array or v2 document in, a v2 `DrawingsDocument` out, never throws. |
 | `destroy()` | Unhooks listeners, removes every pane layer, releases placement mode. |
 
-Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select` (the primary id), `draw:copy`, `draw:cut`, `draw:paste`, plus the 2.0 pair `drawing:select` (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind: 'add' | 'update' | 'remove' | 'reorder' }`, one per mutation, after the per-drawing `draw:*` events), and `drawing:hover` (`{ id: string | null }`, when the unselected drawing under the pointer changes). `DrawingChangeKind` names the `kind` union.
+Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select` (the primary id), `draw:copy`, `draw:cut`, `draw:paste`, plus the 2.0 pair `drawing:select` (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind: 'add' | 'update' | 'remove' | 'reorder' }`, one per mutation, after the per-drawing `draw:*` events; `ids` is empty for a history step that changed no drawing, a study anchor's drag and its undo or redo), and `drawing:hover` (`{ id: string | null }`, when the unselected drawing under the pointer changes). `DrawingChangeKind` names the `kind` union.
+Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select` (the primary id), `draw:copy`, `draw:cut`, `draw:paste`, plus the 2.0 pair `drawing:select` (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind: 'add' | 'update' | 'remove' | 'reorder' }`, one per mutation, after the per-drawing `draw:*` events), and `drawing:hover` (`{ id: string | null }`, when the unselected drawing under the pointer changes). `DrawingChangeKind` names the `kind` union. `DrawingChangeEvent` names the whole payload: `linked: true` on a linked chart's commit, and `step` (2.5.6) on the change that closes a recorded undo step, the number `historySteps()` lists it under; a forced edit, a linked commit, a restore and an `undo`/`redo` carry none.
 
 **The controller listens on `chart.on(...)`, not `subscribeClick` / `subscribeDrag`.** Those two are single-slot callbacks the host needs for its own order lines; routing drawings through the bus means the two never contend.
 
@@ -395,8 +453,9 @@ plot, the controller uses `DrawingChartHost.coordinateToTime(point.x)` for the
 preview and freehand samples. The built-in Chart provides this mapping. Custom
 hosts need the same mapping to support empty-space placement. Keep the crosshair's
 bar time and OHLC null outside loaded data; do not invent bars or snap a future
-endpoint to the last candle. Pointer leave still clears the preview. Existing
-edge-spacing extrapolation and drawing-state formats are unchanged.
+endpoint to the last candle. Pointer leave still clears the preview. Drawing-state
+formats are unchanged. Which time an x in the empty space stands for is the data
+layer's answer: see [times past the last bar](data-and-time.md#times-past-the-last-bar).
 
 
 1. `setTool(id)` arms the tool and puts the chart in placement mode, so a press places an anchor instead of panning.
@@ -901,12 +960,13 @@ any undo on a linked drawing does; if the peers deleted their copies meanwhile,
 it stays on this chart alone and loses the mark, so a later restore does not
 apply their deletion to it.
 
-The controller converts through `DrawingChartHost.timeScale` (its `width` is the
-plot width) and each pane's `priceToY` / `yToPrice` / `priceScale.height`, which
-the built-in `Chart` provides. A host without them still paints viewport
+The controller measures a viewport anchor by the plot the chart reports,
+`DrawingChartHost.plotRect(paneIndex)` (`chart.plotRect`, `{ left, top, width,
+height }` in container px, null where the pane has no plot on screen), the same
+rectangle the chart hands the layer that paints it, and converts time and price
+through `DrawingChartHost.timeScale` and each pane's `priceToY` / `yToPrice`,
+which the built-in `Chart` provides. A host without them still paints viewport
 drawings but cannot place, move or convert them. `screenPoints` adds the plot's
-left edge, which it reads off any bar through `timeToCoordinate`; on a chart
-with no bars it falls back to the optional
-`DrawingChartHost.priceAxisLayout(paneIndex)` (each price column's `side`, `x`
-and `width` in container px), taking the innermost left column's right edge. Types: `DrawingSpace`,
+left edge and top from that rectangle, so an HTML overlay a host lays against
+`chart.plotRect` lines up with the drawing. Types: `DrawingSpace`,
 `ViewportPoint`, `DrawingPlacementOptions`.

@@ -319,3 +319,46 @@ test('the standalone profile selector displays current orderflow values and opti
   expect(coveredTablePixels).toBe(0);
   await info.attach('standalone orderflow values and table', { body: await page.screenshot(), contentType: 'image/png' });
 });
+
+for (const [width, height] of [[1100, 720], [390, 740]]) {
+  test(`a note pinned over the corner mark takes its presses at ${width}px, and the bare mark still links`, async ({ page }, info) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width, height });
+    await ready(page);
+    const pixels = await brandPixels(page);
+    const mark = { x: (pixels.minX + pixels.maxX) / 4, y: (pixels.minY + pixels.maxY) / 4 };
+    const id = await page.evaluate(mark => {
+      const { chart, draw } = (window as any).__probe;
+      const rect = chart.plotRect(0);
+      // The note's box starts a little up and left of the mark and covers it.
+      return draw.add({ tool: 'text', paneIndex: 0, points: [], space: 'viewport', style: {},
+        viewportPoints: [{ x: (mark.x - rect.left - 10) / rect.width, y: (mark.y - rect.top - 10) / rect.height }],
+        text: { value: 'Pinned over the corner', fontSize: 16, background: true, backgroundColor: '#334155' } }).id;
+    }, mark);
+    await (page.evaluate(() => (window as any).__frame()));
+    await page.screenshot({ path: info.outputPath(`note-over-mark-${width}.png`) });
+    const anchor = () => page.evaluate(noteId => (window as any).__probe.draw.get(noteId).viewportPoints[0], id);
+    const before = await anchor();
+    // A tap selects the note instead of opening the link.
+    await page.touchscreen.tap(mark.x, mark.y);
+    expect(await page.evaluate(() => (window as any).__opened)).toHaveLength(0);
+    expect(await page.evaluate(() => (window as any).__probe.draw.selection())).toEqual([id]);
+    // A drag moves it.
+    await page.mouse.move(mark.x, mark.y);
+    await page.mouse.down();
+    await page.mouse.move(mark.x + 90, mark.y - 70, { steps: 8 });
+    await page.mouse.up();
+    const after = await anchor();
+    expect(after.x).toBeGreaterThan(before.x);
+    expect(after.y).toBeLessThan(before.y);
+    expect(await page.evaluate(() => (window as any).__opened)).toHaveLength(0);
+    await page.mouse.move(2, 2);
+    await (page.evaluate(() => (window as any).__frame()));
+    await page.screenshot({ path: info.outputPath(`note-moved-off-mark-${width}.png`) });
+    // With the note moved away the mark is bare, and a tap on it links again.
+    await page.touchscreen.tap(mark.x, mark.y);
+    expect(await page.evaluate(() => (window as any).__opened)).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+}

@@ -1,5 +1,6 @@
 import type { Bar } from '../model/bar';
 import type { BarsRequest, BarSubscriptionOptions, DataFeed, UnsubscribeFn } from './types';
+import { dataVariantError, unsupportedDataVariant } from './data-variant';
 
 /** Schedules a repeating callback and returns an unsubscribe. Inject in tests. */
 export type FeedScheduler = (cb: () => void, intervalMs: number) => UnsubscribeFn;
@@ -10,9 +11,20 @@ const defaultScheduler: FeedScheduler = (cb, ms) => {
 };
 
 /**
+ * The feed has one series per instrument and declares no variants, so any
+ * other variant would be that series under the wrong label. It is refused.
+ */
+function refuseVariant(req: BarsRequest): void {
+  const unsupported = unsupportedDataVariant(undefined, req.variant);
+  if (unsupported) throw dataVariantError(unsupported, req.variant);
+}
+
+/**
  * Deterministic, in-memory data feed for tests and demos. No network.
  * Generates a reproducible synthetic OHLC walk from a fixed seed so that
  * pixel-diff and unit tests are stable across runs (no Math.random / Date.now).
+ * It serves only its default series: a request naming another data variant is
+ * refused with a `DataVariantUnsupportedError`.
  */
 export class FakeDataFeed implements DataFeed {
   private readonly intervalSec: number;
@@ -24,6 +36,7 @@ export class FakeDataFeed implements DataFeed {
   }
 
   async getBars(req: BarsRequest): Promise<Bar[]> {
+    refuseVariant(req);
     const count = 500;
     const start = req.from ?? 1_700_000_000;
     return generateBars(start, count, this.intervalSec);
@@ -36,6 +49,7 @@ export class FakeDataFeed implements DataFeed {
    * by hand in tests, and `opts.tickMs` to change the cadence.
    */
   subscribeBars(req: BarsRequest, onBar: (bar: Bar) => void, opts?: BarSubscriptionOptions & { tickMs?: number }): UnsubscribeFn {
+    refuseVariant(req);
     let t = opts?.seedFrom?.time ?? req.from ?? 1_700_000_000;
     let prev = opts?.seedFrom?.close ?? 100;
     let seed = 0x1234567 >>> 0;

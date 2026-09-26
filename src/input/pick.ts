@@ -19,6 +19,17 @@ import type { PriceScaleId } from '../model/series';
 
 export type PickKind = 'price' | 'time';
 
+/**
+ * What a `'point'` pick answers: the bar time and the price under one click.
+ * One capture rather than a time pick and a price pick in turn, so a study
+ * input pairing the two is never written half from one click and half from
+ * another.
+ */
+export interface PickPoint {
+  time: number;
+  price: number;
+}
+
 /** Cancel a capture, or inspect whether this invocation still owns it. */
 export interface PickHandle {
   (): void;
@@ -62,9 +73,10 @@ export function cancelPick(host: PickHost): void {
 }
 
 /**
- * Arm the next plot click to resolve to a price or a bar time and hand it to
- * `cb`. Returns a cancel function; calling it (or arming another pick on the
- * same chart) disarms without calling back. The chart emits `pick:start`
+ * Arm the next plot click to resolve to a price, a bar time, or both as a
+ * `'point'` ({@link PickPoint}), and hand it to `cb`. Returns a cancel
+ * function; calling it (or arming another pick on the same chart) disarms
+ * without calling back. The chart emits `pick:start`
  * (`{ kind }`) and `pick:end` (`{ kind, value }`, `value` null when cancelled)
  * so a host can show its own cursor or hint while the pick is live.
  *
@@ -73,20 +85,22 @@ export function cancelPick(host: PickHost): void {
  * past the last bar keeps the projected time, which is what a pick in the empty
  * right-hand space means.
  */
-export function beginPick(host: PickHost, kind: PickKind, cb: (value: number) => void): PickHandle {
-  return beginPickResolved(host, kind, cb);
+export function beginPick(host: PickHost, kind: 'point', cb: (value: PickPoint) => void): PickHandle;
+export function beginPick(host: PickHost, kind: PickKind, cb: (value: number) => void): PickHandle;
+export function beginPick(host: PickHost, kind: PickKind | 'point', cb: (value: never) => void): PickHandle {
+  return beginPickResolved(host, kind, cb as (value: number | PickPoint) => void);
 }
 
 /** @internal Chart supplies measured plot bounds and its selected scale. */
-export function beginPickResolved(host: PickHost, kind: PickKind, cb: (value: number) => void,
-  resolve?: (payload: unknown) => number | null): PickHandle {
-  if (kind !== 'price' && kind !== 'time') throw new TypeError('Invalid pick kind');
+export function beginPickResolved(host: PickHost, kind: PickKind | 'point', cb: (value: number | PickPoint) => void,
+  resolve?: (payload: unknown) => number | PickPoint | null): PickHandle {
+  if (kind !== 'price' && kind !== 'time' && kind !== 'point') throw new TypeError('Invalid pick kind');
   const token = {};
   starts.set(host, token);
   let open = false, invalidated = false;
   const cleanup: (() => void)[] = [];
 
-  const finish = (value: number | null): void => {
+  const finish = (value: number | PickPoint | null): void => {
     if (!open) return;
     open = false;
     if (active.get(host) === cancel) active.delete(host);
@@ -112,19 +126,27 @@ export function beginPickResolved(host: PickHost, kind: PickKind, cb: (value: nu
   }
   open = true;
 
+  // The bar a time falls on, or the projected time past the last bar.
+  const bar = (time: number): number => {
+    const dl = host.dataLayer;
+    return dl.indexToTime(Math.round(dl.timeToIndexFloat(time))) ?? time;
+  };
   cleanup.push(host.on('click', (payload) => {
     if (!open) return;
     const p = payload as ClickLike;
-    let value = resolve ? resolve(payload) : kind === 'price' ? p.price : p.time;
+    const value = resolve ? resolve(payload) : kind === 'price' ? p.price : kind === 'time' ? p.time : { time: p.time, price: p.price };
     // A click the chart could not resolve (no pane under it, no bars loaded)
-    // leaves the pick armed rather than answering with a bogus number.
-    if (value === null || !Number.isFinite(value)) return;
-    if (kind === 'time') {
-      const dl = host.dataLayer;
-      value = dl.indexToTime(Math.round(dl.timeToIndexFloat(value))) ?? value;
+    // leaves the pick armed rather than answering with a bogus number, and a
+    // point answers only when both of its halves are there.
+    if (value === null) return;
+    if (typeof value === 'object') {
+      const at = Number.isFinite(value.time) ? bar(value.time) : NaN;
+      const { price } = value as { price: number | null };
+      if (Number.isFinite(at) && price !== null && Number.isFinite(price)) finish({ time: at, price });
+      return;
     }
-    if (!Number.isFinite(value)) return;
-    finish(value);
+    const answer = Number.isFinite(value) && kind === 'time' ? bar(value) : value;
+    if (Number.isFinite(answer)) finish(answer);
   }));
   active.set(host, cancel);
   host.emit('pick:start', { kind });

@@ -2,7 +2,7 @@ export default {
   '-- intro': { type: 'separator', title: 'Introduction' },
   'getting-started': 'Getting Started',
   'migrating-to-2': 'Migrating to 2.0',
-  upgrading: 'Upgrading to 2.5.5',
+  upgrading: 'Upgrading to 2.5.6',
   compatibility: 'Compatibility & Maintenance',
   cdn: 'Use from a CDN',
   'core-concepts': 'Core Concepts',
@@ -44,6 +44,7 @@ export default {
   'chart-data-export': 'Chart Data & CSV Export',
   interactions: 'Interactions & A11y',
   'keyboard-shortcuts': 'Keyboard Shortcuts',
+  'undo-history': 'Undo and Redo',
   events: 'Events',
   mobile: 'Mobile & Touch',
 
@@ -61,6 +62,7 @@ export default {
   'performance-and-operations': 'Performance & Operations',
   'data-feeds': 'Custom Data Feeds',
   'bar-cache': 'Bar Cache',
+  'data-variants': 'Data Variants',
   'custom-intervals': 'Custom Intervals',
 
   '-- reference': { type: 'separator', title: 'Reference' },

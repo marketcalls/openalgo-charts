@@ -7,6 +7,7 @@
 import { InvalidateMask, InvalidationLevel } from './invalidate-mask';
 import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop';
 import { Pane, type PaneRenderContext } from './pane';
+import { alignToDevicePixels, type CanvasLayer } from './canvas';
 import type { PriceAxisPlacement, PriceAxisSide, PriceAxisSlot } from '../model/price-axis-layout';
 import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale, type TimeScaleOptions } from '../scale/time-scale';
@@ -19,7 +20,7 @@ import {
   resolveRenderBackend, type IRenderBackend, type RenderBackendFactory, type RenderBackendKind, type RendererChoice,
   type RendererFallbackReason,
 } from '../render/backend';
-import { DataLayer } from '../model/data-layer';
+import { DataLayer, type SessionCalendarSource } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type SeriesRecord, type PriceScaleId, type PriceFormat, type BarConfirmationOptions, type SeriesUpdateOptions } from '../model/series';
 import { bindSeriesProvenance, SeriesProvenance, validateSeriesOptions } from '../model/series-provenance';
 import { replayWindow, observeReplayWindow } from '../model/replay-window';
@@ -90,6 +91,7 @@ const INSTANCE_PALETTE: readonly string[] = [
   '#26c6da', '#8bc34a', '#ff7043', '#5c6bc0',
 ];
 import { IndicatorInstance, parseIndicatorPlotPriceScales, validateIndicatorScaleAssignment, type IndicatorApi, type IndicatorHost } from '../model/indicator-instance';
+import { parseIndicatorPolicy, type IndicatorEditOptions, type IndicatorPolicy } from '../model/indicator-policy';
 import type { AlertsDocument } from '../alerts/types';
 import { copyAlert, parseAlertsDocument, validateAlert } from '../alerts/document';
 import type { ChartDataContext } from '../model/indicator-registry';
@@ -115,7 +117,7 @@ import { ShortcutManager } from '../input/shortcuts';
 import type { ShortcutManagerOptions } from '../input/shortcuts';
 import { TradingController, DEFAULT_TRADING_COLORS, type TradingColors, type TradingSettings } from './trading-controller';
 import { pinchState, pinchDelta, type PinchState } from '../input/touch';
-import { beginPickResolved, cancelPick, type PickKind, type PickOptions, type PickHandle } from '../input/pick';
+import { beginPickResolved, cancelPick, type PickKind, type PickOptions, type PickHandle, type PickPoint } from '../input/pick';
 import type { IPrimitive, PrimitiveHost, PrimitiveHit, PrimitiveAnchor, PrimitivePlacement } from '../primitives/primitive';
 import { PriceLine, type PriceLineOptions } from '../primitives/price-line';
 import { SeriesMarkers } from '../primitives/markers';
@@ -128,10 +130,19 @@ import { TimeNavigator, type TimeNavigatorOptions } from '../primitives/time-nav
 import type { ChartSettingsState } from '../model/chart-settings';
 import { LogoWatermark, type LogoWatermarkOptions } from '../primitives/watermark';
 import { TextWatermark, type TextWatermarkOptions } from '../primitives/text-watermark';
+import type { TickSchedule } from '../feed/tick-schedule';
 
 /** Optional background text. Blank text follows the chart's symbol and interval. */
 export interface ChartWatermarkOptions extends Partial<TextWatermarkOptions> {
   visible?: boolean;
+}
+
+/** A pane's plot area in container media px, from `Chart.plotRect`. */
+export interface PlotRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 /** Defensive branding snapshot emitted synchronously after setBranding as `branding:changed`. */
@@ -228,6 +239,12 @@ export interface ChartNavigationOptions {
 export interface ChartOptions {
   document?: Document;
   pixelRatio?: () => number;
+  /**
+   * The frame scheduler, for deterministic tests. Supplied, it runs every
+   * frame the chart paints, the one after a resize or a new pixel ratio
+   * included; with the default one the chart paints those inside the
+   * callback that reports them, so a resize never shows a cleared canvas.
+   */
   raf?: { schedule: RafScheduler; cancel?: RafCanceller };
   /** Full palette; pass `lightTheme` (the default), `darkTheme`, or a custom ChartTheme. */
   theme?: ChartTheme;
@@ -535,7 +552,10 @@ export interface PointerInfo {
   pressure: number;
 }
 
-/** Payload of the `click` event (`chart.on('click', ...)`). */
+/**
+ * Payload of the `click` event (`chart.on('click', ...)`). Its `pressure` is
+ * the pressure at the press, not the release, which always reads 0.
+ */
 export interface ChartClickEvent extends PointerInfo {
   /** `externalId` of the hit primitive, or null on empty plot. */
   id: string | null;
@@ -549,12 +569,15 @@ export interface ChartClickEvent extends PointerInfo {
   /** Set on the release half of a press-drag-release while a host is placing a shape. */
   viaDrag?: boolean;
   /**
-   * The same state as `modifiers`, in the flat form the draw tier has read
-   * since it shipped. `pressure` here is the pressure at the press, not the
-   * release, which always reads 0.
+   * Shift at the click: the same state as `modifiers.shift`, in the flat form
+   * the first click payloads carried.
+   *
+   * @deprecated Removed in 3.0.0. Read `modifiers.shift` (since 2.0.0), which carries the same state.
    */
   shiftKey: boolean;
+  /** @deprecated Removed in 3.0.0. Read `modifiers.ctrl` (since 2.0.0), which carries the same state. */
   ctrlKey: boolean;
+  /** @deprecated Removed in 3.0.0. Read `modifiers.meta` (since 2.0.0), which carries the same state. */
   metaKey: boolean;
 }
 
@@ -678,8 +701,36 @@ export interface PriceAxisState {
   /** False while the scale still sits on its 0..1 placeholder (nothing measured). */
   scaled: boolean;
   lockRatio: boolean;
-  /** Whether `movePriceAxis` would do anything: something to move, and a free side. */
+  /**
+   * Whether `movePriceAxis` would do anything: something to move, and a free side.
+   *
+   * @deprecated Removed in 3.0.0, with {@link Chart.movePriceAxis}, the only operation it describes. Placement
+   * through {@link Chart.setPriceAxisPlacement} (since 2.5.4) needs no such check.
+   */
   movable: boolean;
+}
+
+/**
+ * The setters that change what `getState` saves without an event of their
+ * own, and so announce it with `layout:change`.
+ */
+export type LayoutSetter =
+  | 'setPaneWeight' | 'setPriceAxisOptions' | 'setPriceAxisAutoFit' | 'setPriceAxisLockRatio'
+  | 'setPriceScaleOptions' | 'setAutoScale' | 'setGridOptions' | 'setCanvasOptions' | 'setStatusLineOptions'
+  | 'setWatermarkOptions' | 'setTradingSettings' | 'setAxisChromeOptions' | 'setEventOptions' | 'applyOptions';
+
+/**
+ * Payload of the `layout:change` event (`chart.on('layout:change', ...)`):
+ * a setter in {@link LayoutSetter} has run and the saved layout may differ.
+ * It fires once per outermost call, after the change is applied: the canvas
+ * block setting the grid on its way is one event, named `setCanvasOptions`.
+ * A call that names no pane or scale the chart has changes nothing and fires
+ * nothing, and neither does a restore, which announces itself with
+ * `state:restore:start` and `state:restore:end`. Compare what you read back
+ * if a no-op matters: setting a value to what it already was still fires.
+ */
+export interface LayoutChangeEvent {
+  setter: LayoutSetter;
 }
 
 /** Payload of the `contextmenu` event (`chart.on('contextmenu', ...)`). */
@@ -758,6 +809,8 @@ export class Chart {
   private readonly _loop: RenderLoop;
   /** The frame scheduler, kept for the one-shot re-measure after construction. */
   private readonly _raf: { schedule: RafScheduler; cancel: RafCanceller };
+  /** Whether the host supplied `raf`, and so owns every frame, the resize ones included. */
+  private readonly _rafInjected: boolean;
   private _remeasureHandle: number | null = null;
   private readonly _dataLayer = new DataLayer();
   private readonly _timeScale: TimeScale;
@@ -767,9 +820,19 @@ export class Chart {
   private _pending: InvalidateMask | null = null;
   private _scaleMutationDepth = 0;
   private _resizeObserver: ResizeObserver | null = null;
+  /** Watches the canvases' device-pixel boxes, where the browser reports them. */
+  private _deviceObserver: ResizeObserver | null = null;
+  /** Matches the device pixel ratio the canvases were last sized at; made again on every change. */
+  private _ratioQuery: MediaQueryList | null = null;
+  /** The window whose `resize` also re-checks the ratio. */
+  private _ratioView: Window | null = null;
+  /** The device pixel ratio the canvases were last sized at. */
+  private _layoutRatio = 0;
   private _width = 0;
   private _height = 0;
   private _hasFitContent = false;
+  /** Layout setters running inside another one, or inside a restore: only the outermost announces. */
+  private _layoutDepth = 0;
 
   // interaction state
   private _crosshairMode: CrosshairMode;
@@ -778,6 +841,7 @@ export class Chart {
   private _indicatorLegendCollapsed: boolean;
   private _shortcuts: ShortcutManager | null = null;
   private _trading: TradingController | null = null;
+  private _tickSchedule: TickSchedule | null = null;
   private _pointerInside = false;
   private _keyTarget: HTMLElement | Document | null = null;
   private readonly _now: () => number;
@@ -871,6 +935,19 @@ export class Chart {
   private readonly _seriesRecords = new WeakMap<SeriesApi, SeriesRecord>();
   private readonly _seriesProvenance = new Map<number, SeriesProvenance>();
   private readonly _indicators: IndicatorInstance[] = [];
+  /**
+   * Where the price source sits among the studies of its pane: undefined until
+   * something places it (the source then stays where it was added, as it
+   * always did), null at the back of the series band, or the instance id of
+   * the study it paints directly above.
+   */
+  private _sourceAbove: string | null | undefined = undefined;
+  /**
+   * Each study legend row's own buttons, before its study's policy withholds
+   * any, and the list the chart last gave the row. A row showing any other
+   * list was set by the host since, and that list becomes its own.
+   */
+  private readonly _legendActions = new WeakMap<PaneLegend, [own: readonly PaneLegendAction[], shown: readonly PaneLegendAction[] | undefined]>();
   private _restoreGeneration = 0;
   private readonly _indicatorRanges = new Map<string, {
     pane: Pane; scaleId: PriceScaleId; range: { min: number; max: number };
@@ -1098,12 +1175,14 @@ export class Chart {
     this._liveRegion = live;
 
     this._raf = resolveRaf(options.raf);
+    this._rafInjected = options.raf !== undefined;
     this._loop = new RenderLoop(() => this._onFrame(), this._raf.schedule, this._raf.cancel);
 
     this._addPane();
     this.setBranding(options.branding ?? true);
     this.setWatermarkOptions(options.watermark ?? false);
     this._observeSize();
+    this._watchPixelRatio();
     this._attachInput();
     // Direct navigation shares the chart's events; internal gestures and data
     // updates already own their repaint, animation and notification boundaries.
@@ -1137,6 +1216,24 @@ export class Chart {
 
   public get dataLayer(): DataLayer {
     return this._dataLayer;
+  }
+
+  /**
+   * Lay the time axis past the last bar out in these trading hours, or drop
+   * them with null, and repaint every pane, so a drawing already placed past
+   * the last bar moves to the time it now means.
+   *
+   * This is the call for a host setting hours on its own: a `SessionCalendar`
+   * or an `Instrument` it holds, or any object with `sessionFrom`.
+   * `Instrument.applyTo` and `SessionCalendar.applyTo` come here too.
+   * `chart.dataLayer.setSessionCalendar` sets the same hours and asks for no
+   * frame, for a host about to load bars or move the view anyway, either of
+   * which repaints.
+   */
+  public setSessionCalendar(calendar: SessionCalendarSource | null): void {
+    if (this._destroyed) return;
+    this._dataLayer.setSessionCalendar(calendar);
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
   /** Readonly source bars, without allocating a history copy on each live update. */
@@ -1320,6 +1417,22 @@ export class Chart {
   public setTradingSettings(patch: TradingSettings): void {
     Object.assign(this._tradingSettings, patch);
     this._trading?.setSettings(patch);
+    this._layoutChanged('setTradingSettings');
+  }
+
+  /**
+   * Announce that a setter changed the saved layout, unless it ran inside
+   * another one or inside a restore: the outer call is the one announced.
+   */
+  private _layoutChanged(setter: LayoutSetter): void {
+    if (this._layoutDepth > 0 || this._destroyed) return;
+    this.emit('layout:change', { setter } satisfies LayoutChangeEvent);
+  }
+
+  /** Run `fn` with the layout setters it calls counted as part of the caller's change. */
+  private _withinLayoutChange<T>(fn: () => T): T {
+    this._layoutDepth++;
+    try { return fn(); } finally { this._layoutDepth--; }
   }
 
   /** Add a series and return its data handle. */
@@ -1477,7 +1590,7 @@ export class Chart {
         this._dataLayer.removeSeries(dataId);
         this._seriesProvenance.delete(dataId);
         if (this._firstDataId.value === dataId) this._firstDataId.value = null;
-        if (this._primary?.record === record) this._primary = null;
+        if (this._primary?.record === record) { this._primary = null; owner.pane.setSourceSeries(null); }
         if (!owner.indicatorOwned) this._reconcileIndicatorRanges();
         this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
         this._recomputeAxisColumns();
@@ -1502,6 +1615,9 @@ export class Chart {
     if (!owner.indicatorOwned) this._reconcileIndicatorRanges();
     if (isPrimary) {
       this._primary = { api, record };
+      this._panes[paneIndex].setSourceSeries(record);
+      // A source added after a layout placed it goes where the layout says.
+      if (this._sourceAbove !== undefined) this._placeSource();
       this.emit('objects:change', {});
     }
     return api;
@@ -1617,6 +1733,7 @@ export class Chart {
   public setEventOptions(patch: ChartEventOptions): void {
     Object.assign(this._eventVisible, patch);
     this._syncEvents();
+    this._layoutChanged('setEventOptions');
   }
 
   public eventOptions(): ChartEventOptions {
@@ -1664,13 +1781,29 @@ export class Chart {
    * macd.setSettings({ fastPeriod: 12 });
    * macd.remove();
    * ```
+   *
+   * `options.policy` restricts what the user may do with the study (see
+   * `IndicatorPolicy`); the host keeps changing it with `{ force: true }`.
+   *
+   * `options.instanceId` gives the study that id instead of a new one, so a
+   * host that brings a removed study back (an undo) brings back its identity:
+   * the studies that read its output and the alerts that name it find it
+   * again. An id a study on this chart holds now throws, since two studies
+   * cannot answer to one id; the id of a removed study is free to take back.
    */
   public addIndicator(
     indicatorId: string,
     settings: Readonly<IndicatorSettings> = {},
-    options: { paneIndex?: number; priceScaleId?: PriceScaleId; plotPriceScaleIds?: Readonly<Record<string, PriceScaleId>> } = {},
+    options: {
+      paneIndex?: number; priceScaleId?: PriceScaleId; plotPriceScaleIds?: Readonly<Record<string, PriceScaleId>>;
+      policy?: IndicatorPolicy; instanceId?: string;
+    } = {},
   ): IndicatorApi {
+    const instanceId = options.instanceId;
+    if (instanceId !== undefined && (typeof instanceId !== 'string' || !instanceId.trim())) throw new TypeError('Invalid indicator instance id');
+    if (instanceId !== undefined && this._indicators.some(item => item.id === instanceId)) throw new Error(`Indicator instance id already in use: ${instanceId}`);
     if (options.priceScaleId !== undefined && !this._validPriceScaleId(options.priceScaleId)) throw new TypeError('Invalid indicator price scale');
+    const policy = options.policy === undefined ? undefined : parseIndicatorPolicy(options.policy);
     const descriptor = getIndicator(indicatorId);
     const validatedSettings = cloneIndicatorSettings(settings);
     validateIndicatorInputs(descriptor.inputs, validatedSettings);
@@ -1687,10 +1820,11 @@ export class Chart {
       descriptor,
       this._distinctColors(descriptor, validatedSettings),
       options.paneIndex,
-      undefined,
+      instanceId,
       reserved,
       options.priceScaleId,
       plotPriceScaleIds,
+      policy,
     );
     this._indicators.push(instance);
     this._restackLegends();
@@ -1739,10 +1873,13 @@ export class Chart {
     return this._indicators;
   }
 
-  /** Move an existing study to an existing pane or a new pane at panes().length. */
-  public moveIndicator(instanceId: string, paneIndex: number): boolean {
+  /**
+   * Move an existing study to an existing pane or a new pane at panes().length.
+   * A study whose policy is not `movable` stays unless `options.force` is set.
+   */
+  public moveIndicator(instanceId: string, paneIndex: number, options: IndicatorEditOptions = {}): boolean {
     const instance = this._indicators.find(item => item.id === instanceId);
-    if (this.isDestroyed || !instance || !Number.isInteger(paneIndex) || paneIndex < 0 || paneIndex > this._panes.length || instance.paneIndex === paneIndex || !instance.canRelocate(paneIndex)) return false;
+    if (this.isDestroyed || !instance || !this._policyAllows(instance, 'movable', options) || !Number.isInteger(paneIndex) || paneIndex < 0 || paneIndex > this._panes.length || instance.paneIndex === paneIndex || !instance.canRelocate(paneIndex)) return false;
     const previous = instance.paneIndex;
     const freshTarget = paneIndex === this._panes.length;
     this._ensurePane(paneIndex);
@@ -1767,6 +1904,8 @@ export class Chart {
       this._panes.find(pane => pane.hasPrimitive(primitive))?.transferPrimitive(primitive, target);
     }
     instance.relocate(paneIndex);
+    // The source keeps its place when the study it sat on leaves its pane.
+    this._reanchorSource();
     this._syncLegendPanes();
     // Alert visuals resolve the instance's new pane before we decide whether its old pane is empty.
     this.emit('objects:change', {});
@@ -1781,11 +1920,14 @@ export class Chart {
     return true;
   }
 
-  /** Change study stacking order among studies on the same pane. */
-  public reorderIndicator(instanceId: string, direction: -1 | 1): boolean {
+  /**
+   * Change study stacking order among studies on the same pane. A study whose
+   * policy is not `movable` stays unless `options.force` is set.
+   */
+  public reorderIndicator(instanceId: string, direction: -1 | 1, options: IndicatorEditOptions = {}): boolean {
     if (direction !== -1 && direction !== 1) return false;
     const index = this._indicators.findIndex(item => item.id === instanceId);
-    if (this.isDestroyed || index < 0) return false;
+    if (this.isDestroyed || index < 0 || !this._policyAllows(this._indicators[index], 'movable', options)) return false;
     const paneIndex = this._indicators[index].paneIndex;
     let target = index + direction;
     while (target >= 0 && target < this._indicators.length && this._indicators[target].paneIndex !== paneIndex) target += direction;
@@ -1810,7 +1952,141 @@ export class Chart {
     const owned = new Set(legends);
     let index = 0;
     for (const entry of this._legends) if (owned.has(entry.legend)) entry.legend = legends[index++];
+    this._placeSource();
     this._syncLegendPanes();
+  }
+
+  /** Whether a call may make a change a study's policy reserves for its host. */
+  private _policyAllows(study: IndicatorApi, flag: keyof IndicatorPolicy, options: IndicatorEditOptions): boolean {
+    return options.force === true || study.policy()[flag] !== false;
+  }
+
+  /**
+   * The series band of a pane, back to front: `'source:primary'` where the
+   * price source is on this pane, and `'indicator:<id>'` for each study that
+   * lives on it and plots a series here, in the order they paint. The same
+   * ids as the object inventory. Host series and a study's plots placed on
+   * another pane paint in the band too, in their own slots, but are not
+   * entries of it.
+   */
+  public seriesStack(paneIndex = this._primaryIndex()): string[] {
+    const pane = this._panes[paneIndex];
+    if (pane === undefined) return [];
+    const owners = this._stackOwners(pane, paneIndex);
+    const out: string[] = [];
+    for (const record of pane.series()) {
+      const id = owners.get(record);
+      if (id !== undefined && !out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+
+  /**
+   * Move a source or study directly above or below another entry of the same
+   * pane's series band (see `seriesStack`). A study keeps its other bands'
+   * layers in the new study order, so its fills, levels and markers follow.
+   * The drawings placed above an entry travel with it. False, with nothing
+   * changed, for an entry of another pane, a move that changes nothing, or a
+   * study whose policy is not `movable` unless `options.force` is set.
+   */
+  public moveInSeriesStack(id: string, target: string, where: 'above' | 'below', options: IndicatorEditOptions = {}): boolean {
+    if (this.isDestroyed || id === target || (where !== 'above' && where !== 'below')) return false;
+    const study = id.startsWith('indicator:') ? this._indicators.find(item => 'indicator:' + item.id === id) : undefined;
+    const source = id === 'source:primary' && this._primary !== null ? this._seriesOwners.get(this._primary.api)?.pane : undefined;
+    const paneIndex = study ? study.paneIndex : source ? this._panes.indexOf(source) : -1;
+    const order = paneIndex < 0 ? [] : this.seriesStack(paneIndex);
+    if (!order.includes(id) || !order.includes(target) || (study && !this._policyAllows(study, 'movable', options))) return false;
+    const next = order.filter(item => item !== id);
+    next.splice(next.indexOf(target) + (where === 'above' ? 1 : 0), 0, id);
+    if (next.every((item, i) => item === order[i])) return false;
+    // The studies of this pane take their slots in the study list in the new
+    // order, which every band of theirs follows; studies elsewhere keep theirs.
+    const studies = next.flatMap(item => this._indicators.filter(entry => 'indicator:' + entry.id === item));
+    const members = new Set(studies);
+    let k = 0;
+    for (let i = 0; i < this._indicators.length; i++) if (members.has(this._indicators[i])) this._indicators[i] = studies[k++];
+    const at = next.indexOf('source:primary');
+    if (at >= 0) this._sourceAbove = at === 0 ? null : next[at - 1].slice('indicator:'.length);
+    this._reorderIndicatorResources();
+    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    this.emit('objects:change', {});
+    return true;
+  }
+
+  /**
+   * Paint an attached primitive inside the series band of its pane, directly
+   * above the source or study `above` names (an id from `seriesStack`), or
+   * pass null to return it to its own z-order band. While that entry plots
+   * no series on the primitive's pane it paints in its own band. A drawing
+   * layer is the case this exists for. False for a primitive on no pane.
+   */
+  public setPrimitiveStackAbove(primitive: IPrimitive, above: string | null): boolean {
+    const index = this._panes.findIndex(pane => pane.hasPrimitive(primitive));
+    if (index < 0 || (above !== null && typeof above !== 'string')) return false;
+    if (this._panes[index].primitiveStackAbove(primitive) === above) return true;
+    this._panes[index].setPrimitiveStackAbove(primitive, above);
+    this.invalidate(m => m.invalidatePane(index, { level: InvalidationLevel.Light, autoScale: false }));
+    return true;
+  }
+
+  /** Each series of a pane that belongs to one of its series-band entries, with that entry's id. */
+  private _stackOwners(pane: Pane, paneIndex: number): Map<SeriesRecord, string> {
+    const owners = new Map<SeriesRecord, string>();
+    if (this._primary !== null && this._seriesOwners.get(this._primary.api)?.pane === pane) owners.set(this._primary.record, 'source:primary');
+    for (const study of this._indicators) {
+      if (study.paneIndex !== paneIndex) continue;
+      for (const { api } of study.renderResources().series) {
+        const record = this._seriesRecords.get(api);
+        if (record !== undefined && this._seriesOwners.get(api)?.pane === pane) owners.set(record, 'indicator:' + study.id);
+      }
+    }
+    return owners;
+  }
+
+  /** The series an entry paints last on a pane: what a primitive placed above it paints after. */
+  private _stackSlot(paneIndex: number, entry: string): SeriesRecord | undefined {
+    const pane = this._panes[paneIndex];
+    if (pane === undefined) return undefined;
+    const owners = this._stackOwners(pane, paneIndex);
+    let last: SeriesRecord | undefined;
+    for (const record of pane.series()) if (owners.get(record) === entry) last = record;
+    return last;
+  }
+
+  /**
+   * Put the price source where it was placed: directly above its study, or
+   * behind every study of its pane. A source nobody placed stays where it was
+   * added. Host series keep their slots, so only the source record moves, and
+   * only when it is out of place.
+   */
+  private _placeSource(): void {
+    const placed = this._sourceAbove;
+    const owner = this._primary === null ? undefined : this._seriesOwners.get(this._primary.api);
+    if (placed === undefined || owner === undefined) return;
+    const pane = owner.pane, paneIndex = this._panes.indexOf(pane), source = this._primary!.record;
+    const owners = this._stackOwners(pane, paneIndex);
+    owners.delete(source);
+    const records = pane.series(), at = records.indexOf(source);
+    const after = placed === null ? undefined : this._stackSlot(paneIndex, 'indicator:' + placed);
+    // A study that is gone leaves the source at the back, and says so when saved.
+    if (after === undefined) this._sourceAbove = null;
+    const from = after === undefined ? -1 : records.indexOf(after);
+    const next = records.findIndex((record, i) => i > from && record !== source && owners.has(record));
+    if (at > from && (next < 0 || at < next)) return;
+    // The least that puts it in place: right after its study, or right before
+    // the first study at the back, so a host series beside it keeps its side.
+    pane.moveSeries(source, after === undefined ? records[next] : records[from + 1] ?? null);
+  }
+
+  /**
+   * The study directly below the source, read from the band as it stands:
+   * how the source keeps its place when the study it sat on leaves the pane.
+   */
+  private _reanchorSource(): void {
+    const pane = this._primary === null ? undefined : this._seriesOwners.get(this._primary.api)?.pane;
+    if (typeof this._sourceAbove !== 'string' || pane === undefined) return;
+    const order = this.seriesStack(this._panes.indexOf(pane)), at = order.indexOf('source:primary');
+    this._sourceAbove = at > 0 ? order[at - 1].slice('indicator:'.length) : null;
   }
 
   private _syncLegendPanes(): void {
@@ -1818,12 +2094,14 @@ export class Chart {
     this._restackLegends();
   }
 
-  /** Remove one indicator instance by its handle id. Returns true if it existed. */
-  public removeIndicator(instanceId: string): boolean {
+  /**
+   * Remove one indicator instance by its handle id. Returns true if it existed
+   * and went; a study whose policy is not `removable` stays unless
+   * `options.force` is set.
+   */
+  public removeIndicator(instanceId: string, options: IndicatorEditOptions = {}): boolean {
     const instance = this._indicators.find(x => x.id === instanceId);
-    if (instance === undefined) return false;
-    instance.remove();
-    return true;
+    return instance !== undefined && instance.remove(options);
   }
 
   private _forgetIndicator(instanceId: string, failedOwnedPane?: number): void {
@@ -1835,6 +2113,7 @@ export class Chart {
     }
     const { indicatorId, paneIndex } = this._indicators[i];
     this._indicators.splice(i, 1);
+    this._reanchorSource();
     this._restackLegends();
     this._indicatorReservedIds.add(instanceId);
     this._indicatorRefreshes.delete(instanceId);
@@ -1959,6 +2238,7 @@ export class Chart {
     if (typeof patch.fontSize === 'number' && Number.isFinite(patch.fontSize)) o.fontSize = Math.max(10, Math.min(200, patch.fontSize));
     if (patch.zOrder === 'bottom' || patch.zOrder === 'normal' || patch.zOrder === 'top') o.zOrder = patch.zOrder;
     this._syncWatermark();
+    this._layoutChanged('setWatermarkOptions');
   }
 
   /** JSON-safe preferences. Automatic text remains blank in this snapshot. */
@@ -2025,6 +2305,10 @@ export class Chart {
       // that pane is written, floor, tick, custom formatter and all.
       formatPrice: (paneIndex: number, value: number, series?: SeriesApi): string | undefined =>
         (series?.priceScale() ?? this._panes[paneIndex]?.priceScale)?.format(value),
+      policyChanged: (): void => {
+        this._restackLegends();
+        this.emit('objects:change', {});
+      },
       addIndicatorLegend: (o): PaneLegend => {
         // A row starts with its own show / settings / delete. Stacking it gives
         // it the pane-level controls when it is the first study row of a lower
@@ -2038,6 +2322,7 @@ export class Chart {
         // _syncLegendOffsets decides which pane wears the offset, and runs on
         // every relayout; this is just the initial placement.
         const legend = new PaneLegend({ ...o, actions: paneActions });
+        this._legendActions.set(legend, [paneActions, legend.options().actions]);
         this._studyLegends.add(legend);
         this._addPrimitive(o.paneIndex, legend);
         return legend;
@@ -2063,11 +2348,11 @@ export class Chart {
           preservedFormats,
         ),
       addIndicatorLevel: (l, paneIndex): PriceLine => {
-        // `dashed` rides along beside `lineStyle` because a descriptor written
-        // before the three-way style existed still sets only the boolean, and
-        // PriceLine reads it when `lineStyle` is absent.
+        // The instance resolves `lineStyle` before calling the host, a
+        // descriptor's `dashed` boolean included, so the line needs nothing
+        // else to pick its dash.
         const opts: PriceLineOptions = {
-          price: l.price, color: l.color, lineWidth: l.lineWidth, dashed: l.dashed,
+          price: l.price, color: l.color, lineWidth: l.lineWidth,
           lineStyle: l.lineStyle, leftLabel: l.label, id: l.id,
         };
         return this.addPriceLine(opts, paneIndex);
@@ -2562,7 +2847,9 @@ export class Chart {
    * pane, the primary price pane when none is named, or to a chart anchor.
    */
   public addPrimitive(primitive: IPrimitive, where?: number | PrimitivePlacement): void {
-    if (where === undefined || typeof where === 'number') { this._addPrimitive(where ?? this._primaryIndex(), primitive); return; }
+    // `typeof` rather than `??` picks the index: the website compiles this file
+    // without strict null checks, where `=== undefined` narrows nothing.
+    if (where === undefined || typeof where === 'number') { this._addPrimitive(typeof where === 'number' ? where : this._primaryIndex(), primitive); return; }
     // Chart furniture: a brand mark, a corner clock. It belongs to the CHART,
     // not to whichever pane happens to be last, so the engine re-homes it as
     // panes come and go instead of every host writing its own placeWatermark().
@@ -2636,6 +2923,28 @@ export class Chart {
   }
 
   /**
+   * A pane's plot in container px: `left` and `top` from the container's
+   * top-left corner, inside the price axis columns and above the time axis,
+   * and the size a primitive on that pane paints into. What a host lays an
+   * overlay against, and what a drawing pinned to the screen is a fraction of.
+   * Null for a pane with no plot on screen: one collapsed to its header
+   * strip, one hidden behind a maximized pane, or no pane at that index.
+   *
+   * The pane is scaled first, the way a price conversion scales it: a caller
+   * that places something on the plot reads the pane's prices next, and a
+   * pane no frame has painted yet (just made, or just moved) still holds its
+   * placeholder range.
+   */
+  public plotRect(paneIndex: number): PlotRect | null {
+    const layout = this._destroyed || this._collapsedShown(paneIndex) ? undefined : this._paneLayout()[paneIndex];
+    if (!layout || !Number.isSafeInteger(paneIndex)) return null;
+    this._ensureScaled(paneIndex);
+    const width = this._width - this._leftAxisWidth - this._rightAxisWidth;
+    const height = layout.height - (paneIndex === this._bottomPaneIndex() ? this._timeAxisHeight : 0);
+    return width > 0 && height > 0 ? { left: this._leftAxisWidth, top: layout.top, width, height } : null;
+  }
+
+  /**
    * A pane whose prices have a place on screen, scaled. A strip has none: the
    * pointer events report no price there, and a conversion that still did
    * would put an overlay or a nudged drawing inside a strip nobody can read.
@@ -2655,6 +2964,7 @@ export class Chart {
     if (opts.horzLines !== undefined) this._gridHorz = opts.horzLines;
     this._canvas.grid = { ...this._canvas.grid, ...opts };
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setGridOptions');
   }
 
   /** Current grid options, visibility first (it is the one field always set). */
@@ -2668,16 +2978,19 @@ export class Chart {
    * rest of the grid alone.
    */
   public setCanvasOptions(patch: CanvasOptions): void {
-    if (patch.grid) this.setGridOptions(patch.grid); // keeps the visibility pair in step
-    if (patch.crosshair) this._canvas.crosshair = { ...this._canvas.crosshair, ...patch.crosshair };
-    if (patch.scales) this._canvas.scales = { ...this._canvas.scales, ...patch.scales };
-    if (patch.margins) {
-      this._canvas.margins = { ...this._canvas.margins, ...patch.margins };
-      // No second margin state: the price scale already owns marginTop/Bottom
-      // as fractions, and this only converts the dialog's percentages.
-      this.setPriceScaleOptions(resolvePlotMargins(this._canvas.margins), 'axes');
-    }
+    this._withinLayoutChange(() => {
+      if (patch.grid) this.setGridOptions(patch.grid); // keeps the visibility pair in step
+      if (patch.crosshair) this._canvas.crosshair = { ...this._canvas.crosshair, ...patch.crosshair };
+      if (patch.scales) this._canvas.scales = { ...this._canvas.scales, ...patch.scales };
+      if (patch.margins) {
+        this._canvas.margins = { ...this._canvas.margins, ...patch.margins };
+        // No second margin state: the price scale already owns marginTop/Bottom
+        // as fractions, and this only converts the dialog's percentages.
+        this.setPriceScaleOptions(resolvePlotMargins(this._canvas.margins), 'axes');
+      }
+    });
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setCanvasOptions');
   }
 
   /** The Canvas option block as it stands (theme fallbacks are not folded in). */
@@ -2713,6 +3026,20 @@ export class Chart {
       for (const scale of scales) scale.setOptions(forPane);
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceScaleOptions');
+  }
+
+  /**
+   * The chart-wide price-scale defaults: every field `setPriceScaleOptions`,
+   * the `priceScale` construction option and the canvas margins have set, and
+   * what a pane added later starts from. `priceScaleOptions()` reads the price
+   * pane's own scale instead, which a change made to that one axis moves and
+   * this does not, so the two together tell a chart-wide change from a
+   * one-axis one. `minMove` here reaches only the panes that quote the
+   * instrument. A detached copy; empty when nothing was ever set.
+   */
+  public priceScaleDefaults(): Partial<PriceScaleOptions> {
+    return { ...this._priceScaleOptions };
   }
 
   /**
@@ -2785,6 +3112,7 @@ export class Chart {
       }
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setAutoScale');
   }
 
   /** Whether only the primary series contributes to autoscale on its current scale. */
@@ -2872,6 +3200,7 @@ export class Chart {
     if (pane === undefined) return;
     pane.scaleFor(scaleId).setOptions(patch);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisOptions');
   }
 
   /**
@@ -2885,6 +3214,7 @@ export class Chart {
     if (on) pane.setRatioLock(scaleId, false, 0, 0);
     pane.scaleFor(scaleId).setAutoScale(on);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisAutoFit');
   }
 
   /**
@@ -2903,6 +3233,7 @@ export class Chart {
     if (on) this._ensureScaledFor(paneIndex, scaleId);
     const ok = pane.setRatioLock(scaleId, on, this._timeScale.barSpacing, pane.scaleFor(scaleId).height);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisLockRatio');
     return ok;
   }
 
@@ -2911,6 +3242,10 @@ export class Chart {
    * it and everything the axis was set to. Returns false when that side carries
    * nothing, or when the other side is already occupied: one strip draws one
    * axis (see `Pane.moveSeriesScale`), which is what `movable` reports.
+   *
+   * @deprecated Removed in 3.0.0. Use {@link Chart.setPriceAxisPlacement} (since 2.5.4), which moves a scale's
+   * column and keeps its id; this method instead swaps the built-in side scales and reassigns their series and
+   * studies.
    */
   public movePriceAxis(paneIndex: number, from: 'right' | 'left', to: 'right' | 'left'): boolean {
     const pane = this._panes[paneIndex];
@@ -2970,6 +3305,7 @@ export class Chart {
     Object.assign(this._statusLine, patch);
     for (const entry of this._legends) entry.legend.setOptions({ statusLine: this._statusLine });
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setStatusLineOptions');
   }
 
   public statusLineOptions(): LegendStatusLineOptions {
@@ -3031,6 +3367,7 @@ export class Chart {
       this._wallClock = patch.clock;
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setAxisChromeOptions');
   }
 
   /** The axis-chrome switches as they stand. */
@@ -3122,8 +3459,13 @@ export class Chart {
     this._flushIndicators();
     const liveWidth = this._width;
     const liveHeight = this._height;
-    const resized = width !== liveWidth || height !== liveHeight;
-    if (resized) {
+    const liveRatio = this._layoutRatio;
+    // The document is at ratio 1 on every screen, so its panes are laid out at
+    // 1 too: laid out at the screen's ratio, the same chart would export other
+    // pane boundaries on a 1.5x laptop than on a 1x or 2x monitor.
+    const relaid = width !== liveWidth || height !== liveHeight || this._ratioForLayout() !== 1;
+    this._layoutRatio = 1;
+    if (relaid) {
       this._width = width;
       this._height = height;
       this._relayout(true);
@@ -3142,10 +3484,10 @@ export class Chart {
           ...this._renderContext(i),
           dpr: 1, hoverId: null, hoverKey: null, dragId: null, paintBackground: background,
         };
-        // The DOM draws the separator as a 1px border on the pane box and lets
-        // the canvas start below it, its last row hidden by the overflow clip.
-        // The export reproduces that box exactly, or the second pane would sit
-        // one pixel higher than it does on screen.
+        // At ratio 1 the DOM draws the separator as a 1px border on the pane
+        // box and lets the canvas start below it, its last row hidden by the
+        // overflow clip. The export reproduces that box exactly, or the second
+        // pane would sit one pixel higher than it does on screen.
         const first = i === topPane;
         const top = layout[i].top + (first ? 0 : 1);
         const paneHeight = layout[i].height - (first ? 0 : 1);
@@ -3164,7 +3506,8 @@ export class Chart {
         svg.popGroup();
       }
     } finally {
-      if (resized) {
+      this._layoutRatio = liveRatio;
+      if (relaid) {
         this._width = liveWidth;
         this._height = liveHeight;
         this._relayout(true);
@@ -3188,11 +3531,12 @@ export class Chart {
       // costing a full series redraw on every mousemove, times every chart in a
       // linked grid. Read per call rather than captured at attach: `zOrder()`
       // is a method, and a primitive is free to change layer.
-      requestUpdate: (): void =>
-        this.invalidate((m) => m.invalidatePane(this._panes.findIndex(pane => pane.hasPrimitive(primitive)), {
-          level: primitive.zOrder() === 'top' ? InvalidationLevel.Cursor : InvalidationLevel.Light,
-          autoScale: false,
-        })),
+      requestUpdate: (): void => {
+        const index = this._panes.findIndex(pane => pane.hasPrimitive(primitive));
+        // One placed in the series band paints on the base canvas, whatever its own band.
+        const top = primitive.zOrder() === 'top' && this._panes[index]?.primitiveStackAbove(primitive) == null;
+        this.invalidate((m) => m.invalidatePane(index, { level: top ? InvalidationLevel.Cursor : InvalidationLevel.Light, autoScale: false }));
+      },
     };
     this._panes[paneIndex].addPrimitive(primitive, host);
     // Track legend rows however they were added — a host can add its own (a
@@ -3258,6 +3602,10 @@ export class Chart {
     // it neither draws nor answers the pointer: it would start inside the
     // strip's lower inset.
     const strip = (entry: { legend: PaneLegend; paneIndex: number }): boolean => leads.get(entry.paneIndex) === entry.legend && this._collapsedShown(entry.paneIndex);
+    // A row offers only what its study's policy lets the user do: no close
+    // button on a study the user may not remove, no gear on one they may not
+    // configure. The pane controls act on the pane and stay.
+    const policies = new Map(this._indicators.map(study => [study.legend(), study.policy()]));
     let reserved = false;
     for (const entry of [...this._legends.filter(strip), ...this._legends.filter(entry => !strip(entry))]) {
       let row = rowByPane.get(entry.paneIndex) ?? 0;
@@ -3270,8 +3618,16 @@ export class Chart {
       }
       const pane = this._panes[entry.paneIndex];
       const collapsed = this._collapsed.has(pane);
-      entry.legend.setOptions(owned ? { row, collapsed, actions: leadActions(entry.legend.options().actions,
-        pane !== undefined && pane !== this._primaryPane && leads.get(entry.paneIndex) === entry.legend) } : { row });
+      if (owned) {
+        // A host that rewrote the row since (`legend().setOptions({ actions })`) keeps what it wrote.
+        const kept = this._legendActions.get(entry.legend), shown = entry.legend.options().actions;
+        const base = kept === undefined || kept[1] !== shown ? shown ?? [] : kept[0], policy = policies.get(entry.legend);
+        const allowed = base.filter(action => !(action === 'close' && policy?.removable === false)
+          && !(action === 'settings' && policy?.configurable === false));
+        const actions = leadActions(allowed, pane !== undefined && pane !== this._primaryPane && leads.get(entry.paneIndex) === entry.legend);
+        entry.legend.setOptions({ row, collapsed, actions });
+        this._legendActions.set(entry.legend, [base, actions]);
+      } else entry.legend.setOptions({ row });
       rowByPane.set(entry.paneIndex, row + (!folded && entry.legend.options().visible !== false ? 1 : 0));
     }
     if (!reserved) this._indicatorLegendRow = rowByPane.get(top) ?? 0;
@@ -3434,7 +3790,11 @@ export class Chart {
     return this._rendererKind ?? 'canvas2d';
   }
 
-  /** The name `rendererKind` shipped under; the same value. */
+  /**
+   * The name `rendererKind` shipped under; the same value.
+   *
+   * @deprecated Removed in 3.0.0. Use {@link Chart.rendererKind} (since 2.0.0), which reports the same backend.
+   */
   public get renderer(): RenderBackendKind {
     return this.rendererKind;
   }
@@ -3494,6 +3854,7 @@ export class Chart {
     if (this._priceScaleOptions) pane.priceScale.setOptions(this._scalePatchFor(pane, this._priceScaleOptions));
     this._panes.push(pane);
     this._container.appendChild(pane.element);
+    this._observeCanvases(pane, true);
     return pane;
   }
 
@@ -3561,13 +3922,17 @@ export class Chart {
   }
 
   /**
-   * Arm the next plot click to answer with a price or a bar time, handed to
-   * `cb`. Returns a cancel function; arming another pick on this chart cancels
-   * the pending one. `pick:start` and `pick:end` bracket it so a host can show
-   * its own cursor while the pick is live. See `input/pick` for why this does
-   * not touch placement mode.
+   * Arm the next plot click to answer with a price, a bar time, or both as a
+   * `'point'`, handed to `cb`. Returns a cancel function; arming another pick
+   * on this chart cancels the pending one. `pick:start` and `pick:end` bracket
+   * it so a host can show its own cursor while the pick is live. A target's
+   * pane limits where the click counts and its scale is the one a price, a
+   * point's included, is read on. See `input/pick` for why this does not touch
+   * placement mode.
    */
-  public beginPick(kind: PickKind, cb: (value: number) => void, options: PickOptions = {}): PickHandle {
+  public beginPick(kind: 'point', cb: (value: PickPoint) => void, options?: PickOptions): PickHandle;
+  public beginPick(kind: PickKind, cb: (value: number) => void, options?: PickOptions): PickHandle;
+  public beginPick(kind: PickKind | 'point', cb: (value: never) => void, options: PickOptions = {}): PickHandle {
     if (this._destroyed || this._destroying) throw new Error('Cannot pick on a destroyed chart');
     if (this._placementMode) throw new Error('Finish drawing placement before picking a study value');
     if (options === null || typeof options !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(options))
@@ -3577,9 +3942,9 @@ export class Chart {
     const priceScaleId = fields.priceScaleId?.value as PickOptions['priceScaleId'];
     if (paneIndex !== undefined && (!Number.isSafeInteger(paneIndex) || paneIndex < 0 || !this._panes[paneIndex])) throw new RangeError('Invalid pick pane');
     const targetPane = paneIndex ?? (priceScaleId !== undefined ? this._firstPaneSlot() : undefined);
-    if (priceScaleId !== undefined && (kind !== 'price' || !this._validPriceScaleId(priceScaleId)
+    if (priceScaleId !== undefined && (kind === 'time' || !this._validPriceScaleId(priceScaleId)
       || !Object.prototype.hasOwnProperty.call(this._panes[targetPane!]?.scaleStates() ?? {}, priceScaleId))) throw new RangeError('Invalid pick scale');
-    return beginPickResolved(this, kind, cb, payload => {
+    return beginPickResolved(this, kind, cb as (value: number | PickPoint) => void, payload => {
       const click = payload as Partial<ChartClickEvent>, point = click?.point, index = click?.paneIndex;
       if (index === undefined || !Number.isSafeInteger(index) || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
         || click.viaDrag || (click.id !== undefined && click.id !== null) || (targetPane !== undefined && index !== targetPane)) return null;
@@ -3588,9 +3953,9 @@ export class Chart {
       if (!pane || point.x < this._leftAxisWidth || point.x >= this._width - this._rightAxisWidth || point.y < 0 || point.y >= height) return null;
       if (kind === 'time') return click.time ?? null;
       this._ensureScaled(index);
-      if (priceScaleId === undefined) return click.price ?? null;
-      if (!Object.prototype.hasOwnProperty.call(pane.scaleStates(), priceScaleId)) return null;
-      return pane.scaleFor(priceScaleId).yToPrice(point.y);
+      const price = priceScaleId === undefined ? click.price ?? null
+        : Object.prototype.hasOwnProperty.call(pane.scaleStates(), priceScaleId) ? pane.scaleFor(priceScaleId).yToPrice(point.y) : null;
+      return kind === 'price' || price === null ? price : { time: click.time ?? Number.NaN, price };
     });
   }
 
@@ -3598,6 +3963,8 @@ export class Chart {
   public setTheme(theme: ChartTheme): void {
     this._theme = theme;
     this._container.style.background = theme.background;
+    // The rules are DOM, not paint: a frame does not recolour them.
+    this._syncSeparators();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
@@ -3618,20 +3985,23 @@ export class Chart {
     crosshairMode?: CrosshairMode;
     crosshairSnapToBar?: boolean;
   }): void {
-    if (opts.theme) this.setTheme(opts.theme);
-    if (opts.grid) this.setGridOptions(opts.grid);
-    if (opts.canvas) this.setCanvasOptions(opts.canvas);
-    if (opts.statusLine) this.setStatusLineOptions(opts.statusLine);
-    if (opts.legendIconSize !== undefined) this.setLegendIconSize(opts.legendIconSize);
-    if (opts.priceScale) this.setPriceScaleOptions(opts.priceScale);
-    if (opts.priceFormatter !== undefined) this.setPriceFormatter(opts.priceFormatter);
-    if ('timeFormatter' in opts) this.setTimeFormatter(opts.timeFormatter);
-    if (opts.timezone !== undefined) this.setTimezone(opts.timezone);
-    if (opts.crosshairMode) this._crosshairMode = opts.crosshairMode;
-    if (typeof opts.crosshairSnapToBar === 'boolean') {
-      this._crosshairSnapToBar = opts.crosshairSnapToBar;
-      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
-    }
+    this._withinLayoutChange(() => {
+      if (opts.theme) this.setTheme(opts.theme);
+      if (opts.grid) this.setGridOptions(opts.grid);
+      if (opts.canvas) this.setCanvasOptions(opts.canvas);
+      if (opts.statusLine) this.setStatusLineOptions(opts.statusLine);
+      if (opts.legendIconSize !== undefined) this.setLegendIconSize(opts.legendIconSize);
+      if (opts.priceScale) this.setPriceScaleOptions(opts.priceScale);
+      if (opts.priceFormatter !== undefined) this.setPriceFormatter(opts.priceFormatter);
+      if ('timeFormatter' in opts) this.setTimeFormatter(opts.timeFormatter);
+      if (opts.timezone !== undefined) this.setTimezone(opts.timezone);
+      if (opts.crosshairMode) this._crosshairMode = opts.crosshairMode;
+      if (typeof opts.crosshairSnapToBar === 'boolean') {
+        this._crosshairSnapToBar = opts.crosshairSnapToBar;
+        this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
+      }
+    });
+    this._layoutChanged('applyOptions');
   }
 
   public panes(): readonly Pane[] {
@@ -3721,7 +4091,10 @@ export class Chart {
         ...(studyInputs.get(i.id)?.length ? { studyInputs: studyInputs.get(i.id)!.map(edge => edge.inputKey) } : {}),
         ...(i.priceScaleId() === null ? {} : { priceScaleId: i.priceScaleId()! }),
         ...(Object.keys(i.plotPriceScaleIds()).length ? { plotPriceScaleIds: i.plotPriceScaleIds() } : {}),
+        // Restrictions only: an unrestricted study saves what it always did.
+        ...(Object.keys(i.policy()).length ? { policy: { ...i.policy() } } : {}),
       })),
+      ...(typeof this._sourceAbove === 'string' ? { sourceAbove: this._sourceAbove } : {}),
     };
     if (this._drawingState !== undefined) state.drawings = this._drawingState;
     if (this._alertState !== undefined) state.alerts = parseAlertsDocument(this._alertState);
@@ -3809,6 +4182,7 @@ export class Chart {
         primaryPane = at;
       }
       if (s.alerts !== undefined) alerts = parseAlertsDocument(s.alerts);
+      if (s.sourceAbove !== undefined && (typeof s.sourceAbove !== 'string' || !s.sourceAbove.trim())) throw new Error('Invalid source placement');
       if (s.indicators !== undefined) {
         if (!Array.isArray(s.indicators)) throw new Error('Invalid indicator list');
         for (const spec of s.indicators) {
@@ -3825,7 +4199,8 @@ export class Chart {
         }
         this._reserveAlertStudyIds(alerts, reservedIds);
         const used = new Set([...reservedIds, ...this._indicatorReservedIds, ...this._indicators.map(item => item.id)]);
-        const specs = s.indicators.map(spec => ({ ...spec, settings: cloneIndicatorSettings(spec.settings ?? {}) }));
+        const specs = s.indicators.map(spec => ({ ...spec, settings: cloneIndicatorSettings(spec.settings ?? {}),
+          ...(spec.policy === undefined ? {} : { policy: parseIndicatorPolicy(spec.policy) }) }));
         // Missing producers remain reserved even when no descriptor can recreate them.
         for (const spec of specs) for (const value of Object.values(spec.settings)) {
           if (value && typeof value === 'object' && 'kind' in value && value.kind === 'indicator'
@@ -3876,7 +4251,10 @@ export class Chart {
       if (generation !== this._restoreGeneration) {
         return { applied: false, series: [], indicators: 0, reason: 'superseded by a newer chart restore' };
       }
-      const report = this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats));
+      // The layout setters a restore calls are the restore, which the start
+      // and end events announce; they do not each fire `layout:change`.
+      const report = this._withinLayoutChange(() =>
+        this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats)));
       if (report.applied && generation === this._restoreGeneration && (previousPriceOnly !== this._priceOnlyAutoScale
         || previousLegendCollapsed !== this._indicatorLegendCollapsed)) {
         this.emit('objects:change', {});
@@ -3950,14 +4328,15 @@ export class Chart {
     let indicators = 0;
     if (studies) {
       this._indicatorRefreshes.clear();
-      for (const instance of this._indicators.splice(0)) instance.remove();
+      // A restore is the host's act: it replaces a protected study as well.
+      for (const instance of this._indicators.splice(0)) instance.remove({ force: true });
       const byId = new Map(studies.specs.map(spec => [spec.instanceId!, spec]));
       for (const id of studies.order) {
         const spec = byId.get(id)!;
         const descriptor = studies.descriptors.get(id)!;
         const instance = new IndicatorInstance(
           this._indicatorHost(preservedFormats), descriptor, spec.settings, spec.paneIndex,
-          spec.instanceId, reservedIds, spec.priceScaleId, spec.plotPriceScaleIds,
+          spec.instanceId, reservedIds, spec.priceScaleId, spec.plotPriceScaleIds, spec.policy,
         );
         reservedIds.add(instance.id);
         this._indicators.push(instance);
@@ -3966,6 +4345,9 @@ export class Chart {
       }
       const display = new Map(studies.specs.map((spec, index) => [spec.instanceId!, index]));
       this._indicators.sort((a, b) => display.get(a.id)! - display.get(b.id)!);
+      // With the studies it is read with: a layout from before the source could
+      // move says nothing, and the source stays behind the studies just made.
+      this._sourceAbove = s.sourceAbove;
       this._reorderIndicatorResources();
     }
 
@@ -4064,7 +4446,9 @@ export class Chart {
   }
 
   /**
-   * A price rounded to the tick the pane's own axis is written with.
+   * A price rounded to the tick the pane's own axis is written with, or, on
+   * the price pane of an instrument with a tick schedule, to the tick of the
+   * band the price falls in.
    *
    * A dragged alert's price comes from a pointer, and a pixel maps to a price
    * with a dozen decimals behind it: dropped where the axis reads 1255.90 it
@@ -4073,13 +4457,48 @@ export class Chart {
    * the tick, because it is the one the axis is written with, so this is the
    * chart's answer rather than something every host works out again.
    *
+   * A scale holds one tick, and with a schedule that is the grid every band
+   * lies on: 105.87 is on a 0.01 grid and still no price in a 0.25 band. So
+   * the price pane, whose prices are the instrument's, asks the schedule.
+   * Another pane is in a study's own units, which no schedule describes.
+   *
    * A scale with no declared tick rounds nothing: there is no tick to round to
    * and inventing one would move a price somebody chose.
    */
   public snapPrice(paneIndex: number, price: number): number {
     if (!Number.isFinite(price)) return price;
+    if (this._tickSchedule !== null && paneIndex === this._primaryIndex()) return this._tickSchedule.round(price);
     const step = this._panes[paneIndex]?.priceScale.options.minMove ?? 0;
     return step > 0 ? roundToTick(price, step) : price;
+  }
+
+  /**
+   * The instrument's tick schedule, or null for a constant tick, the default.
+   * `Instrument.applyTo` sets it from the instrument's `tickBands`.
+   */
+  public tickSchedule(): TickSchedule | null {
+    return this._tickSchedule;
+  }
+
+  /**
+   * Hand the chart the instrument's price-dependent ticks, for a host that
+   * keeps its own instrument metadata rather than calling
+   * `Instrument.applyTo`. Price alerts and anything else rounding through
+   * {@link snapPrice} on the price pane then land in the band a price falls
+   * in, and the trading layer's order and bracket drags take the same
+   * schedule, now or when it is built. Null restores the constant tick. It
+   * describes the loaded instrument, so it is not part of the saved state.
+   */
+  public setTickSchedule(schedule: TickSchedule | null): void {
+    // Refused here, where the host made the mistake, rather than on the first
+    // drag: a dragged price rounds with `round`, and a range bound pushed past
+    // the opposite one backs off with `step`.
+    const given = schedule as Partial<TickSchedule> | null | undefined;
+    if (given != null && (typeof given.round !== 'function' || typeof given.step !== 'function')) {
+      throw new TypeError('chart.setTickSchedule takes a schedule built with new TickSchedule(bands), or null');
+    }
+    this._tickSchedule = schedule ?? null;
+    this._trading?.setTickSchedule(this._tickSchedule);
   }
 
   /** Detached JSON state, also available when no alert controller is attached. */
@@ -4132,6 +4551,9 @@ export class Chart {
     const height = this._container.clientHeight;
     if (!(width > 0) || !(height > 0)) return;
     this.applySize(width, height);
+    // Inside an animation frame callback: a frame requested now runs in the
+    // next one, after this one has shown the canvases the resize cleared.
+    this._paintNow();
   }
 
   public applySize(width: number, height: number): void {
@@ -4162,8 +4584,8 @@ export class Chart {
       this._restackLegends();
     }
     const dpr = this._pixelRatio();
+    if (!geometryOnly) this._layoutRatio = dpr;
     const layout = this._paneLayout();
-    const topPane = this._topPaneIndex();
     const bottomPane = this._bottomPaneIndex();
     this._panes.forEach((pane, paneIndex) => {
       const h = layout[paneIndex].height;
@@ -4180,18 +4602,37 @@ export class Chart {
         // boundaries, legend buttons, and crosshair mapping all landed elsewhere.
         // Deriving both from one number makes layout == hit-test by construction.
         pane.element.style.flex = `0 0 ${h}px`;
-        // A hairline between stacked panes: every pane but the first. Drawn on
-        // the DOM box, so it sits exactly on the boundary the user drags.
-        const first = paneIndex === topPane;
-        pane.element.style.borderTopWidth = first ? '0px' : '1px';
-        pane.element.style.borderTopColor = first ? 'transparent' : this._theme.paneSeparator;
         pane.resize(this._width, h, dpr);
       }
       // Scale height is a layout property (see Pane.setScaleHeights). A strip's
       // scales span the strip, so nothing measured against them reaches below it.
       pane.setScaleHeights(Math.max(0, h - (paneIndex === bottomPane ? this._timeAxisHeight : 0)));
     });
+    if (!geometryOnly) this._syncSeparators();
     this._timeScale.setWidth(Math.max(0, this._width - this._rightAxisWidth - this._leftAxisWidth));
+  }
+
+  /**
+   * A hairline between stacked panes: on every pane but the one against the
+   * chart's top, whole device pixels tall, in the form `Pane.setSeparator`
+   * picks for the ratio the panes were laid out at. It sits on the DOM box,
+   * so it is exactly on the boundary the user drags.
+   */
+  private _syncSeparators(): void {
+    const ratio = this._ratioForLayout();
+    const topPane = this._topPaneIndex();
+    this._panes.forEach((pane, i) => pane.setSeparator(i === topPane ? null : this._theme.paneSeparator, ratio));
+  }
+
+  /**
+   * The device pixel ratio pane boundaries are rounded at: the one the panes
+   * were last laid out at, so hit testing, `priceToCoordinate` and the DOM
+   * boxes agree even when the ratio has moved with no event to say so (a
+   * scale-only emulation, a browser with neither signal) until the next
+   * relayout. Before the first layout, the ratio now.
+   */
+  private _ratioForLayout(): number {
+    return this._layoutRatio > 0 ? this._layoutRatio : this._pixelRatio();
   }
 
   /**
@@ -4296,6 +4737,7 @@ export class Chart {
     pane.weight = Math.max(0.05, weight);
     this._relayout();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPaneWeight');
   }
 
   public paneWeight(index: number): number {
@@ -4309,10 +4751,13 @@ export class Chart {
    * nothing for a series, a price line or an on-chart study to default to. A
    * study pane is removable in any slot, the top one included.
    *
-   * Returns false when the index is out of range or names the primary pane.
+   * Returns false when the index is out of range or names the primary pane,
+   * and when it holds a study whose policy is not `removable` unless
+   * `options.force` is set.
    */
-  public removePane(index: number): boolean {
+  public removePane(index: number, options: IndicatorEditOptions = {}): boolean {
     if (!Number.isInteger(index) || index < 0 || index >= this._panes.length || this._panes[index] === this._primaryPane) return false;
+    if (this._indicators.some(study => study.paneIndex === index && !this._policyAllows(study, 'removable', options))) return false;
     if (this._eventPane === index) {
       // The strip goes home to the price pane, before the slots shift.
       const home = this._primaryIndex();
@@ -4329,7 +4774,7 @@ export class Chart {
     for (let i = this._indicators.length - 1; i >= 0; i--) {
       if (this._indicators[i].paneIndex !== index) continue;
       const [instance] = this._indicators.splice(i, 1);
-      instance.remove();
+      instance.remove({ force: true });
     }
     const pane = this._panes[index];
     for (const record of [...pane.series()]) {
@@ -4338,6 +4783,7 @@ export class Chart {
       this._seriesProvenance.delete(record.dataId);
       if (this._firstDataId.value === record.dataId) this._firstDataId.value = null;
     }
+    this._observeCanvases(pane, false);
     pane.destroy();
     this._panes.splice(index, 1);
     // Keep the maximize target on the pane it named. Removing the maximized
@@ -4571,6 +5017,8 @@ export class Chart {
     if (indicator === undefined) return false;
     const paneIndex = indicator.paneIndex;
     switch (action) {
+      // A press on a button the policy withheld (a stale hit id) does nothing:
+      // the user's press is exactly what a policy restricts.
       case 'close':
         this.removeIndicator(instanceId);   // prunes its pane if it emptied
         return true;
@@ -4583,7 +5031,7 @@ export class Chart {
       // host's. Everything it needs to *generate* one is on the descriptor
       // (`inputs`), and applying it is `indicator.setSettings(patch)`.
       case 'settings':
-        this.emit('indicatorSettings', { instanceId, indicatorId: indicator.indicatorId, paneIndex });
+        if (indicator.policy().configurable !== false) this.emit('indicatorSettings', { instanceId, indicatorId: indicator.indicatorId, paneIndex });
         return true;
       // Same payload as the gear, and for the same reason: the engine holds no
       // code and no DOM, so it says which indicator was asked about and the
@@ -4607,8 +5055,19 @@ export class Chart {
    * strip one legend row tall, with the time axis under it when it is the
    * bottom pane, and the open panes share what is left by weight, so folding
    * one never rewrites a stored weight.
+   *
+   * Every boundary between panes sits on a device pixel (`alignToDevicePixels`)
+   * of the ratio the panes are laid out at (`_ratioForLayout`), so each canvas
+   * covers a whole number of device pixels and the separator gets rows of its
+   * own. It is done here rather than where the boxes are sized, so hit testing
+   * reads the same boxes the DOM shows.
    */
   private _paneLayout(): { top: number; height: number }[] {
+    return alignToDevicePixels(this._paneShares(), this._ratioForLayout());
+  }
+
+  /** The layout by weight and strip height alone, before device-pixel rounding. */
+  private _paneShares(): { top: number; height: number }[] {
     const bottom = this._bottomPaneIndex();
     const strip = paneLegendRowHeight({ iconSize: this._legendIconSize }) + 2 * DEFAULT_LEGEND_TOP;
     const strips = this._panes.map((_, i) => this._collapsedShown(i) ? strip + (i === bottom ? this._timeAxisHeight : 0) : 0);
@@ -4699,6 +5158,7 @@ export class Chart {
       dragId: this._dragId,
       sessionClock: this._sessionClockOptions(),
       barCountdown: this._barCountdownOptions(),
+      stackSlot: (entry: string) => this._stackSlot(paneIndex, entry),
     };
   }
 
@@ -4739,9 +5199,136 @@ export class Chart {
     if (typeof ResizeObserver === 'undefined') return;
     this._resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) this.applySize(entry.contentRect.width, entry.contentRect.height);
+      if (!entry) return;
+      this.applySize(entry.contentRect.width, entry.contentRect.height);
+      // Resizing a canvas clears it, and this callback runs after the
+      // frame's animation callbacks, just before the browser paints. Left
+      // to the next frame, the repaint would put one cleared frame on screen
+      // for every step of a window drag.
+      this._paintNow();
     });
     this._resizeObserver.observe(this._container);
+    if (typeof ResizeObserverEntry !== 'undefined' && 'devicePixelContentBoxSize' in ResizeObserverEntry.prototype) {
+      this._deviceObserver = new ResizeObserver(entries => this._onDevicePixels(entries));
+      for (const pane of this._panes) this._observeCanvases(pane, true);
+    }
+  }
+
+  /** Start or stop reading a pane's canvases' device-pixel boxes. */
+  private _observeCanvases(pane: Pane, on: boolean): void {
+    const observer = this._deviceObserver;
+    if (observer === null) return;
+    for (const layer of [pane.base, pane.top]) {
+      if (on) observer.observe(layer.element, { box: 'device-pixel-content-box' });
+      else observer.unobserve(layer.element);
+    }
+  }
+
+  /**
+   * Give each canvas the backing store the browser says its box covers. A
+   * canvas that starts part way into a device pixel is snapped to one pixel
+   * more or fewer than `media x dpr`, and a store one pixel off is stretched
+   * over the box, blurring every line on it.
+   */
+  private _onDevicePixels(entries: readonly ResizeObserverEntry[]): void {
+    if (this._destroyed || this._destroying) return;
+    let changed = false;
+    for (const entry of entries) {
+      const layer = this._canvasLayerOf(entry.target);
+      const device = entry.devicePixelContentBoxSize?.[0];
+      const box = entry.contentBoxSize?.[0];
+      if (layer === null || device === undefined || box === undefined) continue;
+      // Measured before a relayout in this same frame: the box it describes
+      // is gone, and the entry for the new one follows before the paint. What
+      // the canvas last heard is no longer known to be its box either.
+      if (Math.abs(box.inlineSize - layer.mediaWidth) > 0.05 || Math.abs(box.blockSize - layer.mediaHeight) > 0.05) {
+        layer.forgetDeviceSize();
+        continue;
+      }
+      if (layer.setDeviceSize(device.inlineSize, device.blockSize)) changed = true;
+    }
+    if (!changed) return;
+    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    this._paintNow();
+  }
+
+  private _canvasLayerOf(target: Element): CanvasLayer | null {
+    for (const pane of this._panes) {
+      if (pane.base.element === target) return pane.base;
+      if (pane.top.element === target) return pane.top;
+    }
+    return null;
+  }
+
+  /** The window the chart's document shows in, or null outside a browser. */
+  private _view(): Window | null {
+    const view = this._doc.defaultView;
+    if (view) return view;
+    return typeof window === 'undefined' ? null : window;
+  }
+
+  /**
+   * Follow the device pixel ratio. It changes with no box changing size when
+   * the window moves to a screen of another density, and no size observer
+   * hears of that, so the canvases would stay at the old ratio, stretched and
+   * blurred. A resolution query matches the one ratio it was made for, so
+   * each change makes a new one for the ratio now in force.
+   *
+   * The window's `resize` is heard too: a zoom fires it, and it is the one
+   * signal left in a browser whose query list takes no change listener. It
+   * costs a comparison when the ratio has not moved.
+   */
+  private _watchPixelRatio(): void {
+    this._unwatchPixelRatio();
+    const view = this._view();
+    if (view === null || this._destroying || this._destroyed) return;
+    if (typeof view.addEventListener === 'function') {
+      view.addEventListener('resize', this._checkPixelRatio);
+      this._ratioView = view;
+    }
+    if (typeof view.matchMedia !== 'function') return;
+    const query = view.matchMedia(`(resolution: ${view.devicePixelRatio || 1}dppx)`);
+    if (typeof query?.addEventListener !== 'function') return;
+    query.addEventListener('change', this._onPixelRatio);
+    this._ratioQuery = query;
+  }
+
+  private _unwatchPixelRatio(): void {
+    this._ratioQuery?.removeEventListener('change', this._onPixelRatio);
+    this._ratioQuery = null;
+    this._ratioView?.removeEventListener('resize', this._checkPixelRatio);
+    this._ratioView = null;
+  }
+
+  private readonly _onPixelRatio = (): void => {
+    if (this._destroyed || this._destroying) return;
+    this._watchPixelRatio();
+    this._checkPixelRatio();
+  };
+
+  /** Size the canvases again if the ratio is no longer the one they were sized at. */
+  private readonly _checkPixelRatio = (): void => {
+    if (this._destroyed || this._destroying || this._pixelRatio() === this._layoutRatio) return;
+    this._relayout();
+    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    this._paintNow();
+  };
+
+  /**
+   * Run the pending frame now rather than on the next animation frame, for
+   * the callbacks that clear a canvas once this frame's animation callbacks
+   * have run: a resize observed before the browser paints, a new pixel ratio.
+   * Waiting would show the cleared canvas for a frame.
+   *
+   * Not with a scheduler the host injected (`raf`): that host owns every frame
+   * the chart paints, as with the kinetic glide, so the frame already asked
+   * for runs when the host runs it.
+   */
+  private _paintNow(): void {
+    if (this._rafInjected) return;
+    if (this._destroyed || this._destroying || this._pending === null || this._scaleMutationDepth > 0) return;
+    this._loop.stop();
+    this._onFrame();
   }
 
   private _onFrame(): void {
@@ -4899,7 +5486,7 @@ export class Chart {
       price: onPlot ? this._priceAt(p.pane, p.localY) : null,
       time: index === null ? null : (this._dataLayer.indexToTime(index) ?? null),
       index,
-      target: this._contextTarget(p, plotX, onPlot, index),
+      target: this._contextTarget(p, onPlot, index),
       preventDefault: (): void => e.preventDefault(),
     };
   }
@@ -4911,7 +5498,6 @@ export class Chart {
    */
   private _contextTarget(
     p: { x: number; pane: number; localY: number; paneHeight: number },
-    plotX: number,
     onPlot: boolean,
     index: number | null,
   ): ContextMenuTarget {
@@ -4928,8 +5514,14 @@ export class Chart {
       return slot ? { kind: 'price-scale', id: null, side: slot.side, scaleId: slot.scaleId } : { kind: 'empty', id: null };
     }
 
-    const hit = this._panes[p.pane]?.hitTestPrimitives(plotX, p.localY, this._renderContext(p.pane));
-    if (hit != null) {
+    const pane = this._panes[p.pane];
+    const context = this._renderContext(p.pane);
+    const hit = this._hitAt(p.pane, p.x, p.localY);
+    // A strip plots nothing, so nothing on it can be under the pointer.
+    const record = index === null || this._collapsedShown(p.pane) ? null : this._seriesAt(p.pane, index, p.localY);
+    // What is painted on top takes the menu: a drawing placed under a source
+    // or a study loses the pointer to that series where the two overlap.
+    if (hit != null && !(record !== null && hit.paintedBy !== undefined && pane.paintsBelowSeries(hit.paintedBy, record, context))) {
       const id = hit.externalId;
       if (id.startsWith('draw:')) return { kind: 'drawing', id };
       if (id.startsWith('indicator:')) {
@@ -4941,8 +5533,6 @@ export class Chart {
       if (id.endsWith('::row')) return { kind: 'legend', id };
       return { kind: 'primitive', id };
     }
-    // A strip plots nothing, so nothing on it can be under the pointer.
-    const record = index === null || this._collapsedShown(p.pane) ? null : this._seriesAt(p.pane, index, p.localY);
     if (record === null) return { kind: 'empty', id: null };
     for (const instance of this._indicators) {
       for (const plot of getIndicator(instance.indicatorId).plots) {
@@ -5044,8 +5634,8 @@ export class Chart {
   private _clickInfo(e: PointerLike): PointerInfo & { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean } {
     const info = pointerInfo(e);
     info.pressure = this._downPressure;
-    // The flat flags predate `modifiers` and the draw tier reads them; both
-    // stay so a host typed against either keeps working.
+    // The flat flags predate `modifiers` and are deprecated, removed in 3.0.0;
+    // they stay until then so a host typed against either keeps working.
     return { ...info, shiftKey: info.modifiers.shift, ctrlKey: info.modifiers.ctrl, metaKey: info.modifiers.meta };
   }
 
@@ -5135,7 +5725,9 @@ export class Chart {
       return;
     }
 
-    if (this._branding !== null && this._brandingHit(p.pane, p.x, p.localY)) {
+    // The mark takes the press only where nothing else answers it: see `_hitAt`.
+    const hit = this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane), this._branding);
+    if (this._branding !== null && !hit && this._brandingHit(p.pane, p.x, p.localY)) {
       this._brandingPress = { pointerId: e.pointerId, mark: this._branding, moved: false };
       this._dragging = false;
       this._pointerMoved = false;
@@ -5152,7 +5744,6 @@ export class Chart {
     }
 
     // If the press lands on a draggable line (order/SL/TP), drag it — don't pan.
-    const hit = this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane));
     // `draggable` primitives (drawing anchors/shapes) arm regardless of a host
     // callback — they publish through the `drag` event bus. The `ns-resize`
     // form is the original price-line path and still needs `subscribeDrag`.
@@ -5422,9 +6013,7 @@ export class Chart {
       this._dragPriceScale = null;
       // Re-evaluate hover at the release point (mouse keeps hovering the line;
       // touch has no pointer any more) and drop the dragging visual state.
-      const hit = e.pointerType === 'touch'
-        ? null
-        : this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane)) ?? null;
+      const hit = e.pointerType === 'touch' ? null : this._hitAt(p.pane, p.x, p.localY);
       this._setHover(hit);
       this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
       return;
@@ -5465,7 +6054,7 @@ export class Chart {
     // Always hit-test a clean click: the chart's own chrome (pane-legend
     // buttons) must work whether or not the host subscribed to clicks.
     if (!this._pointerMoved) {
-      const hit = this._panes[this._downPane]?.hitTestPrimitives(this._downX - this._leftAxisWidth, this._downLocalY, this._renderContext(this._downPane));
+      const hit = this._hitAt(this._downPane, this._downX, this._downLocalY);
       if (wasPanning) this._setHover(e.pointerType === 'touch' ? null : hit ?? null);
       // Pane-legend buttons are the chart's own chrome — handle them here so
       // the host doesn't have to re-implement remove/hide/move/maximize.
@@ -5544,16 +6133,27 @@ export class Chart {
     this._setHover(null);
   };
 
-  private _brandingHit(paneIndex: number, x: number, y: number): boolean {
+  /** The corner mark's hit at a container x and pane y, whatever else is there. */
+  private _brandingHit(paneIndex: number, x: number, y: number): PrimitiveHit | null {
     const pane = this._panes[paneIndex];
-    if (this._branding === null || !pane?.hasPrimitive(this._branding)) return false;
+    if (this._branding === null || !pane?.hasPrimitive(this._branding)) return null;
     const isBottom = paneIndex === this._bottomPaneIndex();
     return this._branding.hitTest(x - this._leftAxisWidth, y, {
       timeScale: this._timeScale, priceScale: pane.priceScale, dataLayer: this._dataLayer,
       plotWidth: this._width - this._leftAxisWidth - this._rightAxisWidth,
       plotHeight: (this._paneLayout()[paneIndex]?.height ?? 0) - (isBottom ? this._timeAxisHeight : 0),
       priceAxisWidth: this._rightAxisWidth, dpr: this._pixelRatio(), theme: this._theme,
-    }) !== null;
+    });
+  }
+
+  /**
+   * What the pointer is over on a pane, at a container x and pane y. The
+   * corner mark comes last: a note pinned over it, or anything else there,
+   * is what the user can see and means to grab, and the mark is only a link.
+   */
+  private _hitAt(paneIndex: number, x: number, y: number): PrimitiveHit | null {
+    return this._panes[paneIndex]?.hitTestPrimitives(x - this._leftAxisWidth, y, this._renderContext(paneIndex), this._branding)
+      ?? this._brandingHit(paneIndex, x, y);
   }
 
   private readonly _onPointerLeave = (): void => {
@@ -5715,7 +6315,9 @@ export class Chart {
     if (this._lastPressOnIndicatorToggle || this._previousPressOnIndicatorToggle) return;
     const p = this._localPoint(e);
     if (this._indicatorLegendHit(p.pane, p.x, p.localY)) return;
-    if (this._brandingHit(p.pane, p.x, p.localY)) return;
+    // The mark's own double click does nothing; one on a drawing over it is the drawing's.
+    if (this._brandingHit(p.pane, p.x, p.localY)
+      && !this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane), this._branding)) return;
     const ev: DoubleClickEvent = { paneIndex: p.pane, x: p.x, y: p.y, handled: false };
     this.emit('dblclick', ev);
     // While a tool is armed a double-click means "finish this shape" — a
@@ -5916,7 +6518,7 @@ export class Chart {
       return;
     }
     const pane = this._panes[paneIndex];
-    const hit = pane.hitTestPrimitives(plotX, localY, this._renderContext(paneIndex)) ?? null;
+    const hit = this._hitAt(paneIndex, x, localY);
     // A pane boundary beats a primitive hit: the divider is a thin target and
     // the legend rows sit right below one.
     if (hit === null && this._dividerAt(containerY) !== null) {
@@ -6068,9 +6670,12 @@ export class Chart {
       this._remeasureHandle = null;
     }
     this._stopNavigationMotion();
-    for (const indicator of this._indicators.splice(0)) indicator.remove();
+    for (const indicator of this._indicators.splice(0)) indicator.remove({ force: true });
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;
+    this._deviceObserver?.disconnect();
+    this._deviceObserver = null;
+    this._unwatchPixelRatio();
     if (typeof window !== 'undefined') {
       const el = this._container;
       el.removeEventListener('pointerdown', this._onPointerDown);

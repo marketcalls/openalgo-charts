@@ -22,9 +22,10 @@
 import { rsi, sourceValues } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
 import {
-  sma, wma, rma, stdev, highest, lowest, nulls, smaSeededEma,
-  change, roc, vwma, rollingSum, swma, stoch, cci,
+  sma, stdev, highest, lowest, nulls,
+  change, roc, rollingSum, swma, stoch, cci,
 } from './calc';
+import { fromFirstValue, smoothingMa, SMOOTHING_MA_TYPES, BOLLINGER_MA } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -42,31 +43,6 @@ const str = (s: Readonly<Record<string, unknown>>, k: string, d: string): string
 };
 const src = (s: Readonly<Record<string, unknown>>, k = 'source'): IndicatorSource =>
   (s[k] as IndicatorSource) ?? 'close';
-
-/**
- * Run `smooth` over the tail that begins at the series' first real value, then
- * pad the answer back to full length.
- *
- * Chaining a smoother straight onto a series that already has a warmup gap gets
- * the wrong answer in two different ways: a rolling extreme quietly replies from
- * a short window (`highest` skips non-finite values rather than refusing), and a
- * recursive average carries one NaN forever. the reference never meets either problem,
- * because a reference series simply does not exist before its first value and the
- * smoother's window starts counting there. This reproduces that.
- */
-function fromFirstValue(
-  values: readonly number[],
-  smooth: (tail: readonly number[], start: number) => number[],
-): number[] {
-  const n = values.length;
-  const out = new Array<number>(n).fill(NaN);
-  let start = 0;
-  while (start < n && !Number.isFinite(values[start])) start += 1;
-  if (start >= n) return out;
-  const tail = smooth(values.slice(start), start);
-  for (let i = 0; i < tail.length && start + i < n; i++) out[start + i] = tail[i];
-  return out;
-}
 
 /**
  * the reference `ema`, written the way the reference manual defines it:
@@ -334,40 +310,6 @@ export const RELATIVE_VIGOR_INDEX: IndicatorDescriptor = {
   },
 };
 
-/** the reference "Smoothing" block offers these seven, `None` included. */
-const RVI_MA_TYPES: readonly { label: string; value: string }[] = [
-  { label: 'None', value: 'None' },
-  { label: 'SMA', value: 'SMA' },
-  { label: 'SMA + Bollinger Bands', value: 'SMA + Bollinger Bands' },
-  { label: 'EMA', value: 'EMA' },
-  { label: 'SMMA (RMA)', value: 'SMMA (RMA)' },
-  { label: 'WMA', value: 'WMA' },
-  { label: 'VWMA', value: 'VWMA' },
-];
-
-/**
- * The smoothing block's kernel switch. Every branch starts at the smoothed
- * series' first real value rather than at bar 0, because that series is itself
- * an indicator with a warmup gap.
- */
-function smoothingMa(
-  kind: string,
-  values: readonly number[],
-  volumes: readonly number[],
-  length: number,
-): number[] {
-  switch (kind) {
-    // `smaSeededEma` finds its own seed, so it needs no slicing.
-    case 'EMA': return smaSeededEma(values, length);
-    case 'SMMA (RMA)': return fromFirstValue(values, (t) => rma(t, length));
-    case 'WMA': return fromFirstValue(values, (t) => wma(t, length));
-    case 'VWMA': return fromFirstValue(values, (t, start) => vwma(t, volumes.slice(start), length));
-    // 'SMA', 'SMA + Bollinger Bands', and — because a settings blob can carry
-    // anything — everything else.
-    default: return fromFirstValue(values, (t) => sma(t, length));
-  }
-}
-
 /**
  * Relative Volatility Index — RSI's arithmetic applied to volatility instead of
  * price: how much of the recent standard deviation arrived on up bars.
@@ -392,7 +334,7 @@ export const RELATIVE_VOLATILITY_INDEX: IndicatorDescriptor = {
     { key: 'fillColor', type: 'color', label: 'Background', default: '#7e57c2' },
     {
       key: 'maType', type: 'select', label: 'Type', default: 'SMA',
-      options: RVI_MA_TYPES, group: 'Smoothing',
+      options: SMOOTHING_MA_TYPES, group: 'Smoothing',
     },
     { key: 'maLength', type: 'number', label: 'Length', default: 14, min: 1, max: 500, step: 1, group: 'Smoothing' },
     { key: 'bbMult', type: 'number', label: 'BB StdDev', default: 2, min: 0.001, max: 50, step: 0.5, group: 'Smoothing' },
@@ -452,7 +394,7 @@ export const RELATIVE_VOLATILITY_INDEX: IndicatorDescriptor = {
     const maType = str(s, 'maType', 'SMA');
     const maLength = int(s, 'maLength', 14);
     const mult = num(s, 'bbMult', 2);
-    const isBB = maType === 'SMA + Bollinger Bands';
+    const isBB = maType === BOLLINGER_MA;
     const ma = maType === 'None'
       ? new Array<number>(n).fill(NaN)
       : smoothingMa(maType, rvi, bars.map((b) => b.volume ?? 0), maLength);

@@ -134,6 +134,47 @@ test('an instrument applied before the trading layer exists snaps its drags unti
   expect(constant.newPrice).toBe(constant.raw);
 });
 
+test('a dragged price alert lands on the tick of the band it is dropped in', async ({ page }, info) => {
+  await page.goto('/tests/e2e/tick-schedule-drag-fixture.html?via=instrument');
+  await page.waitForFunction(() => !!window.__ticks);
+  const id = await page.evaluate(async () => {
+    const { chart } = window.__ticks;
+    const lib = await import('/dist/openalgo-charts.mjs' as string);
+    const alerts = new lib.AlertController(chart);
+    (window as unknown as { __alerts: typeof alerts }).__alerts = alerts;
+    return alerts.add({ source: { kind: 'price', price: 99.2 }, title: 'Band alert' }).id as string;
+  });
+  expect(await page.evaluate(() => window.__ticks.chart.tickSchedule()?.bands.length)).toBe(2);
+  await paint(page);
+  const stored = () => page.evaluate(alertId => (window as unknown as { __alerts: { list(): { id: string; source: { price: number } }[] } })
+    .__alerts.list().find(alert => alert.id === alertId)!.source.price, id);
+  // Well left of the order pills, which sit near the price axis.
+  const grab = async (price: number) => { const p = await point(page, price); return { x: p.x - 500, y: p.y, price: p.price }; };
+  const from = await grab(99.2), up = await grab(100.33);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(up.x, up.y, { steps: 10 });
+  await page.mouse.up();
+  await paint(page);
+  const upper = await stored();
+  expect(upper).toBeGreaterThan(100);
+  // A 0.05 band: the axis grid alone (0.01) would have accepted 100.33.
+  expect(Math.round(upper * 100) % 5).toBe(0);
+  expect(upper).toBe(await page.evaluate(price => window.__ticks.ticks.round(price), up.price));
+  await page.screenshot({ path: info.outputPath('tick-schedule-alert-upper-band.png') });
+
+  const back = await grab(upper), down = await grab(99.63);
+  await page.mouse.move(back.x, back.y);
+  await page.mouse.down();
+  await page.mouse.move(down.x, down.y, { steps: 10 });
+  await page.mouse.up();
+  await paint(page);
+  const lower = await stored();
+  expect(lower).toBeLessThan(100);
+  expect(onGrid(lower)).toBe(true);
+  expect(lower).toBe(await page.evaluate(price => window.__ticks.ticks.round(price), down.price));
+});
+
 /**
  * Docks a ladder over a book that straddles the boundary (cent bids below 100,
  * nickel asks from it) and records chart clicks. `tickSize` crosses into the

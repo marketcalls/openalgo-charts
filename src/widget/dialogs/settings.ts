@@ -18,6 +18,7 @@ import {
   button, controlsFromInputs, dialogFrame, el, glyphSvg, openPanel, renderForm, tabList,
   type FormHandle, type PanelHandle,
 } from '../form';
+import { TAB_GLYPH } from '../glyphs';
 
 export interface SettingsDialogOptions {
   /** The tab to open on. Default: the first tab with a control in it. */
@@ -33,19 +34,6 @@ export interface SettingsDialogOptions {
   /** Runs once when the dialog is gone; `committed` is false after Cancel or Escape. */
   onClose?(committed: boolean): void;
 }
-
-/**
- * A glyph per tab, keyed by the schema's tab id rather than by position so a
- * reordering in the engine cannot shuffle the pictures; a tab this table does
- * not know draws none.
- */
-const TAB_GLYPH: Readonly<Record<string, string>> = {
-  price: 'M5 2v12M3 5h4v6H3zM11 2v12M9 4h4v7H9z',
-  readout: 'M2 4h8M2 8h12M2 12h9',
-  axes: 'M3 2v11h11M3 6h2M3 10h2M7 13v-2M11 13v-2',
-  appearance: 'M2 3h12v10H2zM2 8h12M7 3v10',
-  trading: 'M2 12l4-4 3 2 5-6M11 4h3v3M2 14h12',
-};
 
 /** The defaults of one tab as a patch: both halves and the switch of a paired colour included. */
 export function tabDefaults(tab: ChartSettingsTab): ChartSettingsValues {
@@ -81,9 +69,17 @@ export function mountSettingsDialog(
   let form: FormHandle | null = null;
   let committed = false;
 
+  // The whole session is one step on the chart's timeline, and a Cancel that
+  // puts everything back leaves none. Settings are not announced by the
+  // chart, so each write is a transaction the history can measure.
+  const endStep = ctx.history?.group('Chart settings') ?? ((): void => {});
+  const applyNow = (patch: ChartSettingsValues): void => {
+    if (ctx.history !== undefined) ctx.history.transact(() => applyChartSettings(chart, patch));
+    else applyChartSettings(chart, patch);
+  };
   const write = (patch: ChartSettingsValues): void => {
     for (const k of Object.keys(patch)) dirty.add(k);
-    applyChartSettings(chart, patch);
+    applyNow(patch);
     opts.onApply?.(patch);
   };
 
@@ -139,7 +135,7 @@ export function mountSettingsDialog(
 
   // Escape and the scrim are the shell's, and both mean Cancel.
   const offContext = chart.on('data:context', renderPane);
-  const handle = openPanel(ctx, frame.el, { placement: 'center', modal: true, onClose: () => { offContext(); form?.destroy(); } }, () => cancel());
+  const handle = openPanel(ctx, frame.el, { placement: 'center', modal: true, onClose: () => { offContext(); form?.destroy(); endStep(); } }, () => cancel());
 
   function revert(): void {
     if (committed || dirty.size === 0) return;
@@ -149,7 +145,7 @@ export function mountSettingsDialog(
       if (v !== undefined) back[key] = v;
     }
     dirty.clear();
-    applyChartSettings(chart, back);
+    applyNow(back);
     opts.onApply?.(back);
   }
   function cancel(): void {

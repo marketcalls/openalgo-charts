@@ -77,7 +77,7 @@ ps.setAutoScale(true);                     // hand it back to the data
 
 `chart.resetScale()` (also the navigator reset button and the default double-click action) re-enables autoscale and releases ratio locks on every created right, left and overlay scale, then restores the configured default view. `navigation.defaultVisibleBars: 0` fits all loaded bars; a positive count targets the newest N loaded bars plus four right-padding slots, within data and spacing limits.
 
-Chart-wide equivalents, for a settings dialog: `chart.setPriceScaleOptions(patch, scope = 'primary')` writes each pane's right scale; scope `'axes'` selects scales configured on a visible side, and `'all'` includes hidden scales. `chart.priceScaleOptions()` reads the price pane's right scale, in whatever slot it sits (`primaryPaneIndex()`). `chart.setAutoScale(on)` updates every active visible axis across panes and releases those axes' ratio locks when enabled. It leaves hidden scales and their locks unchanged; `resetScale()` still resets every created scale. See [settings-and-menus](settings-and-menus.md).
+Chart-wide equivalents, for a settings dialog: `chart.setPriceScaleOptions(patch, scope = 'primary')` writes each pane's right scale; scope `'axes'` selects scales configured on a visible side, and `'all'` includes hidden scales. `chart.priceScaleOptions()` reads the price pane's right scale, in whatever slot it sits (`primaryPaneIndex()`). `chart.priceScaleDefaults()` reads the chart-wide defaults those calls (and the `priceScale` option and the canvas margins) set, which a pane added later starts from and which `setPriceAxisOptions` on one axis leaves alone: compare the two to tell a chart-wide change from a one-axis one. `chart.setAutoScale(on)` updates every active visible axis across panes and releases those axes' ratio locks when enabled. It leaves hidden scales and their locks unchanged; `resetScale()` still resets every created scale. See [settings-and-menus](settings-and-menus.md).
 
 ### Conversion and formatting
 
@@ -238,7 +238,7 @@ foreign or removed handle, destroyed chart, or indicator-owned plot. A study's
 plots, fills, levels and other scale-bound visuals move together through its
 `setPriceScale` method. Use `setPlotPriceScales` for individual declared plots,
 including related fill endpoints in the same patch.
-The legacy `movePriceAxis` reassigns every series and explicitly bound primitive
+The legacy `movePriceAxis`, deprecated and removed in 3.0.0 in favour of placement, reassigns every series and explicitly bound primitive
 on the source `'left'` or `'right'` ID to the other ID, carrying its scale object
 and configuration. The destination ID must be unused; other named columns on
 that side do not prevent the move. Source and destination placements reset to
@@ -275,7 +275,9 @@ An explicit override applies to all local plots and their fills, levels, drawing
 and attached price primitives. Markers bound to plots follow those plots. Explicit
 `overlay: true` plots and fills retain their price-pane placement and effective
 scale; price-anchored markers keep their primary-series binding. Tables and
-background shading remain screen-space resources. Fill endpoints must share a
+untargeted background shading remain screen-space resources; a shading column
+naming a `plot` ([background targets](indicators.md#background-targets-256), 2.5.6)
+is bound to that plot's scale and moves with it. Fill endpoints must share a
 pane and scale, or the request returns false before changing anything. Unplotted
 calculation columns used by a fill resolve against that fill's local band scale.
 
@@ -333,8 +335,9 @@ Fills follow their common endpoint scale. Levels, unbound price drawings and
 attached price primitives follow the first local plot, as does study-owned range
 intent. A drawing that names a `plot` follows that plot's scale, and a price-pane
 drawing (`overlay: true`) follows the scale the price pane quotes prices on, the candles' own, without binding one. Plot markers,
-including marker groups that name a plot, follow their series. Tables and background shading remain
-in screen coordinates. Handles, data, settings and provider attachments survive
+including marker groups that name a plot, follow their series. A shading column naming a plot
+(2.5.6) is bound to that plot's scale, and price-pane shading binds none. Tables and untargeted background
+shading remain in screen coordinates. Handles, data, settings and provider attachments survive
 assignment changes; no calculation or alert evaluation is required.
 
 Scale identity remains separate from column placement. Use
@@ -449,9 +452,9 @@ chart.setPriceAxisLockRatio(paneIndex, scaleId, true); // false when it could no
 chart.setPriceAxisPlacement(paneIndex, scaleId, 'left'); // retains the scale ID
 ```
 
-`PriceAxisState` is `{ paneIndex, scaleId, side, active, autoFit, inverted, mode, scaled, lockRatio, movable }`, and `PRICE_SCALE_MODES` lists the four modes in menu order. Use the exact `scaleId` from a `contextmenu` target, including named or empty overlays explicitly exposed as columns. `side` reports right for hidden placement for compatibility; use `priceAxisPlacement` to distinguish hidden state. `movable` describes only the legacy reassignment method.
+`PriceAxisState` is `{ paneIndex, scaleId, side, active, autoFit, inverted, mode, scaled, lockRatio, movable }`, and `PRICE_SCALE_MODES` lists the four modes in menu order. Use the exact `scaleId` from a `contextmenu` target, including named or empty overlays explicitly exposed as columns. `side` reports right for hidden placement for compatibility; use `priceAxisPlacement` to distinguish hidden state. `movable` describes only the legacy reassignment method and is deprecated with it, removed in 3.0.0; placement needs no such check.
 
-- **Placement preserves identity.** `setPriceAxisPlacement` moves or reorders a column even when other scales use that side. The legacy `movePriceAxis(pane, from, to)` instead swaps the built-in side scale objects and reassigns their resources to the destination ID. It requires an unused destination ID and resets both placements to their named sides. A `priceAxisMoved` event follows a successful legacy move.
+- **Placement preserves identity.** `setPriceAxisPlacement` moves or reorders a column even when other scales use that side. The legacy `movePriceAxis(pane, from, to)` (deprecated, removed in 3.0.0) instead swaps the built-in side scale objects and reassigns their resources to the destination ID. It requires an unused destination ID and resets both placements to their named sides. A `priceAxisMoved` event, deprecated with the method, follows a successful legacy move; placement emits `priceAxisPlacementChanged`.
 - **Whole-axis study moves require one local assignment.** `movePriceAxis` conservatively refuses a study with mixed local scale assignments or explicit price overlays. This is a guard on the legacy operation, not a saved-state limitation. `priceAxisState().movable` reports that restriction. Uniform local studies and primitive-only studies adopt the moved side. Use `study.setPriceScale` for all local resources or `study.setPlotPriceScales` for selected plots.
 - **The ratio lock pins price-per-bar.** The pane remembers the geometry the lock was taken at and rescales the visible span by height over bar spacing each frame, in transformed space, so a logarithmic axis keeps its angle too. Auto-fit and `resetScale` release it, and it is refused on a scale nothing has measured (`scaled: false`), because there is no ratio to hold.
 - **`active: false`** means no series or explicitly bound primitive maps to that scale. It is a row to render disabled with its state showing, not one to leave out.

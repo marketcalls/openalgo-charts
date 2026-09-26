@@ -13,6 +13,14 @@ This page covers every way to get price data into a chart: bulk load, live
 updates, tick aggregation, infinite history paging, large-dataset downsampling,
 and gap recovery after a feed drop.
 
+## Data variants
+
+A request's `variant` names which of the provider's series to load: regular or
+extended hours, adjusted or raw prices, a currency or a unit. The controller asks
+the feed's `dataVariants` declaration first and publishes status `'unsupported'`
+without fetching anything when the variant is not declared. See
+[Data Variants](/docs/data-variants).
+
 ## Shared loading controller (2.1.6)
 
 `DataLoadingController` owns one instrument's history, live bar store, retries

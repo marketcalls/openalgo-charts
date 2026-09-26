@@ -1,4 +1,5 @@
 import { fmt, UP, DOWN } from './ui.js';
+import { sessionOf } from './session.js';
 
 let app;
 export function initStatus(a) { app = a; }
@@ -52,12 +53,14 @@ export const descriptionOf = (sym) => LONG_NAMES[String(sym).toUpperCase()] || n
  * from midnight. Never a fixed UTC offset: New York is four hours off UTC
  * for part of the year and five for the rest, and a constant would be
  * silently wrong for half of it. `null` means the venue never closes; a
- * venue absent from the table has no hours here and says so.
+ * venue absent from the table has no hours here and says so. `pre` and
+ * `post` bound the extended session where the source serves one: an
+ * extended chart is trading, and can go stale, from `pre` to `post`.
  */
 export const SESSIONS = {
   NSE: { zone: 'Asia/Kolkata', open: 9 * 60 + 15, close: 15 * 60 + 30 },
   BSE: { zone: 'Asia/Kolkata', open: 9 * 60 + 15, close: 15 * 60 + 30 },
-  US: { zone: 'America/New_York', open: 9 * 60 + 30, close: 16 * 60 },
+  US: { zone: 'America/New_York', open: 9 * 60 + 30, close: 16 * 60, pre: 4 * 60, post: 20 * 60 },
   CRYPTO: null,
 };
 const WEEKDAY = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -81,28 +84,35 @@ const zoneParts = (() => {
 })();
 
 /**
- * Whether the venue is trading right now. Regular hours only: there is no
- * holiday calendar behind this, so it says "market closed" on Republic Day
- * for the same reason it does on a Sunday.
+ * Whether the venue is trading right now, for a chart on `session`. There
+ * is no holiday calendar behind this, so it says "market closed" on
+ * Republic Day for the same reason it does on a Sunday. A chart on extended
+ * hours is told which side of the regular session its bars come from.
  */
-export function marketStatusReading(symbol = app.req.symbol || '') {
+export function marketStatusReading(symbol = app.req.symbol || '', session = sessionOf(app?.req)) {
   const venue = exchangeOf(symbol);
   if (!(venue in SESSIONS)) return undefined;    // no hours for this venue
   if (SESSIONS[venue] === null) return { text: 'Open 24x7', color: UP };
-  return venueLive(symbol) ? { text: 'Market open', color: UP } : { text: 'Market closed' };
+  if (venueLive(symbol)) return { text: 'Market open', color: UP };
+  if (!venueLive(symbol, session)) return { text: 'Market closed' };
+  const { minutes } = zoneParts(Date.now(), SESSIONS[venue].zone);
+  return { text: minutes < SESSIONS[venue].open ? 'Pre-market' : 'Post-market' };
 }
 
 /**
  * Can this venue still be producing bars right now? The same table and the
  * same missing holiday calendar as the status line above, so it says "live"
- * on Republic Day for the same reason it does not say "closed" on one. Read
- * by `barsRequest` to decide how far ahead it is worth asking for data.
+ * on Republic Day for the same reason it does not say "closed" on one. A
+ * chart on extended hours counts them where the venue has them. Read by
+ * `barsRequest` to decide how far ahead it is worth asking for data, and by
+ * `staleness` to decide whether a bar can be late at all.
  */
-export function venueLive(symbol) {
+export function venueLive(symbol, session = 'regular') {
   const s = SESSIONS[exchangeOf(symbol)];
   if (s === undefined || s === null) return true;   // unknown hours, or 24x7
+  const extended = session === 'extended' && s.pre !== undefined;
   const { day, minutes } = zoneParts(Date.now(), s.zone);
-  return day >= 1 && day <= 5 && minutes >= s.open && minutes < s.close;
+  return day >= 1 && day <= 5 && minutes >= (extended ? s.pre : s.open) && minutes < (extended ? s.post : s.close);
 }
 
 /** A bar's local calendar day, for spotting a session boundary. */
@@ -191,13 +201,15 @@ export function symbolLogo(sym) {
  * time of day, so it has to be right on the frame it is drawn rather than on
  * the frame the demo last patched options.
  */
-export function symbolStatus({ symbol: sym = app.req.symbol || '', bars = app.currentBars, timezone = app.chartTimezone } = {}) {
+export function symbolStatus({ symbol: sym = app.req.symbol || '', bars = app.currentBars, timezone = app.chartTimezone, session } = {}) {
   if (!sym) return null;
   return {
     logo: symbolLogo(sym),
     description: descriptionOf(sym) || undefined,
     ticker: exchangeOf(sym) + ':' + nameOf(sym),
-    marketStatus: marketStatusReading(sym),
+    // The session of the chart this row belongs to: the caller names it, and
+    // without one the main chart's symbol reads the main chart's session.
+    marketStatus: marketStatusReading(sym, session ?? (sym === (app?.req?.symbol || '') ? sessionOf(app?.req) : 'regular')),
     lastDayChange: dayChangeReading(bars, timezone),
   };
 }

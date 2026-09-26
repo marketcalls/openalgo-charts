@@ -1,8 +1,10 @@
 import type { SeriesApi } from '../model/series';
 import type { Bar } from '../model/bar';
 import type { ChartDataContext } from '../model/indicator-registry';
+import type { DataVariant } from '../feed/data-variant';
 import type { IndicatorApi } from '../model/indicator-instance';
 import type { IPrimitive } from '../primitives/primitive';
+import type { TickSchedule } from '../feed/tick-schedule';
 
 /** A primary-source mutation, emitted after indicator invalidation. */
 export interface ChartDataUpdate {
@@ -31,6 +33,12 @@ export interface AlertChartHost {
    * nothing to round to, and inventing one would move a price somebody chose.
    */
   snapPrice?(paneIndex: number, price: number): number;
+  /**
+   * The instrument's tick schedule, or null for a constant tick. A dragged
+   * price alert lands on the band its price falls in. Optional; absent keeps
+   * the source scale's one tick.
+   */
+  tickSchedule?(): TickSchedule | null;
   /**
    * Slot of the price pane, where a price alert draws and where a drawing
    * needs no input plot. It moves when a host puts the price pane below its
@@ -119,14 +127,17 @@ export interface BarCondition {
 }
 
 /**
- * Evaluation belongs to the instrument and interval present when the alert was armed.
- * Fixed price levels remain visible on other intervals of the same instrument,
- * labelled with their original timeframe and paused until it is displayed again.
+ * Evaluation belongs to the instrument, interval and data variant present when
+ * the alert was armed. Fixed price levels remain visible on other intervals and
+ * sessions of the same instrument quoted in the same currency and unit,
+ * labelled with where they evaluate and paused until that is displayed again.
  */
 export interface AlertScope {
   symbol?: string;
   exchange?: string;
   interval?: string;
+  /** The series the chart showed (extended hours, raw prices, a currency). Absent for the provider's default. */
+  variant?: DataVariant;
 }
 
 export interface AlertInput {

@@ -2,6 +2,689 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.5.6
+
+2026-09-26
+
+### Added
+
+- `chart.setSessionCalendar(calendar)` sets the hours the time axis follows
+  past the last bar and repaints every pane, so a drawing already placed there
+  moves to the time it now means; `null` clears them. Any object with
+  `sessionFrom(utcSeconds)` qualifies (`SessionCalendarSource`), so a host
+  setting hours it built itself needs neither `applyTo`. Both `applyTo` calls
+  below go through it.
+- `chart.dataLayer.setSessionCalendar(calendar)` and the `sessionCalendar`
+  getter set and read the same hours. The data layer cannot reach the chart,
+  so this setter moves times without asking for a frame: the path for a host
+  about to load bars or move the view anyway. `Instrument.applyTo` now sets the instrument itself, so a host that
+  applies instrument metadata gets the fix with no other change. Another
+  instrument replaces its hours, and a data context moved to another symbol or
+  exchange drops them, so a symbol the host holds no instrument for is not laid
+  out in the last one's sessions.
+- `SessionCalendar`, trading hours without price or quantity rules: built from
+  `{ timezone, sessions, exceptions }` (`SessionCalendarSpec`), validated,
+  detached and frozen by the same rules as an instrument's calendar, with
+  errors reading `Invalid session calendar: ...`. It reads with the same
+  `sessionAt`, and `applyTo(chart)` sets it as the chart's calendar and
+  repaints, so drawings already past the last bar move to the times they now
+  mean.
+- `sessionFrom(utcSeconds)` on `Instrument` and `SessionCalendar` returns the
+  window active at an instant, or else the next one to open, looking about a
+  year ahead, and null when nothing opens in that time. An overnight window
+  still running is returned on its opening date.
+- The reference host lays the empty space right of the last candle out in the
+  venue's regular hours (NSE and BSE 09:15 to 15:30 IST, US 09:30 to 16:00 New
+  York, weekdays), on both charts of the split view, and in the host
+  instrument's own calendar for a symbol it holds metadata for. Crypto and
+  venues without hours keep the median spacing.
+- A `layout:change` event (`LayoutChangeEvent`, naming a `LayoutSetter`)
+  after the setters that change what `getState` saves and had no event of
+  their own: `setPaneWeight`, `setPriceAxisOptions`, `setPriceAxisAutoFit`,
+  `setPriceAxisLockRatio`, `setPriceScaleOptions`, `setAutoScale`,
+  `setGridOptions`, `setCanvasOptions`, `setStatusLineOptions`,
+  `setWatermarkOptions`, `setTradingSettings`, `setAxisChromeOptions`,
+  `setEventOptions` and `applyOptions`. It fires once per outermost call,
+  after the change is applied, so the canvas block setting the grid on its way
+  is one `setCanvasOptions` event; a call naming no pane the chart has fires
+  nothing, and a restore fires none, since it announces itself. A host that
+  saves its layout, or an undo history, now hears these changes when they
+  happen. The reference host autosaves on it, which now covers a grid toggled
+  with the chart's own Alt+V and Alt+H keys.
+- `chart.priceScaleDefaults()` reads the chart-wide price-scale defaults that
+  `setPriceScaleOptions`, the `priceScale` option and the canvas margins set,
+  and that a pane added later starts from. `priceScaleOptions()` reads the
+  price pane's own scale, which a change made to that one axis moves and the
+  defaults do not, so the two tell a chart-wide change from a one-axis one.
+- Accent registries for the icon sets: `DRAWING_TOOL_ACCENTS` /
+  `drawingToolAccent(id)` and `CHROME_ICON_ACCENTS` / `chromeIconAccent(id)`,
+  optional per glyph. An accent is the fill of marks the glyph's own path
+  already draws as outlines (anchor dots, pole caps, arrowheads, slider
+  knobs), so it adds weight and never identity: a host that draws only the
+  path data still shows every mark that tells one glyph from another.
+  `iconSvg`, `chromeIconSvg`, `iconSprite` and `toolCursor` draw it as a
+  second `<path>` with `fill="currentColor" stroke="none"` after the glyph.
+- A browser check for look-alike icons, `tests/e2e/icon-raster.spec.ts`. Every
+  glyph is rasterised at its native size in Chromium, Firefox and WebKit, twice:
+  as the builders draw it, and as the bare path data a host that wraps the
+  registry itself draws. The check fails when two glyphs in a tier overlap at
+  an intersection over union of 0.85 or more in either rendering (only the
+  star, eye and link state pairs may), when a named sibling pair reaches 0.7,
+  or when a tier's share of solid pixels falls below its floor (0.59 for the
+  tools, 0.6 for chrome, measured 0.59 and 0.62).
+- Study policies. A study carries an `IndicatorPolicy` of four independent flags,
+  each defaulting to true, the way a drawing carries its `DrawingPolicy`:
+  `removable`, `configurable`, `movable` and `listed`. Pass it with
+  `addIndicator(id, settings, { policy })`, read it with `indicator.policy()`
+  (the flags that are false) and replace it with `indicator.setPolicy(policy)`,
+  or `null`, which is always the host's act. A policy restricts the user: every
+  native call a user control makes treats its caller as the user unless it passes
+  `{ force: true }` (`IndicatorEditOptions`), and returns false with nothing
+  changed when refused. `removable` covers `chart.removeIndicator`,
+  `indicator.remove` and `chart.removePane` for a pane holding the study;
+  `configurable` covers `setSettings`, `setPriceScale` and `setPlotPriceScales`;
+  `movable` covers `chart.moveIndicator`, `chart.reorderIndicator` and
+  `chart.moveInSeriesStack`. `setSettings` and `remove` now return a boolean. The
+  legend row drops its close button and gear (and a stale press on either does
+  nothing); a row whose buttons the host set with `legend().setOptions({ actions })`
+  keeps them through every restack, with the policy laid over them. `ChartObjects`
+  withholds remove, settings, reorder, move and place and leaves an unlisted study
+  out, and the widget greys its settings and remove menu rows and the picker's
+  remove button with the note "protected", declines the settings dialog with the
+  reason, reports a write the host refused after locking the study while the
+  dialog was open, and leaves an unlisted study out of the picker and the alert
+  source lists. Hiding a study stays the user's choice. A restore is the host's act
+  and replaces a protected study. The chart state saves only the restrictions
+  (`IndicatorState.policy`), so an unrestricted layout is written exactly as before
+  and older layouts restore unrestricted; a malformed policy refuses the restore.
+  Workspace documents keep policies. A portable template is the user's copy of the
+  user's own studies: it leaves out every study the host keeps from the user (one
+  that is not `removable` or not `listed`) and every study reading the output of
+  one, lets go of a scale range such a study owned, and copies a study with other
+  restrictions without them. A template applied in `replace` mode keeps the host's
+  studies, on their own panes, so it neither copies nor removes them.
+  `parseIndicatorPolicy` validates a policy. The yfinance host adds **Add Protected
+  VWAP** to its chart menu and removes it with `force`; importing or loading a
+  layout keeps it, and a layout file's own restricted studies are left out.
+- Draw order across sources, studies and drawings. A pane paints in bands, back
+  to front: behind the series, the series band, the overlay band (price lines,
+  markers, study levels) and in front. The series band holds the price source and
+  each study in paint order, read with `chart.seriesStack(paneIndex)`, and
+  `chart.moveInSeriesStack(id, target, 'above' | 'below', options?)` moves the source
+  or a study next to another entry; a study's fills, levels and markers keep their
+  bands and follow the new study order. A drawing can now sit between studies:
+  `Drawing.stackAbove` names the entry it paints directly above,
+  `draw.placeInStack(id, { drawing } | { entry }, where)` puts it next to another
+  drawing or an entry as one undo step, `reorder`, `bringToFront` and `sendToBack`
+  work within the slot it paints in, and `sendBehindSeries` and `bringAboveSeries`
+  take it out of the series band. Any primitive can be placed the same way with
+  `chart.setPrimitiveStackAbove(primitive, entry)`; a batching renderer flushes
+  before it, so the WebGL2 backend keeps the order. `ChartObjects.stack(paneIndex)`
+  lists a pane back to front, and `canPlace` and `place` move a drawing anywhere in
+  its pane and a source or study only between whole slots, taking the drawings
+  placed on it along; a move the bands cannot paint is refused. Rows gain `band`,
+  `stackAbove` and the `place` capability (`ChartObjectBand`,
+  `ChartObjectDrawingSource.placeInStack`, `DrawingStackTarget`). The pointer takes
+  what is painted on top: the front drawing layer answers for every layer of its
+  pane front to back; whatever paints over the series (the overlay band and the
+  front) takes a press, a hover, a click or the context menu from whatever paints
+  with or behind it (a drawing or primitive placed in the series band, a drawing
+  behind the series, a bottom primitive) wherever it answers, whatever the
+  distance, so a box placed under an order line gives the line the press; and a
+  right-click over a drawing or placed primitive and a series painted over it
+  targets the series (`PrimitiveHit.paintedBy`). A bottom primitive, such as a
+  bracket's stop line, now yields the same way to a primitive over the series
+  within reach, where it used to win by being nearer. The price source stays the pane's instrument wherever it
+  paints: the crosshair readout, the last-price line and a rebased axis describe it.
+  A moved source saves `ChartState.sourceAbove`; a drawing's slot is saved in the
+  drawing document and carried by duplicate and the clipboard; a drawing whose
+  study is gone paints in front until the study returns. Layouts and drawing
+  documents from 2.5.5 load and paint unchanged. The widget's Objects panel lists
+  each pane in draw order, notes a drawing behind the series or above an entry,
+  reorders by dragging a row onto the upper or lower half of another and refuses a
+  drop the bands cannot paint before it lands, and Earlier and Later step through
+  the same order.
+- Paired time and price inputs. A `price` input can name a declared `timestamp`
+  input with `timeKey`, making the two one point on the chart; `anchor: true` adds
+  a handle there. Registration refuses a `timeKey` that names no timestamp input,
+  the price itself or a timestamp another price already pairs with, and an
+  `anchor` without a `timeKey`. `chart.beginPick('point', cb, options?)` captures
+  both halves from one click as a `PickPoint` (`{ time, price }`, the time snapped
+  to the bar), reads the price on the target scale and answers only when both
+  resolve; `pick:start` and `pick:end` carry `kind: 'point'`. The widget's and the
+  reference host's settings forms offer **Pick point on chart** on the price row
+  and commit both keys in one patch. The drawing tier draws the anchor on the pane
+  and scale a pick of the price reads (`studyInputTarget(chart, study, key)`,
+  exported from `openalgo-charts/draw`): dragging it previews the point with guides
+  to both axes and writes both settings in one patch on release, Escape cancels, an
+  active drawing tool or a waiting pick takes the press, and a study whose policy is
+  `configurable: false` keeps it still. Each drag is one step of the drawing undo
+  history, in order with the drawings, and emits `drawing:change` with empty `ids`
+  so Undo controls refresh; a host keeping one timeline of its own takes the steps
+  with `draw.delegateInputAnchorSteps(record)`, as the chart-wide `ChartHistory`
+  below does, so Ctrl+Z, the rail and the phone bar take a drag back once in both
+  hosts. `draw.moveInputAnchor(studyId, key, point)` moves an anchor the
+  way a drag does, as one step, for a host control that sets the point another way
+  (a point pick). `new DrawingController(chart, { inputAnchors: false })` draws
+  none. The reference host adds the Anchored growth sample.
+- `chart.plotRect(paneIndex)` returns a pane's plot in container px (`PlotRect`:
+  `left`, `top`, `width`, `height`), inside the price axis columns and above the
+  time axis, or null for a collapsed, hidden or missing pane. It scales the pane
+  first, as a price conversion does, so a pane no frame has painted yet (just made
+  or just moved) answers in its prices and not its placeholder range. The draw tier now
+  places, moves and converts drawings pinned to the screen by it rather than
+  working the rectangle out from the scales, so `draw.screenPoints` and a host
+  overlay laid against `plotRect` agree. `DrawingChartHost` gains the optional
+  `plotRect` and drops the optional `priceAxisLayout` it no longer reads.
+- `chart.setTickSchedule(schedule | null)` and `chart.tickSchedule()` put the
+  instrument's price-dependent ticks on the chart. `Instrument.applyTo` sets it,
+  and a host with its own metadata calls it; it also reaches `chart.trading`, now or
+  when that layer is built. `chart.snapPrice` on the price pane then rounds with the
+  band the price falls in, and a dragged price alert lands on that band's tick, a
+  range bound stopping a band tick inside an off-tick opposite bound. With no
+  schedule every rounding is unchanged. A schedule without `round` and `step` is
+  refused when it is set, not on the first drag. `AlertChartHost` gains the optional
+  `tickSchedule()`. The reference host hands its `BANDED` schedule to both charts.
+- `chart.addIndicator(id, settings, { instanceId })` gives the study that id, so a
+  host that brings a removed study back (an undo) brings back its identity and the
+  studies reading its output and the alerts naming it find it again. An id a study
+  on the chart holds now throws; the id of a removed study is free to take back.
+- One undo timeline for the whole chart. `ChartHistory` in the widget tier
+  records a study added or removed (with its settings, visibility, pane,
+  stacking row and price scale), study settings, visibility and scale
+  assignments, the chart type and the primary series' scale, price scale
+  settings (mode, invert, margins, auto-fit, pinned ratio and axis placement),
+  pane moves, folds and heights, panes added or removed on their own, the chart
+  settings the settings dialog writes, and drawings, in the order they were
+  made. The widget builds one as
+  `widget.history` (and `ctx.history`): Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z, the
+  rail's Undo and Redo, and the mobile sheets all walk it. The mobile More
+  sheet now opens with Undo and Redo, and the Drawing sheet gains Redo.
+- A step is taken back by making the chart look the way it did in exactly the
+  fields that step changed, through the chart's public calls, never by
+  restoring a whole saved state. A study removed with the pane it emptied comes
+  back to its slot with the pane's height, fold and axes and the drawings that
+  pane held. Undo never writes bars, never fires an alert (a study brought back
+  reseeds silently) and never places an order.
+- The chart settings and study settings dialogs are one step per session, and
+  a Cancel that restores every value leaves none; each context-menu row is one
+  step. `transact(fn, label)` records what the chart does not announce,
+  `group(label)` merges a live edit, `ignore(fn)` keeps a host's own change out,
+  drawings included and the redo branch kept, `push(command)` records a host's
+  own reversible step, and `attach(chart, draw)` keeps the timeline across a
+  host's chart rebuild. A listener's change while a step is applied is not a
+  step either, and a Cancel gives the redo branch back. A step that cannot be
+  applied is rolled back, dropped with the steps behind it, and reported to
+  `onError`; a new action clears redo; `restoreState` starts a new timeline.
+- `DrawingController.historySteps()` and a `step` number on the `drawing:change`
+  that closes a recorded step (`DrawingChangeEvent`), so a host can hold drawing
+  steps in a timeline of its own, and `DrawingController.untracked(fn)`, which
+  runs a host's own edits without recording a step or touching either branch,
+  taking them into every recorded step the way a forced edit is.
+- A linked appearance change is an undo step of the chart that made it only: the
+  chart grid and the reference host's split view apply it on the others outside
+  their timelines, and undoing or redoing it announces the result again, so linked
+  charts never drift apart.
+- The yfinance reference host walks one timeline per chart: the keyboard and the
+  mobile bar walk the focused chart's, the drawing toolbar and the rail the main
+  chart's. It records its chart-type rebuild as a command, makes each chart
+  settings and study settings session one step, and keeps comparisons, the volume
+  row and loaded layouts out of it.
+- A study input anchor's move is one step of the chart-wide timeline, taken back
+  once. `DrawingController.delegateInputAnchorSteps(record)` hands the step each
+  anchor move makes (a drag, `moveInputAnchor`) to a host's own timeline, with its
+  own `undo` and `redo` (`InputAnchorStep`), until the returned function gives the
+  steps back, and records none of them itself. `ChartHistory` takes them from its
+  drawing controller, and from one it is attached to later, and records the
+  settings patch the move wrote as the move ends, so the rail's Undo is on the
+  moment a drag is released. A drag, `moveInputAnchor` and a settings dialog's
+  **Pick point on chart** are each one step, walked in order with the drawings:
+  an undo after a pick takes the pick back, never a drawing made before it. A
+  press that grabs something starts a step of its own, so a change made earlier
+  in the same turn is not taken back with the drag. A move made inside
+  `untracked`, and so inside `ignore`, is the host's own and a step nowhere.
+- Without a chart-wide history, the drawing controller holds a point written
+  through a study's settings, as a settings dialog's **Pick point on chart**
+  writes it, as a step of its own, the way it holds a drag. Before, a drag
+  followed by such a pick left the drag's step describing a point the study no
+  longer held, and an undo passed over it and removed an unrelated drawing made
+  before both, leaving the pick in place. Now the first undo takes the pick back,
+  the next the drag, and only the third the drawing. A write inside `untracked`,
+  or forced on a study the user may not configure, is the host's own and no step,
+  and `delegateInputAnchorSteps` hands over only the anchors' own moves, since a
+  host timeline sees a settings write itself.
+- Undo and redo never override a study's policy. A press leaves a study as its
+  policy keeps it: not removed while `removable: false`, its settings and scales
+  as they are while `configurable: false`, its pane while `movable: false`, and
+  never moved by a call of its own. Other studies still pass one that may not
+  move, as the chart lets them: a user's reorder that moves a free study past a
+  pinned one is a step and is taken back, and a study removed from above a pinned
+  one comes back above it; two pinned studies never trade places. The rest of the
+  step still applies, and a step left with nothing to do (removing a study the
+  host has protected since) is dropped and the press goes on to the one before,
+  as the drawing history treats a read-only drawing, so `canUndo`, `canRedo` and
+  the peeks say what a press would do, and `subscribe` hears when a policy changes
+  that. A change only the host could make, adding a protected study or a forced
+  write or remove on one, is no step.
+- Undo and redo never remove or weaken a policy the host set later. A study a
+  press brings back takes the policy its host holds now, the one it last had on
+  the chart, never an older one the step captured: a restriction added after the
+  step was made is still on the study that comes back. A study that left the
+  chart by the host's hand (inside `ignore`, through a forced remove, or left out
+  of a chart the host rebuilt and passed to `attach`) is the host's to bring
+  back: the part of any step that would re-add it is dropped, and a step with
+  nothing else to do goes with it.
+- A study brought back by an undo or redo takes back the instance id it had, so
+  the studies reading it and the alerts naming it find it again. The history
+  tells studies apart by the chart's own object for each, not by id or kind: if
+  a study the host placed under that id since holds it, of the same kind or
+  another, the one brought back takes a fresh id with the settings the step gives
+  it, the later steps and the studies reading it follow it there, and the host's
+  study keeps the id, its pane and its settings and is never taken for the one a
+  step means.
+- `ChartHistory` records a pane height or a scale option set in code outside a
+  transaction (`setPaneWeight`, `setPriceAxisOptions`, `setPriceScaleOptions` and
+  the other setters the chart now announces with `layout:change`) as a step of
+  its own. The chart-wide price scale defaults (`priceScaleDefaults()`: mode,
+  invert and both margins) are a field of each step apart from every pane's
+  axes: a chart-wide change is taken back with them, so a pane added after the
+  undo starts from the old defaults, while a change to one axis from its menu,
+  on a chart with a single pane too, is replayed on that axis alone and never
+  writes the defaults or announces a linked appearance change. The chart
+  settings `scales.mode`, `scales.inverted` and `scales.autoScale` are no longer
+  compared as settings, since the defaults and the axes carry them.
+- A step made of several stretches (a group or a transaction with an `ignore`
+  inside it) reads each stretch against the chart the stretch before it in the
+  press leaves, rather than the chart before the press, so a later stretch whose
+  stacking order the chart held already still puts back the order an earlier one
+  changed. A command pushed inside `ignore` is no step. A pane a host makes for a
+  primitive of its own (`addPrimitive` at a new index) or a drawing it places
+  there is the host's, like one it plots a series in: no `pane-add` step, and no
+  undo or redo makes or removes it.
+- Conditional study inputs. Every `IndicatorInput` (and a chart settings colour
+  pair) takes `visibleWhen` and `activeWhen`, an `IndicatorInputCondition` over
+  the other settings: `{ key, is }`, `{ key, isNot }` with one value or a list,
+  and `{ all }` or `{ any }` to combine them. A hidden input leaves the form and
+  the tab order; an inactive one stays readable, disabled, with a reason naming
+  what it depends on. Rules cascade through an input a condition reads, and a
+  colour pair's switch and colours count as the pair. They are presentation
+  only: `calc` receives every setting, and a hidden value is kept.
+- Inline rows: consecutive inputs with the same `inline` id share one row, the
+  first one's label leading it, each member with its own label. A multi-line
+  input and a colour pair always take a row of their own.
+- The widget's generated forms and the reference host's form re-read the rules
+  after every edit and every sync, announce what was shown, hidden, made
+  available or unavailable in a polite live region, and move focus off a control
+  that just left. A hidden or disabled draft never blocks OK or Apply: a valid
+  one is kept and saved, an invalid one is not written. Defaults resets hidden
+  inputs too, and Cancel restores the rows the original settings show. A pick
+  or search beside a disabled field is disabled with it. Both forms read an
+  edit once it is committed, so they answer alike: the reference host's number
+  box now commits the way the widget's does, clamped to its bounds, with a
+  blank box getting its last value back.
+- `inputStates(inputs, values)`, `inputConditionMet(condition, values)` and the
+  `InputState` type in `openalgo-charts/widget`, for a host that renders its own
+  form; `FormOptions.unavailable` is now asked again after every edit and sync.
+- Data variants: regular and extended hours, adjusted and raw prices, and a quote
+  currency or unit are each their own provider series, with their own identity.
+  `BarsRequest.variant` names one; a feed declares what it serves through the new
+  optional `DataFeed.dataVariants`, and a feed without it serves only its default series.
+  Nothing is converted or adjusted locally: a variant the provider does not declare is
+  reported, never made from another series. New base exports `normalizeDataVariant`,
+  `dataVariantKey`, `unsupportedDataVariant`, `dataVariantError` and `publishDataContext`,
+  and the types `DataVariant`, `DataSession`, `DataAdjustment`, `DataVariantDimension`,
+  `DataVariantCapabilities`, `DataVariantQuery` and `DataContextTarget`.
+- `DataLoadingController` asks the declaration before the cache or the network and
+  publishes the new status `'unsupported'` with `snapshot.unsupported` (the dimension)
+  and a `DataVariantUnsupportedError`, fetching, streaming, refreshing and paging
+  nothing. A declaration that fails is an `'error'` that still fetches nothing: paging
+  waits and a refresh asks the declaration again. A load with another variant is a new source: the request in flight is
+  aborted, the stream released and the bars cleared. Hosts that switch exhaustively
+  on `DataLoadingStatus` gain one case.
+- `withBarCache` keys each variant as its own series (`invalidate` takes a `variant`) and
+  forwards `dataVariants`; `HistoryRequestPool` never shares a request between two
+  variants. The default variant adds nothing to a key, so keys and persisted entries
+  from before variants still match.
+- `ChartDataContext.variant` carries the variant to studies and hosts. Set it with
+  `publishDataContext(chart, context)`, which makes a change of variant alone a change
+  of source (requested bars aborted, source revisions restarted, studies told) while
+  the instrument, its event markers and linked drawings stay. `Instrument.applyTo`
+  keeps the context's variant.
+- A variant-only change through `publishDataContext` emits `data:context` twice (a
+  passing context with the interval cleared, then the real one) until the chart
+  compares variants itself; requested studies, Tier 2 studies and the alert controller
+  skip the passing one, so nothing is fetched, reported or saved for it.
+- Alerts: `AlertScope.variant` records the variant an alert was set on (none for the
+  default series, so existing scopes and documents are unchanged). An alert evaluates
+  only on its own variant, `availability` asks for it back, a fixed price level is not
+  drawn in another currency or unit, and `parseAlertsDocument` refuses a variant it
+  cannot name. The widget's alert editor treats a variant change as a context change
+  and its list names the variant.
+- Requested contexts: `IndicatorBarsRequest.variant`. `createRequestedIndicator` and a
+  Tier 2 study's `requestBars` ask for another instrument in the chart's session and
+  adjustment (`inheritedDataVariant`, indicators tier) unless the request names a
+  variant, and a variant-only change restarts both.
+- Widget: the `variant` option, `widget.variant()`, `widget.setDataVariant(variant)` and
+  a `variant` event. The variant rides on every load, the data context, `getState`,
+  the persisted layout and the saved-view check. A saved state without a variant (every
+  state saved on the default series, and every one saved before variants) restores onto
+  the default series whatever the widget shows, so its view never lands on other bars.
+  The status line names a non-default variant and the data status reads "Not available from this source" with no retry for
+  an undeclared one. `WorkspacePane.variant` saves it in portable workspaces, and
+  `createChartGrid` saves, reopens and copies it per cell.
+- The yfinance reference host has a session menu: regular hours, and extended hours for
+  intraday bars of US listed stocks, the source's own pre and post market bars
+  (`session=extended`, and `prepost` upstream). Elsewhere the choice is greyed with the
+  reason, and a chart already on extended hours that moves to daily bars shows an
+  unsupported card with a button back to regular hours. The session is part of the bar
+  cache key, the data context, comparisons, replay's finer history, saved layouts and
+  named workspaces; fixture mode serves a deterministic extended session. On an
+  extended-hours chart the market status reads "Pre-market" or "Post-market", the stale
+  badge and the load window follow the 04:00 to 20:00 New York session, and the alert
+  menu treats a session change as a change of scope.
+- A study's background shading can name a target, the way its drawings and
+  markers can since 2.5.4. `background` may return a list of columns, typed as
+  `IndicatorBackgroundSpec` (`{ colors, overlay?, plot? }`), instead of one
+  colour per bar: `overlay: true` shades the price pane behind the candles and
+  binds no axis, and `plot: 'key'` shades that plot's pane, bound to the plot's
+  effective scale. Each target is a layer of its own, owned by the instance: it
+  follows `setPlotPriceScales`, `setPriceScale` and `moveIndicator` (price-pane
+  shading stays on the price pane), hides with the study, is released when a
+  pass returns no column for it and goes with the study or its pane. Shading
+  stacks after the study's marks and shapes, its own column first and then its
+  targets, price pane first; it paints behind every series, so it always sits
+  under the candles, plots, marks and shapes. One column per target: a second
+  column for the same target, a column without colours, a hole in the list,
+  colours mixed with columns, an unknown plot, or `plot` with `overlay: true`
+  throw before any shading layer changes. The plain form, and a list whose
+  one column names no target, render exactly as before.
+- The reference host's Routed signal sample shades the candles by the sign of
+  its momentum, with a Momentum shading input that sends the shading to the
+  study's own pane or turns it off.
+
+### Changed
+
+- `npm run lint` enforces the deprecation policy: a `@deprecated` tag in `src`
+  must name the release that removes the API ("removed in X.Y.Z"), that release
+  must be a later major than the package version, and the tag must sit in a doc
+  block. Once the package reaches the named release, the tag fails the lint.
+  The rule asks the compiler which tags a comment carries, so a tag
+  in the middle of a line counts, exactly as it does for the editor's
+  strike-through, and a tag's text ends at the next tag on the same line.
+- The draw tier reads a click's additive gesture (Shift, Ctrl or Cmd) from
+  `modifiers` first, so it keeps working when the deprecated flat flags go.
+- **Chrome icons draw a heavier line.** `CHROME_ICON_STROKE`, and with it
+  `CHROME_ICON_ATTRS.strokeWidth`, is 2 (it was 1.5), the same 2px line as the
+  24px tool glyphs, and the chrome live area is 2 to 14. A 1.5 stroke on whole
+  units put every edge three quarters of the way across a pixel, so no edge was
+  solid: 0.18 of the tier's inked pixels were solid at 16px, 0.62 now. Every
+  host that takes the stroke from `chromeIconSvg` or `CHROME_ICON_ATTRS` gets
+  the heavier line. To keep the old weight, pass it explicitly:
+  `chromeIconSvg(id, { stroke: 1.5 })`, `stroke-width="1.5"` on your own
+  `<svg>`, or `stroke-width: 1.5` in your stylesheet (for the widget,
+  `.oac-widget .oac-glyph--chrome > svg`). The glyphs are now drawn for 2 on
+  whole units, so at 1.5 they are exactly as soft as before. A host that
+  already sets its own chrome stroke keeps it. The dense chrome glyphs are
+  redrawn for the heavier line (settings, camera, link, unlink, duplicate,
+  eye, eye-off, star, star-filled, magnet), the widget stylesheet and the
+  reference host follow the tier's value, and the widget's own glyphs (the
+  chart settings tabs, the indicator style tab, the stacking and fit menu
+  items) are redrawn for it too: the price tab had filled in solid.
+- **Glyph path data changed** for 19 tool ids (`cursor`, `magnet`,
+  `trend-line`, `ray`, `extended-line`, `arrow`, `horizontal-ray`,
+  `cross-line`, `info-line`, `path`, `polyline`, `price-range`, `date-range`,
+  `date-price-range`, `long-position`, `short-position`, `risk-reward-long`,
+  `risk-reward-short`, `callout`) and 14 chrome ids (`cursor`, `magnet`,
+  `lock`, `unlock`, `eye`, `eye-off`, `star`, `star-filled`, `settings`,
+  `paste`, `duplicate`, `link`, `unlink`, `camera`). Each value is still one
+  complete glyph, marks included. A host that copies or generates metadata from
+  the path strings, or asserts them in a test, must regenerate it from this
+  release.
+- Look-alike glyphs are drawn apart. Long and short positions are one frame
+  split at the entry, the target zone the taller, with an entry tick and the
+  direction solid in the target; one is the other turned over. The
+  risk-reward pair measures a tall reward span and a short risk span from one
+  entry line. The line family differs by its ends: a trend line ends in two
+  anchor dots, a ray starts at an origin dot (its tick read as a check mark),
+  an extended line carries its dots inside, an arrow and a path end in a head,
+  and a polyline marks its vertices. The horizontal ray leaves from an anchor a
+  third of the way in. The callout's tail runs back to a distant point, apart
+  from the balloon's stub, and paste is a board with lines of content beside
+  the trash can. Unlock swings the shackle open, the cursor is a pointer
+  rather than a cross beside the cross-line tool and plus, and the magnet has
+  pole caps.
+- The widget's Undo and Redo chords are listed with the widget's shortcuts
+  rather than the drawing ones, since they now reach every step on the chart.
+- The OpenAlgo adapters refuse a non-default variant (`OpenAlgoDataFeed.getBars`,
+  `OpenAlgoLiveDataFeed.subscribeBars`) with a `DataVariantUnsupportedError` rather than
+  answering with the one series they have under another name, and so does the synthetic
+  `FakeDataFeed` (`getBars` and `subscribeBars`).
+
+### Deprecated
+
+- `mapOrder` is deprecated in favour of `decodeOrder`, which returns the reason a
+  row could not be read, or `OpenAlgoTradeFeed.getOrderBook()`, which sets such
+  rows aside as `quarantined`. It keeps working until 3.0.0.
+- The `dashed` field that an `IndicatorHost` receives in `addIndicatorLevel` is
+  deprecated: read `lineStyle`, which the study always resolves and which also
+  carries `'dotted'`. It is still sent until 3.0.0. The `dashed` shorthand a
+  descriptor's `levels()` or `addPriceLine` accepts is unchanged and not
+  deprecated.
+- Depth subscribe frames stop sending the `depth_level` key beside `depth` in
+  3.0.0, and the widget message key "Enter a valid expiry date and time in UTC",
+  which the widget no longer shows, is removed then. Neither has a declaration
+  to tag, so COMPATIBILITY.md lists both.
+- The flat `shiftKey`, `ctrlKey` and `metaKey` on a `click` event are
+  deprecated: read `modifiers`, which carries the same state and `alt` besides.
+  `chart.renderer` is deprecated in favour of `chart.rendererKind`, the same
+  value. Both keep working until 3.0.0, and their declarations carry the tag,
+  so an editor strikes them through.
+- `chart.movePriceAxis(pane, from, to)` is deprecated in favour of
+  `chart.setPriceAxisPlacement(pane, scaleId, side)` (since 2.5.4), which moves
+  a scale's column and keeps its id, where the old method swaps the built-in
+  side scales and reassigns their series and studies. `movable` in
+  `priceAxisState()` describes only that old method and goes with it, and so
+  does the `priceAxisMoved` event, which only that method emits: listen for
+  `priceAxisPlacementChanged`. The widget and the reference host already use
+  placement. All three keep working until 3.0.0.
+- The chart's own study host no longer reads the deprecated `dashed` it is
+  handed for a study level; it draws from `lineStyle`, which the study always
+  resolves, so every level looks exactly as before.
+- COMPATIBILITY.md now has a table of every deprecated API with its
+  replacement, the release that replacement arrived in and the release that
+  removes the old form, and a list of older forms that are kept on purpose (the
+  `dashed` and `magnet: true` shorthands, the IST helpers, a study `levels` hook
+  written against the settings-only form, the `topic` field on an inbound
+  market-data frame, and the readers of older saved documents). The one-id
+  `draw:*` events beside `drawing:select` and `drawing:change` are listed as not
+  decided yet; they are settled with a typed event map.
+
+### Fixed
+
+- A chart follows a change of device pixel ratio: the window moved to a screen
+  of another density, or a zoom that leaves the container's CSS size alone.
+  Before, nothing re-sized the canvases, so the whole chart stayed at the old
+  ratio, stretched and blurred, until something changed the container's size.
+  The chart now watches a `(resolution: Xdppx)` query, made again for each new
+  ratio, and the window's `resize` as well, which a zoom fires and which is the
+  one signal left in a browser whose query list takes no change listener.
+- Pane boundaries now land on whole device pixels, at every ratio, so each
+  canvas covers a whole number of device pixels and the browser no longer
+  stretches a lower pane by a fraction of a pixel. Three panes in 344 px at
+  1 : 0.32 : 0.32 were 209.76 px and 67.12 px tall, boundaries inside a device
+  pixel at every ratio; they are now rounded where they meet, within half a
+  device pixel of their share, and the outer edge stays where the container
+  puts it. At a ratio of 1 a pane's height can therefore differ from its exact
+  share by up to one pixel; weights are untouched. A chart whose panes already
+  share the height in whole pixels is laid out and painted exactly as before.
+  Hit testing and `priceToCoordinate` round at the ratio the panes were laid
+  out at, so they stay on the boxes on screen even when the ratio moves with
+  nothing to say so.
+- At a fractional ratio the separator between panes is a box one device pixel
+  tall laid over the top of the lower pane, where it was a 1 px CSS border. At
+  1.25 and 1.5 that border was 1.25 or 1.5 device pixels, so the canvases
+  under it started part way into a pixel and the browser resampled the whole
+  pane and blended the rule into it. There the lower pane's canvases now start
+  at the pane's top and the rule covers their first row, so a pointer maps to
+  the canvas pixel it is over. At a whole-number ratio (1, 2, 3) the separator
+  is the 1 px border it always was, the canvases under it and pane-local
+  coordinates where they were: a border is whole device pixels there. The
+  separator changes form when the ratio does. `setTheme` recolours it, which
+  the border kept in the previous theme's colour until the next resize.
+- `exportSVG` lays its panes out at a ratio of 1, the ratio the document is at,
+  whatever the screen's: the same chart exports the same document on a 1x,
+  1.5x or 2x screen, with the separator as the 1 px border the screen draws at
+  1.
+- Where the browser reports a canvas's device-pixel box
+  (`devicePixelContentBoxSize`, Chromium and Firefox), the canvas's backing
+  store takes that size, so a chart that starts part way into a pixel is not
+  stretched by one. A report more than a pixel away from media times ratio is
+  refused, which is what an emulated device scale reports. The box is kept
+  through a resize of less than a pixel that leaves it as it was, which the
+  browser does not report again.
+- No blank frame while the chart is resized. Resizing a canvas clears it, and
+  the size arrives in a ResizeObserver callback, after the frame's animation
+  callbacks and before the browser paints, so the repaint waited a frame and
+  every step of a window drag showed one cleared frame. The chart now paints
+  in that callback, on a new ratio, and in the one re-measure a frame after
+  construction, which ran inside an animation callback and had the same gap.
+  A host that supplies its own `raf` scheduler keeps every frame, these
+  included, on it.
+- Ichimoku Cloud reads its three periods and its displacement as whole bars,
+  the way the other built-in studies read a length. A fractional period (a
+  conversion period of 9.4, say, from a saved layout or a host's own settings
+  UI) made the calculation throw a TypeError, and a fractional displacement
+  blanked both spans and the lagging span. Each is now rounded to the nearest
+  whole bar, and a period below one reads as one, the declared minimum, where
+  it used to print nothing. Whole values compute exactly as before.
+- Times past the last bar no longer take their spacing from the gap between
+  the last two bars. That gap is the one most likely to be a night or a
+  weekend: on a five-minute chart whose last candle was Monday's 09:15 open,
+  every bar of empty space to its right stood for almost three days, so a
+  trend line drawn three bars past it ended more than eight days later.
+  `DataLayer.indexToTimeFloat` and `timeToIndexFloat` (and so
+  `chart.coordinateToTime`, `chart.timeToCoordinate`, drawing placement, study
+  shapes past the last bar and linked viewports) now continue at the median of
+  the last 64 bar intervals. Left of the first bar nothing changes. Evenly
+  spaced data maps exactly as before, and stored drawings keep their times: an
+  anchor saved at a future time is simply drawn where that time now falls.
+- With a session calendar the space past the last bar follows the venue's
+  hours. The bar after Friday's 15:25 candle is Monday's 09:15, so a saved
+  anchor at Monday 09:30 is drawn four bars past the last candle rather than
+  about 800 five-minute bars off screen in the night and weekend. A date the
+  calendar closes is skipped, a shortened day ends early and a lunch break is
+  stepped over. Each window keeps the offset the feed's bars keep from its
+  opening, read from the bars in windows opening at the same time: hourly bars
+  stamped on the clock stay on the clock both at a 09:00 morning opening and
+  at 12:00 before a 12:30 afternoon one, and a feed that stamps its first
+  hourly bar 09:00 against a 09:15 open keeps doing so. Daily bars step through
+  trading dates. Positions between two future bar times interpolate across the
+  closed hours and convert back exactly. A calendar the recent bars do not sit
+  in (regular hours against extended-hours data) is ignored in favour of the
+  median, and a calendar that throws never stops a chart painting. Generation
+  is bounded: past 4096 future bars or 512 calendar reads the axis continues
+  at the average pace already generated.
+- `long-position` and `short-position` were one picture (the same subpaths in
+  another order), and the duplicate check compared path strings, so it passed.
+  It now compares drawings: subpaths walked to absolute coordinates, sorted,
+  and read from a fixed end, curves and arcs included. `lock` and `unlock`
+  overlapped by more than 99 percent at 16px, and the chrome `cursor` and
+  `plus` by 92 percent.
+- The corner logo no longer takes a press meant for something over it. A note
+  pinned to the screen in the corner, a drawing crossing the mark or an order line
+  gets the press, the drag, the hover and the double click, and the logo's link
+  opens only where nothing else answers the pointer.
+- The yfinance reference host's chart state card hid its Dismiss button in the markup
+  only: the button style overrode the hidden attribute, so an empty chart showed it too.
+- A settings change whose pass fails keeps the study's last good candle
+  colours, as the documented pass order says. The chart restacks every study
+  after a settings change, and that restack ran the `barColors` hook again on
+  the failed pass: it published the colours of a pass rejected at a drawing,
+  marker or shading target, and when `calc` itself had thrown, a hook reading
+  one of its columns threw out of `setSettings` instead of leaving the error
+  status. Moving or reordering a study whose last pass failed keeps them too.
+
+### Documentation
+
+- README and ARCHITECTURE.md now describe the engine as it is: two canvases per
+  pane with the axes painted on the base canvas, a data write (a study
+  recompute or a live tick) repainting every pane, a time-scale operation queue
+  that nothing fills, kinetic scroll and eased zoom on their own frame loops,
+  conflation applied to every series in a pane, per-bar candle colours, a
+  marker pass that walks every marker, and `mergeRange` not implemented.
+- The unmeasured "60 fps" and "50k+ bars" claims are replaced by a recorded
+  measurement from `scripts/browser-endurance.mjs` at 2,000, 10,000 and 50,000
+  bars per chart (frame-interval p95 17 ms, 134 ms and 717 ms on the recorded
+  machine), with its workload and machine in `docs/browser-endurance.md`. The
+  README states the large-history cost as a known limit.
+- The README limitation that a pane had one shared comparison scale is removed:
+  each comparison has had a scale of its own since independent comparison
+  scales shipped.
+- ARCHITECTURE.md places order and position lines on the base canvas, where a
+  drag repaints them, and lists what the overlay canvas really carries. The
+  README says the same, and names the widget tier among the places that build
+  SVG icon markup.
+- No document calls the WebGL2 backend faster than Canvas2D any more: that has
+  not been measured. The documents say what the backend does instead.
+- `docs/performance-notes.md` records two findings for the render benchmark:
+  markers map the whole history on every paint, and the endurance harness's
+  painted-chart hash includes the price-axis strip.
+- `tests/docs-claims.test.ts` ties these statements to the code: a frame rate,
+  percentile, duration or bar-count workload in README or ARCHITECTURE.md must
+  cite its measurement record (a frame figure, the browser harness), GPU speed
+  wording needs a record that measures the GPU backend, the canvas count, the
+  overlay contents, the SVG tiers and the shared index must match the code, and
+  the repaint scope a document states must match what the chart does.
+
+### Internal
+
+- The indicator tier's warmup-gap alignment and its Smoothing block are
+  written once, in an internal module the tier does not export, instead of as
+  private copies spread across the study modules: five of the gapped EMA, four
+  of the Smoothing kernel switch (the moving-average ribbon's among them), four
+  of the first-value alignment (one written inline in ADX) and three of the
+  Smoothing option list. The canvas
+  colour helpers and the widget's tokens share one luminance calculation, each
+  still reading colours through its own parser, because the two parsers
+  disagree on malformed input and merging them would move a colour. The
+  widget still declares its own `Rgba`, so its declaration and reference page
+  are unchanged. The merge moved no output: all 105 built-in studies over 16
+  synthetic datasets and 31,312 setting combinations, their declared inputs
+  and options, and 12,037 colour probes across both parsers give bit-identical
+  results before and after it, from source and from the built bundles (the
+  Ichimoku fix above is the only change in study output).
+  `tests/shared-helpers.test.ts` checks the merged helpers bitwise against
+  independent copies of the ones they replaced, and fails if a private copy
+  comes back, by name or as the alignment pattern under another name.
+- The two public `withAlpha` functions share a name, not a behaviour, and stay
+  separate on purpose; their declarations now say so. The base package's
+  writes `rgba()` with the alpha as given, for canvas, and the widget's writes
+  `#rrggbb` for an opaque colour and clamps and rounds the alpha, for a token
+  value.
+- `npm run test:script-engine` draws a compiled study with two grids and a band
+  whose colour the script computes per bar, built with
+  `descriptorFor(program, { id, chartVersion: VERSION })`, on a real chart, and
+  checks both grids and each run of the band's colour. Against an engine older
+  than 0.8.0, whose adapter refuses such a study, the case is skipped with a
+  note saying so; the engine's version is read from its own `package.json`.
+
+Saved layouts, drawings and workspace documents from 2.5.5 load unchanged. A
+study or drawing without a policy behaves as before, a chart without a session
+calendar spaces the future by its recent bars, and at a whole-number pixel ratio
+the device-pixel work lays panes and separators out exactly as 2.5.5 did when pane
+heights are whole pixels. Deprecated forms keep working until 3.0.0. No runtime dependencies or package tiers were
+added.
+
+Sizes, measured on this release and against 2.5.5 (Brotli, decimal kB): base
+engine 119.15 to 125.39, base plus trade 135.79 to 142.07, the trade tier alone
+16.64 to 16.69, indicators 36.34 to 36.44, draw 44.87 to 48.42, widget 82.30 to
+92.72, workspace 9.99 to 10.47, widget terminal 282.67 to 302.96 and every tier
+together 335.15 to 355.97. The chart-only import grows from 75.07 to 79.25 KiB:
+study policies, one draw order, device-pixel layout, resize paints, the session
+calendar and the layout event belong to every chart, and the undo history,
+panels and forms stay in the widget. Each budget is the smallest two-decimal
+value that passes.
+
 ## 2.5.5
 
 2026-09-26

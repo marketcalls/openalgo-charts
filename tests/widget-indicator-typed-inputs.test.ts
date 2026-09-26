@@ -387,3 +387,49 @@ describe('typed indicator host controls', () => {
     expect(h.panel.isOpen()).toBe(false);
   });
 });
+
+describe('a paired time and price in the settings dialog', () => {
+  const paired = [
+    { key: 'at', type: 'timestamp', label: 'Anchor time', default: 1700000000, pick: true },
+    { key: 'level', type: 'price', label: 'Anchor price', default: 2, min: 0, max: 100, pick: true, timeKey: 'at', anchor: true },
+  ] satisfies IndicatorInput[];
+
+  it('picks both from one click and commits them as one patch', () => {
+    const h = fixture({ inputs: paired });
+    const trigger = h.root.querySelector('[data-input-action="level"]')!;
+    expect(trigger.textContent).toBe('Pick point on chart');
+    // The time keeps its own time-only pick.
+    expect(h.root.querySelector('[data-input-action="at"]')!.textContent).toBe('Pick on chart');
+    const start = vi.spyOn(h.chart, 'beginPick'), write = vi.spyOn(h.inst, 'setSettings');
+    trigger.click();
+    expect(start.mock.calls[0][0]).toBe('point');
+    expect(start.mock.calls[0][2]).toEqual({ paneIndex: 0, priceScaleId: 'right' });
+    expect(h.root.querySelector('.oac-input-pick')!.textContent).toContain('Pick Anchor time and Anchor price on the chart');
+    const scale = h.chart.panes()[0].priceScale;
+    h.chart.emit('click', { paneIndex: 0, point: { x: 250, y: 80 }, price: -999, time: 1700000060.4, id: null });
+    expect(write).toHaveBeenCalledOnce();
+    expect(write.mock.calls[0][0]).toEqual({ level: scale.yToPrice(80), at: 1700000060 });
+    expect(h.inst.settings()).toMatchObject({ level: scale.yToPrice(80), at: 1700000060 });
+    expect(h.field('at').value).toBe('1700000060');
+    expect(h.field('level').value).toBe(String(scale.yToPrice(80)));
+    expect(h.panel.el.hidden).toBe(false);
+    h.button('Cancel').click();
+    expect(h.inst.settings()).toMatchObject({ level: 2, at: 1700000000 });
+  });
+
+  it('writes neither half when the point pick is cancelled', () => {
+    const h = fixture({ inputs: paired }), write = vi.spyOn(h.inst, 'setSettings');
+    const start = vi.spyOn(h.chart, 'beginPick'), ends: unknown[] = [];
+    h.chart.on('pick:end', payload => ends.push(payload));
+    h.root.querySelector('[data-input-action="level"]')!.click();
+    // The pick under way is the paired one, for both halves at once.
+    expect(start.mock.calls.map(call => call[0])).toEqual(['point']);
+    h.button('Cancel pick').click();
+    expect(ends).toEqual([{ kind: 'point', value: null }]);
+    h.chart.emit('click', { paneIndex: 0, point: { x: 250, y: 80 }, price: 3, time: 1700000060, id: null });
+    expect(write).not.toHaveBeenCalled();
+    expect(h.inst.settings()).toMatchObject({ level: 2, at: 1700000000 });
+    expect(h.field('at').value).toBe('1700000000');
+    expect(h.panel.el.hidden).toBe(false);
+  });
+});

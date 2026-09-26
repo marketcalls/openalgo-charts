@@ -135,3 +135,23 @@ test('bracket legs snap in their own band and keep one tick from the entry', asy
   expect(parked.stop).toBe(await page.evaluate(entry => ((window as any).__oac.app.ticks as HostTicks).step(entry, -1), parked.entry));
   await page.screenshot({ path: info.outputPath('host-bracket-across-boundary.png') });
 });
+
+test('a price alert dragged into the upper band lands on the tick of that band', async ({ page }, info) => {
+  await pinRange(page, 99, 101);
+  expect(await page.evaluate(() => (window as any).__oac.app.chart.tickSchedule()?.bands.length)).toBe(2);
+  const id = await page.evaluate(() => (window as any).__oac.app.alerts.add({ source: { kind: 'price', price: 99.4 }, title: 'Band alert' }).id);
+  await paint(page);
+  const stored = (): Promise<number> => page.evaluate(alertId => (window as any).__oac.app.alerts.list()
+    .find((alert: { id: string }) => alert.id === alertId).source.price, id);
+  const from = await point(page, 99.4, 0.35), to = await point(page, 100.33, 0.35);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+  await page.mouse.up();
+  await paint(page);
+  const dropped = await stored();
+  expect(dropped).toBeGreaterThan(100);
+  expect(Math.round(dropped * 100) % 5).toBe(0);
+  expect(dropped).toBe(await round(page, to.price));
+  await page.screenshot({ path: info.outputPath('host-alert-upper-band.png') });
+});

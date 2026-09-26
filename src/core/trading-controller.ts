@@ -92,6 +92,13 @@ export interface TradingHost {
   subscribeDrag(onDrag: (externalId: string, price: number) => void, onDragEnd?: (externalId: string, price: number) => void): void;
   /** Optional: route trading events onto the chart's unified `chart.on(...)` bus. */
   emit?(event: string, payload: unknown): void;
+  /**
+   * Optional: the instrument's tick schedule when the layer is built. The
+   * layer is built on first use, often after the instrument was applied, and
+   * applying one cannot build the layer early: its click and drag
+   * subscriptions would replace the host's own.
+   */
+  tickSchedule?(): TickSchedule | null;
 }
 
 export const DEFAULT_TRADING_COLORS: TradingColors = {
@@ -215,26 +222,6 @@ export class TradeMarkersPrimitive implements IPrimitive {
 
 interface Tracked<E> { entity: E; line: PriceLine; sig: string; }
 
-// The tick schedule of the instrument last applied to each chart. The trading
-// layer is built on first use, often after the instrument was applied, and
-// applying one cannot build the layer early: its click and drag subscriptions
-// would replace the host's own. So the layer starts from what is left here.
-const instrumentTicks = new WeakMap<object, TickSchedule | null>();
-
-/**
- * `Instrument.applyTo`'s hand-off: a layer built later starts from `ticks`,
- * and one that exists takes them now, so a symbol switch never leaves the
- * previous instrument's bands on a drag. Null, for a constant tick, keeps the
- * raw pointer price the layer has always reported.
- * @internal
- */
-export function applyInstrumentTicks(
-  chart: { hasTrading(): boolean; readonly trading: TradingController }, ticks: TickSchedule | null,
-): void {
-  instrumentTicks.set(chart, ticks);
-  if (chart.hasTrading()) chart.trading.setTickSchedule(ticks);
-}
-
 export class TradingController {
   private readonly _host: TradingHost;
   private readonly _positions = new Map<string, Tracked<TradingPosition>>();
@@ -248,7 +235,7 @@ export class TradingController {
 
   public constructor(host: TradingHost) {
     this._host = host;
-    this._ticks = instrumentTicks.get(host) ?? null;
+    this._ticks = host.tickSchedule?.() ?? null;
     host.subscribeClick((externalId) => this._onClick(externalId));
     host.subscribeDrag(
       (externalId, price) => this._onDrag(externalId, price),
@@ -297,8 +284,8 @@ export class TradingController {
    * carry, to the instrument's ticks. Null, the default, passes the pointer's
    * price through unrounded, as it always has. The host's own validation stays
    * authoritative either way; this only stops a drag previewing a price the
-   * instrument cannot trade at. `Instrument.applyTo` sets it from the
-   * instrument, so call this after applying one to override it.
+   * instrument cannot trade at. `Instrument.applyTo` and
+   * `chart.setTickSchedule` set it, so call this after either to override it.
    */
   public setTickSchedule(schedule: TickSchedule | null): void {
     // Refused here, where the host made the mistake, rather than as a pointer

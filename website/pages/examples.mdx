@@ -5,6 +5,7 @@ description: Live, in-page chart demos powered by the real OpenAlgo Charts libra
 
 import RunnableExample from '../components/RunnableExample'
 import TypedInputsDemo from '../components/TypedInputsDemo'
+import ConditionalInputsDemo from '../components/ConditionalInputsDemo'
 import { STOCK_BARS_SOURCE } from '../components/synthetic-market'
 import { SANDBOX_BROKER_EXAMPLE } from '../components/account-examples'
 import { ProfileDemo, ProfileThemeGallery } from '../components/ProfileShowcase'
@@ -215,6 +216,96 @@ inputs: [
 ]
 ```
 
+## Anchored study input
+
+The growth path starts at one point: a bar time and a price that belong together. The
+price input names its time (`timeKey`), so **Pick point** sets both from one click, and
+`anchor: true` puts the orange ring on the chart. Drag the ring to move both at once, then
+use **Undo** and **Redo**: a drag and a pick are one step each, because the pick goes
+through `draw.moveInputAnchor`. Escape during a drag cancels it. See
+[a time and a price that belong together](/docs/indicators#a-time-and-a-price-that-belong-together).
+
+<RunnableExample height={400} tiers={['draw']} caption="Drag the ring, or press Pick point and click a bar. Each drag and each pick is one undo step." code={`const bar = document.createElement('div');
+bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px;font-size:12px';
+el.appendChild(bar);
+const host = document.createElement('div');
+host.style.cssText = 'height:330px';
+el.appendChild(host);
+
+lib.registerIndicator({
+  id: 'example-anchored-growth', name: 'Anchored growth', placement: 'onchart',
+  inputs: [
+    { key: 'from', type: 'timestamp', label: 'Anchor time', default: 0, pick: true },
+    { key: 'price', type: 'price', label: 'Anchor price', default: 0, pick: true, timeKey: 'from', anchor: true },
+    { key: 'rate', type: 'number', label: 'Growth per bar (%)', default: 0.15 },
+  ],
+  plots: [{ key: 'path', title: 'Growth path', type: 'line', style: { color: '#f59e0b', lineWidth: 2 } }],
+  calc(bars, s) {
+    const start = bars.findIndex(b => b.time >= s.from);
+    return { path: bars.map((_, i) => (start < 0 || i < start ? null : s.price * (1 + s.rate / 100) ** (i - start))) };
+  },
+});
+
+const chart = lib.createChart(host);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.setVisibleLogicalRange({ from: 40, to: 165 });
+// The drawing controller draws the anchor and holds its undo steps.
+const draw = new lib.DrawingController(chart);
+const study = chart.addIndicator('example-anchored-growth', { from: bars[90].time, price: bars[90].close });
+
+const readout = document.createElement('span');
+const show = () => {
+  const s = study.settings();
+  readout.textContent = 'Anchor: ' + new Date(s.from * 1000).toISOString().slice(0, 16).replace('T', ' ')
+    + ' UTC at ' + s.price.toFixed(2);
+};
+const button = (label, run) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = label;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+  b.onclick = run;
+  bar.appendChild(b);
+};
+// One click answers with the bar time and the price together, and moving the
+// anchor through the drawing controller makes the pick an undo step like a drag.
+button('Pick point', () => chart.beginPick('point', p => draw.moveInputAnchor(study.id, 'price', p)));
+button('Undo', () => draw.undo());
+button('Redo', () => draw.redo());
+bar.appendChild(readout);
+chart.on('objects:change', show);
+show();
+return chart;`} />
+## Conditional study inputs
+
+Open the study inputs and change the mode, the smoothing and the signal switch.
+The band width appears only in Bands mode and keeps its value while it is
+hidden, the smoothing length is editable only with a smoothing chosen, and the
+signal's length and colour share its row and follow its switch. From 2.5.6, see
+[conditional inputs](/docs/indicators#conditional-inputs-and-inline-rows).
+
+<ConditionalInputsDemo />
+
+The descriptor declares the rules as data beside each input:
+
+```ts
+inputs: [
+  { key: 'length', type: 'number', label: 'Length', default: 20, inline: 'len' },
+  { key: 'source', type: 'source', label: 'Source', default: 'close', inline: 'len' },
+  { key: 'mode', type: 'select', label: 'Mode', default: 'line', options: MODES },
+  { key: 'width', type: 'number', label: 'Band width', default: 1.5, visibleWhen: { key: 'mode', is: 'bands' } },
+  { key: 'smoothing', type: 'select', label: 'Smoothing', default: 'none', options: SMOOTHING },
+  { key: 'smoothLength', type: 'number', label: 'Smoothing length', default: 5,
+    activeWhen: { key: 'smoothing', isNot: 'none' } },
+  { key: 'showSignal', type: 'boolean', label: 'Signal', default: false, inline: 'signal' },
+  { key: 'signalLength', type: 'number', label: 'Length', default: 9, inline: 'signal',
+    activeWhen: { key: 'showSignal', is: true } },
+  { key: 'signalColor', type: 'color', label: 'Colour', default: '#d97706', inline: 'signal',
+    activeWhen: { key: 'showSignal', is: true } },
+]
+```
+
 ## Compare markets
 
 Put two instruments on one chart and compare how they move. Prices and returns
@@ -393,6 +484,60 @@ button('Pin selected', 'viewport');
 button('Unpin selected', 'data');
 return chart;`} />
 
+## Draw order across studies
+
+A drawing can sit behind the series, over the candles and under a study, over a study, or
+in front of everything, and the candles can move over a study. The line under the buttons
+lists the pane back to front, the order it paints in. See
+[Draw order](/docs/objects#draw-order).
+
+<RunnableExample height={400} tiers={['indicators', 'draw']} caption="Simulated prices. Each button moves one object; the list reads the pane from back to front." code={`const bar = document.createElement('div');
+bar.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px';
+el.appendChild(bar);
+const order = document.createElement('div');
+order.style.cssText = 'color:#94a3b8;font:12px system-ui, sans-serif;margin-bottom:6px';
+el.appendChild(order);
+const host = document.createElement('div');
+host.style.cssText = 'height:300px';
+el.appendChild(host);
+
+const chart = lib.createChart(host);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.setVisibleLogicalRange({ from: 110, to: 200 });
+const ema = chart.addIndicator('ema', { length: 9, color: '#f5c542' });
+const draw = new lib.DrawingController(chart);
+const span = bars.slice(140, 181);
+const box = draw.add({ tool: 'rectangle', paneIndex: 0,
+  style: { color: '#4f8cff', fill: true, fillOpacity: 0.85, lineWidth: 2 }, points: [
+    { time: bars[140].time, price: Math.max(...span.map(b => b.high)) },
+    { time: bars[180].time, price: Math.min(...span.map(b => b.low)) },
+  ] });
+// One list for the whole pane: the same inventory an Objects panel reads.
+const objects = new lib.ChartObjects(chart, { drawings: draw });
+const label = row => row.band === 'above' ? row.name + ' (in front)'
+  : row.band === 'below' ? row.name + ' (behind the series)' : row.name;
+const show = () => { order.textContent = 'Back to front: ' + objects.stack(0).map(label).join(', '); };
+objects.subscribe(show);
+
+const moves = [
+  ['Box in front', () => draw.bringAboveSeries(box.id)],
+  ['Box over the average', () => draw.placeInStack(box.id, { entry: 'indicator:' + ema.id }, 'above')],
+  ['Box over the candles', () => draw.placeInStack(box.id, { entry: 'source:primary' }, 'above')],
+  ['Box behind the series', () => draw.sendBehindSeries(box.id)],
+  ['Candles over the average', () => chart.moveInSeriesStack('source:primary', 'indicator:' + ema.id, 'above')],
+  ['Candles under the average', () => chart.moveInSeriesStack('source:primary', 'indicator:' + ema.id, 'below')],
+];
+for (const [label, run] of moves) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+  b.onpointerdown = (event) => event.stopPropagation();
+  b.onclick = run;
+  bar.appendChild(b);
+}
+return { destroy() { objects.destroy(); draw.destroy(); chart.destroy(); } };`} />
+
 ## The terminal in one call
 
 Add a toolbar, drawing tools, settings, and the Data and Objects panels with
@@ -428,6 +573,116 @@ widget.chart.addIndicator('ema', { length: 20 });
 return widget;`} />
 
 Every option and event is on [The Widget Tier](/docs/widget).
+
+## One undo for the whole chart
+
+A study, a pane fold, a chart type and a drawing are steps on one timeline. Add RSI, fold its
+pane, switch to a line, draw a trend line from the rail, then take each step back and apply it
+again with the buttons, or with Ctrl+Z and Ctrl+Y over the chart. The line beside the buttons
+says what Undo would take back. See [Undo and Redo](/docs/undo-history).
+
+<RunnableExample height={520} tiers={['widget']} caption="Simulated prices. Undo never touches the bars: a study brought back computes from the prices on the chart and fires none of its alerts." code={`${STOCK_BARS_SOURCE}
+el.style.display = 'flex';
+el.style.flexDirection = 'column';
+const controls = document.createElement('div');
+controls.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px';
+el.appendChild(controls);
+const host = document.createElement('div');
+host.style.cssText = 'flex:1;min-height:0;width:100%;position:relative';
+el.appendChild(host);
+const widget = lib.createWidget(host, {
+  symbol: 'NOVA', exchange: 'DEMO', interval: '1h', persist: false, mobile: 'never',
+  feed: { getBars: async () => stockBars(1700000000, 200, 3600, 100, 41), subscribeBars: () => () => {} },
+});
+const note = document.createElement('span');
+note.style.cssText = 'color:#94a3b8;font:12px system-ui, sans-serif;margin-left:6px';
+const button = (label, run) => {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText = 'padding:5px 10px;border:1px solid #334155;border-radius:4px;background:#172033;color:#e2e8f0;cursor:pointer';
+  b.onpointerdown = (event) => event.stopPropagation();
+  b.onclick = run;
+  controls.appendChild(b);
+  return b;
+};
+button('Add RSI', () => widget.chart.addIndicator('rsi'));
+button('Fold the last pane', () => {
+  const last = widget.chart.panes().length - 1;
+  if (last > 0) widget.chart.setPaneCollapsed(last, !widget.chart.paneCollapsed(last));
+});
+button('Line or candles', () => widget.setChartType(widget.chartType() === 'line' ? 'candlestick' : 'line'));
+const undo = button('Undo', () => widget.history.undo());
+const redo = button('Redo', () => widget.history.redo());
+controls.appendChild(note);
+const show = () => {
+  const next = widget.history.peekUndo();
+  note.textContent = next ? 'Undo takes back: ' + next.changes.join(', ') : 'Nothing to undo';
+  undo.disabled = !widget.history.canUndo();
+  redo.disabled = !widget.history.canRedo();
+};
+widget.history.subscribe(show);
+show();
+return widget;`} />
+
+## Regular and extended hours
+
+Extended hours are the provider's own pre and post market bars, a different series from
+regular hours, so the chart asks for them by name and never makes them from the regular
+bars. The simulated provider below declares both sessions and no price adjustment, so
+**Raw prices** shows the unsupported state instead of relabelling the regular series.
+See [Data Variants](/docs/data-variants).
+
+<RunnableExample height={500} tiers={['widget']} caption="Simulated prices on New York time. Extended hours add the 04:00 to 09:30 and 16:00 to 20:00 bars around the same regular session." code={`${STOCK_BARS_SOURCE}
+el.style.display = 'flex';
+el.style.flexDirection = 'column';
+const controls = document.createElement('div');
+controls.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px';
+el.appendChild(controls);
+const host = document.createElement('div');
+host.style.cssText = 'flex:1;min-height:0;width:100%;position:relative';
+el.appendChild(host);
+// One provider series per session. Regular hours are the same bars as the
+// middle of the extended day: the provider serves both, the chart derives neither.
+const monday = 1767571200; // Monday 5 January 2026, 00:00 UTC; New York is UTC-5 in January
+const day = 86400, preOpen = 9 * 3600, open = 14.5 * 3600, close = 21 * 3600, postClose = 25 * 3600;
+const extended = [];
+for (let d = 0; d < 3; d++) {
+  extended.push(...stockBars(monday + d * day + preOpen, (postClose - preOpen) / 300, 300, 100 + d * 1.5, 17 + d));
+}
+const regular = extended.filter(bar => {
+  const t = (bar.time - monday) % day;
+  return t >= open && t < close;
+});
+const feed = {
+  dataVariants: () => ({ sessions: ['regular', 'extended'] }),
+  getBars: async request => (request.variant && request.variant.session === 'extended' ? extended : regular),
+  subscribeBars: () => () => {},
+};
+const widget = lib.createWidget(host, {
+  symbol: 'NOVA', exchange: 'DEMO', interval: '5m', intervals: ['5m'], timezone: 'America/New_York',
+  persist: false, rail: false, feed, navigation: { defaultVisibleBars: 400 },
+});
+const note = document.createElement('span');
+note.style.cssText = 'color:#94a3b8;font:12px system-ui, sans-serif;margin-left:6px';
+const show = state => {
+  if (state.status === 'unsupported') note.textContent = 'Not served by this provider: nothing was fetched';
+  else if (state.status === 'ready') note.textContent = state.bars.length + ' bars';
+};
+widget.dataController.subscribe(show);
+for (const [label, variant] of [
+  ['Regular hours', undefined],
+  ['Extended hours', { session: 'extended' }],
+  ['Raw prices', { adjustment: 'raw' }],
+]) {
+  const button = document.createElement('button');
+  button.textContent = label;
+  button.style.cssText = 'padding:5px 10px;border:1px solid #334155;border-radius:4px;background:#172033;color:#e2e8f0;cursor:pointer';
+  button.onpointerdown = event => event.stopPropagation();
+  button.onclick = () => widget.setDataVariant(variant);
+  controls.appendChild(button);
+}
+controls.appendChild(note);
+return widget;`} />
 
 ## Watchlists and news
 
@@ -594,7 +849,8 @@ const bars = Array.from({ length: 90 }, (_, i) => {
 chart.addSeries('candlestick').setData(bars);
 chart.addPriceLine({ price: 100, color: '#8892a6', lineStyle: 'dotted', id: 'boundary',
   leftLabel: 'tick 0.05 from here, 0.01 below' }, 0);
-chart.trading.setTickSchedule(ticks);
+// The chart hands it to its trading layer, and rounds dragged alerts with it too.
+chart.setTickSchedule(ticks);
 const order = { id: 'entry', type: 'limit', side: 'buy', price: 99.62, size: 10 };
 chart.trading.setOrders([order]);
 chart.trading.on('trading:order_modify', (event) => {
@@ -813,6 +1069,43 @@ const chart = lib.createChart(el);
 const bars = lib.generateBars(1700000000, 160, 3600);
 chart.addSeries('candlestick').setData(bars);
 chart.addIndicator('demo-routed-signals');
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
+### Shading the candles from a study pane
+
+The momentum histogram sits in its own pane, and the regime it measures shades the
+candles: that shading column names the price pane with `overlay: true`, so the up and
+down stretches read against the bars themselves, behind them. A second column names no
+target and marks the strongest readings behind the histogram, exactly as a plain
+`background` would. See [background targets](/docs/indicators#background-targets-256) (2.5.6).
+
+<RunnableExample height={420} code={`lib.registerIndicator({
+  id: 'demo-routed-shading', name: 'Routed shading', category: 'Custom',
+  placement: 'pane',
+  inputs: [{ key: 'length', type: 'number', label: 'Length', default: 10, min: 2, max: 50, step: 1 }],
+  plots: [{ key: 'momentum', type: 'histogram', title: 'Momentum', style: { color: '#64748b' } }],
+  calc(bars, s) {
+    const n = Math.max(2, s.length | 0);
+    return { momentum: bars.map((b, i) => (i < n ? null : b.close - bars[i - n].close)) };
+  },
+  background({ values }) {
+    const m = values.momentum;
+    const peak = Math.max(...m.map((v) => Math.abs(v ?? 0)));
+    return [
+      // Behind the candles: which way momentum points, bar by bar.
+      { overlay: true, colors: m.map((v) => (v == null || v === 0 ? null
+        : v > 0 ? 'rgba(38,166,154,0.14)' : 'rgba(239,83,80,0.14)')) },
+      // No target: the study's own pane, where the reading is strongest.
+      { colors: m.map((v) => (v != null && Math.abs(v) > peak * 0.6 ? 'rgba(79,140,255,0.18)' : null)) },
+    ];
+  },
+});
+
+const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addIndicator('demo-routed-shading');
 chart.timeScale.fitContent(bars.length);
 return chart;`} />
 

@@ -6,7 +6,10 @@
  *
  * The design decisions, all of which are load-bearing:
  *
- * **Key.** `symbol | exchange | interval`. The requested range is deliberately
+ * **Key.** `symbol | exchange | interval`, then the data variant when the
+ * request names one (extended hours, raw prices): each is a separate provider
+ * series, and the default variant adds nothing, so keys written before
+ * variants existed still match. The requested range is deliberately
  * NOT part of the key: one entry per series holds the widest set fetched so
  * far, and a narrower request is served by slicing it. Keying on the range
  * would miss on every pan and on every "same chart, one bar later" reload,
@@ -48,6 +51,7 @@
 import type { Bar, UTCSeconds } from '../model/bar';
 import type { BarsPage, BarsPageRequest, BarsRequest, DataFeed, MarketDepth, UnsubscribeFn, LiveBarMeta } from './types';
 import { nextBucketStart, tryResolveInterval } from './intervals';
+import { dataVariantKey, type DataVariantCapabilities, type DataVariantQuery } from './data-variant';
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -171,7 +175,8 @@ export function barCloseSec(interval: string, barStartSec: UTCSeconds, zone?: st
 }
 
 export function barCacheKey(req: BarsRequest): string {
-  return `${req.symbol}|${req.exchange}|${req.interval}`;
+  const variant = dataVariantKey(req.variant);
+  return `${req.symbol}|${req.exchange}|${req.interval}${variant && '|' + variant}`;
 }
 
 /** Bars are mutated in place by live builders; never hand out our own objects. */
@@ -236,6 +241,9 @@ export class BarCache implements DataFeed {
     if (typeof feed.getBarsPage === 'function') {
       this.getBarsPage = (req): Promise<BarsPage> => feed.getBarsPage!(req);
     }
+    if (typeof feed.dataVariants === 'function') {
+      this.dataVariants = (query): DataVariantCapabilities | Promise<DataVariantCapabilities> => feed.dataVariants!(query);
+    }
   }
 
   // `...rest` is part of the signature so a caller holding the concrete
@@ -243,6 +251,7 @@ export class BarCache implements DataFeed {
   public subscribeBars?: (req: BarsRequest, onBar: (bar: Bar, meta?: LiveBarMeta) => void, ...rest: unknown[]) => UnsubscribeFn;
   public subscribeDepth?: (req: BarsRequest, onDepth: (depth: MarketDepth) => void, ...rest: unknown[]) => UnsubscribeFn;
   public getBarsPage?: (req: BarsPageRequest) => Promise<BarsPage>;
+  public dataVariants?: (query: DataVariantQuery) => DataVariantCapabilities | Promise<DataVariantCapabilities>;
 
   public async getBars(req: CachedBarsRequest): Promise<Bar[]> {
     throwIfAborted(req.signal);
@@ -303,7 +312,7 @@ export class BarCache implements DataFeed {
    * when they are next read and found expired, not by `clear()`. A store that
    * outlives the process is responsible for its own overall quota.
    */
-  public async invalidate(req?: Pick<BarsRequest, 'symbol' | 'exchange' | 'interval'>): Promise<void> {
+  public async invalidate(req?: Pick<BarsRequest, 'symbol' | 'exchange' | 'interval' | 'variant'>): Promise<void> {
     if (req === undefined) return this.clear();
     const key = barCacheKey(req);
     await this._drop(key);
