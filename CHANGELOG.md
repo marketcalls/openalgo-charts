@@ -206,7 +206,17 @@ in CI holds frame budgets per bar count.
   budgets; `node tests/bench/plot-tick.mjs <dist-dir>` times a ten-study tick
   on any build.
 
-Sizes: to be measured on the release build.
+Saved layouts, drawings and workspace documents from 2.5.7 load unchanged, and
+no runtime dependencies or package tiers were added.
+
+Sizes, measured on this release and against 2.5.7 (Brotli, decimal kB): base
+engine 126.91 to 130.37, base plus trade 143.60 to 147.06, indicators 36.44 to
+40.38 (the sixteen tails), widget terminal 304.49 to 311.90 and every tier
+together 357.50 to 364.91; the trade, draw, widget, workspace, transform,
+profile and WebGL2 tiers are unchanged. The chart-only import grows from 80.87
+to 83.87 KiB: the level of detail, the reused draw items, the hit boxes, the
+kept time index and the pane-scoped repaint all run on every chart. Each budget
+is the smallest two-decimal value that passes.
 
 ## 2.5.7
 

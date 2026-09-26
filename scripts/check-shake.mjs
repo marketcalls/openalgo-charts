@@ -221,7 +221,12 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // internals) with no change in behaviour. The class shells, the delegates the
 // chart keeps for its public methods and the extra member reads cost 1661
 // bytes: 82809 bytes (80.87 KiB) at 2.5.7; allow 80.87 KiB.
-const LIMIT_BYTES = 80.87 * 1024;
+// 2.5.8 is the rendering release, and all of it runs on every chart: the level
+// of detail's column reducer, the per-series draw items and point buffers that
+// keep a frame from allocating per bar, the hit boxes behind the hit-test
+// prefilter, the time index kept across plot writes and the pane-scoped
+// repaint. 85883 bytes (83.87 KiB), up 3074; allow 83.88 KiB.
+const LIMIT_BYTES = 83.88 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

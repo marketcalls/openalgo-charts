@@ -375,7 +375,7 @@
         "releaseUrl": "https://github.com/marketcalls/openscript/releases/tag/v0.7.1",
         "published": "npm openalgo-script 0.7.1 and PyPI openscript 0.7.1 on 2026-09-25"
       },
-      "published": "npm openalgo-script 0.8.0 and PyPI openscript 0.8.0 on 2026-09-26: the chart adapter gates the tables hook and per-bar band colours on the chart version (chartVersion), both available from charts 2.5.4. The published 0.8.0 passes the chart repository's script-engine integration checks against 2.5.6 and 2.5.7."
+      "published": "npm openalgo-script 0.8.0 and PyPI openscript 0.8.0 on 2026-09-26: the chart adapter gates the tables hook and per-bar band colours on the chart version (chartVersion), both available from charts 2.5.4. The published 0.8.0 passes the chart repository's script-engine integration checks against 2.5.6, 2.5.7 and 2.5.8."
     },
     "scope": [
       "Candle level of detail on by default: one OHLC-preserving stick per device-pixel column below about one CSS px per bar (90 program R1)",
@@ -401,13 +401,13 @@
     "demoTestFiles": 62,
     "browserEvidence": "The merged 2.5.4 candidate runs 1118 browser cases across Chromium, Firefox and WebKit. Four stale expectations (navigation snapshot keys, the persistent legend count row, the external-study refetch after a history resync and a drawing-policy fixture whose two lines crossed at the click point) were corrected; the first three also failed on the pre-merge baseline, and the fourth arrived with the drawing-policy tests. Startup waits that time out under ten parallel browsers against one fixture server occur at the same rate on the pre-merge baseline. Read-only drawing selection and menu screenshots inspected.",
     "website": "63 static pages built successfully. All 1405 generated API files in the static output match the warning-free source API build byte-for-byte.",
-    "chartOnlyBrotliKiB": 80.87,
-    "chartOnlyBudgetKiB": 80.87,
-    "baseBrotliKB": 126.91,
-    "indicatorBrotliKB": 36.44,
+    "chartOnlyBrotliKiB": 83.87,
+    "chartOnlyBudgetKiB": 83.88,
+    "baseBrotliKB": 130.37,
+    "indicatorBrotliKB": 40.38,
     "workspaceBrotliKB": 10.47,
-    "allTiersBrotliKB": 357.5,
-    "budgetChange": "The 2.5.7 build sets the moved limits to the smallest two-decimal value that passes: base 126.91 kB, base plus trade 143.60 kB, terminal 304.49 kB and all tiers 357.50 kB; the chart-only import measures 82809 bytes under an 80.87 KiB ceiling. The growth is the class structure of the chart split.",
+    "allTiersBrotliKB": 364.91,
+    "budgetChange": "The 2.5.8 build sets the moved limits to the smallest two-decimal value that passes: base 130.38 kB, base plus trade 147.07 kB, indicators 40.39 kB, terminal 311.90 kB and all tiers 364.91 kB; the chart-only import measures 85883 bytes under an 83.88 KiB ceiling.",
     "review": "Independent typed-input review found reentrant destruction, pane-slot replacement and context changes during pick:end. Eight actual-chart regressions failed before capture lifetime fences and now pass. No additional blocker found in scalar validation, exchange defaults, restore preflight or public exports. A final host review reproduced four failures involving constructor and __proto__ exchange keys; safe own-property defaults, patches and staged collection now preserve them through selection, Defaults, Cancel and Apply.",
     "packageVerification": "Full verify passes lint, typecheck, 7826 unit tests, seven endurance checks, build, all 478 example-host tests, declaration identity, measured size budgets and optional-tier removal checks. The installed public companion 0.7.0 passes 18 compiled-program integration checks and public adapter typechecking. API documentation generates without warnings. The separately discovered Python extreme-directional defect is outside those integration fixtures and remains tracked for correction.",
     "latestEngineSourceReview": "Companion source f9ab00e4e9238b442ae0ad3639f52bc5dc45394b passes 2161 JavaScript tests, 956 Python tests and 102 conformance cases, with 19 compiler-only skips. Strict gates pass 6836 cases and 1504908 accepted calls with zero exact-bit, absence, oracle or execution differences. Both public 0.7.0 packages are published. Downloaded public artifacts pass 363 programs across all 116 keys, 124977 exact cells and 6756 independent expected cells. Archived source/build bytes and registry integrity match; attestation digest/source/workflow claims checked without cryptographic signature verification.",

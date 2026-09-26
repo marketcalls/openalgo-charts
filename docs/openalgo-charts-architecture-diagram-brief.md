@@ -73,7 +73,9 @@ Rechecked on 2.5.7: base 126.91 kB, indicators 36.44 kB, draw 48.42 kB, profile
 widget 92.72 kB; all tiers 357.50 kB. The release splits the chart's internals into
 collaborator modules inside the base engine and changes no box, arrow or chip.
 
-For 2.5.8: the level of detail, the allocation-free series pass, in-place study plot
+Rechecked on 2.5.8: base 130.37 kB, indicators 40.38 kB, draw 48.42 kB, profile
+14.96 kB, transform 4.50 kB, trade 16.69 kB, workspace 10.47 kB, webgl 6.39 kB and
+widget 92.72 kB; all tiers 364.91 kB. The level of detail, the allocation-free series pass, in-place study plot
 writes, the repaint scope, the single animation loop and primitive hit boxes live inside
 the base engine, and the sixteen built-in tails inside the indicator tier, so the release
 changes no box, arrow or chip; "Invalidation + frame coalescing" in the rendering box
