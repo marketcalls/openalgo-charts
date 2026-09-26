@@ -2,10 +2,14 @@
  * Tier-1 momentum / volatility indicators, computed from the chart's own OHLCV.
  * Part of the lazy `openalgo-charts/indicators` tier.
  */
-import { rsi, atr, trueRange, sourceValues } from 'openalgo-charts';
-import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
+import { rsi, atr, trueRange, sourceValues, sourceValue } from 'openalgo-charts';
+import type { Bar, IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
 import { sma, rma, smaSeededEma, stdev, highest, lowest, nulls } from './calc';
 import { fromFirstValue, smoothingMa, SMOOTHING_MA_TYPES, BOLLINGER_MA } from './smoothing';
+import { withTail, windowTail, machineTail, whole, cell, type Tail } from './tail';
+import { seeded, smooth, rsiState, rsiStep, wilder, atrStep, trueRangeAt, meanAt } from './steppers';
+
+type Calc = IndicatorDescriptor['calc'];
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -32,7 +36,7 @@ const src = (s: Readonly<Record<string, unknown>>): IndicatorSource => (s.source
 const constant = (n: number, value: number): (number | null)[] =>
   new Array<number | null>(n).fill(value);
 
-export const RSI: IndicatorDescriptor = {
+export const RSI: IndicatorDescriptor = withTail({
   id: 'rsi',
   name: 'RSI',
   category: 'Momentum',
@@ -65,9 +69,24 @@ export const RSI: IndicatorDescriptor = {
     { price: num(s, 'oversold', 30), color: '#26a69a', title: 'OS', dashed: true },
   ],
   range: () => ({ min: 0, max: 100 }),
-};
+}, (calc) => (bars, s, from, previous, store) => {
+  const length = num(s, 'length', 14);
+  if (!whole(length)) return null;
+  const source = src(s);
+  const upper = num(s, 'overbought', 70);
+  const lower = num(s, 'oversold', 30);
+  return machineTail(calc, `${length}|${source}|${upper}|${lower}`, {
+    keys: ['rsi', 'upperLevel', 'lowerLevel'],
+    start: rsiState,
+    step: (st, i, row) => {
+      row[0] = cell(rsiStep(st, sourceValue(bars[i], source), length));
+      row[1] = upper;
+      row[2] = lower;
+    },
+  }, bars, from, previous, store);
+});
 
-export const MACD: IndicatorDescriptor = {
+export const MACD: IndicatorDescriptor = withTail({
   id: 'macd',
   name: 'MACD',
   category: 'Momentum',
@@ -129,9 +148,29 @@ export const MACD: IndicatorDescriptor = {
     return { macd: nulls(macd), signal: nulls(signal), histogram: nulls(histogram) };
   },
   levels: () => [{ price: 0, color: '#5a6b8c', dashed: true }],
-};
+}, (calc) => (bars, s, from, previous, store) => {
+  const fast = num(s, 'fastPeriod', 12);
+  const slow = num(s, 'slowPeriod', 26);
+  const signal = num(s, 'signalPeriod', 9);
+  if (!whole(fast) || !whole(slow) || !whole(signal)) return null;
+  const source = src(s);
+  // The signal's leading gap is the MACD's warmup, which a seeded average
+  // steps over the same way `fromFirstValue` trims it.
+  return machineTail(calc, `${fast}|${slow}|${signal}|${source}`, {
+    keys: ['macd', 'signal', 'histogram'],
+    start: () => ({ fast: seeded(), slow: seeded(), signal: seeded() }),
+    step: (st, i, row) => {
+      const x = sourceValue(bars[i], source);
+      const m = smooth(st.fast, x, fast, true) - smooth(st.slow, x, slow, true);
+      const sig = smooth(st.signal, m, signal, true);
+      row[0] = cell(m);
+      row[1] = cell(sig);
+      row[2] = cell(m - sig);
+    },
+  }, bars, from, previous, store);
+});
 
-export const STOCHASTIC: IndicatorDescriptor = {
+export const STOCHASTIC: IndicatorDescriptor = withTail({
   id: 'stochastic',
   name: 'Stochastic',
   category: 'Momentum',
@@ -181,9 +220,15 @@ export const STOCHASTIC: IndicatorDescriptor = {
     { price: 20, color: '#26a69a', title: 'OS', dashed: true },
   ],
   range: () => ({ min: 0, max: 100 }),
-};
+}, (calc) => windowTail(calc, (s) => {
+  // %D averages %K, which averages the raw reading, which reads the range.
+  const k = num(s, 'kPeriod', 14);
+  const smoothing = num(s, 'kSmoothing', 1);
+  const d = num(s, 'dPeriod', 3);
+  return whole(k) && whole(smoothing) && whole(d) ? k + smoothing + d - 3 : null;
+}));
 
-export const ADX: IndicatorDescriptor = {
+export const ADX: IndicatorDescriptor = withTail({
   id: 'adx',
   name: 'ADX / DMI',
   category: 'Trend',
@@ -248,9 +293,53 @@ export const ADX: IndicatorDescriptor = {
     return { plusDi: nulls(plusDi), minusDi: nulls(minusDi), adx: nulls(adx) };
   },
   levels: () => [{ price: 25, color: '#5a6b8c', title: '25', dashed: true }],
-};
+}, (calc) => (bars, s, from, previous, store) => {
+  const period = num(s, 'period', 14);
+  const adxPeriod = num(s, 'adxPeriod', 14);
+  if (!whole(period) || !whole(adxPeriod)) return null;
+  return machineTail(calc, `${period}|${adxPeriod}`, {
+    keys: ['plusDi', 'minusDi', 'adx'],
+    start: () => ({ tr: seeded(), plus: seeded(), minus: seeded(), adx: seeded() }),
+    step: (st, i, row) => {
+      const [tr, up, down] = directionalAt(bars, i);
+      const range = smooth(st.tr, tr, period, false);
+      const plusR = smooth(st.plus, up, period, false);
+      const minusR = smooth(st.minus, down, period, false);
+      let plusDi = NaN;
+      let minusDi = NaN;
+      let dx = NaN;
+      if (Number.isFinite(range) && range !== 0) {
+        const plus = (plusR / range) * 100;
+        const minus = (minusR / range) * 100;
+        if (Number.isFinite(plus)) plusDi = plus;
+        if (Number.isFinite(minus)) minusDi = minus;
+        if (Number.isFinite(plusDi) && Number.isFinite(minusDi)) {
+          const sum = plusDi + minusDi;
+          dx = sum > 0 ? (Math.abs(plusDi - minusDi) / sum) * 100 : 0;
+        }
+      }
+      row[0] = cell(plusDi);
+      row[1] = cell(minusDi);
+      row[2] = cell(smooth(st.adx, dx, adxPeriod, false));
+    },
+  }, bars, from, previous, store);
+});
 
-export const CCI: IndicatorDescriptor = {
+/** ADX's three inputs at one bar: true range and the two directional moves, all absent on bar 0. */
+function directionalAt(bars: readonly Bar[], i: number): [number, number, number] {
+  if (i === 0) return [NaN, NaN, NaN];
+  const b = bars[i];
+  const p = bars[i - 1];
+  const tr = trueRangeAt(bars, i);
+  if (!Number.isFinite(b.high) || !Number.isFinite(b.low) || !Number.isFinite(p.high) || !Number.isFinite(p.low)) {
+    return [tr, NaN, NaN];
+  }
+  const up = b.high - p.high;
+  const down = p.low - b.low;
+  return [tr, up > down && up > 0 ? up : 0, down > up && down > 0 ? down : 0];
+}
+
+export const CCI: IndicatorDescriptor = withTail({
   id: 'cci',
   name: 'CCI',
   category: 'Momentum',
@@ -335,7 +424,51 @@ export const CCI: IndicatorDescriptor = {
     { price: 0, color: '#5a6b8c', dashed: true },
     { price: -100, color: '#26a69a', dashed: true },
   ],
-};
+}, cciTail);
+
+/**
+ * CCI reads one window of typical prices. Its smoothing either reads a window
+ * of CCI in turn, and the whole study reruns over the run that covers both, or
+ * carries an exponential or Wilder average, which resumes.
+ */
+function cciTail(calc: Calc): Tail {
+  const windowed = windowTail(calc, (s) => {
+    const period = num(s, 'period', 20);
+    const maLength = int(s, 'maLength', 20);
+    if (!whole(period) || !whole(maLength)) return null;
+    return period - 1 + (str(s, 'maType', 'SMA') === 'None' ? 0 : maLength - 1);
+  });
+  return (bars, s, from, previous, store, ctx) => {
+    const maType = str(s, 'maType', 'SMA');
+    if (maType !== 'EMA' && maType !== 'SMMA (RMA)') return windowed(bars, s, from, previous, store, ctx);
+    const period = num(s, 'period', 20);
+    const k = num(s, 'constant', 0.015);
+    const maLength = int(s, 'maLength', 20);
+    if (!whole(period) || !whole(maLength)) return null;
+    const tp = (j: number): number => (bars[j].high + bars[j].low + bars[j].close) / 3;
+    return machineTail(calc, `${period}|${k}|${maType}|${maLength}`, {
+      keys: ['cci', 'ma', 'bbUpper', 'bbLower', 'upperLevel', 'lowerLevel'],
+      start: seeded,
+      step: (st, i, row) => {
+        let out = NaN;
+        if (i >= period - 1) {
+          const avg = meanAt(tp, i, period);
+          const typical = tp(i);
+          let dev = 0;
+          for (let j = 0; j < period; j++) dev += Math.abs(tp(i - j) - avg);
+          const md = dev / period;
+          out = !Number.isFinite(md) ? NaN : md > 0 ? (typical - avg) / (k * md) : 0;
+        }
+        row[0] = cell(out);
+        row[1] = cell(smooth(st, out, maLength, maType === 'EMA'));
+        row[2] = null;
+        row[3] = null;
+        row[4] = 100;
+        row[5] = -100;
+      },
+    }, bars, from, previous, store);
+  };
+}
 
 export const MFI: IndicatorDescriptor = {
   id: 'mfi',
@@ -397,7 +530,7 @@ export const MFI: IndicatorDescriptor = {
   range: () => ({ min: 0, max: 100 }),
 };
 
-export const ATR: IndicatorDescriptor = {
+export const ATR: IndicatorDescriptor = withTail({
   id: 'atr',
   name: 'ATR',
   category: 'Volatility',
@@ -410,7 +543,15 @@ export const ATR: IndicatorDescriptor = {
   calc: (bars, s) => ({
     atr: nulls(atr(bars.map((b) => b.high), bars.map((b) => b.low), bars.map((b) => b.close), num(s, 'period', 14))),
   }),
-};
+}, (calc) => (bars, s, from, previous, store) => {
+  const period = num(s, 'period', 14);
+  if (!whole(period)) return null;
+  return machineTail(calc, `${period}`, {
+    keys: ['atr'],
+    start: wilder,
+    step: (st, i, row) => { row[0] = cell(atrStep(st, trueRangeAt(bars, i), period)); },
+  }, bars, from, previous, store);
+});
 
 /**
  * CM Williams Vix Fix — a synthetic VIX from price alone.

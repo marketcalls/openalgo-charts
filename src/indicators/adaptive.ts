@@ -12,10 +12,12 @@
  * `atr`, `trueRange`, and the `sourceValues` helper come from the base bundle
  * (`openalgo-charts`), not deep paths. See the note in `src/indicators/index.ts`.
  */
-import { atr, trueRange, sourceValues } from 'openalgo-charts';
+import { atr, trueRange, sourceValues, sourceValue } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
 import { sma, rma, nulls, smaSeededEma, change, roc, rollingSum, linreg } from './calc';
 import { emaOfGapped } from './smoothing';
+import { withTail, machineTail, whole, cell } from './tail';
+import { seeded, smooth, wilder, atrStep, trueRangeAt, meanAt } from './steppers';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -121,7 +123,7 @@ const CHANNEL_FILL_OPACITY = 0.05;
  * ignoring gaps entirely. Each has its own warmup, and the plotted band starts at
  * whichever of the rail and the basis is slower.
  */
-export const KELTNER_CHANNEL: IndicatorDescriptor = {
+export const KELTNER_CHANNEL: IndicatorDescriptor = withTail({
   id: 'keltner-channel',
   name: 'Keltner Channels',
   category: 'Volatility',
@@ -186,7 +188,31 @@ export const KELTNER_CHANNEL: IndicatorDescriptor = {
     }
     return { upper: nulls(upper), basis: nulls(basis), lower: nulls(lower) };
   },
-};
+}, (calc) => (bars, s, from, previous, store) => {
+  const length = int(s, 'length', 20);
+  const atrLength = int(s, 'atrlength', 10);
+  if (!whole(length) || !whole(atrLength)) return null;
+  const mult = num(s, 'mult', 2);
+  const source = src(s);
+  const exp = flag(s, 'exp', true);
+  const style = str(s, 'bandsStyle', 'Average True Range');
+  const at = (j: number): number => sourceValue(bars[j], source);
+  return machineTail(calc, `${length}|${atrLength}|${mult}|${source}|${exp}|${style}`, {
+    keys: ['upper', 'basis', 'lower'],
+    start: () => ({ basis: seeded(), range: seeded(), atr: wilder() }),
+    step: (st, i, row) => {
+      const bar = bars[i];
+      const basis = exp ? smooth(st.basis, at(i), length, true) : meanAt(at, i, length);
+      const rail = style === 'True Range' ? trueRangeAt(bars, i)
+        : style === 'Range' ? smooth(st.range, bar.high - bar.low, length, false)
+          : atrStep(st.atr, trueRangeAt(bars, i), atrLength);
+      const offset = rail * mult;
+      row[0] = cell(basis + offset);
+      row[1] = cell(basis);
+      row[2] = cell(basis - offset);
+    },
+  }, bars, from, previous, store);
+});
 
 /**
  * Least Squares Moving Average: the endpoint of a least-squares line fitted over
