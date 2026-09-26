@@ -280,10 +280,11 @@ See also: [Core Concepts](/docs/core-concepts), [Data Loading](/docs/data-loadin
 
 ### Conflation
 
-An optional OHLC-preserving downsampling step activated when bars become sub-pixel wide
-at high zoom-out. Groups of consecutive bars are merged into one: open = first open,
-close = last close, high = max high, low = min low, volume = sum. This is strictly
-lossless for candle shape and never averages prices. Enabled via `ChartOptions.conflate`.
+The chart's level of detail: an OHLC-preserving step that engages when bars become narrower
+than about one CSS px at high zoom-out. The bars sharing a device-pixel column are drawn as
+one stick: open = first open, close = last close, high = max high, low = min low, volume =
+sum. It never averages prices, and data, indicators and autoscale still see every bar. On by
+default; `ChartOptions.conflate: false` turns it off.
 
 See also: [Core Concepts](/docs/core-concepts)
 

@@ -463,26 +463,39 @@ chart.setHistoryLoader(function () {
 
 return chart;`} caption="Pan left to trigger history paging. Each page prepends 60 more hourly bars while keeping the viewport stable." />
 
-## Large datasets: conflation
+## Large datasets: level of detail
 
-When zoomed far out, many bars collapse to sub-pixel widths. Enable conflation
-to let the renderer merge groups of bars into a single OHLC-preserving drawn
-bar, which keeps rendering fast and keeps the candle shape meaningful:
+When zoomed far out, many bars share one pixel column, and drawing each of them
+paints the same pixels over and over. The chart's level of detail, on by
+default, draws one OHLC-preserving stick per device-pixel column instead, so a
+frame costs the width of the plot rather than the number of bars in view: 200,000
+candles and their volume fitted into a 944 px plot paint about 2,900 marks,
+against 400,000 bar by bar.
 
 ```ts
 const chart = createChart(el, {
-  conflate: true,
-  conflationFactor: 1,  // default; raise to 2-4 for more aggressive merging
+  timeScale: { minBarSpacing: 0.01 }, // allow zooming out past one bar per pixel
+  conflationFactor: 1,                // default; 2 to 4 merge into wider columns
 });
+
+// Opt out: every bar drawn at every zoom.
+const every = createChart(el, { conflate: false });
 ```
 
-Conflation is **OHLC-preserving** -- open comes from the first bar in the
-group, close from the last, high and low from the extremes, and volume is
-summed. It kicks in automatically when `barSpacing * devicePixelRatio` falls
-below the pixel threshold and is transparent to your data layer; the underlying
-bars are unchanged.
+It engages only below about one CSS px per bar (exactly one at a whole device
+pixel ratio). The default time scale never zooms out past one bar per CSS px
+(`minBarSpacing: 1`), so a chart that keeps that floor draws exactly as before;
+lower the floor to show long histories whole.
 
-The same merge helpers are also available for manual use:
+Each stick is **OHLC-preserving**: open comes from the first bar in the column,
+close from the last, high and low from the extremes, volume is summed, and the
+stick takes the colours of the bar that closed it. Line series keep each
+column's first, lowest, highest and last values, and histograms its lowest and
+highest bar, which cover the pixels every bar would have. A custom chart type is
+always drawn in full, even one registered under a built-in name. The step is transparent to your data layer: indicators,
+autoscale and the crosshair see every bar.
+
+Fixed-size merge helpers are also available for manual use:
 
 ```ts
 import { conflateBars, mergeBars } from 'openalgo-charts';
@@ -492,11 +505,11 @@ const single = mergeBars(bars.slice(0, 5)); // merge a specific group
 ```
 
 See [Core Concepts](/docs/core-concepts) for the gapless index model that makes
-conflation align correctly.
+the columns align correctly.
 
-Conflation reduces rendering work for zoomed-out data. It does not reduce the
-memory retained by the source series or indicator outputs. Pair it with a
-history window for sustained sessions.
+The level of detail reduces rendering work for zoomed-out data. It does not
+reduce the memory retained by the source series or indicator outputs. Pair it
+with a history window for sustained sessions.
 
 ## Reconnect and gap recovery
 

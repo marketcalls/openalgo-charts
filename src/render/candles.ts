@@ -131,8 +131,7 @@ export function candleGeometry(x: number, barSpacing: number, dpr: number, width
   const fullW = optimalBarWidth(barSpacing, dpr);
   const wickW = Math.max(1, Math.floor(dpr));
   const cx = Math.round(x * dpr);
-  const scale = Math.max(0.05, Math.min(1, widthScale));
-  const bodyW = scale === 1 ? fullW : Math.max(1, Math.round(fullW * scale));
+  const bodyW = scaledBodyWidth(fullW, widthScale);
   return {
     cx,
     bodyX: cx - Math.floor(bodyW / 2),
@@ -140,6 +139,12 @@ export function candleGeometry(x: number, barSpacing: number, dpr: number, width
     wickX: cx - Math.floor(wickW / 2),
     wickW,
   };
+}
+
+/** A body `fullW` wide scaled by `widthScale`, clamped the way `candleGeometry` documents. */
+function scaledBodyWidth(fullW: number, widthScale: number): number {
+  const scale = Math.max(0.05, Math.min(1, widthScale));
+  return scale === 1 ? fullW : Math.max(1, Math.round(fullW * scale));
 }
 
 export interface CandleDrawItem {
@@ -190,11 +195,12 @@ export function drawCandles(
     const yHigh = Math.round(priceToY(bar.high) * dpr);
     const yLow = Math.round(priceToY(bar.low) * dpr);
 
-    // Per-bar width (volume candles scale the body by relative volume).
-    const geo = candleGeometry(x, barSpacing, dpr, style.widthScale ? style.widthScale(bar) : 1);
-    const cx = geo.cx;
-    const w = geo.bodyW;
-    const halfW = cx - geo.bodyX;
+    // Per-bar width (volume candles scale the body by relative volume). The
+    // geometry is `candleGeometry`'s, worked out in place rather than returned
+    // as an object: this runs for every candle in view on every frame.
+    const cx = Math.round(x * dpr);
+    const w = style.widthScale ? scaledBodyWidth(bodyW, style.widthScale(bar)) : bodyW;
+    const halfW = Math.floor(w / 2);
 
     // A per-bar colour override replaces the whole up/down verdict
     // for this bar: body, border and wick together, or a recoloured candle would
@@ -208,7 +214,7 @@ export function drawCandles(
 
     if (style.wickVisible) {
       ctx.fillStyle = wickColor;
-      ctx.fillRect(geo.wickX, yHigh, geo.wickW, Math.max(1, yLow - yHigh));
+      ctx.fillRect(cx - (wickW >> 1), yHigh, wickW, Math.max(1, yLow - yHigh));
     }
 
     // At the `wick` tier the body would repaint the pixels the wick just

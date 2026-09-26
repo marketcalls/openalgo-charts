@@ -424,7 +424,7 @@ export class Chart {
     this._zoomAnchor = options.zoomAnchor ?? 'cursor';
     this._doubleClick = options.doubleClick ?? 'reset';
     this._movablePrimaryPane = options.movablePrimaryPane === true;
-    this._conflate = options.conflate ?? false;
+    this._conflate = options.conflate ?? true;
     this._conflationFactor = options.conflationFactor ?? 1;
     // Resolved here, before the first pane, so an unregistered explicit choice
     // fails at construction rather than on the first frame.

@@ -106,7 +106,9 @@ interface ChartOptions {
   doubleClick?: 'reset' | 'maximize' | 'none';
   /** Mouse/pen pan direction and the initial/reset view. */
   navigation?: Partial<ChartNavigationOptions>;
+  /** Level of detail: one OHLC-preserving stick per device-pixel column under about one CSS px per bar. Default true. */
   conflate?: boolean;
+  /** Column width in sticks for the level of detail. Default 1. */
   conflationFactor?: number;
   /** Which backend paints the series. Default 'canvas2d'; 'webgl2' needs the webgl tier. */
   renderer?: 'canvas2d' | 'webgl2' | 'auto';
@@ -672,7 +674,7 @@ interface PrimitiveHit {
 }
 ```
 
-Returned by `IPrimitive.hitTest` when the pointer lands on the primitive. `externalId` is routed to `chart.subscribeClick`. `distance` is the pixel distance from the cursor; smaller values win ties before `zOrder` is considered.
+Returned by `IPrimitive.hitTest` when the pointer lands on the primitive. `externalId` is routed to `chart.subscribeClick`. `distance` is the pixel distance from the cursor, never negative; smaller values win ties before `zOrder` is considered.
 
 ### `PrimitiveHost`
 
@@ -692,12 +694,13 @@ interface IPrimitive {
   draw(ctx: CanvasRenderingContext2D, rc: PrimitiveRenderContext): void;
   autoscaleInfo?(): { min: number; max: number } | null;
   hitTest?(x: number, y: number, rc: PrimitiveRenderContext): PrimitiveHit | null;
+  hitBounds?(rc: PrimitiveRenderContext): { left: number; top: number; right: number; bottom: number } | null;
   attached?(host: PrimitiveHost): void;
   detached?(): void;
 }
 ```
 
-The extension point for custom overlays, indicators, and profiles. `autoscaleInfo` optionally expands the pane's price range so the primitive is not clipped by autoscale. `hitTest` receives media-px coordinates relative to the pane plot.
+The extension point for custom overlays, indicators, and profiles. `autoscaleInfo` optionally expands the pane's price range so the primitive is not clipped by autoscale. `hitTest` receives media-px coordinates relative to the pane plot. `hitBounds` returns the box, in those coordinates, outside which `hitTest` answers `null` (or `null` when nothing can be hit): a pointer move then asks `hitTest` only where the point is inside it. The pane keeps the box until the scales, the pane's layout, hover or the primitive's own state (announced through `requestUpdate`) change.
 
 ### `PriceLineOptions`
 

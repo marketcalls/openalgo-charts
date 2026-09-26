@@ -54,7 +54,14 @@ export function drawBars(
   ctx.save();
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const g = barGeometry(item, toY, dpr);
+    // `barGeometry`, worked out in place: this runs for every bar in view on
+    // every frame, and an object per bar is garbage by the next one.
+    const b = item.bar;
+    const cx = Math.round(item.x * dpr);
+    const yOpen = Math.round(toY(b.open) * dpr);
+    const yClose = Math.round(toY(b.close) * dpr);
+    const yHigh = Math.round(toY(b.high) * dpr);
+    const yLow = Math.round(toY(b.low) * dpr);
     // An OHLC bar is the type this option is named for, so it follows the same
     // rule the candle renderer does: the reference is the bar before this one,
     // taken from `prevClose` for the first drawn bar, and a missing or
@@ -63,16 +70,16 @@ export function drawBars(
     const ref = i > 0 ? items[i - 1].bar.close : item.prevClose;
     const up = style.colorByPreviousClose === true && ref !== undefined && Number.isFinite(ref)
       ? item.bar.close >= ref
-      : g.up;
+      : b.close >= b.open;
     // A per-bar colour override wins over the up/down verdict, the
     // same override the candle renderer honours. The whole bar takes it: range,
     // open tick and close tick are one glyph.
     ctx.fillStyle = item.bar.color
       ?? (up ? (style.upColor ?? '#26a69a') : (style.downColor ?? '#ef5350'));
-    ctx.fillRect(g.cx - Math.floor(lw / 2), g.yHigh, lw, Math.max(1, g.yLow - g.yHigh));
+    ctx.fillRect(cx - Math.floor(lw / 2), yHigh, lw, Math.max(1, yLow - yHigh));
     if (!highLowOnly) {
-      ctx.fillRect(g.cx - tick, g.yOpen, tick, lw); // open tick (left)
-      ctx.fillRect(g.cx, g.yClose, tick, lw); // close tick (right)
+      ctx.fillRect(cx - tick, yOpen, tick, lw); // open tick (left)
+      ctx.fillRect(cx, yClose, tick, lw); // close tick (right)
     }
   }
   ctx.restore();
@@ -92,7 +99,11 @@ export function drawColumns(
   const baseY = Math.round(toY(style.base ?? 0) * dpr);
   ctx.save();
   for (const item of items) {
-    const g = barGeometry(item, toY, dpr);
+    // `barGeometry`'s centre, close and direction, worked out in place, and
+    // its open, high and low not at all: a column draws none of them.
+    const cx = Math.round(item.x * dpr);
+    const yClose = Math.round(toY(item.bar.close) * dpr);
+    const up = item.bar.close >= item.bar.open;
     // A per-bar colour wins over the up/down pair, matching the histogram
     // renderer. Indicators whose meaning changes bar to bar set it through the
     // descriptor's `colorBy`, and a column plot that ignored it would silently
@@ -102,9 +113,9 @@ export function drawColumns(
     // colour is what an indicator plot's Colour control writes, and a column
     // that read only the up/down pair left that control inert.
     ctx.fillStyle = item.bar.color ?? style.color
-      ?? (g.up ? (style.upColor ?? '#26a69a') : (style.downColor ?? '#ef5350'));
-    const top = Math.min(baseY, g.yClose);
-    ctx.fillRect(g.cx - half, top, w, Math.max(1, Math.abs(baseY - g.yClose)));
+      ?? (up ? (style.upColor ?? '#26a69a') : (style.downColor ?? '#ef5350'));
+    const top = Math.min(baseY, yClose);
+    ctx.fillRect(cx - half, top, w, Math.max(1, Math.abs(baseY - yClose)));
   }
   ctx.restore();
 }

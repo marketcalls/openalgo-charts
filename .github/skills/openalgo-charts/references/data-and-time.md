@@ -305,24 +305,31 @@ The four cases are the `Bucketing` union from the interval registry, and `TickTi
 
 For interval bars built from an LTP/quote stream, use `CandleBuilder` instead, see [feeds-and-live](feeds-and-live.md).
 
-## Conflation
+## Level of detail (`conflate`)
 
-Off by default. Enabling it changes nothing until bars fall below the pixel threshold.
+On by default. Once bars are narrower than the stick a candle is drawn with, the series pass stops drawing one mark per bar and draws one per device-pixel column instead, so a frame costs the plot's width rather than the number of bars in view: 200,000 bars fitted into a 944 px plot paint about 2,900 marks with candles and volume, against 400,000 bar by bar (`node scripts/bench-pane.mjs`).
 
 ```ts
-const chart = createChart(el, { conflate: true, conflationFactor: 1 });
+// Let the view zoom out past one bar per CSS px; the level of detail keeps it cheap.
+const chart = createChart(el, { timeScale: { minBarSpacing: 0.01 } });
+// Opt out: every bar drawn at every zoom.
+const every = createChart(el, { conflate: false });
 ```
 
 | Option | Default | Effect |
 |---|---|---|
-| `conflate` | `false` | Enables OHLC-preserving downsampling at draw time. |
-| `conflationFactor` | `1` | Aggressiveness multiplier; raise to 2-4 to merge sooner and harder. |
+| `conflate` | `true` | Draw per column below the threshold; `false` draws every bar. |
+| `conflationFactor` | `1` | Column width in sticks; `2` to `4` merge sooner into wider, coarser columns. |
 
-`conflationGroupSize(barSpacing, dpr, minPx = 0.5, factor = 1)` returns `1` while `barSpacing * dpr >= minPx * max(1, factor)`, otherwise `ceil(threshold / widthPx)`. The pane calls it with `minPx = 0.5`.
+- **Threshold.** A candle's column is one stick wide, `max(1, floor(dpr))` device px, times the factor; a line's or a histogram's is one device pixel times the factor. The level of detail engages for every series at once when `barSpacing * dpr` is under a candle's column, which at the default factor is under one CSS px at a whole pixel ratio. At or above it every bar has a column of its own and the frame is exactly what it was without the option. The default time scale floor (`minBarSpacing: 1`) never goes below it, so a chart that keeps the floor draws as before.
+- **Candles, OHLC bars, high-low bars and the HLC area** merge each column into one stick: open from the first bar, close from the last, high and low the column's extremes, volume summed, open interest the last reading, and the colour overrides of the bar that closed the column. Never averaged. The sticks sit on the column grid and tile without overlap; a column holding only whitespace draws nothing.
+- **Lines, steps, areas and baselines** keep real bars: the first, lowest, highest and last of each unbroken run in a column, which cover the pixels the full line covers. A gap stays a gap, kept as one whitespace bar.
+- **Columns and histograms** keep each column's lowest and highest bar, drawn from the base, which cover what every bar in it would.
+- **Any other renderer** (a host's `registerChartType` renderer, even one registered under a built-in name, Point and Figure, Kagi) is drawn in full: it may read fields or neighbours a merge cannot know about.
 
-Merging is lossless for candle shape: open from the first bar, close from the last, high/low from the extremes, volume summed. Never averaged. The merged bar takes the **first** bar's time; `conflateItems` places x at the group centre.
+It is a render-time step only: the DataLayer, `getData()`, indicators, autoscale and the crosshair readout all see every bar.
 
-Conflation is a render-time transform only, the DataLayer, your `getData()`, indicators and autoscale all still see every source bar. What changes is what you see: a group of candles becomes one wider-range candle, so wick counts and per-bar colors no longer correspond 1:1 to your data at extreme zoom-out. The helpers `conflateBars(bars, groupSize)` and `mergeBars(group)` are exported for manual use.
+The fixed-size helpers are exported for a host that downsamples bars itself: `conflationGroupSize(barSpacing, dpr, minPx = 0.5, factor = 1)` returns `1` while `barSpacing * dpr >= minPx * max(1, factor)`, otherwise `ceil(threshold / widthPx)`; `conflateBars(bars, groupSize)` and `mergeBars(group)` merge fixed groups the same OHLC-preserving way (the merged bar takes the **first** bar's time), and `conflateItems` places x at the group centre. The pane does not use them.
 
 ## Related
 
