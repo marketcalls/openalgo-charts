@@ -546,6 +546,16 @@ build, which already measured over several of them before this change.
   press that grabs something starts a step of its own, so a change made earlier
   in the same turn is not taken back with the drag. A move made inside
   `untracked`, and so inside `ignore`, is the host's own and a step nowhere.
+- Without a chart-wide history, the drawing controller holds a point written
+  through a study's settings, as a settings dialog's **Pick point on chart**
+  writes it, as a step of its own, the way it holds a drag. Before, a drag
+  followed by such a pick left the drag's step describing a point the study no
+  longer held, and an undo passed over it and removed an unrelated drawing made
+  before both, leaving the pick in place. Now the first undo takes the pick back,
+  the next the drag, and only the third the drawing. A write inside `untracked`,
+  or forced on a study the user may not configure, is the host's own and no step,
+  and `delegateInputAnchorSteps` hands over only the anchors' own moves, since a
+  host timeline sees a settings write itself.
 - Undo and redo never override a study's policy. A press leaves a study as its
   policy keeps it: not removed while `removable: false`, its settings and scales
   as they are while `configurable: false`, its pane and its row in the stack

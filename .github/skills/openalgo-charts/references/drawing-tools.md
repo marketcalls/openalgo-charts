@@ -388,7 +388,11 @@ the controller on the pane and scale `studyInputTarget(chart, study, key)` names
 (the same target a pick of that price uses; `StudyInputTarget` is
 `{ paneIndex, priceScaleId }`). A drag writes both settings in one patch and is one
 step of this controller's undo history, in order with the drawings; `undo()` and
-`redo()` walk it, and a step whose study has gone or moved on is passed over. The
+`redo()` walk it, and a step whose study has gone is passed over. A point written
+through the study's settings instead (a settings dialog's Pick point, a price typed
+in) is one step of this history as well, so an undo takes it back first and never
+passes over it to a drawing made before it; a write inside `untracked`, or forced on
+a study the user may not configure, is the host's own and no step. The
 step emits `drawing:change` with `ids: []` (and again on undo and redo), so a
 control showing whether Undo is available refreshes. An active drawing tool or a pick takes
 the press instead, and choosing a tool, starting a pick or a `data:context` change drops a
@@ -400,7 +404,9 @@ of its own takes these steps with `draw.delegateInputAnchorSteps(record)` (unrel
 `record` gets each move's `InputAnchorStep` (`{ undo(): boolean; redo(): boolean }`, each
 false once the settings have moved on) as the move ends, this history records nothing and
 emits no `drawing:change` for it, and the returned function gives the steps back; the
-widget tier's `ChartHistory` does this. A move inside `untracked` is a step nowhere. See
+widget tier's `ChartHistory` does this. A point written through the settings is not
+handed over, since that timeline sees the write itself. A move inside `untracked` is a
+step nowhere. See
 [indicators](indicators.md#paired-time-and-price-inputs).
 
 | Member | Behaviour |
@@ -428,7 +434,7 @@ widget tier's `ChartHistory` does this. A move inside `untracked` is a step nowh
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A step left with nothing to do, once a drawing in it is made read-only or the host's own act has overtaken it, is dropped, so `canUndo()` and `canRedo()` report only a press that changes something. |
 | `historySteps()` | `{ undo: number[], redo: number[] }`, oldest first: the steps each branch holds, by the number `drawing:change` reported them under. A step in neither branch was taken away (a reset, a trim, a host's forced edit). For a host keeping one timeline across drawings and its own edits, such as the widget tier's `ChartHistory`. A step still being recorded (a drag in progress) is not listed. Step numbers are unique across controllers on the page. (unreleased) |
 | `untracked(fn)` | Runs `fn` as the host's own act and returns what it returns: an edit inside records no undo step and leaves both branches (redo included) as they are, and every recorded step takes it in, as a forced edit does, so no later undo or redo reverses it. Unlike `force` it reaches no read-only drawing; `undo`/`redo` inside it still move along the branches. `ChartHistory.ignore` and every history press run through it. (unreleased) |
-| `delegateInputAnchorSteps(record)` | Hands the step each study input anchor move makes (a drag, `moveInputAnchor`) to `record` instead of this history, until the returned function gives them back; a later call takes them from an earlier one. `record` receives an `InputAnchorStep` (`{ undo(): boolean; redo(): boolean }`) once the patch is written. For a timeline that already records the settings patch the move writes, such as `ChartHistory`, which would otherwise see one move as two steps. (unreleased) |
+| `delegateInputAnchorSteps(record)` | Hands the step each study input anchor move makes (a drag, `moveInputAnchor`) to `record` instead of this history, until the returned function gives them back; a later call takes them from an earlier one. `record` receives an `InputAnchorStep` (`{ undo(): boolean; redo(): boolean }`) once the patch is written. For a timeline that already records the settings patch the move writes, such as `ChartHistory`, which would otherwise see one move as two steps. A point written through the study's settings, which this history otherwise holds as a step, is not handed over: the timeline sees that write itself. (unreleased) |
 | `copy(target?)` / `cut(target?)` / `paste()` | **Async.** See the clipboard section. |
 | `clipboard()` | The `DrawingClipboard` behind them, for reporting failures. |
 | `toJSON()` / `fromJSON(data)` | `{ version: 2, drawings }` (a `DrawingsDocument`) out, deep-copied, without transient drawings (`policy.persistent: false`); replace-all in (and clears history + selection, transient drawings included). `fromJSON` accepts a 1.9.x bare `Drawing[]` too and upgrades it. |

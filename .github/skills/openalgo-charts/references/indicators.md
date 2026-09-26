@@ -824,12 +824,15 @@ registerIndicator({
   does not take the pointer at all). Escape cancels the drag and writes nothing.
 - **Undo.** Each drag is one step of the drawing history, in order with the
   drawings, so the host's Undo and Redo (`draw.undo()`, Ctrl+Z) take it back and
-  forward; a step whose study has been removed, or edited since, is passed over.
-  Recording it and walking it emit `drawing:change` with empty `ids`, so a host's
-  Undo control refreshes. A host control that sets the point another way (its own
-  point pick) calls `draw.moveInputAnchor(studyId, key, point)` so that move is a
-  step too; to the drawing history alone a plain `setSettings` is not a step, and
-  the drags before it are then passed over. With the widget tier's `ChartHistory`
+  forward; a step whose study has been removed is passed over. Recording it and
+  walking it emit `drawing:change` with empty `ids`, so a host's Undo control
+  refreshes. A host control that sets the point another way (its own point pick)
+  calls `draw.moveInputAnchor(studyId, key, point)` so that move is snapped and
+  bounded as a drag is, and a step. A point written through `setSettings` instead,
+  as a settings dialog's Pick point does, is a step of the drawing history too: its
+  undo takes the pick back first, then the drag before it, and never a drawing made
+  before them. A write inside `draw.untracked`, or forced on a study the user may
+  not configure, is the host's own and no step. With the widget tier's `ChartHistory`
   on the chart (the widget and the reference host build one), the history takes
   these steps instead (`draw.delegateInputAnchorSteps`) and records every settings
   patch, a dialog's pick included, so each move is undone once, in order.

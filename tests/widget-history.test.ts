@@ -263,6 +263,41 @@ describe('dialogs and menus', () => {
     expect(w.history.canRedo()).toBe(false);
   });
 
+  it('takes a Pick point on chart back first when the rail walks the drawing history alone, and never the line before it', async () => {
+    const { w, root } = make();
+    const [, , , , , undo] = (root.querySelector('.oac-rail') as FakeElement).querySelectorAll('.oac-rail__ctl .oac-rail__btn');
+    const study = w.chart.addIndicator('widget-history-anchored');
+    await settle();
+    // A host that keeps no chart-wide timeline: every press is the drawing controller's own.
+    w.history.destroy();
+    const line = addLine(w, 97);
+    const id = `input-anchor:${study.id}:level`;
+    w.chart.emit('drag:start', { id, time: T0 + 5 * DAY, price: 100, paneIndex: 0 });
+    w.chart.emit('drag', { id, time: T0 + 12 * DAY, price: 103, paneIndex: 0 });
+    w.chart.emit('drag:end', { id, time: T0 + 12 * DAY, price: 103, paneIndex: 0 });
+    expect(study.settings()).toMatchObject({ at: T0 + 12 * DAY, level: 103 });
+
+    mountIndicatorSettings(w.context, undefined, { instanceId: study.id });
+    const trigger = root.querySelector('[data-input-action="level"]') as FakeElement;
+    expect(trigger.textContent).toBe('Pick point on chart');
+    trigger.click();
+    const price = w.chart.panes()[0].priceScale.yToPrice(120);
+    w.chart.emit('click', { paneIndex: 0, point: { x: 400, y: 120 }, price, time: T0 + 20 * DAY + 60, id: null });
+    await settle();
+    (root.querySelectorAll('.oac-dialog__actions button')[1]).click();   // OK
+    expect(study.settings()).toMatchObject({ at: T0 + 20 * DAY, level: price });
+
+    undo.click();
+    expect(w.draw.get(line)).toBeDefined();
+    expect(study.settings()).toMatchObject({ at: T0 + 12 * DAY, level: 103 });
+    undo.click();
+    expect(w.draw.get(line)).toBeDefined();
+    expect(study.settings()).toMatchObject({ at: T0 + 5 * DAY, level: 100 });
+    undo.click();
+    expect(w.draw.get(line)).toBeUndefined();
+    expect(w.draw.canUndo()).toBe(false);
+  });
+
   it('keeps the redo branch through a settings dialog that is cancelled', async () => {
     const { w, root } = make();
     w.chart.addIndicator('widget-history-osc');

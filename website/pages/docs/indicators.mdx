@@ -75,10 +75,14 @@ registerIndicator({
 - **Undo takes a drag back.** Each drag is one step of the drawing undo history, in
   the order it was made among the drawings, so Ctrl+Z, the rail's Undo and the phone
   bar reverse it in the widget and the reference host. A step whose study was
-  removed or edited since is passed over. A host control that sets the point another
-  way, a point pick of its own, calls `draw.moveInputAnchor(studyId, key, point)`:
-  the move is snapped, held in bounds and refused exactly as a drag is, and is one
-  step too, so Undo takes it back. With a chart-wide
+  removed since is passed over. A host control that sets the point another way, a
+  point pick of its own, calls `draw.moveInputAnchor(studyId, key, point)`: the move
+  is snapped, held in bounds and refused exactly as a drag is, and is one step too,
+  so Undo takes it back. A point written through the study's settings instead, as a
+  settings dialog's **Pick point on chart** does, is one step of the drawing history
+  as well: Undo takes the pick back first, then the drag before it, and never a
+  drawing made before them. A write the host makes inside `draw.untracked`, or
+  forces on a study the user may not configure, is its own and no step. With a chart-wide
   [undo history](/docs/undo-history) on the chart, as the widget and the reference
   host have, that history holds these steps instead
   (`draw.delegateInputAnchorSteps`), so each move is taken back once, in order with

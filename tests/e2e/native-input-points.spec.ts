@@ -12,6 +12,7 @@ type Draw = { add(drawing: object): { id: string }; get(id: string): unknown; hi
 type DemoWindow = Window & { __oac: { app: { chart: Chart; draw: Draw; loading: boolean } } };
 declare global { interface Window { __points: {
   chart: Chart; draw: Draw; study: IndicatorApi; patches: IndicatorSettings[]; open(): void;
+  history?: { destroy(): void };
 } } }
 
 const T0 = 1700000000;
@@ -34,7 +35,7 @@ async function mount(page: Page, surface: Surface, width: number) {
   await page.evaluate(async ({ kind, t0 }) => {
     const lib = await import('/dist/openalgo-charts.mjs' as string) as typeof Charts;
     const widgets = await import('/dist/openalgo-charts.widget.mjs' as string) as typeof Widgets;
-    let chart: Chart, draw: Draw, open: (id: string) => void;
+    let chart: Chart, draw: Draw, open: (id: string) => void, history: { destroy(): void } | undefined;
     if (kind === 'widget') {
       const widget = widgets.createWidget(document.getElementById('host')!, {
         persist: false, rail: window.innerWidth > 640, symbol: 'PRIMARY', interval: '1m',
@@ -43,6 +44,7 @@ async function mount(page: Page, surface: Surface, width: number) {
       });
       chart = widget.chart;
       draw = widget.draw as unknown as Draw;
+      history = widget.history;
       open = id => { widgets.mountIndicatorSettings(widget.context, undefined, { instanceId: id }); };
     } else {
       chart = (window as DemoWindow).__oac.app.chart;
@@ -68,7 +70,7 @@ async function mount(page: Page, surface: Surface, width: number) {
     chart.panes()[0].priceScale.setFixedRange({ min: 190, max: 240 });
     const patches: IndicatorSettings[] = [], write = study.setSettings.bind(study);
     study.setSettings = (patch, options) => { patches.push({ ...patch }); return write(patch, options); };
-    window.__points = { chart, draw, study, patches, open: () => open(window.__points.study.id) };
+    window.__points = { chart, draw, study, patches, history, open: () => open(window.__points.study.id) };
   }, { kind: surface, t0: T0 });
   await paint(page);
   return errors;
@@ -225,3 +227,54 @@ for (const surface of ['widget', 'demo'] as const) {
     expect(errors).toEqual([]);
   });
 }
+
+// The verifier's case: a drag, then Pick point on chart in the settings dialog,
+// with no chart-wide history, so the rail walks the drawing controller's own.
+// The first Undo takes the pick back and leaves the line drawn before both.
+test('widget takes a pick back first when the rail walks the drawing history alone, and never the line before it', async ({ page }, info) => {
+  const errors = await mount(page, 'widget', 1100), c = dialog(page, 'widget');
+  await page.evaluate(() => window.__points.history!.destroy());
+  const line = await page.evaluate(t0 => window.__points.draw.add({
+    tool: 'horizontal-line', paneIndex: 0, style: { color: '#38bdf8' }, points: [{ time: t0 + 6 * 60, price: 196 }],
+  }).id, T0);
+  const from = await at(page, T0 + 12 * 60, 206), to = await at(page, T0 + 24 * 60, 226);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x + 2, to.y, { steps: 8 });
+  await page.mouse.up();
+  await paint(page);
+  const dragged = await settings(page);
+  expect(dragged.at).toBe(T0 + 24 * 60);
+
+  await page.evaluate(() => window.__points.open());
+  await c.root.locator('[data-input-action="level"]').click();
+  const pick = await at(page, T0 + 36 * 60, 232);
+  await page.mouse.click(pick.x + 2, pick.y);
+  await expect(c.root).toBeVisible();
+  await c.accept.click();
+  await expect(c.root).toBeHidden();
+  await paint(page);
+  const picked = await settings(page);
+  expect(picked.at).toBe(T0 + 36 * 60);
+  await page.screenshot({ path: info.outputPath('drawing-history-picked.png') });
+
+  const undo = page.locator('.oac-rail button[aria-label="Undo"]'), redo = page.locator('.oac-rail button[aria-label="Redo"]');
+  const hasLine = () => page.evaluate(id => window.__points.draw.get(id) !== undefined, line);
+  await undo.click();
+  await paint(page);
+  expect(await hasLine()).toBe(true);
+  expect(await settings(page)).toMatchObject({ at: dragged.at, level: dragged.level });
+  await page.screenshot({ path: info.outputPath('drawing-history-pick-undone.png') });
+  await undo.click();
+  await paint(page);
+  expect(await hasLine()).toBe(true);
+  expect(await settings(page)).toMatchObject({ at: T0 + 12 * 60, level: 206 });
+  await undo.click();
+  await paint(page);
+  expect(await hasLine()).toBe(false);
+  for (let i = 0; i < 3; i++) { await redo.click(); await paint(page); }
+  expect(await hasLine()).toBe(true);
+  expect(await settings(page)).toMatchObject({ at: picked.at, level: picked.level });
+  await page.screenshot({ path: info.outputPath('drawing-history-redone.png') });
+  expect(errors).toEqual([]);
+});
