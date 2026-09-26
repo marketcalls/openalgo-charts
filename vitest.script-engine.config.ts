@@ -7,6 +7,7 @@ if (!root) throw new Error('SCRIPT_ENGINE_ROOT must name a built script engine c
 export default defineConfig({
   resolve: {
     alias: [
+      { find: /^script-engine-under-test\/package\.json$/, replacement: resolve(root, 'package.json') },
       { find: /^script-engine-under-test\/adapters\/charts$/, replacement: resolve(root, 'dist/adapters/charts/index.js') },
       { find: /^script-engine-under-test$/, replacement: resolve(root, 'dist/core/index.js') },
     ],
