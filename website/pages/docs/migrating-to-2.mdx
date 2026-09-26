@@ -269,7 +269,8 @@ chart.rendererKind;                                     // what the chart actual
 ```
 
 `chart.renderer` exists as the same value under the name it first shipped
-with in the 2.0 development line; new code reads `rendererKind`. The default
+with in the 2.0 development line; it is deprecated and goes in 3.0.0, so new
+code reads `rendererKind`. The default
 is `'canvas2d'` and is pixel-identical to 1.9.2, so a host that passes no
 option sees no change. `'webgl2'` needs `import 'openalgo-charts/webgl'` and
 throws without it; `'auto'` is the silent form. A GPU backend that loses its

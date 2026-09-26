@@ -29,9 +29,10 @@ arrived in:
 /** @deprecated Removed in 3.0.0. Use {@link decodeOrder} (since 1.6.0). */
 ```
 
-`npm run lint` enforces the tag in `src`. It fails a tag that names no removal
-release, one whose removal falls inside the current major, and one outside a
-`/** */` doc block, where neither the editor nor the reference reads it. It also
+`npm run lint` enforces the tag in `src`, wherever the compiler reads one,
+including the middle of a line. It fails a tag that names no removal release,
+one whose removal falls inside the current major, and one outside a `/** */`
+doc block, where neither the editor nor the reference reads it. It also
 fails every tag whose removal release the package has reached, so a major
 release cannot ship a deprecated API it promised to remove. The table under
 [Deprecated APIs](#deprecated-apis) lists each deprecation, and a test keeps it
@@ -45,9 +46,10 @@ state do not belong in portable layout files.
 
 ## Deprecated APIs
 
-Each entry keeps working until the release in the "Removed in" column. Two
-entries have no declaration a tag can sit on (a key the feed sends on the wire,
-and one member of a string union), so this table is where they are recorded.
+Each entry keeps working until the release in the "Removed in" column. The
+`depth_level` wire key and the widget message key have no declaration a tag
+can sit on (a key the feed sends on the wire, and one member of a string
+union), so this table is where they are recorded.
 
 | Deprecated | Declared in | Replacement since | Removed in | Use instead |
 | --- | --- | --- | --- | --- |
@@ -55,8 +57,10 @@ and one member of a string union), so this table is where they are recorded.
 | `IndicatorHost.addIndicatorLevel` argument `level.dashed` | `src/model/indicator-instance.ts` | 1.7.1 | 3.0.0 | `level.lineStyle`, which a study always resolves and which also carries `'dotted'` |
 | `depth_level` key in a depth subscribe frame | `src/feed/openalgo-ws.ts` (`formatSubscribe`), a wire key | 2.0.1 | 3.0.0 | `depth`, the key the OpenAlgo proxy reads, which is sent beside it today |
 | Widget message key "Enter a valid expiry date and time in UTC" | `src/widget/localization.ts`, a union member | 2.4.6 | 3.0.0 | Nothing: the widget no longer shows it, so drop it from a translation catalog |
+| `ChartClickEvent` flags `shiftKey`, `ctrlKey` and `metaKey` | `src/core/chart.ts` | 2.0.0 | 3.0.0 | `modifiers.shift`, `modifiers.ctrl` and `modifiers.meta`, the same state, beside `alt` |
+| `Chart.renderer` | `src/core/chart.ts` | 2.0.0 | 3.0.0 | `Chart.rendererKind`, the same value under its settled name |
 
-Migration, for the two a host is most likely to hold:
+Migration, for the three a host is most likely to hold:
 
 ```ts
 // before
@@ -69,6 +73,11 @@ if (result.ok) use(result.order); else report(result.issue);
 addIndicatorLevel(level, pane) { draw(level.price, level.dashed ? 'dashed' : 'solid'); }
 // after
 addIndicatorLevel(level, pane) { draw(level.price, level.lineStyle); }
+
+// a click handler, before
+chart.on('click', (e) => { if (e.shiftKey || e.ctrlKey) addToSelection(e.id); });
+// after
+chart.on('click', (e) => { if (e.modifiers.shift || e.modifiers.ctrl) addToSelection(e.id); });
 ```
 
 ### Kept on purpose
@@ -81,11 +90,36 @@ remove them:
   set. It is the common case and the form the built-in study levels use.
 - **`magnet: true | false`** on `DrawingController`, meaning `'strong'` and
   `'off'`. A boolean is the obvious form of an on/off magnet.
+- **The IST helpers**: `IST_OFFSET_SECONDS`, `istStringToUtcSeconds`,
+  `utcSecondsToIstParts`, `utcSecondsToIstDateString`, `formatIstTime`,
+  `formatIstTimeSeconds`, `formatIstDate`, `formatIstCrosshairLabel`,
+  `isNewIstDay` and the `IstParts` type, public since 1.x. IST is the shipped
+  default zone and OpenAlgo's history API takes IST date strings, so these stay
+  as the named form of that default. The zone-aware functions
+  (`utcSecondsToZonedParts`, `formatZonedTime` and the rest) are the general
+  form, for any IANA zone.
+- **`levels(settings)` descriptors.** The context a study's `levels` hook
+  receives spreads the settings onto itself beside `bars` and `values`, so a
+  descriptor written against the original one-argument form still reads
+  `ctx.overbought`. The built-in studies are written that way.
+- **The `topic` field on an inbound market-data frame.** `parseMessage` reads
+  the symbol and exchange from the frame first and falls back to `topic`, the
+  form an older proxy sends. A reader of a wire format stays while a server can
+  still send it.
 - **Readers of older saved documents**: a 1.9.x drawings array given to
   `fromJSON` or `migrateDrawings`, a version 1 clipboard body, an unversioned
   alert list, a cache entry without a version and a partial pane state. A
   reader stays as long as such a document can still be in someone's storage,
   and follows the document's own version field rather than the package version.
+
+### Not decided yet
+
+- **The `draw:*` events beside `drawing:select` and `drawing:change`.** The
+  draw tier emits both. `draw:select` carries one id where `drawing:select`
+  carries the whole selection, and `draw:add`, `draw:update` and `draw:remove`
+  carry one drawing each where `drawing:change` lists every id. Whether the
+  one-id names are deprecated is decided with the typed event map planned later
+  in this release series; until then both are emitted and both are supported.
 
 ## Runtime boundary
 
@@ -98,8 +132,9 @@ successful server-side module resolution.
 Browser regression projects exercise Chromium, Firefox and WebKit. Record actual
 versions, operating system, viewport, device-pixel ratio and rendering backend with
 release evidence. WebKit automation does not prove every Safari/device combination.
-Canvas2D is the general rendering path; WebGL2 accelerates supported series and
-retains the documented fallback. Clipboard, fullscreen and downloads also depend
+Canvas2D is the general rendering path; the WebGL2 tier draws the standard series
+types on the GPU, with the documented fallback. Its frame time has not been
+measured against Canvas2D. Clipboard, fullscreen and downloads also depend
 on browser permissions and embedding policy. Surface those failures to the user.
 
 ## Host and adapter responsibility

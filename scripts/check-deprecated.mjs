@@ -14,14 +14,18 @@
  * The tag must sit in a doc block. A line comment or a plain block comment
  * reaches neither the editor's strike-through nor the API reference, which
  * are the two places a host would see it.
+ *
+ * What counts as a tag, and where its text ends, is the compiler's call: it is
+ * the compiler that strikes a name through in a host's editor. It reads a tag
+ * in the middle of a line as well as at the start of one, ends a tag's text at
+ * the next tag even on the same line, and reads none inside a code span. The
+ * rule asks it rather than imitating it, so the two cannot disagree.
  */
 import { readFileSync } from 'node:fs';
+import ts from 'typescript';
 
-/** The removal clause every tag carries. */
-const REMOVAL = /\bremoved in (\d+)\.(\d+)\.(\d+)\b/i;
-
-/** Where the tag's own text ends: the next block tag at the start of a doc line. */
-const NEXT_TAG = /\n\s*\*?\s*@[A-Za-z]/;
+/** The removal clause every tag carries; its words may wrap onto the next line. */
+const REMOVAL = /\bremoved\s+in\s+(\d+)\.(\d+)\.(\d+)\b/i;
 
 /** @param {string} version */
 function parseVersion(version) {
@@ -43,7 +47,7 @@ function packageVersion() {
 
 /**
  * What is wrong with one tag's text, or null when it meets the policy.
- * `tagText` runs from just after `@deprecated` to the next block tag.
+ * `tagText` is the text the compiler gives the tag, which ends at the next tag.
  *
  * @param {string} tagText
  * @param {string} current the version being built
@@ -58,6 +62,22 @@ export function deprecationProblem(tagText, current) {
   if (compare(removal, now) <= 0) return { messageId: 'reached', data };
   if (removal[0] <= now[0]) return { messageId: 'sameMajor', data };
   return null;
+}
+
+/**
+ * The `@deprecated` tags the compiler reads in one doc comment: where each
+ * starts, as an offset into `doc`, and the text that belongs to it.
+ *
+ * @param {string} doc a whole doc comment, from its opening slash to its closing one
+ * @returns {{ at: number, text: string }[]}
+ */
+export function deprecatedTags(doc) {
+  const source = ts.createSourceFile('probe.ts', `${doc}\nfunction probe() {}\n`, ts.ScriptTarget.Latest, true);
+  const [statement] = source.statements;
+  if (statement === undefined) return [];
+  return ts.getJSDocTags(statement)
+    .filter((tag) => tag.tagName.text === 'deprecated')
+    .map((tag) => ({ at: tag.getStart(source), text: ts.getTextOfJSDocComment(tag.comment) ?? '' }));
 }
 
 /** @type {import('eslint').Rule.RuleModule} */
@@ -84,22 +104,20 @@ export const deprecationVersionRule = {
     return {
       Program() {
         for (const comment of source.getAllComments()) {
-          const text = comment.value;
-          const isDoc = comment.type === 'Block' && text.startsWith('*');
-          // The comment's text starts after its opening `//` or `/*`.
-          const start = /** @type {[number, number]} */ (comment.range)[0] + 2;
-          for (let at = text.indexOf('@deprecated'); at !== -1; at = text.indexOf('@deprecated', at + 1)) {
-            // A block tag opens its line, as the compiler reads one. The word
-            // in the middle of a sentence is prose about the policy, not a tag.
-            if (!/^\s*\*?\s*$/.test(text.slice(text.lastIndexOf('\n', at) + 1, at))) continue;
-            const loc = { start: source.getLocFromIndex(start + at), end: source.getLocFromIndex(start + at + 11) };
+          if (!comment.value.includes('@deprecated')) continue;
+          const isDoc = comment.type === 'Block' && comment.value.startsWith('*');
+          // A tag outside a doc block is read the way the compiler would read
+          // it inside one: a tag its author meant, in a place no tool looks.
+          // The `/**` put in front is one character longer than `//` or `/*`.
+          const doc = isDoc ? `/*${comment.value}*/` : `/**${comment.value}*/`;
+          const origin = /** @type {[number, number]} */ (comment.range)[0] - (isDoc ? 0 : 1);
+          for (const tag of deprecatedTags(doc)) {
+            const loc = { start: source.getLocFromIndex(origin + tag.at), end: source.getLocFromIndex(origin + tag.at + 11) };
             if (!isDoc) {
               context.report({ loc, messageId: 'notDoc' });
               continue;
             }
-            const rest = text.slice(at + 11);
-            const end = rest.search(NEXT_TAG);
-            const problem = deprecationProblem(end === -1 ? rest : rest.slice(0, end), current);
+            const problem = deprecationProblem(tag.text, current);
             if (problem !== null) context.report({ loc, messageId: problem.messageId, data: problem.data });
           }
         }
