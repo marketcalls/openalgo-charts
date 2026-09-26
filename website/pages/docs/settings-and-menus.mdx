@@ -487,7 +487,7 @@ const s = chart.priceAxisState(0, 'right');   // PriceAxisState | null
 | `mode` | One of `PRICE_SCALE_MODES`: `'linear'`, `'logarithmic'`, `'percentage'`, `'indexed-to-100'`. |
 | `scaled` | False while the scale still sits on its `0..1` placeholder, meaning nothing has been measured on it yet. |
 | `lockRatio` | The price-per-bar ratio is pinned. |
-| `movable` | Whether legacy `movePriceAxis` can reassign this built-in side ID to the other ID. It does not govern column placement. |
+| `movable` | Whether legacy `movePriceAxis` can reassign this built-in side ID to the other ID. It does not govern column placement. Deprecated with `movePriceAxis`, removed in 3.0.0. |
 
 Null for a pane that does not exist. `active: false` is a real state, not an error: it is
 the ladder on an empty chart, or the side a menu was raised on before anything was plotted
@@ -529,7 +529,7 @@ lock. A menu keeps its target ID after a move. Success emits
 by `objects:change`. See [multiple axes](/docs/scales-and-panes#multiple-axes-on-the-same-side)
 for column geometry and persistence.
 
-The legacy `movePriceAxis(pane, 'right', 'left')` instead swaps the built-in side
+The legacy `movePriceAxis(pane, 'right', 'left')`, deprecated and removed in 3.0.0, instead swaps the built-in side
 scale objects and reassigns their resources to the destination ID. That ID must
 be unused; other named columns on its side do not prevent the move. Source and
 destination placements reset to their named sides, and the vacated scale resets

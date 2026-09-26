@@ -268,8 +268,9 @@ overrides and retains explicit price-overlay overrides. `IndicatorState.priceSca
 stores the whole-study override and `plotPriceScaleIds` stores explicit plot
 overrides. Omission restores descriptor defaults. See [scales-and-panes](scales-and-panes.md#reassign-a-whole-study)
 for shared formatting, fixed-range ownership and saved scales.
-`movePriceAxis` refuses mixed local study assignments and explicit price overlays;
-its `priceAxisState().movable` result reflects that conservative legacy-operation
+`movePriceAxis` (deprecated, removed in 3.0.0: use `setPriceAxisPlacement`) refuses
+mixed local study assignments and explicit price overlays;
+its `priceAxisState().movable` result (deprecated with it) reflects that conservative legacy-operation
 limit, even though saved state can represent mixed plot assignments. Uniform local and
 primitive-only studies adopt a successful whole-axis move. `setPriceScale` remains
 the operation for moving all local study resources while keeping overlays fixed.
@@ -573,8 +574,8 @@ The getter returns null for an invalid ID, missing pane or destroyed chart;
 layout returns an empty array for a missing pane or destroyed chart. Successful
 changes emit `priceAxisPlacementChanged` with `{ paneIndex, scaleId, side, order }`
 and `objects:change`.
-`movePriceAxis` retains its legacy resource reassignment behavior; use placement
-to move a column while preserving IDs.
+`movePriceAxis` retains its legacy resource reassignment behavior and is
+deprecated, removed in 3.0.0; use placement to move a column while preserving IDs.
 
 Attached series, including hidden series, and explicitly bound primitives occupy
 columns. An unused configured scale retains placement but reserves no width.
@@ -629,7 +630,7 @@ interface IRenderBackend {
 
 `mount` takes the pane's existing 2D context as its second argument (the pane's base `CanvasLayer` already asked the canvas for one; a second `getContext` would split a frame across two contexts). A backend that owns its canvas ignores it.
 
-Choosing one: `chart.rendererKind` (a `RenderBackendKind`; `chart.renderer` is the same value under the name it first shipped with) reports what the chart actually paints with. It differs from the `renderer` option when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in, and from the moment a GPU backend degrades (see the fallback below). The registry behind the option is exported for a tier or host that brings a backend:
+Choosing one: `chart.rendererKind` (a `RenderBackendKind`; the deprecated `chart.renderer`, removed in 3.0.0, is the same value under the name it first shipped with) reports what the chart actually paints with. It differs from the `renderer` option when the chosen factory declined (no WebGL2 on this device) and the 2D backend stood in, and from the moment a GPU backend degrades (see the fallback below). The registry behind the option is exported for a tier or host that brings a backend:
 
 | Export | What it does |
 |---|---|

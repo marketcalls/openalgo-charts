@@ -112,8 +112,18 @@ import by 43.
 - The flat `shiftKey`, `ctrlKey` and `metaKey` on a `click` event are
   deprecated: read `modifiers`, which carries the same state and `alt` besides.
   `chart.renderer` is deprecated in favour of `chart.rendererKind`, the same
-  value. Both keep working until 3.0.0; their declaration tags follow in a later
-  change to the chart module.
+  value. Both keep working until 3.0.0, and their declarations carry the tag,
+  so an editor strikes them through.
+- `chart.movePriceAxis(pane, from, to)` is deprecated in favour of
+  `chart.setPriceAxisPlacement(pane, scaleId, side)` (since 2.5.4), which moves
+  a scale's column and keeps its id, where the old method swaps the built-in
+  side scales and reassigns their series and studies. `movable` in
+  `priceAxisState()` describes only that old method and goes with it. The
+  widget and the reference host already use placement. Both keep working until
+  3.0.0.
+- The chart's own study host no longer reads the deprecated `dashed` it is
+  handed for a study level; it draws from `lineStyle`, which the study always
+  resolves, so every level looks exactly as before.
 - COMPATIBILITY.md now has a table of every deprecated API with its
   replacement, the release that replacement arrived in and the release that
   removes the old form, and a list of older forms that are kept on purpose (the

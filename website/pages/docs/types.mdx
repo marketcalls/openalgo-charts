@@ -296,7 +296,7 @@ interface PriceAxisState {
 }
 ```
 
-Returned by `chart.priceAxisState(paneIndex, scaleId)`, or `null` for a pane that does not exist. Everything a menu over one axis needs to tick its own rows and grey what does not apply. The writers are `setPriceAxisOptions`, `setPriceAxisAutoFit`, `setPriceAxisLockRatio` and `movePriceAxis`; the last two return whether the axis is now in the state asked for. See [Settings & Menus](/docs/settings-and-menus#the-price-axis-menu).
+Returned by `chart.priceAxisState(paneIndex, scaleId)`, or `null` for a pane that does not exist. Everything a menu over one axis needs to tick its own rows and grey what does not apply. The writers are `setPriceAxisOptions`, `setPriceAxisAutoFit`, `setPriceAxisLockRatio`, `setPriceAxisPlacement` and the deprecated `movePriceAxis` (removed in 3.0.0); the last three return whether the axis is now in the state asked for. See [Settings & Menus](/docs/settings-and-menus#the-price-axis-menu).
 
 ### `PickKind`
 

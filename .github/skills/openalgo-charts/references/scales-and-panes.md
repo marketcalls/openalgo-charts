@@ -238,7 +238,7 @@ foreign or removed handle, destroyed chart, or indicator-owned plot. A study's
 plots, fills, levels and other scale-bound visuals move together through its
 `setPriceScale` method. Use `setPlotPriceScales` for individual declared plots,
 including related fill endpoints in the same patch.
-The legacy `movePriceAxis` reassigns every series and explicitly bound primitive
+The legacy `movePriceAxis`, deprecated and removed in 3.0.0 in favour of placement, reassigns every series and explicitly bound primitive
 on the source `'left'` or `'right'` ID to the other ID, carrying its scale object
 and configuration. The destination ID must be unused; other named columns on
 that side do not prevent the move. Source and destination placements reset to
@@ -452,9 +452,9 @@ chart.setPriceAxisLockRatio(paneIndex, scaleId, true); // false when it could no
 chart.setPriceAxisPlacement(paneIndex, scaleId, 'left'); // retains the scale ID
 ```
 
-`PriceAxisState` is `{ paneIndex, scaleId, side, active, autoFit, inverted, mode, scaled, lockRatio, movable }`, and `PRICE_SCALE_MODES` lists the four modes in menu order. Use the exact `scaleId` from a `contextmenu` target, including named or empty overlays explicitly exposed as columns. `side` reports right for hidden placement for compatibility; use `priceAxisPlacement` to distinguish hidden state. `movable` describes only the legacy reassignment method.
+`PriceAxisState` is `{ paneIndex, scaleId, side, active, autoFit, inverted, mode, scaled, lockRatio, movable }`, and `PRICE_SCALE_MODES` lists the four modes in menu order. Use the exact `scaleId` from a `contextmenu` target, including named or empty overlays explicitly exposed as columns. `side` reports right for hidden placement for compatibility; use `priceAxisPlacement` to distinguish hidden state. `movable` describes only the legacy reassignment method and is deprecated with it, removed in 3.0.0; placement needs no such check.
 
-- **Placement preserves identity.** `setPriceAxisPlacement` moves or reorders a column even when other scales use that side. The legacy `movePriceAxis(pane, from, to)` instead swaps the built-in side scale objects and reassigns their resources to the destination ID. It requires an unused destination ID and resets both placements to their named sides. A `priceAxisMoved` event follows a successful legacy move.
+- **Placement preserves identity.** `setPriceAxisPlacement` moves or reorders a column even when other scales use that side. The legacy `movePriceAxis(pane, from, to)` (deprecated, removed in 3.0.0) instead swaps the built-in side scale objects and reassigns their resources to the destination ID. It requires an unused destination ID and resets both placements to their named sides. A `priceAxisMoved` event follows a successful legacy move.
 - **Whole-axis study moves require one local assignment.** `movePriceAxis` conservatively refuses a study with mixed local scale assignments or explicit price overlays. This is a guard on the legacy operation, not a saved-state limitation. `priceAxisState().movable` reports that restriction. Uniform local studies and primitive-only studies adopt the moved side. Use `study.setPriceScale` for all local resources or `study.setPlotPriceScales` for selected plots.
 - **The ratio lock pins price-per-bar.** The pane remembers the geometry the lock was taken at and rescales the visible span by height over bar spacing each frame, in transformed space, so a logarithmic axis keeps its angle too. Auto-fit and `resetScale` release it, and it is refused on a scale nothing has measured (`scaled: false`), because there is no ratio to hold.
 - **`active: false`** means no series or explicitly bound primitive maps to that scale. It is a row to render disabled with its state showing, not one to leave out.

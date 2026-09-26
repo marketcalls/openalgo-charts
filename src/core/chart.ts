@@ -546,7 +546,10 @@ export interface PointerInfo {
   pressure: number;
 }
 
-/** Payload of the `click` event (`chart.on('click', ...)`). */
+/**
+ * Payload of the `click` event (`chart.on('click', ...)`). Its `pressure` is
+ * the pressure at the press, not the release, which always reads 0.
+ */
 export interface ChartClickEvent extends PointerInfo {
   /** `externalId` of the hit primitive, or null on empty plot. */
   id: string | null;
@@ -560,12 +563,15 @@ export interface ChartClickEvent extends PointerInfo {
   /** Set on the release half of a press-drag-release while a host is placing a shape. */
   viaDrag?: boolean;
   /**
-   * The same state as `modifiers`, in the flat form the draw tier has read
-   * since it shipped. `pressure` here is the pressure at the press, not the
-   * release, which always reads 0.
+   * Shift at the click: the same state as `modifiers.shift`, in the flat form
+   * the first click payloads carried.
+   *
+   * @deprecated Removed in 3.0.0. Read `modifiers.shift` (since 2.0.0), which carries the same state.
    */
   shiftKey: boolean;
+  /** @deprecated Removed in 3.0.0. Read `modifiers.ctrl` (since 2.0.0), which carries the same state. */
   ctrlKey: boolean;
+  /** @deprecated Removed in 3.0.0. Read `modifiers.meta` (since 2.0.0), which carries the same state. */
   metaKey: boolean;
 }
 
@@ -689,7 +695,12 @@ export interface PriceAxisState {
   /** False while the scale still sits on its 0..1 placeholder (nothing measured). */
   scaled: boolean;
   lockRatio: boolean;
-  /** Whether `movePriceAxis` would do anything: something to move, and a free side. */
+  /**
+   * Whether `movePriceAxis` would do anything: something to move, and a free side.
+   *
+   * @deprecated Removed in 3.0.0, with {@link Chart.movePriceAxis}, the only operation it describes. Placement
+   * through {@link Chart.setPriceAxisPlacement} (since 2.5.4) needs no such check.
+   */
   movable: boolean;
 }
 
@@ -2267,11 +2278,11 @@ export class Chart {
           preservedFormats,
         ),
       addIndicatorLevel: (l, paneIndex): PriceLine => {
-        // `dashed` rides along beside `lineStyle` because a descriptor written
-        // before the three-way style existed still sets only the boolean, and
-        // PriceLine reads it when `lineStyle` is absent.
+        // The instance resolves `lineStyle` before calling the host, a
+        // descriptor's `dashed` boolean included, so the line needs nothing
+        // else to pick its dash.
         const opts: PriceLineOptions = {
-          price: l.price, color: l.color, lineWidth: l.lineWidth, dashed: l.dashed,
+          price: l.price, color: l.color, lineWidth: l.lineWidth,
           lineStyle: l.lineStyle, leftLabel: l.label, id: l.id,
         };
         return this.addPriceLine(opts, paneIndex);
@@ -3137,6 +3148,10 @@ export class Chart {
    * it and everything the axis was set to. Returns false when that side carries
    * nothing, or when the other side is already occupied: one strip draws one
    * axis (see `Pane.moveSeriesScale`), which is what `movable` reports.
+   *
+   * @deprecated Removed in 3.0.0. Use {@link Chart.setPriceAxisPlacement} (since 2.5.4), which moves a scale's
+   * column and keeps its id; this method instead swaps the built-in side scales and reassigns their series and
+   * studies.
    */
   public movePriceAxis(paneIndex: number, from: 'right' | 'left', to: 'right' | 'left'): boolean {
     const pane = this._panes[paneIndex];
@@ -3670,7 +3685,11 @@ export class Chart {
     return this._rendererKind ?? 'canvas2d';
   }
 
-  /** The name `rendererKind` shipped under; the same value. */
+  /**
+   * The name `rendererKind` shipped under; the same value.
+   *
+   * @deprecated Removed in 3.0.0. Use {@link Chart.rendererKind} (since 2.0.0), which reports the same backend.
+   */
   public get renderer(): RenderBackendKind {
     return this.rendererKind;
   }
@@ -5481,8 +5500,8 @@ export class Chart {
   private _clickInfo(e: PointerLike): PointerInfo & { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean } {
     const info = pointerInfo(e);
     info.pressure = this._downPressure;
-    // The flat flags predate `modifiers` and the draw tier reads them; both
-    // stay so a host typed against either keeps working.
+    // The flat flags predate `modifiers` and are deprecated, removed in 3.0.0;
+    // they stay until then so a host typed against either keeps working.
     return { ...info, shiftKey: info.modifiers.shift, ctrlKey: info.modifiers.ctrl, metaKey: info.modifiers.meta };
   }
 

@@ -244,12 +244,7 @@ const namesIn = (cell: string): string[] =>
  * The change that adds the tag removes the entry here, and this suite fails
  * until it does, so the list cannot outlive the wait.
  */
-const PENDING_TAGS: readonly { file: string; name: string }[] = [
-  { file: 'src/core/chart.ts', name: 'shiftKey' },
-  { file: 'src/core/chart.ts', name: 'ctrlKey' },
-  { file: 'src/core/chart.ts', name: 'metaKey' },
-  { file: 'src/core/chart.ts', name: 'renderer' },
-];
+const PENDING_TAGS: readonly { file: string; name: string }[] = [];
 
 describe('the compatibility shims', () => {
   const tagged = taggedDeclarations();
@@ -274,6 +269,12 @@ describe('the compatibility shims', () => {
     const shims = [
       ['src/feed/openalgo-trade.ts', 'mapOrder'],
       ['src/model/indicator-instance.ts', 'dashed'],
+      ['src/core/chart.ts', 'shiftKey'],
+      ['src/core/chart.ts', 'ctrlKey'],
+      ['src/core/chart.ts', 'metaKey'],
+      ['src/core/chart.ts', 'renderer'],
+      ['src/core/chart.ts', 'movePriceAxis'],
+      ['src/core/chart.ts', 'movable'],
     ];
     const found = tagged.map(t => `${t.file}#${t.name}`);
     expect(found).toEqual(expect.arrayContaining(shims.map(([file, name]) => `${file}#${name}`)));
