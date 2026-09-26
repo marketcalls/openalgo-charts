@@ -14,20 +14,14 @@
  * this internal class; no entry point exports the class and the chart holds
  * it in a private field, so none of it reaches the published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
+import { InvalidationLevel } from './invalidate-mask';
+import type { Chart } from './chart';
 import type { Pane } from './pane';
-import type { AxisChromeOptions, ChartEventOptions, ChartNavigationOptions, ChartWatermarkOptions } from './chart-types';
-import type { TradingSettings } from './trading-controller';
-import type { TimeScale, LogicalRange } from '../scale/time-scale';
-import type { PriceScale, PriceScaleOptions } from '../scale/price-scale';
-import type { CanvasOptions, GridOptions } from '../render/grid';
-import type { DataLayer } from '../model/data-layer';
+import type { PriceScaleOptions } from '../scale/price-scale';
 import type { PriceScaleId } from '../model/series';
 import { cloneIndicatorSettings, planIndicatorDependencies } from '../model/indicator-dependencies';
 import { getIndicator, hasIndicator, type IndicatorDescriptor } from '../model/indicator-registry';
-import {
-  IndicatorInstance, parseIndicatorPlotPriceScales, validateIndicatorScaleAssignment, type IndicatorHost,
-} from '../model/indicator-instance';
+import { IndicatorInstance, parseIndicatorPlotPriceScales, validateIndicatorScaleAssignment } from '../model/indicator-instance';
 import { parseIndicatorPolicy } from '../model/indicator-policy';
 import type { AlertsDocument } from '../alerts/types';
 import { parseAlertsDocument } from '../alerts/document';
@@ -42,11 +36,7 @@ import {
   type ChartRestoreOptions,
   type IndicatorState,
 } from '../model/chart-state';
-import type { CrosshairMode } from '../input/crosshair';
-import type { IPrimitive } from '../primitives/primitive';
-import type { LegendStatusLineOptions } from '../primitives/pane-legend';
 import { validateIndicatorInputs } from '../model/indicator-inputs';
-import type { TimeNavigator } from '../primitives/time-navigator';
 import type { ChartSettingsState } from '../model/chart-settings';
 import { isValidTimezone } from '../feed/time';
 
@@ -58,71 +48,70 @@ interface PreparedIndicatorRestore {
 export type PreservedScaleFormats = ReadonlyMap<Pane, ReadonlySet<PriceScaleId>>;
 
 /**
- * The slice of the chart a capture and a restore read, write and drive.
- * Members carry the chart's own names, so the moved code reads as it did in
- * chart.ts. The writable fields are the chart's own, written through.
+ * The slice of the chart a capture and a restore read, write and drive. The
+ * chart itself is the host: each member carries the name and the type of the
+ * chart's own, so the moved code reads as it did in chart.ts, and a member the
+ * chart renames or retypes fails to compile here. The writable fields are the
+ * chart's own, assigned here.
  */
 export interface PersistenceHost {
-  readonly _panes: readonly Pane[];
-  readonly _indicators: IndicatorInstance[];
-  readonly _indicatorRanges: ReadonlyMap<string, {
-    pane: Pane; scaleId: PriceScaleId; range: { min: number; max: number }; token: object;
-  }>;
-  readonly _ownedScaleRanges: Map<PriceScale, object>;
-  readonly _collapsed: WeakSet<Pane>;
-  readonly _timezone: string;
-  readonly _timeScale: TimeScale;
-  readonly _dataLayer: DataLayer;
-  readonly _tradingSettings: TradingSettings;
-  readonly _axisChrome: AxisChromeOptions;
-  readonly _movablePrimaryPane: boolean;
-  readonly _indicatorReservedIds: Set<string>;
-  readonly _indicatorRefreshes: Map<string, boolean>;
-  readonly _primaryPane: Pane;
-  readonly _timeNav: TimeNavigator | null;
-  readonly _anchored: readonly { primitive: IPrimitive }[];
-  _crosshairMode: CrosshairMode;
-  _crosshairSnapToBar: boolean;
-  _priceOnlyAutoScale: boolean;
-  _indicatorLegendCollapsed: boolean;
-  _sourceAbove: string | null | undefined;
-  _drawingState: unknown;
-  _alertState: AlertsDocument | undefined;
-  _primaryIndex(): number;
-  getVisibleLogicalRange(): LogicalRange;
-  setVisibleLogicalRange(range: LogicalRange): void;
-  navigationOptions(): Readonly<ChartNavigationOptions>;
-  _patchNavigation(patch: Partial<ChartNavigationOptions>): void;
-  gridOptions(): { vertLines: boolean; horzLines: boolean } & Partial<GridOptions>;
-  setGridOptions(opts: Partial<GridOptions>): void;
-  canvasOptions(): CanvasOptions;
-  setCanvasOptions(patch: CanvasOptions): void;
-  statusLineOptions(): LegendStatusLineOptions;
-  setStatusLineOptions(patch: LegendStatusLineOptions): void;
-  watermarkOptions(): Readonly<ChartWatermarkOptions>;
-  setWatermarkOptions(options: boolean | ChartWatermarkOptions): void;
-  setTradingSettings(patch: TradingSettings): void;
-  setAxisChromeOptions(patch: AxisChromeOptions): void;
-  eventOptions(): ChartEventOptions;
-  setEventOptions(patch: ChartEventOptions): void;
-  setTimezone(zone: string): void;
-  _validPriceScaleId(value: unknown): value is PriceScaleId;
-  _reserveAlertStudyIds(document: AlertsDocument | undefined, reserved: Set<string>): void;
-  emit(event: string, payload: unknown): void;
-  _withinLayoutChange<T>(fn: () => T): T;
-  _mutateTimeScale<T>(apply: () => T): T;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  _emitViewportIfMoved(before: LogicalRange): void;
-  _restackLegends(): void;
-  _ensurePane(index: number): void;
-  setPrimaryPaneIndex(index: number): boolean;
-  _relayout(): void;
-  _rehomeAnchored(): void;
-  _indicatorHost(preservedFormats?: PreservedScaleFormats): IndicatorHost;
-  _reorderIndicatorResources(): void;
-  _scalePatchFor(pane: Pane, patch: Partial<PriceScaleOptions>): Partial<PriceScaleOptions>;
-  removePane(index: number): boolean;
-  _recomputeAxisColumns(): void;
+  readonly _panes: Chart['_panes'];
+  readonly _indicators: Chart['_indicators'];
+  readonly _indicatorRanges: Chart['_indicatorRanges'];
+  readonly _ownedScaleRanges: Chart['_ownedScaleRanges'];
+  readonly _collapsed: Chart['_collapsed'];
+  readonly _timezone: Chart['_timezone'];
+  readonly _timeScale: Chart['_timeScale'];
+  readonly _dataLayer: Chart['_dataLayer'];
+  readonly _tradingSettings: Chart['_tradingSettings'];
+  readonly _axisChrome: Chart['_axisChrome'];
+  readonly _movablePrimaryPane: Chart['_movablePrimaryPane'];
+  readonly _indicatorReservedIds: Chart['_indicatorReservedIds'];
+  readonly _indicatorRefreshes: Chart['_indicatorRefreshes'];
+  readonly _primaryPane: Chart['_primaryPane'];
+  readonly _timeNav: Chart['_timeNav'];
+  readonly _anchored: Chart['_anchored'];
+  _crosshairMode: Chart['_crosshairMode'];
+  _crosshairSnapToBar: Chart['_crosshairSnapToBar'];
+  _priceOnlyAutoScale: Chart['_priceOnlyAutoScale'];
+  _indicatorLegendCollapsed: Chart['_indicatorLegendCollapsed'];
+  _sourceAbove: Chart['_sourceAbove'];
+  _drawingState: Chart['_drawingState'];
+  _alertState: Chart['_alertState'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _legendStack: Chart['_legendStack'];
+  readonly _layout: Chart['_layout'];
+  readonly _primitives: Chart['_primitives'];
+  readonly _studies: Chart['_studies'];
+  readonly _scales: Chart['_scales'];
+  _primaryIndex: Chart['_primaryIndex'];
+  getVisibleLogicalRange: Chart['getVisibleLogicalRange'];
+  setVisibleLogicalRange: Chart['setVisibleLogicalRange'];
+  navigationOptions: Chart['navigationOptions'];
+  _patchNavigation: Chart['_patchNavigation'];
+  gridOptions: Chart['gridOptions'];
+  setGridOptions: Chart['setGridOptions'];
+  canvasOptions: Chart['canvasOptions'];
+  setCanvasOptions: Chart['setCanvasOptions'];
+  statusLineOptions: Chart['statusLineOptions'];
+  setStatusLineOptions: Chart['setStatusLineOptions'];
+  watermarkOptions: Chart['watermarkOptions'];
+  setWatermarkOptions: Chart['setWatermarkOptions'];
+  setTradingSettings: Chart['setTradingSettings'];
+  setAxisChromeOptions: Chart['setAxisChromeOptions'];
+  eventOptions: Chart['eventOptions'];
+  setEventOptions: Chart['setEventOptions'];
+  setTimezone: Chart['setTimezone'];
+  _validPriceScaleId: Chart['_validPriceScaleId'];
+  _reserveAlertStudyIds: Chart['_reserveAlertStudyIds'];
+  emit: Chart['emit'];
+  _withinLayoutChange: Chart['_withinLayoutChange'];
+  _mutateTimeScale: Chart['_mutateTimeScale'];
+  invalidate: Chart['invalidate'];
+  _emitViewportIfMoved: Chart['_emitViewportIfMoved'];
+  setPrimaryPaneIndex: Chart['setPrimaryPaneIndex'];
+  _indicatorHost: Chart['_indicatorHost'];
+  removePane: Chart['removePane'];
 }
 
 export class ChartPersistence {
@@ -398,7 +387,7 @@ export class ChartPersistence {
     if (priceOnly && typeof priceOnly.value === 'boolean') this._host._priceOnlyAutoScale = priceOnly.value;
     const collapsed = Object.getOwnPropertyDescriptor(s, 'indicatorLegendCollapsed');
     if (collapsed && typeof collapsed.value === 'boolean') this._host._indicatorLegendCollapsed = collapsed.value;
-    this._host._restackLegends();
+    this._host._legendStack._restackLegends();
     // A saved zone is data of unknown provenance, so an unrecognised name is
     // skipped rather than thrown: the rest of the layout is still restorable,
     // and a whole saved workspace should not be lost to one stale zone name.
@@ -410,7 +399,7 @@ export class ChartPersistence {
     // saved slot before anything is applied by index, and a layout that names
     // no slot is one from before the price pane could move: its slot is 0.
     if (panes) {
-      for (let i = 0; i < panes.length; i++) this._host._ensurePane(i);
+      for (let i = 0; i < panes.length; i++) this._host._layout._ensurePane(i);
       this._host.setPrimaryPaneIndex(primaryPane);
       panes.forEach((ps, i) => { this._host._panes[i].weight = ps.weight; });
     }
@@ -423,8 +412,8 @@ export class ChartPersistence {
         if (pane !== this._host._primaryPane && panes?.[i]?.collapsed) this._host._collapsed.add(pane);
         else this._host._collapsed.delete(pane);
       });
-      this._host._relayout();
-      this._host._rehomeAnchored();
+      this._host._layout._relayout();
+      this._host._primitives._rehomeAnchored();
     }
 
     // Indicators are fully derivable from the source data, so they *can* be
@@ -452,7 +441,7 @@ export class ChartPersistence {
       // With the studies it is read with: a layout from before the source could
       // move says nothing, and the source stays behind the studies just made.
       this._host._sourceAbove = s.sourceAbove;
-      this._host._reorderIndicatorResources();
+      this._host._studies._reorderIndicatorResources();
     }
 
     // Price scales last of all, for the same reason the canvas block goes
@@ -476,7 +465,7 @@ export class ChartPersistence {
           if (saved.minPrecision !== undefined) options.minPrecision = saved.minPrecision;
           // Legacy snapshots may carry an instrument tick broadcast into an oscillator.
           // New snapshots explicitly preserve the precision configured on each scale.
-          scale.setOptions(id === 'right' && saved.minPrecision === undefined ? this._host._scalePatchFor(pane, options) : options);
+          scale.setOptions(id === 'right' && saved.minPrecision === undefined ? this._host._scales._scalePatchFor(pane, options) : options);
           const claim = saved.indicatorRange ? this._host._indicatorRanges.get(saved.indicatorRange.instanceId) : undefined;
           const ownDefault = claim && claim.pane === pane && claim.scaleId === id
             && saved.fixedRange?.min === claim.range.min && saved.fixedRange?.max === claim.range.max;
@@ -522,7 +511,7 @@ export class ChartPersistence {
     }
 
     this._host._alertState = alerts;
-    this._host._recomputeAxisColumns();
+    this._host._layout._recomputeAxisColumns();
     if (s.barSpacing !== undefined) this._host._timeScale.setBarSpacing(s.barSpacing);
     if (s.viewport && this._host._dataLayer.length > 0) this._host.setVisibleLogicalRange(s.viewport);
     // Lock references belong to the saved geometry. Applying them after pane pruning

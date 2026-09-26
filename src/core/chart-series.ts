@@ -15,62 +15,56 @@
  * and the chart holds it in a private field, so none of it reaches the
  * published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
-import type { Pane } from './pane';
+import { InvalidationLevel } from './invalidate-mask';
+import type { Chart } from './chart';
 import { compactVolume, type AddSeriesOptions } from './chart-types';
 import type { PreservedScaleFormats } from './chart-state';
-import type { TimeScale } from '../scale/time-scale';
 import type { PriceScale } from '../scale/price-scale';
-import type { DataLayer } from '../model/data-layer';
-import { createSeriesRecord, type SeriesApi, type SeriesRecord, type BarConfirmationOptions, type SeriesUpdateOptions } from '../model/series';
+import { createSeriesRecord, type SeriesApi, type BarConfirmationOptions, type SeriesUpdateOptions } from '../model/series';
 import { bindSeriesProvenance, SeriesProvenance, validateSeriesOptions } from '../model/series-provenance';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
 import type { Bar, SeriesDataItem } from '../model/bar';
 import { toBar } from '../model/bar';
-import type { IPrimitive } from '../primitives/primitive';
 import { SeriesMarkers } from '../primitives/markers';
 import { clamp } from '../helpers/math';
 
 /**
  * The slice of the chart series creation and the data paths read, write and
- * drive. Members carry the chart's own names, so the moved code reads as it
- * did in chart.ts. The writable fields are the chart's own, written through.
+ * drive. The chart itself is the host: each member carries the name and the
+ * type of the chart's own, so the moved code reads as it did in chart.ts, and
+ * a member the chart renames or retypes fails to compile here. The writable
+ * fields are the chart's own, assigned here.
  */
 export interface SeriesHost {
-  readonly _panes: readonly Pane[];
-  readonly _dataLayer: DataLayer;
-  readonly _timeScale: TimeScale;
-  readonly _seriesProvenance: Map<number, SeriesProvenance>;
-  readonly _seriesRecords: WeakMap<SeriesApi, SeriesRecord>;
-  readonly _seriesOwners: WeakMap<SeriesApi, {
-    pane: Pane; priceFormat?: AddSeriesOptions['priceFormat']; inheritedStyle: Partial<SeriesStyle>; indicatorOwned: boolean;
-  }>;
-  readonly _firstDataId: { value: number | null };
-  readonly _priceFormatter: ((price: number) => string) | null;
-  readonly _sourceAbove: string | null | undefined;
-  readonly _width: number;
-  readonly _leftAxisWidth: number;
-  readonly _rightAxisWidth: number;
-  _primary: { api: SeriesApi; record: SeriesRecord } | null;
-  _firstPane: Pane | null;
-  _hasFitContent: boolean;
-  _primaryIndex(): number;
-  _ensurePane(index: number): void;
-  _claimPricePane(pane: Pane): void;
-  _recomputeAxisColumns(): void;
-  _reconcileIndicatorRanges(): void;
-  _invalidateIndicators(): void;
-  _flushIndicators(): void;
-  _addPrimitive(paneIndex: number, primitive: IPrimitive): void;
-  _placeSource(): void;
-  _stopNavigationMotion(): void;
-  _mutateTimeScale<T>(apply: () => T): T;
-  _fitDefaultView(): boolean;
-  _updateAccessibleSummary(): void;
-  seriesType(series: SeriesApi): SeriesType | null;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  emit(event: string, payload: unknown): void;
+  readonly _panes: Chart['_panes'];
+  readonly _dataLayer: Chart['_dataLayer'];
+  readonly _timeScale: Chart['_timeScale'];
+  readonly _seriesProvenance: Chart['_seriesProvenance'];
+  readonly _seriesRecords: Chart['_seriesRecords'];
+  readonly _seriesOwners: Chart['_seriesOwners'];
+  readonly _firstDataId: Chart['_firstDataId'];
+  readonly _priceFormatter: Chart['_priceFormatter'];
+  readonly _sourceAbove: Chart['_sourceAbove'];
+  readonly _width: Chart['_width'];
+  readonly _leftAxisWidth: Chart['_leftAxisWidth'];
+  readonly _rightAxisWidth: Chart['_rightAxisWidth'];
+  _primary: Chart['_primary'];
+  _firstPane: Chart['_firstPane'];
+  _hasFitContent: Chart['_hasFitContent'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _layout: Chart['_layout'];
+  readonly _scales: Chart['_scales'];
+  readonly _studies: Chart['_studies'];
+  readonly _primitives: Chart['_primitives'];
+  readonly _motion: Chart['_motion'];
+  _primaryIndex: Chart['_primaryIndex'];
+  _mutateTimeScale: Chart['_mutateTimeScale'];
+  _fitDefaultView: Chart['_fitDefaultView'];
+  _updateAccessibleSummary: Chart['_updateAccessibleSummary'];
+  seriesType: Chart['seriesType'];
+  invalidate: Chart['invalidate'];
+  emit: Chart['emit'];
 }
 
 export class ChartSeries {
@@ -119,13 +113,13 @@ export class ChartSeries {
     const provenance = new SeriesProvenance(dataId);
     this._host._seriesProvenance.set(dataId, provenance);
     const paneIndex = options.paneIndex ?? this._host._primaryIndex();
-    this._host._ensurePane(paneIndex);
+    this._host._layout._ensurePane(paneIndex);
     const record = createSeriesRecord(dataId, type, options.style, options.priceScaleId ?? 'right');
     // A pane starts quoting the instrument the moment the host plots a price on
     // it, which is how a second symbol on a pane of its own keeps a tick-sized
     // axis. Indicator plots come through here with `claimPrimary` false, so an
     // oscillator can never promote the pane it draws in.
-    if (claimPrimary && getChartType(type).isPriceSeries) this._host._claimPricePane(this._host._panes[paneIndex]);
+    if (claimPrimary && getChartType(type).isPriceSeries) this._host._scales._claimPricePane(this._host._panes[paneIndex]);
     // The first price-type series drives the magnet crosshair + OHLC legend.
     const isPrimary = claimPrimary && this._host._firstDataId.value === null && getChartType(type).isPriceSeries;
     if (isPrimary) {
@@ -133,7 +127,7 @@ export class ChartSeries {
       this._host._firstPane = this._host._panes[paneIndex];
     }
     this._host._panes[paneIndex].addSeries(record);
-    this._host._recomputeAxisColumns(); // reserve/free the axis columns
+    this._host._layout._recomputeAxisColumns(); // reserve/free the axis columns
     /**
      * The pane this series lives on, held BY IDENTITY rather than by the index
      * it happened to be created at.
@@ -185,9 +179,9 @@ export class ChartSeries {
         this._host._seriesProvenance.delete(dataId);
         if (this._host._firstDataId.value === dataId) this._host._firstDataId.value = null;
         if (this._host._primary?.record === record) { this._host._primary = null; owner.pane.setSourceSeries(null); }
-        if (!owner.indicatorOwned) this._host._reconcileIndicatorRanges();
+        if (!owner.indicatorOwned) this._host._studies._reconcileIndicatorRanges();
         this._host._timeScale.setBaseIndex(this._host._dataLayer.baseIndex);
-        this._host._recomputeAxisColumns();
+        this._host._layout._recomputeAxisColumns();
         this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
         if (primary) {
           this._host.emit('data:update', { kind: 'reset' });
@@ -199,19 +193,19 @@ export class ChartSeries {
         const m = new SeriesMarkers(dataId, fallbackBars, () => owner.pane.scaleOf(record));
         // Resolved now, not at creation: primitives are addressed by slot, and
         // this series' slot may have shifted since.
-        this._host._addPrimitive(this._host._panes.indexOf(owner.pane), m);
+        this._host._primitives._addPrimitive(this._host._panes.indexOf(owner.pane), m);
         return m;
       },
     };
     this._host._seriesRecords.set(api, record);
     bindSeriesProvenance(api, provenance);
     this._host._seriesOwners.set(api, owner);
-    if (!owner.indicatorOwned) this._host._reconcileIndicatorRanges();
+    if (!owner.indicatorOwned) this._host._studies._reconcileIndicatorRanges();
     if (isPrimary) {
       this._host._primary = { api, record };
       this._host._panes[paneIndex].setSourceSeries(record);
       // A source added after a layout placed it goes where the layout says.
-      if (this._host._sourceAbove !== undefined) this._host._placeSource();
+      if (this._host._sourceAbove !== undefined) this._host._primitives._placeSource();
       this._host.emit('objects:change', {});
     }
     return api;
@@ -265,7 +259,7 @@ export class ChartSeries {
     if (kind === 'append' && !wasAtRight) {
       this._host._mutateTimeScale(() => this._host._timeScale.setRightOffset(this._host._timeScale.rightOffset - 1));
     }
-    if (dataId === this._host._firstDataId.value) this._host._invalidateIndicators();
+    if (dataId === this._host._firstDataId.value) this._host._studies._invalidateIndicators();
     this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._host._updateAccessibleSummary();
     if (dataId === this._host._firstDataId.value) this._host.emit('data:update', { kind: 'update', time: bar.time });
@@ -273,7 +267,7 @@ export class ChartSeries {
 
   private _setData(dataId: number, bars: readonly Bar[], options?: BarConfirmationOptions): void {
     validateSeriesOptions(options);
-    if (dataId === this._host._firstDataId.value) this._host._stopNavigationMotion();
+    if (dataId === this._host._firstDataId.value) this._host._motion._stopNavigationMotion();
     this._host._dataLayer.setSeriesData(dataId, bars);
     const sorted = this._host._dataLayer.seriesBars(dataId);
     this._host._seriesProvenance.get(dataId)?.record('reset', sorted[sorted.length - 1]?.time, options);
@@ -294,8 +288,8 @@ export class ChartSeries {
     // the base index is already right with the indicator a bar behind, and a
     // burst of ticks between two frames still costs one recompute.
     if (dataId === this._host._firstDataId.value) {
-      this._host._invalidateIndicators();
-      this._host._flushIndicators();
+      this._host._studies._invalidateIndicators();
+      this._host._studies._flushIndicators();
     }
     this._host._timeScale.setBaseIndex(this._host._dataLayer.baseIndex);
     if (!this._host._hasFitContent && this._host._dataLayer.length > 0) {
@@ -315,7 +309,7 @@ export class ChartSeries {
     // baseIndex shifts up by the inserted count; updating it keeps the same
     // bars on screen because (rightEdge − index) is invariant.
     this._host._timeScale.setBaseIndex(this._host._dataLayer.baseIndex);
-    if (dataId === this._host._firstDataId.value) this._host._invalidateIndicators();
+    if (dataId === this._host._firstDataId.value) this._host._studies._invalidateIndicators();
     this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._host._updateAccessibleSummary();
     if (dataId === this._host._firstDataId.value) this._host.emit('data:update', { kind: 'prepend' });

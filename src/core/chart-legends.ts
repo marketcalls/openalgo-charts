@@ -14,13 +14,10 @@
  * exports the class and the chart holds it in a private field, so none of it
  * reaches the published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
-import type { Pane } from './pane';
-import type { IndicatorInstance } from '../model/indicator-instance';
-import type { IPrimitive, PrimitivePlacement } from '../primitives/primitive';
+import { InvalidationLevel } from './invalidate-mask';
+import type { Chart } from './chart';
 import { paneLegendRowHeight, type PaneLegend, type PaneLegendAction } from '../primitives/pane-legend';
 import { IndicatorLegendToggle, INDICATOR_LEGEND_TOGGLE } from '../primitives/indicator-legend-toggle';
-import type { TimeNavigator } from '../primitives/time-navigator';
 
 /** PaneLegend's own defaults, restated so a pane can be reset to them. */
 export const DEFAULT_LEGEND_TOP = 6;
@@ -36,35 +33,38 @@ function leadActions(actions: readonly PaneLegendAction[] = [], lead: boolean): 
 }
 
 /**
- * The slice of the chart the legend rows read and drive. Members carry the
- * chart's own names, so the moved code reads as it did in chart.ts.
+ * The slice of the chart the legend rows read and drive. The chart itself is
+ * the host: each member carries the name and the type of the chart's own, so
+ * the moved code reads as it did in chart.ts, and a member the chart renames
+ * or retypes fails to compile here.
  */
 export interface LegendsHost {
-  readonly _panes: readonly Pane[];
-  readonly _primaryPane: Pane;
-  readonly _indicators: readonly IndicatorInstance[];
-  readonly _legends: readonly { legend: PaneLegend; paneIndex: number }[];
-  readonly _studyLegends: ReadonlySet<PaneLegend>;
-  readonly _legendActions: WeakMap<PaneLegend, [own: readonly PaneLegendAction[], shown: readonly PaneLegendAction[] | undefined]>;
-  readonly _collapsed: WeakSet<Pane>;
-  readonly _indicatorLegendCollapsed: boolean;
-  readonly _legendIconSize: number | undefined;
-  readonly _leftAxisWidth: number;
-  readonly _timeNav: TimeNavigator | null;
-  _primaryIndex(): number;
-  _priceCornerIndex(): number;
-  _collapsedShown(index: number): boolean;
-  _runShortcut(command: string): boolean;
-  addPrimitive(primitive: IPrimitive, where: PrimitivePlacement): void;
-  removePrimitive(primitive: IPrimitive): void;
-  setIndicatorLegendCollapsed(on: boolean): void;
-  removeIndicator(instanceId: string): boolean;
-  movePane(index: number, direction: -1 | 1): boolean;
-  setPaneCollapsed(index: number, collapsed: boolean): boolean;
-  paneCollapsed(index: number): boolean;
-  maximizePane(index: number): boolean;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  emit(event: string, payload: unknown): void;
+  readonly _panes: Chart['_panes'];
+  readonly _primaryPane: Chart['_primaryPane'];
+  readonly _indicators: Chart['_indicators'];
+  readonly _legends: Chart['_legends'];
+  readonly _studyLegends: Chart['_studyLegends'];
+  readonly _legendActions: Chart['_legendActions'];
+  readonly _collapsed: Chart['_collapsed'];
+  readonly _indicatorLegendCollapsed: Chart['_indicatorLegendCollapsed'];
+  readonly _legendIconSize: Chart['_legendIconSize'];
+  readonly _leftAxisWidth: Chart['_leftAxisWidth'];
+  readonly _timeNav: Chart['_timeNav'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _primitives: Chart['_primitives'];
+  readonly _layout: Chart['_layout'];
+  _primaryIndex: Chart['_primaryIndex'];
+  _runShortcut: Chart['_runShortcut'];
+  addPrimitive: Chart['addPrimitive'];
+  removePrimitive: Chart['removePrimitive'];
+  setIndicatorLegendCollapsed: Chart['setIndicatorLegendCollapsed'];
+  removeIndicator: Chart['removeIndicator'];
+  movePane: Chart['movePane'];
+  setPaneCollapsed: Chart['setPaneCollapsed'];
+  paneCollapsed: Chart['paneCollapsed'];
+  maximizePane: Chart['maximizePane'];
+  invalidate: Chart['invalidate'];
+  emit: Chart['emit'];
 }
 
 export class ChartLegends {
@@ -89,7 +89,7 @@ export class ChartLegends {
    */
   public _restackLegends(): void {
     const rowByPane = new Map<number, number>();
-    const top = this._host._priceCornerIndex(), count = this._host._indicators.length;
+    const top = this._host._primitives._priceCornerIndex(), count = this._host._indicators.length;
     const leads = new Map<number, PaneLegend>();
     for (const { legend, paneIndex } of this._host._legends) if (this._host._studyLegends.has(legend) && !leads.has(paneIndex)) leads.set(paneIndex, legend);
     // A study pane's first study row carries the pane controls, open or folded,
@@ -101,7 +101,7 @@ export class ChartLegends {
     // compact rows leave it showing. A strip is one row tall, so a row below
     // it neither draws nor answers the pointer: it would start inside the
     // strip's lower inset.
-    const strip = (entry: { legend: PaneLegend; paneIndex: number }): boolean => leads.get(entry.paneIndex) === entry.legend && this._host._collapsedShown(entry.paneIndex);
+    const strip = (entry: { legend: PaneLegend; paneIndex: number }): boolean => leads.get(entry.paneIndex) === entry.legend && this._host._layout._collapsedShown(entry.paneIndex);
     // A row offers only what its study's policy lets the user do: no close
     // button on a study the user may not remove, no gear on one they may not
     // configure. The pane controls act on the pane and stay.
@@ -111,7 +111,7 @@ export class ChartLegends {
       let row = rowByPane.get(entry.paneIndex) ?? 0;
       const owned = this._host._studyLegends.has(entry.legend);
       const folded = owned && this._host._indicatorLegendCollapsed && !strip(entry);
-      entry.legend.setSuppressed(folded || row > 0 && this._host._collapsedShown(entry.paneIndex));
+      entry.legend.setSuppressed(folded || row > 0 && this._host._layout._collapsedShown(entry.paneIndex));
       if (count > 0 && entry.paneIndex === top && owned && !reserved) {
         this._indicatorLegendRow = row++;
         reserved = true;
@@ -156,7 +156,7 @@ export class ChartLegends {
    * Host-added legend rows are left alone: the host positions its own.
    */
   private _syncLegendOffsets(): void {
-    const corner = this._host._priceCornerIndex(), primary = this._host._primaryIndex();
+    const corner = this._host._primitives._priceCornerIndex(), primary = this._host._primaryIndex();
     const height = paneLegendRowHeight({ iconSize: this._host._legendIconSize });
     const defaultToggleTop = this._legendOffset.top + this._indicatorLegendRow * height;
     let toggleTop = defaultToggleTop;

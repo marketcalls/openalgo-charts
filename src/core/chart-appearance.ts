@@ -16,63 +16,54 @@
  * exports the class and the chart holds it in a private field, so none of it
  * reaches the published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
-import type { Pane, PaneRenderContext } from './pane';
-import type { ChartWatermarkOptions, ExportSvgOptions, LayoutSetter } from './chart-types';
+import { InvalidationLevel } from './invalidate-mask';
+import type { PaneRenderContext } from './pane';
+import type { ChartWatermarkOptions, ExportSvgOptions } from './chart-types';
 import type { Chart } from './chart';
-import type { ChartTheme } from '../theme';
-import type { PriceScaleOptions } from '../scale/price-scale';
-import type { TickMarkType } from '../render/axis';
-import type { CanvasOptions, GridOptions } from '../render/grid';
 import { SvgContext } from '../render/svg-export';
-import type { ChartDataContext } from '../model/indicator-registry';
-import type { CrosshairMode } from '../input/crosshair';
-import type { IPrimitive, PrimitivePlacement } from '../primitives/primitive';
-import type { LegendStatusLineOptions } from '../primitives/pane-legend';
 import { LogoWatermark, type LogoWatermarkOptions } from '../primitives/watermark';
 import { TextWatermark } from '../primitives/text-watermark';
 
 /**
  * The slice of the chart the branding, the background text, the option batch
- * and the exports read, write and drive. Members carry the chart's own names,
- * so the moved code reads as it did in chart.ts. The writable fields are the
- * chart's own, written through.
+ * and the exports read, write and drive. The chart itself is the host: each
+ * member carries the name and the type of the chart's own, so the moved code
+ * reads as it did in chart.ts, and a member the chart renames or retypes fails
+ * to compile here. The writable fields are the chart's own, assigned here.
  */
 export interface AppearanceHost {
-  readonly _panes: readonly Pane[];
-  readonly _doc: Document;
-  readonly _theme: ChartTheme;
-  readonly _dataContext: Readonly<ChartDataContext> | undefined;
-  _width: number;
-  _height: number;
-  _layoutRatio: number;
-  _branding: LogoWatermark | null;
-  _crosshairMode: CrosshairMode;
-  _crosshairSnapToBar: boolean;
-  _pixelRatio(): number;
-  _paneLayout(): { top: number; height: number }[];
-  _layoutWeight(index: number): number;
-  _topPaneIndex(): number;
-  _ratioForLayout(): number;
-  _relayout(geometryOnly?: boolean): void;
-  _renderContext(paneIndex: number): PaneRenderContext;
-  _flushIndicators(): void;
-  _withinLayoutChange<T>(fn: () => T): T;
-  _layoutChanged(setter: LayoutSetter): void;
-  brandingOptions(): false | LogoWatermarkOptions;
-  addPrimitive(primitive: IPrimitive, where: PrimitivePlacement): void;
-  removePrimitive(primitive: IPrimitive): void;
-  setTheme(theme: ChartTheme): void;
-  setGridOptions(opts: Partial<GridOptions>): void;
-  setCanvasOptions(patch: CanvasOptions): void;
-  setStatusLineOptions(patch: LegendStatusLineOptions): void;
-  setLegendIconSize(size: number): void;
-  setPriceScaleOptions(patch: Partial<PriceScaleOptions>): void;
-  setPriceFormatter(fn: ((price: number) => string) | null): void;
-  setTimeFormatter(fn: ((utcSeconds: number, tickMark?: TickMarkType) => string) | undefined): void;
-  setTimezone(zone: string): void;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  emit(event: string, payload: unknown): void;
+  readonly _panes: Chart['_panes'];
+  readonly _doc: Chart['_doc'];
+  readonly _theme: Chart['_theme'];
+  readonly _dataContext: Chart['_dataContext'];
+  _width: Chart['_width'];
+  _height: Chart['_height'];
+  _layoutRatio: Chart['_layoutRatio'];
+  _branding: Chart['_branding'];
+  _crosshairMode: Chart['_crosshairMode'];
+  _crosshairSnapToBar: Chart['_crosshairSnapToBar'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _layout: Chart['_layout'];
+  readonly _studies: Chart['_studies'];
+  _pixelRatio: Chart['_pixelRatio'];
+  _paneLayout: Chart['_paneLayout'];
+  _renderContext: Chart['_renderContext'];
+  _withinLayoutChange: Chart['_withinLayoutChange'];
+  _layoutChanged: Chart['_layoutChanged'];
+  brandingOptions: Chart['brandingOptions'];
+  addPrimitive: Chart['addPrimitive'];
+  removePrimitive: Chart['removePrimitive'];
+  setTheme: Chart['setTheme'];
+  setGridOptions: Chart['setGridOptions'];
+  setCanvasOptions: Chart['setCanvasOptions'];
+  setStatusLineOptions: Chart['setStatusLineOptions'];
+  setLegendIconSize: Chart['setLegendIconSize'];
+  setPriceScaleOptions: Chart['setPriceScaleOptions'];
+  setPriceFormatter: Chart['setPriceFormatter'];
+  setTimeFormatter: Chart['setTimeFormatter'];
+  setTimezone: Chart['setTimezone'];
+  invalidate: Chart['invalidate'];
+  emit: Chart['emit'];
 }
 
 export class ChartAppearance {
@@ -145,7 +136,7 @@ export class ChartAppearance {
     g.fillRect(0, 0, out.width, out.height);
     const layout = this._host._paneLayout();
     for (let i = 0; i < this._host._panes.length; i++) {
-      if (this._host._layoutWeight(i) <= 0) continue;
+      if (this._host._layout._layoutWeight(i) <= 0) continue;
       const y = Math.round((layout[i]?.top ?? 0) * dpr);
       for (const layer of [this._host._panes[i].base, this._host._panes[i].top]) {
         // Hidden or unmeasured buffers are invalid Canvas2D image sources.
@@ -169,19 +160,19 @@ export class ChartAppearance {
     // The same order as a frame: indicator recomputes land before anything is
     // measured, so a study whose inputs changed this tick exports as it will
     // next paint, not as it last did.
-    this._host._flushIndicators();
+    this._host._studies._flushIndicators();
     const liveWidth = this._host._width;
     const liveHeight = this._host._height;
     const liveRatio = this._host._layoutRatio;
     // The document is at ratio 1 on every screen, so its panes are laid out at
     // 1 too: laid out at the screen's ratio, the same chart would export other
     // pane boundaries on a 1.5x laptop than on a 1x or 2x monitor.
-    const relaid = width !== liveWidth || height !== liveHeight || this._host._ratioForLayout() !== 1;
+    const relaid = width !== liveWidth || height !== liveHeight || this._host._layout._ratioForLayout() !== 1;
     this._host._layoutRatio = 1;
     if (relaid) {
       this._host._width = width;
       this._host._height = height;
-      this._host._relayout(true);
+      this._host._layout._relayout(true);
     }
     try {
       if (background && this._host._theme.background !== 'transparent') {
@@ -189,9 +180,9 @@ export class ChartAppearance {
         svg.fillRect(0, 0, width, height);
       }
       const layout = this._host._paneLayout();
-      const topPane = this._host._topPaneIndex();
+      const topPane = this._host._layout._topPaneIndex();
       for (let i = 0; i < this._host._panes.length; i++) {
-        if (this._host._layoutWeight(i) <= 0) continue; // hidden behind a maximized pane
+        if (this._host._layout._layoutWeight(i) <= 0) continue; // hidden behind a maximized pane
         const pane = this._host._panes[i];
         const ctx: PaneRenderContext = {
           ...this._host._renderContext(i),
@@ -223,7 +214,7 @@ export class ChartAppearance {
       if (relaid) {
         this._host._width = liveWidth;
         this._host._height = liveHeight;
-        this._host._relayout(true);
+        this._host._layout._relayout(true);
         // Every auto scale was just measured against the export geometry; a
         // Full frame measures it back against the screen's.
         this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));

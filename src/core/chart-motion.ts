@@ -9,10 +9,8 @@
  * no entry point exports the class and the chart holds it in a private
  * field, so none of it reaches the published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
-import type { RafScheduler, RafCanceller } from './render-loop';
-import type { ChartNavigationOptions } from './chart-types';
-import type { TimeScale } from '../scale/time-scale';
+import { InvalidationLevel } from './invalidate-mask';
+import type { Chart } from './chart';
 import { KineticAnimation } from '../input/kinetic';
 import { ZoomGlide } from '../input/zoom-glide';
 
@@ -22,19 +20,21 @@ const KINETIC_MAX_FRAMES = 600;
 const ZOOM_GLIDE_MAX_FRAMES = 600;
 
 /**
- * The slice of the chart the motion reads and drives. Members carry the
- * chart's own names, so the moved code reads as it did in chart.ts.
+ * The slice of the chart the motion reads and drives. The chart itself is the
+ * host: each member carries the name and the type of the chart's own, so the
+ * moved code reads as it did in chart.ts, and a member the chart renames or
+ * retypes fails to compile here.
  */
 export interface MotionHost {
-  readonly _navigation: Readonly<ChartNavigationOptions>;
-  readonly _destroyed: boolean;
-  readonly _raf: { schedule: RafScheduler; cancel: RafCanceller };
-  readonly _timeScale: TimeScale;
-  _now(): number;
-  _mutateTimeScale<T>(apply: () => T): T;
-  _maybeLoadHistory(): void;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  _emitViewport(type: 'pan' | 'zoom'): void;
+  readonly _navigation: Chart['_navigation'];
+  readonly _destroyed: Chart['_destroyed'];
+  readonly _raf: Chart['_raf'];
+  readonly _timeScale: Chart['_timeScale'];
+  _now: Chart['_now'];
+  _mutateTimeScale: Chart['_mutateTimeScale'];
+  _maybeLoadHistory: Chart['_maybeLoadHistory'];
+  invalidate: Chart['invalidate'];
+  _emitViewport: Chart['_emitViewport'];
 }
 
 export class ChartMotion {

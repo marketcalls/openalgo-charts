@@ -15,29 +15,22 @@
  * class and the chart holds it in a private field, so none of it reaches the
  * published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
-import type { Pane, PaneRenderContext } from './pane';
-import type { ChartMotion } from './chart-motion';
+import { InvalidationLevel } from './invalidate-mask';
 import type {
-  ZoomAnchor, DoubleClickAction, DoubleClickEvent, ChartNavigationOptions, CrosshairMoveEvent,
-  PointerSample, PointerInfo, ChartDragEvent, ChartDragEndEvent, ContextMenuTarget, ContextMenuEvent,
+  DoubleClickEvent, CrosshairMoveEvent, PointerSample, PointerInfo, ChartDragEvent, ChartDragEndEvent,
+  ContextMenuTarget, ContextMenuEvent,
 } from './chart-types';
-import type { ChartClickEvent } from './chart';
-import type { ChartTheme } from '../theme';
-import type { TimeScale, LogicalRange } from '../scale/time-scale';
+import type { Chart, ChartClickEvent } from './chart';
 import type { PriceScale } from '../scale/price-scale';
-import type { GridOptions } from '../render/grid';
-import type { DataLayer } from '../model/data-layer';
-import type { SeriesApi, SeriesRecord } from '../model/series';
+import type { SeriesRecord } from '../model/series';
 import { getChartType } from '../model/chart-type-registry';
 import { getIndicator } from '../model/indicator-registry';
-import type { IndicatorInstance } from '../model/indicator-instance';
 import type { PriceAxisSlot } from '../model/price-axis-layout';
 import type { Bar } from '../model/bar';
 import { KineticAnimation } from '../input/kinetic';
 import { ZoomGlide } from '../input/zoom-glide';
 import { wheelPixels, wheelLogFactor } from '../input/wheel';
-import { magnetSnapPrice, type CrosshairMode } from '../input/crosshair';
+import { magnetSnapPrice } from '../input/crosshair';
 import { ShortcutManager } from '../input/shortcuts';
 import { pinchState, pinchDelta, type PinchState } from '../input/touch';
 import type { PrimitiveHit } from '../primitives/primitive';
@@ -82,85 +75,85 @@ function pointerPressure(e: PointerLike): number {
 }
 
 /**
- * The slice of the chart the input routing reads and drives. Members carry the
- * chart's own names, so the moved code reads as it did in chart.ts. The
- * writable fields are the chart's own, written through.
+ * The slice of the chart the input routing reads and drives. The chart itself
+ * is the host: each member carries the name and the type of the chart's own,
+ * so the moved code reads as it did in chart.ts, and a member the chart
+ * renames or retypes fails to compile here. The writable fields are the
+ * chart's own, assigned here.
  */
 export interface InputHost {
-  readonly _destroyed: boolean;
-  readonly _panes: readonly Pane[];
-  readonly _primaryPane: Pane;
-  readonly _container: HTMLElement;
-  readonly _doc: Document;
-  readonly _width: number;
-  readonly _height: number;
-  readonly _leftAxisWidth: number;
-  readonly _rightAxisWidth: number;
-  readonly _timeAxisHeight: number;
-  readonly _timeScale: TimeScale;
-  readonly _dataLayer: DataLayer;
-  readonly _navigation: Readonly<ChartNavigationOptions>;
-  readonly _motion: ChartMotion;
-  readonly _branding: LogoWatermark | null;
-  readonly _indicators: readonly IndicatorInstance[];
-  readonly _seriesRecords: WeakMap<SeriesApi, SeriesRecord>;
-  readonly _listeners: ReadonlyMap<string, ReadonlySet<(payload: unknown) => void>>;
-  readonly _shortcuts: ShortcutManager | null;
-  readonly _firstDataId: { readonly value: number | null };
-  readonly _timeNavPane: number;
-  readonly _theme: ChartTheme;
-  readonly _gridVert: boolean;
-  readonly _gridHorz: boolean;
-  readonly _zoomAnchor: ZoomAnchor;
-  readonly _animZoom: boolean;
-  readonly _doubleClick: DoubleClickAction;
-  _crosshairMode: CrosshairMode;
+  readonly _destroyed: Chart['_destroyed'];
+  readonly _panes: Chart['_panes'];
+  readonly _primaryPane: Chart['_primaryPane'];
+  readonly _container: Chart['_container'];
+  readonly _doc: Chart['_doc'];
+  readonly _width: Chart['_width'];
+  readonly _height: Chart['_height'];
+  readonly _leftAxisWidth: Chart['_leftAxisWidth'];
+  readonly _rightAxisWidth: Chart['_rightAxisWidth'];
+  readonly _timeAxisHeight: Chart['_timeAxisHeight'];
+  readonly _timeScale: Chart['_timeScale'];
+  readonly _dataLayer: Chart['_dataLayer'];
+  readonly _navigation: Chart['_navigation'];
+  readonly _motion: Chart['_motion'];
+  readonly _branding: Chart['_branding'];
+  readonly _indicators: Chart['_indicators'];
+  readonly _seriesRecords: Chart['_seriesRecords'];
+  readonly _listeners: Chart['_listeners'];
+  readonly _shortcuts: Chart['_shortcuts'];
+  readonly _firstDataId: Chart['_firstDataId'];
+  readonly _timeNavPane: Chart['_timeNavPane'];
+  readonly _theme: Chart['_theme'];
+  readonly _gridVert: Chart['_gridVert'];
+  readonly _gridHorz: Chart['_gridHorz'];
+  readonly _zoomAnchor: Chart['_zoomAnchor'];
+  readonly _animZoom: Chart['_animZoom'];
+  readonly _doubleClick: Chart['_doubleClick'];
+  _crosshairMode: Chart['_crosshairMode'];
   /** The fling velocity and its last sample: the chart's own fields, which a test sets there by name. */
-  _dragVelocity: number;
-  _lastDragX: number;
-  _lastDragT: number;
+  _dragVelocity: Chart['_dragVelocity'];
+  _lastDragX: Chart['_lastDragX'];
+  _lastDragT: Chart['_lastDragT'];
   /** The chart's own listener functions, added here and removed by the chart, by identity. */
-  readonly _onPointerEnter: () => void;
-  readonly _onContextMenu: (e: MouseEvent) => void;
-  readonly _onPointerDown: (e: PointerEvent) => void;
-  readonly _onPointerMove: (e: PointerEvent) => void;
-  readonly _onPointerUp: (e: PointerEvent) => void;
-  readonly _onPointerUpNative: (e: PointerEvent) => void;
-  readonly _onPointerCancel: (e: PointerEvent) => void;
-  readonly _onLostPointerCapture: (e: PointerEvent) => void;
-  readonly _onPointerLeave: () => void;
-  readonly _onWheel: (e: WheelEvent) => void;
-  readonly _onDblClick: (e: { clientX: number; clientY: number }) => void;
-  readonly _onKeyDown: (e: KeyboardEvent) => void;
-  _now(): number;
-  _pixelRatio(): number;
-  _renderContext(paneIndex: number): PaneRenderContext;
-  _paneLayout(): { top: number; height: number }[];
-  _bottomPaneIndex(): number;
-  _collapsedShown(index: number): boolean;
-  _dividerAt(y: number): [number, number] | null;
-  _relayout(): void;
-  _ensureScaled(paneIndex: number): void;
-  _xToTime(x: number): number;
-  _mutateTimeScale<T>(apply: () => T): T;
-  _emitViewport(type: 'pan' | 'zoom'): void;
-  _emitViewportIfMoved(before: LogicalRange): void;
-  _maybeLoadHistory(): void;
-  _startKinetic(velocity: number): void;
-  _indicatorLegendHit(paneIndex: number, x: number, y: number): boolean;
-  _handleLegendAction(externalId: string): boolean;
-  _feedTimeNav(p: { x: number; y: number } | null): void;
-  _firstPaneSlot(): number;
-  _navigationAllowed(command: string): boolean;
-  _updateAccessibleSummary(): void;
-  priceAxisLayout(paneIndex: number): readonly PriceAxisSlot[];
-  resetScale(): void;
-  fitContent(): void;
-  downloadScreenshot(): void;
-  setGridOptions(opts: Partial<GridOptions>): void;
-  maximizePane(index: number): boolean;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  emit(event: string, payload: unknown): void;
+  readonly _onPointerEnter: Chart['_onPointerEnter'];
+  readonly _onContextMenu: Chart['_onContextMenu'];
+  readonly _onPointerDown: Chart['_onPointerDown'];
+  readonly _onPointerMove: Chart['_onPointerMove'];
+  readonly _onPointerUp: Chart['_onPointerUp'];
+  readonly _onPointerUpNative: Chart['_onPointerUpNative'];
+  readonly _onPointerCancel: Chart['_onPointerCancel'];
+  readonly _onLostPointerCapture: Chart['_onLostPointerCapture'];
+  readonly _onPointerLeave: Chart['_onPointerLeave'];
+  readonly _onWheel: Chart['_onWheel'];
+  readonly _onDblClick: Chart['_onDblClick'];
+  readonly _onKeyDown: Chart['_onKeyDown'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _layout: Chart['_layout'];
+  readonly _legendStack: Chart['_legendStack'];
+  _now: Chart['_now'];
+  _pixelRatio: Chart['_pixelRatio'];
+  _renderContext: Chart['_renderContext'];
+  _paneLayout: Chart['_paneLayout'];
+  _bottomPaneIndex: Chart['_bottomPaneIndex'];
+  _ensureScaled: Chart['_ensureScaled'];
+  _xToTime: Chart['_xToTime'];
+  _mutateTimeScale: Chart['_mutateTimeScale'];
+  _emitViewport: Chart['_emitViewport'];
+  _emitViewportIfMoved: Chart['_emitViewportIfMoved'];
+  _maybeLoadHistory: Chart['_maybeLoadHistory'];
+  _startKinetic: Chart['_startKinetic'];
+  _handleLegendAction: Chart['_handleLegendAction'];
+  _feedTimeNav: Chart['_feedTimeNav'];
+  _navigationAllowed: Chart['_navigationAllowed'];
+  _updateAccessibleSummary: Chart['_updateAccessibleSummary'];
+  priceAxisLayout: Chart['priceAxisLayout'];
+  resetScale: Chart['resetScale'];
+  fitContent: Chart['fitContent'];
+  downloadScreenshot: Chart['downloadScreenshot'];
+  setGridOptions: Chart['setGridOptions'];
+  maximizePane: Chart['maximizePane'];
+  invalidate: Chart['invalidate'];
+  emit: Chart['emit'];
 }
 
 export class ChartInput {
@@ -344,7 +337,7 @@ export class ChartInput {
     const context = this._host._renderContext(p.pane);
     const hit = this._hitAt(p.pane, p.x, p.localY);
     // A strip plots nothing, so nothing on it can be under the pointer.
-    const record = index === null || this._host._collapsedShown(p.pane) ? null : this._seriesAt(p.pane, index, p.localY);
+    const record = index === null || this._host._layout._collapsedShown(p.pane) ? null : this._seriesAt(p.pane, index, p.localY);
     // What is painted on top takes the menu: a drawing placed under a source
     // or a study loses the pointer to that series where the two overlap.
     if (hit != null && !(record !== null && hit.paintedBy !== undefined && pane.paintsBelowSeries(hit.paintedBy, record, context))) {
@@ -409,7 +402,7 @@ export class ChartInput {
    * pick somewhere nobody can see.
    */
   private _priceAt(paneIndex: number, y: number): number | null {
-    return this._host._collapsedShown(paneIndex) ? null : this._host._panes[paneIndex]?.yToPrice(y) ?? null;
+    return this._host._layout._collapsedShown(paneIndex) ? null : this._host._panes[paneIndex]?.yToPrice(y) ?? null;
   }
 
   /** Resume overlay repaints after the native context menu closes. */
@@ -496,7 +489,7 @@ export class ChartInput {
 
     // Pane divider: pressing within a few px of the boundary between two panes
     // starts a resize, redistributing weight between them.
-    const divider = this._host._dividerAt(p.y);
+    const divider = this._host._layout._dividerAt(p.y);
     if (divider !== null) {
       const layout = this._host._paneLayout();
       const [a, b] = divider;
@@ -543,7 +536,7 @@ export class ChartInput {
       return;
     }
 
-    if (this._host._indicatorLegendHit(p.pane, p.x, p.localY)) {
+    if (this._host._legendStack._indicatorLegendHit(p.pane, p.x, p.localY)) {
       this._lastPressOnIndicatorToggle = true;
       this._indicatorTogglePress = { pointerId: e.pointerId, moved: false };
       this._dragging = false;
@@ -671,7 +664,7 @@ export class ChartInput {
       const aH = Math.max(min, Math.min(total - min, r.aHeight + (p.y - r.startY)));
       this._host._panes[r.a].weight = (aH / total) * sum;
       this._host._panes[r.b].weight = sum - this._host._panes[r.a].weight;
-      this._host._relayout();
+      this._host._layout._relayout();
       this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
       return;
     }
@@ -719,7 +712,7 @@ export class ChartInput {
       // Horizontal-only mode preserves autoscale when the pointer moves vertically.
       if (e.pointerType === 'touch' || this._host._navigation.mousePan === 'both') {
         // A strip's scale is not on screen, so a drag across it pans time only.
-        const scale = this._host._collapsedShown(this._downPane) ? undefined : this._host._panes[this._downPane]?.priceScale;
+        const scale = this._host._layout._collapsedShown(this._downPane) ? undefined : this._host._panes[this._downPane]?.priceScale;
         const fromStart = p.y - this._dragStartY;
         // Minor mouse/pen drift must not turn an automatic axis into a frozen
         // manual range. Once vertical movement is intentional, include its full
@@ -775,7 +768,7 @@ export class ChartInput {
       const p = this._localPoint(e);
       this._endedPointers.add(e.pointerId);
       if (!togglePress.moved && p.pane === this._downPane && Math.abs(p.x - this._downX) <= 3
-        && Math.abs(p.localY - this._downLocalY) <= 3 && this._host._indicatorLegendHit(p.pane, p.x, p.localY)) {
+        && Math.abs(p.localY - this._downLocalY) <= 3 && this._host._legendStack._indicatorLegendHit(p.pane, p.x, p.localY)) {
         this._host._handleLegendAction(INDICATOR_LEGEND_TOGGLE);
       }
       return;
@@ -1061,7 +1054,7 @@ export class ChartInput {
     // two later plot or axis presses retain the normal double-click action.
     if (this._lastPressOnIndicatorToggle || this._previousPressOnIndicatorToggle) return;
     const p = this._localPoint(e);
-    if (this._host._indicatorLegendHit(p.pane, p.x, p.localY)) return;
+    if (this._host._legendStack._indicatorLegendHit(p.pane, p.x, p.localY)) return;
     // The mark's own double click does nothing; one on a drawing over it is the drawing's.
     if (this._brandingHit(p.pane, p.x, p.localY)
       && !this._host._panes[p.pane]?.hitTestPrimitives(p.x - this._host._leftAxisWidth, p.localY, this._host._renderContext(p.pane), this._host._branding)) return;
@@ -1104,7 +1097,7 @@ export class ChartInput {
       if (zoom) this._host._timeScale.zoomAtX(cur.cx, d.factor);
       if (pan) this._host._timeScale.setRightOffset(this._host._timeScale.rightOffset - d.dx / this._host._timeScale.barSpacing);
     });
-    if (pan && d.dy !== 0 && !this._host._collapsedShown(this._pinchPane)) this._host._panes[this._pinchPane]?.priceScale.panByPixels(d.dy);
+    if (pan && d.dy !== 0 && !this._host._layout._collapsedShown(this._pinchPane)) this._host._panes[this._pinchPane]?.priceScale.panByPixels(d.dy);
     this._host._maybeLoadHistory();
     this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._host._emitViewport(zoom ? 'zoom' : 'pan');
@@ -1240,7 +1233,7 @@ export class ChartInput {
     const hit = this._hitAt(paneIndex, x, localY);
     // A pane boundary beats a primitive hit: the divider is a thin target and
     // the legend rows sit right below one.
-    if (hit === null && this._host._dividerAt(containerY) !== null) {
+    if (hit === null && this._host._layout._dividerAt(containerY) !== null) {
       this._setHover(null);
       this._host._container.style.cursor = 'row-resize';
       return;
@@ -1260,7 +1253,7 @@ export class ChartInput {
         hoveredBar = bars[0].bar;
         // Magnet only snaps within the pane that holds the price series, never
         // in the volume/indicator panes (their scale isn't a price scale).
-        if (this._host._crosshairMode === 'magnet' && paneIndex === this._host._firstPaneSlot()) {
+        if (this._host._crosshairMode === 'magnet' && paneIndex === this._host._layout._firstPaneSlot()) {
           const snapped = magnetSnapPrice(pane.yToPrice(localY), hoveredBar);
           y = pane.priceToY(snapped);
         }

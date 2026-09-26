@@ -18,24 +18,16 @@
  * internal class; no entry point exports the class and the chart holds it in
  * a private field, so none of it reaches the published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
-import type { RenderLoop } from './render-loop';
-import type { Pane } from './pane';
-import type { AddSeriesOptions } from './chart-types';
+import { InvalidationLevel } from './invalidate-mask';
+import type { Chart } from './chart';
 import type { PreservedScaleFormats } from './chart-state';
 import type { PriceScale } from '../scale/price-scale';
-import type { DataLayer } from '../model/data-layer';
-import type { SeriesApi, SeriesRecord, PriceScaleId } from '../model/series';
-import type { SeriesProvenance } from '../model/series-provenance';
+import type { SeriesApi, PriceScaleId } from '../model/series';
 import { replayWindow, observeReplayWindow } from '../model/replay-window';
 import { runAbortable } from '../model/abortable-request';
 import { cloneIndicatorSettings, planIndicatorDependencies } from '../model/indicator-dependencies';
 import type { SeriesType } from '../model/chart-type-registry';
-import {
-  getIndicator, plotStyleKeys,
-  type ChartDataContext, type IndicatorBarsProvider, type IndicatorBarsProviderAccess, type IndicatorDescriptor,
-  type IndicatorSettings,
-} from '../model/indicator-registry';
+import { getIndicator, plotStyleKeys, type IndicatorDescriptor, type IndicatorSettings } from '../model/indicator-registry';
 import {
   IndicatorInstance, parseIndicatorPlotPriceScales, validateIndicatorScaleAssignment, type IndicatorApi, type IndicatorHost,
 } from '../model/indicator-instance';
@@ -47,7 +39,6 @@ import type { IPrimitive } from '../primitives/primitive';
 import type { PriceLine, PriceLineOptions } from '../primitives/price-line';
 import { PaneLegend, type PaneLegendAction } from '../primitives/pane-legend';
 import { ChartTable } from '../primitives/table';
-import type { TimeNavigator } from '../primitives/time-navigator';
 
 /**
  * Colours the 2nd and later instances of the same indicator rotate through.
@@ -60,71 +51,60 @@ const INSTANCE_PALETTE: readonly string[] = [
 ];
 
 /**
- * The slice of the chart the study host reads, writes and drives. Members
- * carry the chart's own names, so the moved code reads as it did in chart.ts.
- * The two writable fields are the chart's own, written through.
+ * The slice of the chart the study host reads, writes and drives. The chart
+ * itself is the host: each member carries the name and the type of the chart's
+ * own, so the moved code reads as it did in chart.ts, and a member the chart
+ * renames or retypes fails to compile here. The two writable fields are the
+ * chart's own, assigned here.
  */
 export interface StudiesHost {
-  readonly _panes: readonly Pane[];
-  readonly _primaryPane: Pane;
-  readonly _indicators: IndicatorInstance[];
-  readonly _indicatorRanges: Map<string, {
-    pane: Pane; scaleId: PriceScaleId; range: { min: number; max: number };
-    series: readonly SeriesApi[]; token: object;
-  }>;
-  readonly _ownedScaleRanges: Map<PriceScale, object>;
-  readonly _indicatorRefreshes: Map<string, boolean>;
-  readonly _indicatorReservedIds: Set<string>;
-  readonly _seriesRecords: WeakMap<SeriesApi, SeriesRecord>;
-  readonly _seriesOwners: WeakMap<SeriesApi, {
-    pane: Pane; priceFormat?: AddSeriesOptions['priceFormat']; inheritedStyle: Partial<SeriesStyle>; indicatorOwned: boolean;
-  }>;
-  readonly _seriesProvenance: ReadonlyMap<number, SeriesProvenance>;
-  readonly _firstDataId: { readonly value: number | null };
-  readonly _dataLayer: DataLayer;
-  readonly _loop: RenderLoop;
-  readonly _legends: readonly { legend: PaneLegend; paneIndex: number }[];
-  readonly _legendActions: WeakMap<PaneLegend, [own: readonly PaneLegendAction[], shown: readonly PaneLegendAction[] | undefined]>;
-  readonly _studyLegends: Set<PaneLegend>;
-  readonly _timeNav: TimeNavigator | null;
-  readonly _anchored: readonly { primitive: IPrimitive }[];
-  readonly _timezone: string;
-  readonly _dataContext: Readonly<ChartDataContext> | undefined;
-  readonly _barsProvider: IndicatorBarsProvider | IndicatorBarsProviderAccess | null;
-  readonly _barsRequests: AbortController;
-  readonly _barsProviderRevision: number;
-  readonly _requestedDataRevision: number;
-  readonly _destroyed: boolean;
-  readonly isDestroyed: boolean;
-  _indicatorsDirty: boolean;
-  _scaleMutationDepth: number;
-  _wallClock(): number;
-  _primaryIndex(): number;
-  _readoutIndex(): number | undefined;
-  _validPriceScaleId(value: unknown): value is PriceScaleId;
-  _policyAllows(study: IndicatorApi, flag: keyof IndicatorPolicy, options: IndicatorEditOptions): boolean;
-  seriesType(series: SeriesApi): SeriesType | null;
-  primarySeries(): SeriesApi | null;
-  hasSnapshotProvider(): boolean;
-  _createSeries(type: SeriesType, options: AddSeriesOptions, claimPrimary: boolean,
-    preservedFormats?: PreservedScaleFormats): SeriesApi;
-  _setSeriesType(series: SeriesApi, type: SeriesType, notify: boolean): boolean;
-  _applySeriesPriceFormat(scale: PriceScale, pf: AddSeriesOptions['priceFormat']): void;
-  _applyPrecision(scale: PriceScale, precision: number | undefined): void;
-  addPriceLine(opts: PriceLineOptions, paneIndex?: number): PriceLine;
-  _addPrimitive(paneIndex: number, primitive: IPrimitive): void;
-  removePrimitive(primitive: IPrimitive): void;
-  _ensurePane(index: number): void;
-  removePane(index: number): boolean;
-  _placeSource(): void;
-  _reanchorSource(): void;
-  _syncLegendPanes(): void;
-  _restackLegends(): void;
-  _recomputeAxisColumns(): void;
-  _relayout(): void;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  on(event: string, cb: (payload: unknown) => void): () => void;
-  emit(event: string, payload: unknown): void;
+  readonly _panes: Chart['_panes'];
+  readonly _primaryPane: Chart['_primaryPane'];
+  readonly _indicators: Chart['_indicators'];
+  readonly _indicatorRanges: Chart['_indicatorRanges'];
+  readonly _ownedScaleRanges: Chart['_ownedScaleRanges'];
+  readonly _indicatorRefreshes: Chart['_indicatorRefreshes'];
+  readonly _indicatorReservedIds: Chart['_indicatorReservedIds'];
+  readonly _seriesRecords: Chart['_seriesRecords'];
+  readonly _seriesOwners: Chart['_seriesOwners'];
+  readonly _seriesProvenance: Chart['_seriesProvenance'];
+  readonly _firstDataId: Chart['_firstDataId'];
+  readonly _dataLayer: Chart['_dataLayer'];
+  readonly _loop: Chart['_loop'];
+  readonly _legends: Chart['_legends'];
+  readonly _legendActions: Chart['_legendActions'];
+  readonly _studyLegends: Chart['_studyLegends'];
+  readonly _timeNav: Chart['_timeNav'];
+  readonly _anchored: Chart['_anchored'];
+  readonly _timezone: Chart['_timezone'];
+  readonly _dataContext: Chart['_dataContext'];
+  readonly _barsProvider: Chart['_barsProvider'];
+  readonly _barsRequests: Chart['_barsRequests'];
+  readonly _barsProviderRevision: Chart['_barsProviderRevision'];
+  readonly _requestedDataRevision: Chart['_requestedDataRevision'];
+  readonly _destroyed: Chart['_destroyed'];
+  readonly isDestroyed: Chart['isDestroyed'];
+  _indicatorsDirty: Chart['_indicatorsDirty'];
+  _scaleMutationDepth: Chart['_scaleMutationDepth'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _series: Chart['_series'];
+  readonly _primitives: Chart['_primitives'];
+  readonly _layout: Chart['_layout'];
+  readonly _legendStack: Chart['_legendStack'];
+  _wallClock: Chart['_wallClock'];
+  _primaryIndex: Chart['_primaryIndex'];
+  _readoutIndex: Chart['_readoutIndex'];
+  _validPriceScaleId: Chart['_validPriceScaleId'];
+  _policyAllows: Chart['_policyAllows'];
+  seriesType: Chart['seriesType'];
+  primarySeries: Chart['primarySeries'];
+  hasSnapshotProvider: Chart['hasSnapshotProvider'];
+  addPriceLine: Chart['addPriceLine'];
+  removePrimitive: Chart['removePrimitive'];
+  removePane: Chart['removePane'];
+  invalidate: Chart['invalidate'];
+  on: Chart['on'];
+  emit: Chart['emit'];
 }
 
 export class ChartStudies {
@@ -189,7 +169,7 @@ export class ChartStudies {
       policy,
     );
     this._host._indicators.push(instance);
-    this._host._restackLegends();
+    this._host._legendStack._restackLegends();
     this._host._indicatorReservedIds.add(instance.id);
     this._queueIndicatorDependents(instance.id, true);
     this._host.emit('objects:change', {});
@@ -235,7 +215,7 @@ export class ChartStudies {
     if (this._host.isDestroyed || !instance || !this._host._policyAllows(instance, 'movable', options) || !Number.isInteger(paneIndex) || paneIndex < 0 || paneIndex > this._host._panes.length || instance.paneIndex === paneIndex || !instance.canRelocate(paneIndex)) return false;
     const previous = instance.paneIndex;
     const freshTarget = paneIndex === this._host._panes.length;
-    this._host._ensurePane(paneIndex);
+    this._host._layout._ensurePane(paneIndex);
     const target = this._host._panes[paneIndex];
     const resources = instance.renderResources();
     for (const { api, overlay } of resources.series) {
@@ -249,8 +229,8 @@ export class ChartStudies {
       target.addSeries(record);
       owner.pane = target;
       if (freshTarget && target.series().filter(item => item.scaleId === record.scaleId).length === 1) target.scaleOf(record).setOptions(options);
-      this._host._applySeriesPriceFormat(target.scaleOf(record), owner.priceFormat);
-      if (record.style.precision !== undefined) this._host._applyPrecision(target.scaleOf(record), record.style.precision);
+      this._host._series._applySeriesPriceFormat(target.scaleOf(record), owner.priceFormat);
+      if (record.style.precision !== undefined) this._host._series._applyPrecision(target.scaleOf(record), record.style.precision);
     }
     for (const { primitive, overlay } of resources.primitives) {
       if (overlay) continue;
@@ -258,16 +238,16 @@ export class ChartStudies {
     }
     instance.relocate(paneIndex);
     // The source keeps its place when the study it sat on leaves its pane.
-    this._host._reanchorSource();
-    this._host._syncLegendPanes();
+    this._host._primitives._reanchorSource();
+    this._host._legendStack._syncLegendPanes();
     // Alert visuals resolve the instance's new pane before we decide whether its old pane is empty.
     this._host.emit('objects:change', {});
     // Retain a pane holding drawings or host visuals even after its last plot moves.
     const source = this._host._panes[previous];
     if (source !== this._host._primaryPane && source.series().length === 0 && source.primitives().every(primitive => primitive === this._host._timeNav || this._host._anchored.some(entry => entry.primitive === primitive))) this._host.removePane(previous);
     this._reorderIndicatorResources();
-    this._host._recomputeAxisColumns();
-    this._host._relayout();
+    this._host._layout._recomputeAxisColumns();
+    this._host._layout._relayout();
     this._host.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
     this._host.emit('objects:change', {});
     return true;
@@ -302,8 +282,8 @@ export class ChartStudies {
     const owned = new Set(legends);
     let index = 0;
     for (const entry of this._host._legends) if (owned.has(entry.legend)) entry.legend = legends[index++];
-    this._host._placeSource();
-    this._host._syncLegendPanes();
+    this._host._primitives._placeSource();
+    this._host._legendStack._syncLegendPanes();
   }
 
   /** The work of `Chart.removeIndicator`, which carries the documented contract. */
@@ -321,8 +301,8 @@ export class ChartStudies {
     }
     const { indicatorId, paneIndex } = this._host._indicators[i];
     this._host._indicators.splice(i, 1);
-    this._host._reanchorSource();
-    this._host._restackLegends();
+    this._host._primitives._reanchorSource();
+    this._host._legendStack._restackLegends();
     this._host._indicatorReservedIds.add(instanceId);
     this._host._indicatorRefreshes.delete(instanceId);
     this._queueIndicatorDependents(instanceId, true);
@@ -342,7 +322,7 @@ export class ChartStudies {
       assignIndicatorScale: (id, series, primitives, commit) => this._assignIndicatorScale(id, series, primitives, commit),
       bindIndicatorPrimitiveScale: (primitive, scaleId) => {
         this._host._panes.find(pane => pane.hasPrimitive(primitive))?.bindPrimitiveScale(primitive, scaleId);
-        this._host._recomputeAxisColumns();
+        this._host._layout._recomputeAxisColumns();
         this._host.invalidate(mask => mask.invalidateGlobal(InvalidationLevel.Full));
       },
       setIndicatorRange: (id, paneIndex, scaleId, range, series) => {
@@ -384,7 +364,7 @@ export class ChartStudies {
       formatPrice: (paneIndex: number, value: number, series?: SeriesApi): string | undefined =>
         (series?.priceScale() ?? this._host._panes[paneIndex]?.priceScale)?.format(value),
       policyChanged: (): void => {
-        this._host._restackLegends();
+        this._host._legendStack._restackLegends();
         this._host.emit('objects:change', {});
       },
       addIndicatorLegend: (o): PaneLegend => {
@@ -402,19 +382,19 @@ export class ChartStudies {
         const legend = new PaneLegend({ ...o, actions: paneActions });
         this._host._legendActions.set(legend, [paneActions, legend.options().actions]);
         this._host._studyLegends.add(legend);
-        this._host._addPrimitive(o.paneIndex, legend);
+        this._host._primitives._addPrimitive(o.paneIndex, legend);
         return legend;
       },
       removeIndicatorLegend: (legend): void => {
         this._host._studyLegends.delete(legend);
         this._host.removePrimitive(legend);
-        this._host._restackLegends();
+        this._host._legendStack._restackLegends();
       },
       legendRowsOn: (paneIndex): number => this._host._legends.filter((l) => l.paneIndex === paneIndex).length,
       primarySeries: (): SeriesApi | null => this._host.primarySeries(),
-      setIndicatorSeriesType: (series, type) => this._host._setSeriesType(series, type as SeriesType, false),
+      setIndicatorSeriesType: (series, type) => this._host._series._setSeriesType(series, type as SeriesType, false),
       addIndicatorSeries: (type, paneIndex, style, priceScaleId, priceFormat): SeriesApi =>
-        this._host._createSeries(
+        this._host._series._createSeries(
           type as SeriesType,
           {
             paneIndex,
@@ -436,14 +416,14 @@ export class ChartStudies {
         return this._host.addPriceLine(opts, paneIndex);
       },
       removeIndicatorLevel: (line): void => this._host.removePrimitive(line),
-      addIndicatorFill: (fill, paneIndex): void => this._host._addPrimitive(paneIndex, fill),
+      addIndicatorFill: (fill, paneIndex): void => this._host._primitives._addPrimitive(paneIndex, fill),
       removeIndicatorFill: (fill): void => this._host.removePrimitive(fill),
       removeIndicatorMarkers: (markers): void => this._host.removePrimitive(markers),
-      addIndicatorPrimitive: (p, paneIndex): void => this._host._addPrimitive(paneIndex, p),
+      addIndicatorPrimitive: (p, paneIndex): void => this._host._primitives._addPrimitive(paneIndex, p),
       removeIndicatorPrimitive: (p): void => this._host.removePrimitive(p),
       addIndicatorTable: (paneIndex): ChartTable => {
         const t = new ChartTable();
-        this._host._addPrimitive(paneIndex, t);
+        this._host._primitives._addPrimitive(paneIndex, t);
         return t;
       },
       removeIndicatorTable: (table): void => this._host.removePrimitive(table),
@@ -552,12 +532,12 @@ export class ChartStudies {
         const record = this._host._seriesRecords.get(api)!, owner = this._host._seriesOwners.get(api)!;
         const target = owner.pane.scaleFor(scaleId);
         record.scaleId = scaleId;
-        this._host._applySeriesPriceFormat(target, owner.priceFormat);
-        if (record.style.precision !== undefined) this._host._applyPrecision(target, record.style.precision);
+        this._host._series._applySeriesPriceFormat(target, owner.priceFormat);
+        if (record.style.precision !== undefined) this._host._series._applyPrecision(target, record.style.precision);
       }
       for (const { primitive, scaleId } of primitives) this._host._panes.find(pane => pane.hasPrimitive(primitive))!.bindPrimitiveScale(primitive, scaleId);
       commit();
-      this._host._recomputeAxisColumns();
+      this._host._layout._recomputeAxisColumns();
     } finally {
       this._host._scaleMutationDepth--;
       this._host.invalidate(mask => mask.invalidateGlobal(InvalidationLevel.Full));

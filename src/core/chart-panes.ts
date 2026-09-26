@@ -16,22 +16,13 @@
  * point exports the class and the chart holds it in a private field, so none
  * of it reaches the published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
+import { InvalidationLevel } from './invalidate-mask';
+import type { Chart } from './chart';
 import { Pane } from './pane';
 import { alignToDevicePixels } from './canvas';
-import type { ChartPixels } from './chart-pixels';
 import { DEFAULT_LEGEND_TOP } from './chart-legends';
-import type { ChartTheme } from '../theme';
-import type { TimeScale } from '../scale/time-scale';
-import type { PriceScaleOptions } from '../scale/price-scale';
-import type { IRenderBackend } from '../render/backend';
-import type { DataLayer } from '../model/data-layer';
-import type { SeriesProvenance } from '../model/series-provenance';
-import type { IndicatorApi, IndicatorInstance } from '../model/indicator-instance';
-import type { IndicatorEditOptions, IndicatorPolicy } from '../model/indicator-policy';
-import type { IPrimitive } from '../primitives/primitive';
+import type { IndicatorEditOptions } from '../model/indicator-policy';
 import { paneLegendRowHeight } from '../primitives/pane-legend';
-import type { EventMarkers } from '../primitives/event-markers';
 
 /**
  * Decimals a pane that does not quote the instrument prints at least.
@@ -45,59 +36,60 @@ import type { EventMarkers } from '../primitives/event-markers';
 export const NON_INSTRUMENT_PRECISION = 2;
 
 /**
- * The slice of the chart the pane stack reads, writes and drives. Members
- * carry the chart's own names, so the moved code reads as it did in chart.ts.
- * The writable fields are the chart's own, written through.
+ * The slice of the chart the pane stack reads, writes and drives. The chart
+ * itself is the host: each member carries the name and the type of the chart's
+ * own, so the moved code reads as it did in chart.ts, and a member the chart
+ * renames or retypes fails to compile here. The writable fields are the
+ * chart's own, assigned here.
  */
 export interface PanesHost {
-  readonly _panes: Pane[];
-  readonly _firstPane: Pane | null;
-  readonly _pricePanes: WeakSet<Pane>;
-  readonly _collapsed: WeakSet<Pane>;
-  readonly _container: HTMLElement;
-  readonly _doc: Document;
-  readonly _theme: ChartTheme;
-  readonly _timeScale: TimeScale;
-  readonly _dataLayer: DataLayer;
-  readonly _pixels: ChartPixels;
-  readonly _indicators: IndicatorInstance[];
-  readonly _seriesProvenance: Map<number, SeriesProvenance>;
-  readonly _firstDataId: { value: number | null };
-  readonly _priceFormatter: ((price: number) => string) | null;
-  readonly _priceScaleOptions: Partial<PriceScaleOptions> | null;
-  readonly _priceAxisWidth: number;
-  readonly _timeAxisHeight: number;
-  readonly _width: number;
-  readonly _height: number;
-  readonly _legendIconSize: number | undefined;
-  readonly _movablePrimaryPane: boolean;
-  readonly _eventMarkers: EventMarkers | null;
-  readonly _destroyed: boolean;
-  _primaryPane: Pane;
-  _eventPane: number;
-  _drawingState: unknown;
-  _layoutRatio: number;
-  _leftAxisWidth: number;
-  _rightAxisWidth: number;
-  _axisColumnWidth: number;
-  _emptyPriceAxis: boolean;
-  _pixelRatio(): number;
-  _newBackend(): IRenderBackend;
-  _scalePatchFor(pane: Pane, patch: Partial<PriceScaleOptions>): Partial<PriceScaleOptions>;
-  _primaryIndex(): number;
-  _ensureScaled(paneIndex: number): void;
-  _policyAllows(study: IndicatorApi, flag: keyof IndicatorPolicy, options: IndicatorEditOptions): boolean;
-  _syncTimeNavPane(): void;
-  _restackLegends(): void;
-  _syncLegendPanes(): void;
-  _rehomeAnchored(): void;
-  _addPrimitive(paneIndex: number, primitive: IPrimitive): void;
-  removePrimitive(primitive: IPrimitive): void;
-  _paintNow(): void;
-  applySize(width: number, height: number): void;
-  movePane(index: number, direction: -1 | 1): boolean;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  emit(event: string, payload: unknown): void;
+  readonly _panes: Chart['_panes'];
+  readonly _firstPane: Chart['_firstPane'];
+  readonly _pricePanes: Chart['_pricePanes'];
+  readonly _collapsed: Chart['_collapsed'];
+  readonly _container: Chart['_container'];
+  readonly _doc: Chart['_doc'];
+  readonly _theme: Chart['_theme'];
+  readonly _timeScale: Chart['_timeScale'];
+  readonly _dataLayer: Chart['_dataLayer'];
+  readonly _pixels: Chart['_pixels'];
+  readonly _indicators: Chart['_indicators'];
+  readonly _seriesProvenance: Chart['_seriesProvenance'];
+  readonly _firstDataId: Chart['_firstDataId'];
+  readonly _priceFormatter: Chart['_priceFormatter'];
+  readonly _priceScaleOptions: Chart['_priceScaleOptions'];
+  readonly _priceAxisWidth: Chart['_priceAxisWidth'];
+  readonly _timeAxisHeight: Chart['_timeAxisHeight'];
+  readonly _width: Chart['_width'];
+  readonly _height: Chart['_height'];
+  readonly _legendIconSize: Chart['_legendIconSize'];
+  readonly _movablePrimaryPane: Chart['_movablePrimaryPane'];
+  readonly _eventMarkers: Chart['_eventMarkers'];
+  readonly _destroyed: Chart['_destroyed'];
+  _primaryPane: Chart['_primaryPane'];
+  _eventPane: Chart['_eventPane'];
+  _drawingState: Chart['_drawingState'];
+  _layoutRatio: Chart['_layoutRatio'];
+  _leftAxisWidth: Chart['_leftAxisWidth'];
+  _rightAxisWidth: Chart['_rightAxisWidth'];
+  _axisColumnWidth: Chart['_axisColumnWidth'];
+  _emptyPriceAxis: Chart['_emptyPriceAxis'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _scales: Chart['_scales'];
+  readonly _legendStack: Chart['_legendStack'];
+  readonly _primitives: Chart['_primitives'];
+  _pixelRatio: Chart['_pixelRatio'];
+  _newBackend: Chart['_newBackend'];
+  _primaryIndex: Chart['_primaryIndex'];
+  _ensureScaled: Chart['_ensureScaled'];
+  _policyAllows: Chart['_policyAllows'];
+  _syncTimeNavPane: Chart['_syncTimeNavPane'];
+  removePrimitive: Chart['removePrimitive'];
+  _paintNow: Chart['_paintNow'];
+  applySize: Chart['applySize'];
+  movePane: Chart['movePane'];
+  invalidate: Chart['invalidate'];
+  emit: Chart['emit'];
 }
 
 export class ChartPanes {
@@ -132,7 +124,7 @@ export class ChartPanes {
     // silent: `paneRemoved` existed with no counterpart. A host with chrome at
     // the bottom of the chart had no way to learn the bottom had moved. Emitted
     // after the relayout so a listener reads settled geometry.
-    this._host._rehomeAnchored();
+    this._host._primitives._rehomeAnchored();
     for (const paneIndex of added) this._host.emit('paneAdded', { paneIndex });
   }
 
@@ -155,7 +147,7 @@ export class ChartPanes {
       for (const scale of pane.scales()) scale.setOptions({ minPrecision: NON_INSTRUMENT_PRECISION });
     }
     pane.priceScale.setPriceFormatter(this._host._priceFormatter);
-    if (this._host._priceScaleOptions) pane.priceScale.setOptions(this._host._scalePatchFor(pane, this._host._priceScaleOptions));
+    if (this._host._priceScaleOptions) pane.priceScale.setOptions(this._host._scales._scalePatchFor(pane, this._host._priceScaleOptions));
     this._host._panes.push(pane);
     this._host._container.appendChild(pane.element);
     this._host._pixels._observeCanvases(pane, true);
@@ -202,7 +194,7 @@ export class ChartPanes {
     if (!geometryOnly) {
       this._host._syncTimeNavPane();
       // Weights just changed, so the pane at the chart's top may have too.
-      this._host._restackLegends();
+      this._host._legendStack._restackLegends();
     }
     const dpr = this._host._pixelRatio();
     if (!geometryOnly) this._host._layoutRatio = dpr;
@@ -357,7 +349,7 @@ export class ChartPanes {
       const home = this._host._primaryIndex();
       if (this._host._eventMarkers !== null) {
         this._host.removePrimitive(this._host._eventMarkers);
-        this._host._addPrimitive(home, this._host._eventMarkers);
+        this._host._primitives._addPrimitive(home, this._host._eventMarkers);
         this._host.emit('events:change', undefined);
       }
       this._host._eventPane = home;
@@ -396,8 +388,8 @@ export class ChartPanes {
     this._recomputeAxisColumns();
     this._relayout();
     this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
-    this._host._rehomeAnchored();
-    this._host._syncLegendPanes();
+    this._host._primitives._rehomeAnchored();
+    this._host._legendStack._syncLegendPanes();
     this._remapSavedDrawings(slot => slot === index ? null : slot > index ? slot - 1 : slot);
     this._host.emit('paneRemoved', { paneIndex: index });
     return true;
@@ -450,8 +442,8 @@ export class ChartPanes {
     for (const pane of panes) this._host._container.appendChild(pane.element);
     this._relayout();
     this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
-    this._host._rehomeAnchored();
-    this._host._syncLegendPanes();
+    this._host._primitives._rehomeAnchored();
+    this._host._legendStack._syncLegendPanes();
     this._host.emit('paneMoved', { from: index, to: target });
     return true;
   }
@@ -485,7 +477,7 @@ export class ChartPanes {
     this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     // Maximize is the case a host cannot work around: it HIDES the other panes,
     // so chrome pinned to the price pane disappears rather than merely sitting wrong.
-    this._host._rehomeAnchored();
+    this._host._primitives._rehomeAnchored();
     this._host.emit('paneMaximized', { paneIndex: this._maximizedPane });
     return true;
   }
@@ -502,7 +494,7 @@ export class ChartPanes {
     this._relayout();
     this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     // The lowest open pane may have changed, and the brand mark lives there.
-    this._host._rehomeAnchored();
+    this._host._primitives._rehomeAnchored();
     if (ended) this._host.emit('paneMaximized', { paneIndex: null });
     this._host.emit('paneCollapsed', { paneIndex: index, collapsed });
     return true;

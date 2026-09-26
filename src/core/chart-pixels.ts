@@ -10,29 +10,33 @@
  * class and the chart holds it in a private field, so none of it reaches the
  * published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
+import { InvalidationLevel } from './invalidate-mask';
+import type { Chart } from './chart';
 import type { Pane } from './pane';
 import type { CanvasLayer } from './canvas';
 
 /**
- * The slice of the chart the observation reads and drives. Members carry the
- * chart's own names, so the moved code reads as it did in chart.ts.
+ * The slice of the chart the observation reads and drives. The chart itself is
+ * the host: each member carries the name and the type of the chart's own, so
+ * the moved code reads as it did in chart.ts, and a member the chart renames
+ * or retypes fails to compile here.
  */
 export interface PixelsHost {
-  readonly _destroyed: boolean;
-  readonly _destroying: boolean;
-  readonly _panes: readonly Pane[];
-  readonly _container: HTMLElement;
-  readonly _doc: Document;
-  readonly _layoutRatio: number;
+  readonly _destroyed: Chart['_destroyed'];
+  readonly _destroying: Chart['_destroying'];
+  readonly _panes: Chart['_panes'];
+  readonly _container: Chart['_container'];
+  readonly _doc: Chart['_doc'];
+  readonly _layoutRatio: Chart['_layoutRatio'];
   /** The chart's own listener functions, added here and removed here by identity. */
-  readonly _onPixelRatio: () => void;
-  readonly _checkPixelRatio: () => void;
-  applySize(width: number, height: number): void;
-  _paintNow(): void;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  _pixelRatio(): number;
-  _relayout(): void;
+  readonly _onPixelRatio: Chart['_onPixelRatio'];
+  readonly _checkPixelRatio: Chart['_checkPixelRatio'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _layout: Chart['_layout'];
+  applySize: Chart['applySize'];
+  _paintNow: Chart['_paintNow'];
+  invalidate: Chart['invalidate'];
+  _pixelRatio: Chart['_pixelRatio'];
 }
 
 export class ChartPixels {
@@ -163,7 +167,7 @@ export class ChartPixels {
   /** Size the canvases again if the ratio is no longer the one they were sized at. */
   public _checkPixelRatio(): void {
     if (this._host._destroyed || this._host._destroying || this._host._pixelRatio() === this._host._layoutRatio) return;
-    this._host._relayout();
+    this._host._layout._relayout();
     this._host.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
     this._host._paintNow();
   }

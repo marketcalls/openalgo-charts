@@ -18,29 +18,26 @@
  * and the chart holds it in a private field, so none of it reaches the
  * published declarations.
  */
-import type { Pane, PaneRenderContext } from './pane';
-import type { AddSeriesOptions } from './chart-types';
-import type { PriceAxisState } from './chart';
+import type { Pane } from './pane';
+import type { Chart, PriceAxisState } from './chart';
 import { NON_INSTRUMENT_PRECISION } from './chart-panes';
 import type { PriceScaleOptions } from '../scale/price-scale';
-import type { SeriesApi, SeriesRecord, PriceScaleId } from '../model/series';
-import type { IndicatorInstance } from '../model/indicator-instance';
-import type { SeriesStyle } from '../render/series-style';
+import type { PriceScaleId } from '../model/series';
 
 /**
- * The slice of the chart the price-scale logic reads. Members carry the
- * chart's own names, so the moved code reads as it did in chart.ts.
+ * The slice of the chart the price-scale logic reads. The chart itself is the
+ * host: each member carries the name and the type of the chart's own, so the
+ * moved code reads as it did in chart.ts, and a member the chart renames or
+ * retypes fails to compile here.
  */
 export interface ScalesHost {
-  readonly _panes: readonly Pane[];
-  readonly _pricePanes: WeakSet<Pane>;
-  readonly _priceScaleOptions: Partial<PriceScaleOptions> | null;
-  readonly _indicators: readonly IndicatorInstance[];
-  readonly _seriesRecords: WeakMap<SeriesApi, SeriesRecord>;
-  readonly _seriesOwners: WeakMap<SeriesApi, {
-    pane: Pane; priceFormat?: AddSeriesOptions['priceFormat']; inheritedStyle: Partial<SeriesStyle>; indicatorOwned: boolean;
-  }>;
-  _renderContext(paneIndex: number): PaneRenderContext;
+  readonly _panes: Chart['_panes'];
+  readonly _pricePanes: Chart['_pricePanes'];
+  readonly _priceScaleOptions: Chart['_priceScaleOptions'];
+  readonly _indicators: Chart['_indicators'];
+  readonly _seriesRecords: Chart['_seriesRecords'];
+  readonly _seriesOwners: Chart['_seriesOwners'];
+  _renderContext: Chart['_renderContext'];
 }
 
 export class ChartScales {

@@ -18,57 +18,52 @@
  * exports the class and the chart holds it in a private field, so none of it
  * reaches the published declarations.
  */
-import { InvalidationLevel, type InvalidateMask } from './invalidate-mask';
+import { InvalidationLevel } from './invalidate-mask';
 import type { Pane } from './pane';
-import type { AddSeriesOptions, ChartEventClick, ChartEventOptions } from './chart-types';
-import type { ChartClickEvent } from './chart';
-import type { SeriesApi, SeriesRecord } from '../model/series';
-import type { IndicatorInstance, IndicatorApi } from '../model/indicator-instance';
-import type { IndicatorEditOptions, IndicatorPolicy } from '../model/indicator-policy';
-import type { SeriesStyle } from '../render/series-style';
+import type { ChartEventClick, ChartEventOptions } from './chart-types';
+import type { Chart, ChartClickEvent } from './chart';
+import type { SeriesRecord } from '../model/series';
+import type { IndicatorEditOptions } from '../model/indicator-policy';
 import type { IPrimitive, PrimitiveHost, PrimitiveAnchor } from '../primitives/primitive';
 import { EventMarkers, type ChartEvent } from '../primitives/event-markers';
-import { PaneLegend, type LegendStatusLineOptions } from '../primitives/pane-legend';
+import { PaneLegend } from '../primitives/pane-legend';
 
 /**
  * The slice of the chart the primitives, the series band and the event strip
- * read, write and drive. Members carry the chart's own names, so the moved
- * code reads as it did in chart.ts. The writable fields are the chart's own,
- * written through.
+ * read, write and drive. The chart itself is the host: each member carries the
+ * name and the type of the chart's own, so the moved code reads as it did in
+ * chart.ts, and a member the chart renames or retypes fails to compile here.
+ * The writable fields are the chart's own, assigned here.
  */
 export interface PrimitivesHost {
-  readonly _panes: readonly Pane[];
-  readonly _indicators: IndicatorInstance[];
-  readonly _primary: { api: SeriesApi; record: SeriesRecord } | null;
-  readonly _seriesRecords: WeakMap<SeriesApi, SeriesRecord>;
-  readonly _seriesOwners: WeakMap<SeriesApi, {
-    pane: Pane; priceFormat?: AddSeriesOptions['priceFormat']; inheritedStyle: Partial<SeriesStyle>; indicatorOwned: boolean;
-  }>;
-  readonly _legends: { legend: PaneLegend; paneIndex: number }[];
-  readonly _anchored: { primitive: IPrimitive; anchor: PrimitiveAnchor }[];
-  readonly _statusLine: LegendStatusLineOptions;
-  readonly _legendIconSize: number | undefined;
-  readonly isDestroyed: boolean;
-  readonly hasOpenInterest: boolean | undefined;
-  _events: readonly ChartEvent[];
-  _eventMarkers: EventMarkers | null;
-  _eventPane: number;
-  _sourceAbove: string | null | undefined;
-  _primaryIndex(): number;
-  _bottomPaneIndex(open?: boolean): number;
-  _topPaneIndex(): number;
-  _layoutWeight(index: number): number;
-  _ensurePane(index: number): void;
-  _paneLayout(): { top: number; height: number }[];
-  _restackLegends(): void;
-  _recomputeAxisColumns(): void;
-  _policyAllows(study: IndicatorApi, flag: keyof IndicatorPolicy, options: IndicatorEditOptions): boolean;
-  _reorderIndicatorResources(): void;
-  seriesStack(paneIndex: number): string[];
-  removePrimitive(primitive: IPrimitive): void;
-  invalidate(build: (mask: InvalidateMask) => void): void;
-  on(event: string, cb: (payload: unknown) => void): () => void;
-  emit(event: string, payload: unknown): void;
+  readonly _panes: Chart['_panes'];
+  readonly _indicators: Chart['_indicators'];
+  readonly _primary: Chart['_primary'];
+  readonly _seriesRecords: Chart['_seriesRecords'];
+  readonly _seriesOwners: Chart['_seriesOwners'];
+  readonly _legends: Chart['_legends'];
+  readonly _anchored: Chart['_anchored'];
+  readonly _statusLine: Chart['_statusLine'];
+  readonly _legendIconSize: Chart['_legendIconSize'];
+  readonly isDestroyed: Chart['isDestroyed'];
+  readonly hasOpenInterest: Chart['hasOpenInterest'];
+  _events: Chart['_events'];
+  _eventMarkers: Chart['_eventMarkers'];
+  _eventPane: Chart['_eventPane'];
+  _sourceAbove: Chart['_sourceAbove'];
+  /** The chart's other collaborators, whose methods this code calls directly. */
+  readonly _layout: Chart['_layout'];
+  readonly _legendStack: Chart['_legendStack'];
+  readonly _studies: Chart['_studies'];
+  _primaryIndex: Chart['_primaryIndex'];
+  _bottomPaneIndex: Chart['_bottomPaneIndex'];
+  _paneLayout: Chart['_paneLayout'];
+  _policyAllows: Chart['_policyAllows'];
+  seriesStack: Chart['seriesStack'];
+  removePrimitive: Chart['removePrimitive'];
+  invalidate: Chart['invalidate'];
+  on: Chart['on'];
+  emit: Chart['emit'];
 }
 
 export class ChartPrimitives {
@@ -148,7 +143,7 @@ export class ChartPrimitives {
     for (let i = 0; i < this._host._indicators.length; i++) if (members.has(this._host._indicators[i])) this._host._indicators[i] = studies[k++];
     const at = next.indexOf('source:primary');
     if (at >= 0) this._host._sourceAbove = at === 0 ? null : next[at - 1].slice('indicator:'.length);
-    this._host._reorderIndicatorResources();
+    this._host._studies._reorderIndicatorResources();
     this._host.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
     this._host.emit('objects:change', {});
     return true;
@@ -226,7 +221,7 @@ export class ChartPrimitives {
   /** The pane a chart anchor currently resolves to. */
   public _anchorTarget(anchor: PrimitiveAnchor): number {
     if (anchor === 'chart-bottom') return this._host._bottomPaneIndex(true);
-    return anchor === 'primary-pane' ? this._priceCornerIndex() : this._host._topPaneIndex();
+    return anchor === 'primary-pane' ? this._priceCornerIndex() : this._host._layout._topPaneIndex();
   }
 
   /**
@@ -239,7 +234,7 @@ export class ChartPrimitives {
    */
   public _priceCornerIndex(): number {
     const primary = this._host._primaryIndex();
-    return this._host._layoutWeight(primary) > 0 ? primary : this._host._topPaneIndex();
+    return this._host._layout._layoutWeight(primary) > 0 ? primary : this._host._layout._topPaneIndex();
   }
 
   /**
@@ -268,7 +263,7 @@ export class ChartPrimitives {
   }
 
   public _addPrimitive(paneIndex: number, primitive: IPrimitive): void {
-    this._host._ensurePane(paneIndex);
+    this._host._layout._ensurePane(paneIndex);
     const host: PrimitiveHost = {
       // A 'top' primitive is drawn only by `Pane.paintTop`, so repainting the
       // base canvas for it is work nothing consumes. That is the difference
@@ -302,7 +297,7 @@ export class ChartPrimitives {
       if (this._host._legendIconSize !== undefined) {
         primitive.setOptions({ iconSize: this._host._legendIconSize });
       }
-      this._host._restackLegends();
+      this._host._legendStack._restackLegends();
     }
     this._host.invalidate((m) => m.invalidatePane(paneIndex, { level: InvalidationLevel.Light, autoScale: false }));
   }
@@ -319,8 +314,8 @@ export class ChartPrimitives {
     if (li >= 0) this._host._legends.splice(li, 1);
     for (let i = 0; i < this._host._panes.length; i++) {
       if (this._host._panes[i].removePrimitive(primitive)) {
-        if (li >= 0) this._host._restackLegends();
-        this._host._recomputeAxisColumns();
+        if (li >= 0) this._host._legendStack._restackLegends();
+        this._host._layout._recomputeAxisColumns();
         this._host.invalidate((m) => m.invalidatePane(i, { level: InvalidationLevel.Light, autoScale: false }));
         return;
       }

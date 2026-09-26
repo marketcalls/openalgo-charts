@@ -190,8 +190,14 @@ export class Chart {
   private readonly _timeAxisHeight: number;
   private _pending: InvalidateMask | null = null;
   private _scaleMutationDepth = 0;
+  // Every collaborator below takes the chart itself as its host. The cast is
+  // safe because each host interface types every member from Chart's own
+  // (`Chart['_panes']`, `Chart['_relayout']`), so a member the chart renames,
+  // drops or retypes fails to compile there. The chart rather than a separate
+  // forwarding object per collaborator, because those objects' getters and
+  // arrows ship to every page that loads the base.
   /** Size and device-pixel-ratio observation; see chart-pixels.ts. */
-  private readonly _pixels = new ChartPixels(this._pixelsHost());
+  private readonly _pixels = new ChartPixels(this as unknown as PixelsHost);
   /** The device pixel ratio the canvases were last sized at. */
   private _layoutRatio = 0;
   private _width = 0;
@@ -209,7 +215,7 @@ export class Chart {
   private _trading: TradingController | null = null;
   private _tickSchedule: TickSchedule | null = null;
   /** Pointer, wheel and keyboard routing, hover, and the gesture state they keep; see chart-input.ts. */
-  private readonly _input = new ChartInput(this._inputHost());
+  private readonly _input = new ChartInput(this as unknown as InputHost);
   private readonly _now: () => number;
   private readonly _conflate: boolean;
   private readonly _conflationFactor: number;
@@ -259,7 +265,7 @@ export class Chart {
   private _eventMarkers: EventMarkers | null = null;
   private _eventPane = 0;
   /** Attaching, stacking and re-homing primitives, and the event strip's type switches; see chart-primitives.ts. */
-  private readonly _primitives = new ChartPrimitives(this._primitivesHost());
+  private readonly _primitives = new ChartPrimitives(this as unknown as PrimitivesHost);
   private readonly _navigation: ChartNavigationOptions = { mousePan: 'both', defaultVisibleBars: 0, panEnabled: true, zoomEnabled: true };
   private _liveRegion: HTMLElement | null = null;
   // The fling velocity and the move it was last sampled at stay here although
@@ -295,7 +301,7 @@ export class Chart {
    */
   private readonly _legendActions = new WeakMap<PaneLegend, [own: readonly PaneLegendAction[], shown: readonly PaneLegendAction[] | undefined]>();
   /** Saving and restoring the chart state; see chart-state.ts. */
-  private readonly _persistence = new ChartPersistence(this._persistenceHost());
+  private readonly _persistence = new ChartPersistence(this as unknown as PersistenceHost);
   private readonly _indicatorRanges = new Map<string, {
     pane: Pane; scaleId: PriceScaleId; range: { min: number; max: number };
     series: readonly SeriesApi[]; token: object;
@@ -305,14 +311,14 @@ export class Chart {
     pane: Pane; priceFormat?: AddSeriesOptions['priceFormat']; inheritedStyle: Partial<SeriesStyle>; indicatorOwned: boolean;
   }>();
   /** Making series and the data paths behind their handles; see chart-series.ts. */
-  private readonly _series = new ChartSeries(this._seriesHost());
+  private readonly _series = new ChartSeries(this as unknown as SeriesHost);
   private _dataContext: Readonly<ChartDataContext> | undefined;
   private _barsProvider: IndicatorBarsProvider | IndicatorBarsProviderAccess | null = null;
   private _barsRequests = new AbortController();
   private _barsProviderRevision = 0;
   private _requestedDataRevision = 0;
   /** Adding, moving and recomputing studies, and the host they talk to; see chart-studies.ts. */
-  private readonly _studies = new ChartStudies(this, this._studiesHost());
+  private readonly _studies = new ChartStudies(this, this as unknown as StudiesHost);
   private _indicatorsDirty = false;
   private readonly _indicatorRefreshes = new Map<string, boolean>();
   private readonly _indicatorReservedIds = new Set<string>();
@@ -320,7 +326,7 @@ export class Chart {
   private _drawingState: unknown = undefined;
   private _alertState: AlertsDocument | undefined;
   /** Making, removing, moving, maximizing and folding panes, and their layout; see chart-panes.ts. */
-  private readonly _layout = new ChartPanes(this._panesHost());
+  private readonly _layout = new ChartPanes(this as unknown as PanesHost);
   /**
    * Panes folded to a header strip. Held by pane identity, like `_pricePanes`,
    * so the fold follows its pane through a move or a removal above it without
@@ -331,7 +337,7 @@ export class Chart {
   private readonly _legends: { legend: PaneLegend; paneIndex: number }[] = [];
   private readonly _studyLegends = new Set<PaneLegend>();
   /** Legend row stacking and offsets, the study count toggle, and legend button presses; see chart-legends.ts. */
-  private readonly _legendStack = new ChartLegends(this._legendsHost());
+  private readonly _legendStack = new ChartLegends(this as unknown as LegendsHost);
   /**
    * Pane holding the primary price series (only this pane gets magnet
    * snapping). By identity, for the reason `_primaryPane` is: a move changes
@@ -353,7 +359,7 @@ export class Chart {
    */
   private readonly _pricePanes = new WeakSet<Pane>();
   /** Which scales a price-scale setting reaches, and one axis' state; see chart-scales.ts. */
-  private readonly _scales = new ChartScales(this._scalesHost());
+  private readonly _scales = new ChartScales(this as unknown as ScalesHost);
   private _timeFormatter: ((utcSeconds: number, tickMark?: TickMarkType) => string) | undefined = undefined;
   private _timezone: string = DEFAULT_TIMEZONE;
   private _leftAxisWidth = 0; // chart-wide reserved left-axis column (0 = none)
@@ -367,7 +373,22 @@ export class Chart {
   private _timeNavPane = -1;
   private _branding: LogoWatermark | null = null;
   /** Branding options, the background text, the option batch and the exports; see chart-appearance.ts. */
-  private readonly _appearance = new ChartAppearance(this._appearanceHost());
+  private readonly _appearance = new ChartAppearance(this as unknown as AppearanceHost);
+  // The members only a collaborator reads, through its host. The unused-member
+  // check counts reads inside this class alone, and a host's `Chart['_x']`
+  // types are not reads, so these type queries tell it the members are used.
+  // Declared, so nothing of it reaches the bundle.
+  declare private readonly _readByCollaborators: [
+    typeof this._layoutRatio, typeof this._eventPane, typeof this._lastDragX, typeof this._lastDragT,
+    typeof this._dragVelocity, typeof this._zoomAnchor, typeof this._doubleClick, typeof this._sourceAbove,
+    typeof this._legendActions, typeof this._ownedScaleRanges, typeof this._indicatorsDirty,
+    typeof this._indicatorRefreshes, typeof this._studyLegends, typeof this._firstPane, typeof this._pricePanes,
+    typeof this._branding, typeof this._policyAllows, typeof this._indicatorHost, typeof this._readoutIndex,
+    typeof this._handleLegendAction, typeof this._syncTimeNavPane, typeof this._feedTimeNav,
+    typeof this._onPixelRatio, typeof this._checkPixelRatio, typeof this._paintNow, typeof this._onPointerUp,
+    typeof this._runShortcut, typeof this._updateAccessibleSummary, typeof this._maybeLoadHistory,
+    typeof this._startKinetic,
+  ];
 
   public constructor(container: HTMLElement, options: ChartOptions = {}) {
     this._timeScale = new TimeScale(options.timeScale);
@@ -397,7 +418,7 @@ export class Chart {
     this._now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : 0));
     this._animZoom = options.animZoom ?? true;
     this._barsProvider = options.barsProvider ?? null;
-    this._motion = new ChartMotion(this._motionHost(), options.animAutoscale ?? this._animZoom);
+    this._motion = new ChartMotion(this as unknown as MotionHost, options.animAutoscale ?? this._animZoom);
     this._zoomAnchor = options.zoomAnchor ?? 'cursor';
     this._doubleClick = options.doubleClick ?? 'reset';
     this._movablePrimaryPane = options.movablePrimaryPane === true;
@@ -776,50 +797,6 @@ export class Chart {
     return this._series._setSeriesType(series, type, true);
   }
 
-  /** What series creation and the data paths read, write and drive of the chart; see `SeriesHost`. */
-  private _seriesHost(): SeriesHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // and written through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _panes() { return chart._panes; },
-      get _dataLayer() { return chart._dataLayer; },
-      get _timeScale() { return chart._timeScale; },
-      get _seriesProvenance() { return chart._seriesProvenance; },
-      get _seriesRecords() { return chart._seriesRecords; },
-      get _seriesOwners() { return chart._seriesOwners; },
-      get _firstDataId() { return chart._firstDataId; },
-      get _priceFormatter() { return chart._priceFormatter; },
-      get _sourceAbove() { return chart._sourceAbove; },
-      get _width() { return chart._width; },
-      get _leftAxisWidth() { return chart._leftAxisWidth; },
-      get _rightAxisWidth() { return chart._rightAxisWidth; },
-      get _primary() { return chart._primary; },
-      set _primary(value) { chart._primary = value; },
-      get _firstPane() { return chart._firstPane; },
-      set _firstPane(value) { chart._firstPane = value; },
-      get _hasFitContent() { return chart._hasFitContent; },
-      set _hasFitContent(value) { chart._hasFitContent = value; },
-      _primaryIndex: () => this._primaryIndex(),
-      _ensurePane: index => this._layout._ensurePane(index),
-      _claimPricePane: pane => this._scales._claimPricePane(pane),
-      _recomputeAxisColumns: () => this._layout._recomputeAxisColumns(),
-      _reconcileIndicatorRanges: () => this._studies._reconcileIndicatorRanges(),
-      _invalidateIndicators: () => this._studies._invalidateIndicators(),
-      _flushIndicators: () => this._studies._flushIndicators(),
-      _addPrimitive: (paneIndex, primitive) => this._primitives._addPrimitive(paneIndex, primitive),
-      _placeSource: () => this._primitives._placeSource(),
-      _stopNavigationMotion: () => this._motion._stopNavigationMotion(),
-      _mutateTimeScale: <T>(apply: () => T): T => this._mutateTimeScale(apply),
-      _fitDefaultView: () => this._fitDefaultView(),
-      _updateAccessibleSummary: () => this._updateAccessibleSummary(),
-      seriesType: series => this.seriesType(series),
-      invalidate: build => this.invalidate(build),
-      emit: (event, payload) => this.emit(event, payload),
-    };
-  }
-
   /**
    * The primary price series: the first one added, and the one the magnet
    * crosshair, the OHLC legend, the market-replay controller and a settings
@@ -998,50 +975,6 @@ export class Chart {
     return this._primitives.setPrimitiveStackAbove(primitive, above);
   }
 
-  /** What the primitives, the series band and the event strip read, write and drive of the chart; see `PrimitivesHost`. */
-  private _primitivesHost(): PrimitivesHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // and written through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _panes() { return chart._panes; },
-      get _indicators() { return chart._indicators; },
-      get _primary() { return chart._primary; },
-      get _seriesRecords() { return chart._seriesRecords; },
-      get _seriesOwners() { return chart._seriesOwners; },
-      get _legends() { return chart._legends; },
-      get _anchored() { return chart._anchored; },
-      get _statusLine() { return chart._statusLine; },
-      get _legendIconSize() { return chart._legendIconSize; },
-      get isDestroyed() { return chart.isDestroyed; },
-      get hasOpenInterest() { return chart.hasOpenInterest; },
-      get _events() { return chart._events; },
-      set _events(value) { chart._events = value; },
-      get _eventMarkers() { return chart._eventMarkers; },
-      set _eventMarkers(value) { chart._eventMarkers = value; },
-      get _eventPane() { return chart._eventPane; },
-      set _eventPane(value) { chart._eventPane = value; },
-      get _sourceAbove() { return chart._sourceAbove; },
-      set _sourceAbove(value) { chart._sourceAbove = value; },
-      _primaryIndex: () => this._primaryIndex(),
-      _bottomPaneIndex: open => this._bottomPaneIndex(open),
-      _topPaneIndex: () => this._layout._topPaneIndex(),
-      _layoutWeight: index => this._layout._layoutWeight(index),
-      _ensurePane: index => this._layout._ensurePane(index),
-      _paneLayout: () => this._paneLayout(),
-      _restackLegends: () => this._legendStack._restackLegends(),
-      _recomputeAxisColumns: () => this._layout._recomputeAxisColumns(),
-      _policyAllows: (study, flag, options) => this._policyAllows(study, flag, options),
-      _reorderIndicatorResources: () => this._studies._reorderIndicatorResources(),
-      seriesStack: paneIndex => this.seriesStack(paneIndex),
-      removePrimitive: primitive => this.removePrimitive(primitive),
-      invalidate: build => this.invalidate(build),
-      on: (event, cb) => this.on(event, cb),
-      emit: (event, payload) => this.emit(event, payload),
-    };
-  }
-
   /**
    * Remove one indicator instance by its handle id. Returns true if it existed
    * and went; a study whose policy is not `removable` stays unless
@@ -1142,128 +1075,12 @@ export class Chart {
   /** JSON-safe preferences. Automatic text remains blank in this snapshot. */
   public watermarkOptions(): Readonly<ChartWatermarkOptions> { return { ...this._appearance._watermarkOptions }; }
 
-  /** What the branding, the background text, the option batch and the exports read, write and drive of the chart; see `AppearanceHost`. */
-  private _appearanceHost(): AppearanceHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // and written through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _panes() { return chart._panes; },
-      get _doc() { return chart._doc; },
-      get _theme() { return chart._theme; },
-      get _dataContext() { return chart._dataContext; },
-      get _width() { return chart._width; },
-      set _width(value) { chart._width = value; },
-      get _height() { return chart._height; },
-      set _height(value) { chart._height = value; },
-      get _layoutRatio() { return chart._layoutRatio; },
-      set _layoutRatio(value) { chart._layoutRatio = value; },
-      get _branding() { return chart._branding; },
-      set _branding(value) { chart._branding = value; },
-      get _crosshairMode() { return chart._crosshairMode; },
-      set _crosshairMode(value) { chart._crosshairMode = value; },
-      get _crosshairSnapToBar() { return chart._crosshairSnapToBar; },
-      set _crosshairSnapToBar(value) { chart._crosshairSnapToBar = value; },
-      _pixelRatio: () => this._pixelRatio(),
-      _paneLayout: () => this._paneLayout(),
-      _layoutWeight: index => this._layout._layoutWeight(index),
-      _topPaneIndex: () => this._layout._topPaneIndex(),
-      _ratioForLayout: () => this._layout._ratioForLayout(),
-      _relayout: geometryOnly => this._layout._relayout(geometryOnly),
-      _renderContext: paneIndex => this._renderContext(paneIndex),
-      _flushIndicators: () => this._studies._flushIndicators(),
-      _withinLayoutChange: <T>(fn: () => T): T => this._withinLayoutChange(fn),
-      _layoutChanged: setter => this._layoutChanged(setter),
-      brandingOptions: () => this.brandingOptions(),
-      addPrimitive: (primitive, where) => this.addPrimitive(primitive, where),
-      removePrimitive: primitive => this.removePrimitive(primitive),
-      setTheme: theme => this.setTheme(theme),
-      setGridOptions: opts => this.setGridOptions(opts),
-      setCanvasOptions: patch => this.setCanvasOptions(patch),
-      setStatusLineOptions: patch => this.setStatusLineOptions(patch),
-      setLegendIconSize: size => this.setLegendIconSize(size),
-      setPriceScaleOptions: patch => this.setPriceScaleOptions(patch),
-      setPriceFormatter: fn => this.setPriceFormatter(fn),
-      setTimeFormatter: fn => this.setTimeFormatter(fn),
-      setTimezone: zone => this.setTimezone(zone),
-      invalidate: build => this.invalidate(build),
-      emit: (event, payload) => this.emit(event, payload),
-    };
-  }
-
   /**
    * The `IndicatorHost` a study instance talks to; see chart-studies.ts. Kept
    * here by name because the restore and tests build a host through it.
    */
   private _indicatorHost(preservedFormats?: PreservedScaleFormats): IndicatorHost {
     return this._studies._indicatorHost(preservedFormats);
-  }
-
-  /** What the study host reads, writes and drives of the chart; see `StudiesHost`. */
-  private _studiesHost(): StudiesHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // and written through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _panes() { return chart._panes; },
-      get _primaryPane() { return chart._primaryPane; },
-      get _indicators() { return chart._indicators; },
-      get _indicatorRanges() { return chart._indicatorRanges; },
-      get _ownedScaleRanges() { return chart._ownedScaleRanges; },
-      get _indicatorRefreshes() { return chart._indicatorRefreshes; },
-      get _indicatorReservedIds() { return chart._indicatorReservedIds; },
-      get _seriesRecords() { return chart._seriesRecords; },
-      get _seriesOwners() { return chart._seriesOwners; },
-      get _seriesProvenance() { return chart._seriesProvenance; },
-      get _firstDataId() { return chart._firstDataId; },
-      get _dataLayer() { return chart._dataLayer; },
-      get _loop() { return chart._loop; },
-      get _legends() { return chart._legends; },
-      get _legendActions() { return chart._legendActions; },
-      get _studyLegends() { return chart._studyLegends; },
-      get _timeNav() { return chart._timeNav; },
-      get _anchored() { return chart._anchored; },
-      get _timezone() { return chart._timezone; },
-      get _dataContext() { return chart._dataContext; },
-      get _barsProvider() { return chart._barsProvider; },
-      get _barsRequests() { return chart._barsRequests; },
-      get _barsProviderRevision() { return chart._barsProviderRevision; },
-      get _requestedDataRevision() { return chart._requestedDataRevision; },
-      get _destroyed() { return chart._destroyed; },
-      get isDestroyed() { return chart.isDestroyed; },
-      get _indicatorsDirty() { return chart._indicatorsDirty; },
-      set _indicatorsDirty(value) { chart._indicatorsDirty = value; },
-      get _scaleMutationDepth() { return chart._scaleMutationDepth; },
-      set _scaleMutationDepth(value) { chart._scaleMutationDepth = value; },
-      _wallClock: () => this._wallClock(),
-      _primaryIndex: () => this._primaryIndex(),
-      _readoutIndex: () => this._readoutIndex(),
-      _validPriceScaleId: (value): value is PriceScaleId => this._validPriceScaleId(value),
-      _policyAllows: (study, flag, options) => this._policyAllows(study, flag, options),
-      seriesType: series => this.seriesType(series),
-      primarySeries: () => this.primarySeries(),
-      hasSnapshotProvider: () => this.hasSnapshotProvider(),
-      _createSeries: (type, options, claimPrimary, preservedFormats) => this._series._createSeries(type, options, claimPrimary, preservedFormats),
-      _setSeriesType: (series, type, notify) => this._series._setSeriesType(series, type, notify),
-      _applySeriesPriceFormat: (scale, pf) => this._series._applySeriesPriceFormat(scale, pf),
-      _applyPrecision: (scale, precision) => this._series._applyPrecision(scale, precision),
-      addPriceLine: (opts, paneIndex) => this.addPriceLine(opts, paneIndex),
-      _addPrimitive: (paneIndex, primitive) => this._primitives._addPrimitive(paneIndex, primitive),
-      removePrimitive: primitive => this.removePrimitive(primitive),
-      _ensurePane: index => this._layout._ensurePane(index),
-      removePane: index => this.removePane(index),
-      _placeSource: () => this._primitives._placeSource(),
-      _reanchorSource: () => this._primitives._reanchorSource(),
-      _syncLegendPanes: () => this._legendStack._syncLegendPanes(),
-      _restackLegends: () => this._legendStack._restackLegends(),
-      _recomputeAxisColumns: () => this._layout._recomputeAxisColumns(),
-      _relayout: () => this._layout._relayout(),
-      invalidate: build => this.invalidate(build),
-      on: (event, cb) => this.on(event, cb),
-      emit: (event, payload) => this.emit(event, payload),
-    };
   }
 
   private _validPriceScaleId(value: unknown): value is PriceScaleId {
@@ -1761,23 +1578,6 @@ export class Chart {
     return true;
   }
 
-  /** What the price-scale logic reads of the chart; see `ScalesHost`. */
-  private _scalesHost(): ScalesHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _panes() { return chart._panes; },
-      get _pricePanes() { return chart._pricePanes; },
-      get _priceScaleOptions() { return chart._priceScaleOptions; },
-      get _indicators() { return chart._indicators; },
-      get _seriesRecords() { return chart._seriesRecords; },
-      get _seriesOwners() { return chart._seriesOwners; },
-      _renderContext: paneIndex => this._renderContext(paneIndex),
-    };
-  }
-
   /**
    * Per-field status-line switches, applied to every pane legend on the chart:
    * the host's symbol row and the indicator rows alike, which is what makes one
@@ -2149,81 +1949,6 @@ export class Chart {
     return this._persistence.restoreState(state, options);
   }
 
-  /** What a state capture and a restore read, write and drive; see `PersistenceHost`. */
-  private _persistenceHost(): PersistenceHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // and written through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _panes() { return chart._panes; },
-      get _indicators() { return chart._indicators; },
-      get _indicatorRanges() { return chart._indicatorRanges; },
-      get _ownedScaleRanges() { return chart._ownedScaleRanges; },
-      get _collapsed() { return chart._collapsed; },
-      get _timezone() { return chart._timezone; },
-      get _timeScale() { return chart._timeScale; },
-      get _dataLayer() { return chart._dataLayer; },
-      get _tradingSettings() { return chart._tradingSettings; },
-      get _axisChrome() { return chart._axisChrome; },
-      get _movablePrimaryPane() { return chart._movablePrimaryPane; },
-      get _indicatorReservedIds() { return chart._indicatorReservedIds; },
-      get _indicatorRefreshes() { return chart._indicatorRefreshes; },
-      get _primaryPane() { return chart._primaryPane; },
-      get _timeNav() { return chart._timeNav; },
-      get _anchored() { return chart._anchored; },
-      get _crosshairMode() { return chart._crosshairMode; },
-      set _crosshairMode(value) { chart._crosshairMode = value; },
-      get _crosshairSnapToBar() { return chart._crosshairSnapToBar; },
-      set _crosshairSnapToBar(value) { chart._crosshairSnapToBar = value; },
-      get _priceOnlyAutoScale() { return chart._priceOnlyAutoScale; },
-      set _priceOnlyAutoScale(value) { chart._priceOnlyAutoScale = value; },
-      get _indicatorLegendCollapsed() { return chart._indicatorLegendCollapsed; },
-      set _indicatorLegendCollapsed(value) { chart._indicatorLegendCollapsed = value; },
-      get _sourceAbove() { return chart._sourceAbove; },
-      set _sourceAbove(value) { chart._sourceAbove = value; },
-      get _drawingState() { return chart._drawingState; },
-      set _drawingState(value) { chart._drawingState = value; },
-      get _alertState() { return chart._alertState; },
-      set _alertState(value) { chart._alertState = value; },
-      _primaryIndex: () => this._primaryIndex(),
-      getVisibleLogicalRange: () => this.getVisibleLogicalRange(),
-      setVisibleLogicalRange: range => this.setVisibleLogicalRange(range),
-      navigationOptions: () => this.navigationOptions(),
-      _patchNavigation: patch => this._patchNavigation(patch),
-      gridOptions: () => this.gridOptions(),
-      setGridOptions: opts => this.setGridOptions(opts),
-      canvasOptions: () => this.canvasOptions(),
-      setCanvasOptions: patch => this.setCanvasOptions(patch),
-      statusLineOptions: () => this.statusLineOptions(),
-      setStatusLineOptions: patch => this.setStatusLineOptions(patch),
-      watermarkOptions: () => this.watermarkOptions(),
-      setWatermarkOptions: options => this.setWatermarkOptions(options),
-      setTradingSettings: patch => this.setTradingSettings(patch),
-      setAxisChromeOptions: patch => this.setAxisChromeOptions(patch),
-      eventOptions: () => this.eventOptions(),
-      setEventOptions: patch => this.setEventOptions(patch),
-      setTimezone: zone => this.setTimezone(zone),
-      _validPriceScaleId: (value): value is PriceScaleId => this._validPriceScaleId(value),
-      _reserveAlertStudyIds: (document, reserved) => this._reserveAlertStudyIds(document, reserved),
-      emit: (event, payload) => this.emit(event, payload),
-      _withinLayoutChange: <T>(fn: () => T): T => this._withinLayoutChange(fn),
-      _mutateTimeScale: <T>(apply: () => T): T => this._mutateTimeScale(apply),
-      invalidate: build => this.invalidate(build),
-      _emitViewportIfMoved: before => this._emitViewportIfMoved(before),
-      _restackLegends: () => this._legendStack._restackLegends(),
-      _ensurePane: index => this._layout._ensurePane(index),
-      setPrimaryPaneIndex: index => this.setPrimaryPaneIndex(index),
-      _relayout: () => this._layout._relayout(),
-      _rehomeAnchored: () => this._primitives._rehomeAnchored(),
-      _indicatorHost: preservedFormats => this._indicatorHost(preservedFormats),
-      _reorderIndicatorResources: () => this._studies._reorderIndicatorResources(),
-      _scalePatchFor: (pane, patch) => this._scales._scalePatchFor(pane, patch),
-      removePane: index => this.removePane(index),
-      _recomputeAxisColumns: () => this._layout._recomputeAxisColumns(),
-    };
-  }
-
   /**
    * The opaque `drawings` slot in the chart state. The base engine only
    * round-trips it; the drawing tier reads and writes it.
@@ -2462,110 +2187,9 @@ export class Chart {
     return this._collapsed.has(this._panes[index]);
   }
 
-  /** What the pane stack and its layout read, write and drive of the chart; see `PanesHost`. */
-  private _panesHost(): PanesHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // and written through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _panes() { return chart._panes; },
-      get _firstPane() { return chart._firstPane; },
-      get _pricePanes() { return chart._pricePanes; },
-      get _collapsed() { return chart._collapsed; },
-      get _container() { return chart._container; },
-      get _doc() { return chart._doc; },
-      get _theme() { return chart._theme; },
-      get _timeScale() { return chart._timeScale; },
-      get _dataLayer() { return chart._dataLayer; },
-      get _pixels() { return chart._pixels; },
-      get _indicators() { return chart._indicators; },
-      get _seriesProvenance() { return chart._seriesProvenance; },
-      get _firstDataId() { return chart._firstDataId; },
-      get _priceFormatter() { return chart._priceFormatter; },
-      get _priceScaleOptions() { return chart._priceScaleOptions; },
-      get _priceAxisWidth() { return chart._priceAxisWidth; },
-      get _timeAxisHeight() { return chart._timeAxisHeight; },
-      get _width() { return chart._width; },
-      get _height() { return chart._height; },
-      get _legendIconSize() { return chart._legendIconSize; },
-      get _movablePrimaryPane() { return chart._movablePrimaryPane; },
-      get _eventMarkers() { return chart._eventMarkers; },
-      get _destroyed() { return chart._destroyed; },
-      get _primaryPane() { return chart._primaryPane; },
-      set _primaryPane(value) { chart._primaryPane = value; },
-      get _eventPane() { return chart._eventPane; },
-      set _eventPane(value) { chart._eventPane = value; },
-      get _drawingState() { return chart._drawingState; },
-      set _drawingState(value) { chart._drawingState = value; },
-      get _layoutRatio() { return chart._layoutRatio; },
-      set _layoutRatio(value) { chart._layoutRatio = value; },
-      get _leftAxisWidth() { return chart._leftAxisWidth; },
-      set _leftAxisWidth(value) { chart._leftAxisWidth = value; },
-      get _rightAxisWidth() { return chart._rightAxisWidth; },
-      set _rightAxisWidth(value) { chart._rightAxisWidth = value; },
-      get _axisColumnWidth() { return chart._axisColumnWidth; },
-      set _axisColumnWidth(value) { chart._axisColumnWidth = value; },
-      get _emptyPriceAxis() { return chart._emptyPriceAxis; },
-      set _emptyPriceAxis(value) { chart._emptyPriceAxis = value; },
-      _pixelRatio: () => this._pixelRatio(),
-      _newBackend: () => this._newBackend(),
-      _scalePatchFor: (pane, patch) => this._scales._scalePatchFor(pane, patch),
-      _primaryIndex: () => this._primaryIndex(),
-      _ensureScaled: paneIndex => this._ensureScaled(paneIndex),
-      _policyAllows: (study, flag, options) => this._policyAllows(study, flag, options),
-      _syncTimeNavPane: () => this._syncTimeNavPane(),
-      _restackLegends: () => this._legendStack._restackLegends(),
-      _syncLegendPanes: () => this._legendStack._syncLegendPanes(),
-      _rehomeAnchored: () => this._primitives._rehomeAnchored(),
-      _addPrimitive: (paneIndex, primitive) => this._primitives._addPrimitive(paneIndex, primitive),
-      removePrimitive: primitive => this.removePrimitive(primitive),
-      _paintNow: () => this._paintNow(),
-      applySize: (width, height) => this.applySize(width, height),
-      movePane: (index, direction) => this.movePane(index, direction),
-      invalidate: build => this.invalidate(build),
-      emit: (event, payload) => this.emit(event, payload),
-    };
-  }
-
   /** Stays on the chart by name: the pointer release and tests route a legend press through it. */
   private _handleLegendAction(externalId: string): boolean {
     return this._legendStack._handleLegendAction(externalId);
-  }
-
-  /** What the legend rows read and drive of the chart; see `LegendsHost`. */
-  private _legendsHost(): LegendsHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _panes() { return chart._panes; },
-      get _primaryPane() { return chart._primaryPane; },
-      get _indicators() { return chart._indicators; },
-      get _legends() { return chart._legends; },
-      get _studyLegends() { return chart._studyLegends; },
-      get _legendActions() { return chart._legendActions; },
-      get _collapsed() { return chart._collapsed; },
-      get _indicatorLegendCollapsed() { return chart._indicatorLegendCollapsed; },
-      get _legendIconSize() { return chart._legendIconSize; },
-      get _leftAxisWidth() { return chart._leftAxisWidth; },
-      get _timeNav() { return chart._timeNav; },
-      _primaryIndex: () => this._primaryIndex(),
-      _priceCornerIndex: () => this._primitives._priceCornerIndex(),
-      _collapsedShown: index => this._layout._collapsedShown(index),
-      _runShortcut: command => this._runShortcut(command),
-      addPrimitive: (primitive, where) => this.addPrimitive(primitive, where),
-      removePrimitive: primitive => this.removePrimitive(primitive),
-      setIndicatorLegendCollapsed: on => this.setIndicatorLegendCollapsed(on),
-      removeIndicator: instanceId => this.removeIndicator(instanceId),
-      movePane: (index, direction) => this.movePane(index, direction),
-      setPaneCollapsed: (index, collapsed) => this.setPaneCollapsed(index, collapsed),
-      paneCollapsed: index => this.paneCollapsed(index),
-      maximizePane: index => this.maximizePane(index),
-      invalidate: build => this.invalidate(build),
-      emit: (event, payload) => this.emit(event, payload),
-    };
   }
 
   /** Stays on the chart by name: its callers here and tests read the pane boxes through it. */
@@ -2684,29 +2308,6 @@ export class Chart {
     };
   }
 
-  /** What the size and pixel-ratio observation reads of the chart; see `PixelsHost`. */
-  private _pixelsHost(): PixelsHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _destroyed() { return chart._destroyed; },
-      get _destroying() { return chart._destroying; },
-      get _panes() { return chart._panes; },
-      get _container() { return chart._container; },
-      get _doc() { return chart._doc; },
-      get _layoutRatio() { return chart._layoutRatio; },
-      get _onPixelRatio() { return chart._onPixelRatio; },
-      get _checkPixelRatio() { return chart._checkPixelRatio; },
-      applySize: (width, height) => this.applySize(width, height),
-      _paintNow: () => this._paintNow(),
-      invalidate: build => this.invalidate(build),
-      _pixelRatio: () => this._pixelRatio(),
-      _relayout: () => this._layout._relayout(),
-    };
-  }
-
   // Arrow fields on the chart, like its other listeners, so each keeps one
   // identity from the add to the remove. The work is in chart-pixels.ts.
   private readonly _onPixelRatio = (): void => this._pixels._onPixelRatio();
@@ -2802,92 +2403,6 @@ export class Chart {
 
   // ── input handling ──────────────────────────────────────────────────────
 
-  /** What the input routing reads, writes and drives of the chart; see `InputHost`. */
-  private _inputHost(): InputHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // and written through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _destroyed() { return chart._destroyed; },
-      get _panes() { return chart._panes; },
-      get _primaryPane() { return chart._primaryPane; },
-      get _container() { return chart._container; },
-      get _doc() { return chart._doc; },
-      get _width() { return chart._width; },
-      get _height() { return chart._height; },
-      get _leftAxisWidth() { return chart._leftAxisWidth; },
-      get _rightAxisWidth() { return chart._rightAxisWidth; },
-      get _timeAxisHeight() { return chart._timeAxisHeight; },
-      get _timeScale() { return chart._timeScale; },
-      get _dataLayer() { return chart._dataLayer; },
-      get _navigation() { return chart._navigation; },
-      get _motion() { return chart._motion; },
-      get _branding() { return chart._branding; },
-      get _indicators() { return chart._indicators; },
-      get _seriesRecords() { return chart._seriesRecords; },
-      get _listeners() { return chart._listeners; },
-      get _shortcuts() { return chart._shortcuts; },
-      get _firstDataId() { return chart._firstDataId; },
-      get _timeNavPane() { return chart._timeNavPane; },
-      get _theme() { return chart._theme; },
-      get _gridVert() { return chart._gridVert; },
-      get _gridHorz() { return chart._gridHorz; },
-      get _zoomAnchor() { return chart._zoomAnchor; },
-      get _animZoom() { return chart._animZoom; },
-      get _doubleClick() { return chart._doubleClick; },
-      get _crosshairMode() { return chart._crosshairMode; },
-      set _crosshairMode(value) { chart._crosshairMode = value; },
-      get _dragVelocity() { return chart._dragVelocity; },
-      set _dragVelocity(value) { chart._dragVelocity = value; },
-      get _lastDragX() { return chart._lastDragX; },
-      set _lastDragX(value) { chart._lastDragX = value; },
-      get _lastDragT() { return chart._lastDragT; },
-      set _lastDragT(value) { chart._lastDragT = value; },
-      get _onPointerEnter() { return chart._onPointerEnter; },
-      get _onContextMenu() { return chart._onContextMenu; },
-      get _onPointerDown() { return chart._onPointerDown; },
-      get _onPointerMove() { return chart._onPointerMove; },
-      get _onPointerUp() { return chart._onPointerUp; },
-      get _onPointerUpNative() { return chart._onPointerUpNative; },
-      get _onPointerCancel() { return chart._onPointerCancel; },
-      get _onLostPointerCapture() { return chart._onLostPointerCapture; },
-      get _onPointerLeave() { return chart._onPointerLeave; },
-      get _onWheel() { return chart._onWheel; },
-      get _onDblClick() { return chart._onDblClick; },
-      get _onKeyDown() { return chart._onKeyDown; },
-      _now: () => this._now(),
-      _pixelRatio: () => this._pixelRatio(),
-      _renderContext: paneIndex => this._renderContext(paneIndex),
-      _paneLayout: () => this._paneLayout(),
-      _bottomPaneIndex: () => this._bottomPaneIndex(),
-      _collapsedShown: index => this._layout._collapsedShown(index),
-      _dividerAt: y => this._layout._dividerAt(y),
-      _relayout: () => this._layout._relayout(),
-      _ensureScaled: paneIndex => this._ensureScaled(paneIndex),
-      _xToTime: x => this._xToTime(x),
-      _mutateTimeScale: <T>(apply: () => T): T => this._mutateTimeScale(apply),
-      _emitViewport: type => this._emitViewport(type),
-      _emitViewportIfMoved: before => this._emitViewportIfMoved(before),
-      _maybeLoadHistory: () => this._maybeLoadHistory(),
-      _startKinetic: velocity => this._startKinetic(velocity),
-      _indicatorLegendHit: (paneIndex, x, y) => this._legendStack._indicatorLegendHit(paneIndex, x, y),
-      _handleLegendAction: externalId => this._handleLegendAction(externalId),
-      _feedTimeNav: p => this._feedTimeNav(p),
-      _firstPaneSlot: () => this._layout._firstPaneSlot(),
-      _navigationAllowed: command => this._navigationAllowed(command),
-      _updateAccessibleSummary: () => this._updateAccessibleSummary(),
-      priceAxisLayout: paneIndex => this.priceAxisLayout(paneIndex),
-      resetScale: () => this.resetScale(),
-      fitContent: () => this.fitContent(),
-      downloadScreenshot: () => this.downloadScreenshot(),
-      setGridOptions: opts => this.setGridOptions(opts),
-      maximizePane: index => this.maximizePane(index),
-      invalidate: build => this.invalidate(build),
-      emit: (event, payload) => this.emit(event, payload),
-    };
-  }
-
   // Arrow fields on the chart, like its other listeners, so each keeps one
   // identity from the add to the remove, and tests still drive them by name.
   // The work is in chart-input.ts.
@@ -2912,25 +2427,6 @@ export class Chart {
   /** Stays on the chart by name, for the frame and for tests; the pointer handlers set it. */
   private get _cursor(): { x: number; y: number } | null {
     return this._input._cursor;
-  }
-
-  /** What the navigation motion reads and drives of the chart; see `MotionHost`. */
-  private _motionHost(): MotionHost {
-    // A getter's own `this` is the host literal, so the live fields are read
-    // through the chart.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const chart = this;
-    return {
-      get _navigation() { return chart._navigation; },
-      get _destroyed() { return chart._destroyed; },
-      get _raf() { return chart._raf; },
-      get _timeScale() { return chart._timeScale; },
-      _now: () => this._now(),
-      _mutateTimeScale: <T>(apply: () => T): T => this._mutateTimeScale(apply),
-      _maybeLoadHistory: () => this._maybeLoadHistory(),
-      invalidate: build => this.invalidate(build),
-      _emitViewport: type => this._emitViewport(type),
-    };
   }
 
   /**
