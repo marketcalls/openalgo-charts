@@ -1820,7 +1820,7 @@ and put the message beside the study instead of in a console.
 | `plots` | `IndicatorPlot[]` | One per drawn series. `type` is any registered chart type; `overlay: true` puts that one plot on the price pane; [`ohlc`](#a-plot-drawn-as-candles) names four columns so the plot draws as bars; `offset` (2.4.0) paints the column that many bars to the right, the shifted tail landing in the right margin; `colorParts` (2.4.0) colours a candle plot's body, wick and border apart. |
 | `fills` | `IndicatorFillSpec[]?` | Optional shaded bands. `between` names two `calc` columns, which need not be plots. `colorBy` computes each bar's color; `gradientBy` computes each bar's gradient; `gradient` supplies a static or computed price-anchored gradient for the whole band. Per-bar color takes precedence. `overlay: true` draws the band on the price pane beside overlay plots. |
 | `calc` | `(bars, settings, store, ctx?) => IndicatorValues` | Full recompute. `ctx` is the optional [calculation context](#the-calculation-context). |
-| `calcTail` | `(bars, settings, fromIndex, previous, store, ctx?) => IndicatorValues \| null` | Optional incremental path. |
+| `calcTail` | `(bars, settings, fromIndex, previous, store, ctx?) => IndicatorValues \| null` | Optional incremental path. Sixteen built-ins implement it (unreleased), see below. |
 | `markers` | `({ bars, values, settings }) => IndicatorMarker[]` | Optional bar-anchored signal markers, run after every `calc`. Shapes include `cross` and `xcross`, and `paneTop` / `paneBottom` pin a glyph to the plot edge (2.4.0). A mark may name a [target](#drawing-and-marker-targets): `overlay: true` for the candles, `plot` for another plot. |
 | `markerAnchor` | `'plot' \| 'price'` | Defaults to the first plot. `'price'` selects the primary series for an indicator on the price pane when one exists. Applies to marks that name no target. |
 | `table` | `({ bars, values, settings }) => \{ rows, options \} \| null` | Optional corner-pinned summary grid, run after every `calc`. |
@@ -1890,6 +1890,38 @@ that same bar replaced or one appended after it. A symbol change or a page of hi
 arriving at the left edge falls back to a full `calc` instead of splicing onto a history
 that no longer exists.
 </Callout>
+
+#### The built-ins' tails (unreleased)
+
+The built-in `sma`, `ema`, `wma`, `rsi`, `atr`, `adx`, `macd`, `bollinger`, `vwap`,
+`supertrend`, `stochastic`, `obv`, `cci`, `keltner-channel`, `donchian` and
+`parabolic-sar` implement `calcTail`. A tick costs them a step, or one window, instead of
+a pass over the loaded history, and the spliced result equals a full `calc` of the same
+bars value for value, NaN and negative zero included. A study that carries state from bar
+to bar rebuilds it once after each full calculation, so the first tick after a load or a
+settings change costs about one pass.
+
+Their tail declines, and the full `calc` runs, for a length that is not a positive whole
+number, a negative Donchian `offset`, any VWAP `offset`, and a VWAP bar that changes how
+the history's sessions are read: the first overnight gap in a short history, or a bar
+that moves the median gap between bars.
+
+A descriptor that spreads a built-in does not inherit its `calcTail`: the built-ins hold
+it as a property a spread does not copy. Such a descriptor recomputes in full on every
+tick through its own `calc`, as it did before the built-ins had tails, so a column it adds
+or a value it changes is never skipped. To keep the tail, copy it by name, and only when
+your `calc` returns the built-in's result unchanged for the settings it is given.
+
+```ts
+const ema = getIndicator('ema');
+registerIndicator({
+  ...ema,
+  id: 'ema-localized',
+  name: 'Exponential average',
+  // Same calc, same columns: the built-in's tail is safe to copy.
+  calcTail: ema.calcTail,
+});
+```
 
 ## Higher timeframes: `securitySeries` (2.4.0)
 

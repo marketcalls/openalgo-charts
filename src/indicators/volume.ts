@@ -5,6 +5,8 @@
 import type { Bar, IndicatorDescriptor } from 'openalgo-charts';
 import { nulls, sma, stdev } from './calc';
 import { smoothingMa, SMOOTHING_MA_TYPES, BOLLINGER_MA } from './smoothing';
+import { withTail, machineTail, claimOf, settle, whole, cell } from './tail';
+import { seeded, smooth } from './steppers';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -59,7 +61,31 @@ export const VOLUME: IndicatorDescriptor = {
   },
 };
 
-export const OBV: IndicatorDescriptor = {
+/** OBV's smoothing block over a run of OBV values, shared by `calc` and the tail's windowed kinds. */
+function obvSmoothing(
+  out: readonly number[], volumes: readonly number[], s: Readonly<Record<string, unknown>>,
+): Record<string, (number | null)[]> {
+  const n = out.length;
+  const maType = str(s, 'maType', 'None');
+  const maLength = int(s, 'maLength', 9);
+  const mult = num(s, 'bbMult', 2);
+  const ma = maType === 'None'
+    ? new Array<number>(n).fill(NaN)
+    : smoothingMa(maType, out, volumes, maLength);
+  // The band offset exists only for the Bollinger kernel, and an absent
+  // offset makes both band columns absent too, which is how the reference
+  // keeps the two plots and their fill hidden for every other type.
+  const band = maType === BOLLINGER_MA
+    ? stdev(out, maLength).map((v) => v * mult)
+    : new Array<number>(n).fill(NaN);
+  return {
+    ma: nulls(ma),
+    bbUpper: nulls(ma.map((v, i) => v + band[i])),
+    bbLower: nulls(ma.map((v, i) => v - band[i])),
+  };
+}
+
+export const OBV: IndicatorDescriptor = withTail({
   id: 'obv',
   name: 'On-Balance Volume',
   category: 'Volume',
@@ -102,28 +128,43 @@ export const OBV: IndicatorDescriptor = {
       }
       out[i] = acc;
     }
-
-    const maType = str(s, 'maType', 'None');
-    const maLength = int(s, 'maLength', 9);
-    const mult = num(s, 'bbMult', 2);
-    const ma = maType === 'None'
-      ? new Array<number>(n).fill(NaN)
-      : smoothingMa(maType, out, bars.map(vol), maLength);
-    // The band offset exists only for the Bollinger kernel, and an absent
-    // offset makes both band columns absent too, which is how the reference
-    // keeps the two plots and their fill hidden for every other type.
-    const band = maType === BOLLINGER_MA
-      ? stdev(out, maLength).map((v) => v * mult)
-      : new Array<number>(n).fill(NaN);
-
-    return {
-      obv: nulls(out),
-      ma: nulls(ma),
-      bbUpper: nulls(ma.map((v, i) => v + band[i])),
-      bbLower: nulls(ma.map((v, i) => v - band[i])),
-    };
+    return { obv: nulls(out), ...obvSmoothing(out, bars.map(vol), s) };
   },
-};
+}, (calc) => (bars, s, from, previous, store) => {
+  // The running total resumes. An exponential or Wilder smoothing resumes with
+  // it; a window over the total reads the held values before the tail, which
+  // are exact wherever finite and absent wherever the total was not, and a
+  // window treats every absent value alike.
+  const maType = str(s, 'maType', 'None');
+  const maLength = int(s, 'maLength', 9);
+  if (!whole(maLength)) return null;
+  const recursive = maType === 'EMA' || maType === 'SMMA (RMA)';
+  const tail = machineTail(calc, `${maType}|${maLength}`, {
+    keys: recursive ? ['obv', 'ma', 'bbUpper', 'bbLower'] : ['obv'],
+    start: () => ({ acc: 0, ma: seeded() }),
+    step: (st, i, row) => {
+      if (i > 0) {
+        const v = vol(bars[i]);
+        if (bars[i].close > bars[i - 1].close) st.acc += v;
+        else if (bars[i].close < bars[i - 1].close) st.acc -= v;
+      }
+      row[0] = cell(st.acc);
+      if (!recursive) return;
+      row[1] = cell(smooth(st.ma, st.acc, maLength, maType === 'EMA'));
+      row[2] = null;
+      row[3] = null;
+    },
+  }, bars, from, previous, store);
+  if (tail === null || recursive) return tail;
+  const held = previous.obv;
+  const claim = claimOf(store, calc, bars, from);
+  if (claim === undefined || held === undefined || held.length < from) return null;
+  const start = Math.max(0, from - maLength);
+  const run: number[] = [];
+  for (let j = start; j < bars.length; j++) run.push((j < from ? held[j] : tail.obv[j - from]) ?? NaN);
+  const smoothed = settle(claim, obvSmoothing(run, bars.slice(start).map(vol), s), from - start, previous, from);
+  return smoothed === null ? null : { obv: tail.obv, ...smoothed };
+});
 
 export const ADL: IndicatorDescriptor = {
   id: 'adl',

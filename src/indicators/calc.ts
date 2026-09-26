@@ -147,8 +147,11 @@ function roundedBinaryAverage(numerator: bigint, denominator: bigint): number {
   return negative ? -result : result;
 }
 
-/** Nonnegative integer weights allow division after a compensated sum. */
-function finiteAverage(values: readonly number[], weights?: readonly number[]): number {
+/**
+ * Nonnegative integer weights allow division after a compensated sum. Exported
+ * for the tier's resumable kernels (./steppers), not from the tier entry.
+ */
+export function finiteAverage(values: readonly number[], weights?: readonly number[]): number {
   let sum = 0;
   let correction = 0;
   let denominator = 0;
