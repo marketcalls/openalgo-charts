@@ -172,7 +172,15 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // stays the instrument wherever it paints, and the chart state saves both.
 // Measured 75.07 to 76.63 KiB (1.56 KiB); allow 76.63 KiB. The inventory's
 // placement rules, the drawing layers and the panel stay out of this import.
-const LIMIT_BYTES = 76.63 * 1024;
+// A study's paired time and price are one point, and the chart answers what a
+// host asks about it: the pair's validation, the 'point' pick that captures
+// both from one click, the plot rectangle a host overlay and the draw tier's
+// pinned drawings both read (chart.plotRect), the tick schedule the chart now
+// holds so a dragged price alert rounds by band, and the corner mark yielding
+// the pointer to whatever lies over it. Measured 76.63 to 76.90 KiB (0.27
+// KiB), with the base bundle 121.49 to 121.76 kB; allow 76.91 KiB. The anchor
+// handle, its drag and its undo step live in the draw tier and stay out.
+const LIMIT_BYTES = 76.91 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

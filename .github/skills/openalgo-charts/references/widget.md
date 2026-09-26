@@ -238,6 +238,14 @@ symbol and its `exchangeKey` commit together; a missing exchange defaults to
 an empty string. Without lookup, manual symbol entry remains available.
 Price picks resolve the study's actual pane and scale, including hidden scales;
 a mixed-scale study needs an explicit target. Drawing placement blocks picking.
+A price paired with a timestamp (`timeKey`) gets **Pick point on chart** instead:
+one click through `chart.beginPick('point')` fills both fields and reaches
+`onPatch` as one patch holding both keys, and cancelling writes neither. The
+hint reads "Pick {time} and {price} on the chart" (message keys
+`Pick point on chart` and `Pick {time} and {price} on the chart`). The target is
+`studyInputTarget` from the draw tier, the same one the chart's anchor uses. The
+widget's `DrawingController` draws an `anchor: true` pair's handle, and Mod+Z,
+the rail's Undo and the phone bar take a drag of it back.
 Context changes, study removal and chart destruction cancel pending controls.
 
 Alert panels use optional `WidgetContext.alerts`, supplied automatically by

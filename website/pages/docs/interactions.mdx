@@ -155,8 +155,20 @@ the pick was cancelled, and fires before the callback when it was not.
 - **One pick per chart.** Arming a second cancels the first, so a single click can never
   answer two callers. Arming a fresh pick from inside the callback works.
 
-The optional third argument, `PickOptions`, selects a pane and, for price picks,
-an existing price scale. A scale without `paneIndex` targets the primary pane.
+A `'point'` pick answers with both at once, a `PickPoint` of the bar time and the
+price under one click, for a setting that pairs the two:
+
+```ts
+chart.beginPick('point', ({ time, price }) => {
+  study.setSettings({ from: time, price });       // one patch, both halves
+}, { paneIndex: 0, priceScaleId: 'right' });
+```
+
+It answers only when both halves resolve, and `pick:start` and `pick:end` carry
+`kind: 'point'`.
+
+The optional third argument, `PickOptions`, selects a pane and, for price and point
+picks, an existing price scale. A scale without `paneIndex` targets the primary pane.
 Other panes, axes and primitive controls cannot answer the pick. Hidden overlay
 scales are supported. Invalid targets throw before replacing an existing pick.
 Data replacement, context changes, restoration and destruction cancel pending

@@ -2,7 +2,6 @@ import type { Chart } from '../core/chart';
 import { tryResolveInterval } from './intervals';
 import { isValidTimezone, parseSessionSpec, utcSecondsToZonedParts, zonedWallClockToUtcSeconds, type SessionSpec } from './time';
 import { TickSchedule, type TickBand } from './tick-schedule';
-import { applyInstrumentTicks } from '../core/trading-controller';
 
 export interface InstrumentCalendar {
   /** HHMM-HHMM[:days], with opening weekdays 1 (Sunday) through 7. */
@@ -188,6 +187,6 @@ export class Instrument {
     chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest });
     // Drags snap by the same schedule the order constraints carry, and a
     // constant tick clears the one an earlier instrument left.
-    applyInstrumentTicks(chart, this.tickSchedule);
+    chart.setTickSchedule(this.tickSchedule);
   }
 }

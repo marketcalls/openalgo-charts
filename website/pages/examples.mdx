@@ -215,6 +215,66 @@ inputs: [
 ]
 ```
 
+## Anchored study input
+
+The growth path starts at one point: a bar time and a price that belong together. The
+price input names its time (`timeKey`), so **Pick point** sets both from one click, and
+`anchor: true` puts the orange ring on the chart. Drag the ring to move both at once, then
+use **Undo** and **Redo**; Escape during a drag cancels it. See
+[a time and a price that belong together](/docs/indicators#a-time-and-a-price-that-belong-together).
+
+<RunnableExample height={400} tiers={['draw']} caption="Drag the ring, or press Pick point and click a bar. Each drag is one undo step." code={`const bar = document.createElement('div');
+bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px;font-size:12px';
+el.appendChild(bar);
+const host = document.createElement('div');
+host.style.cssText = 'height:330px';
+el.appendChild(host);
+
+lib.registerIndicator({
+  id: 'example-anchored-growth', name: 'Anchored growth', placement: 'onchart',
+  inputs: [
+    { key: 'from', type: 'timestamp', label: 'Anchor time', default: 0, pick: true },
+    { key: 'price', type: 'price', label: 'Anchor price', default: 0, pick: true, timeKey: 'from', anchor: true },
+    { key: 'rate', type: 'number', label: 'Growth per bar (%)', default: 0.15 },
+  ],
+  plots: [{ key: 'path', title: 'Growth path', type: 'line', style: { color: '#f59e0b', lineWidth: 2 } }],
+  calc(bars, s) {
+    const start = bars.findIndex(b => b.time >= s.from);
+    return { path: bars.map((_, i) => (start < 0 || i < start ? null : s.price * (1 + s.rate / 100) ** (i - start))) };
+  },
+});
+
+const chart = lib.createChart(host);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.setVisibleLogicalRange({ from: 40, to: 165 });
+// The drawing controller draws the anchor and holds its undo steps.
+const draw = new lib.DrawingController(chart);
+const study = chart.addIndicator('example-anchored-growth', { from: bars[90].time, price: bars[90].close });
+
+const readout = document.createElement('span');
+const show = () => {
+  const s = study.settings();
+  readout.textContent = 'Anchor: ' + new Date(s.from * 1000).toISOString().slice(0, 16).replace('T', ' ')
+    + ' UTC at ' + s.price.toFixed(2);
+};
+const button = (label, run) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = label;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+  b.onclick = run;
+  bar.appendChild(b);
+};
+// One click answers with the bar time and the price together.
+button('Pick point', () => chart.beginPick('point', p => study.setSettings({ from: p.time, price: p.price })));
+button('Undo', () => draw.undo());
+button('Redo', () => draw.redo());
+bar.appendChild(readout);
+chart.on('objects:change', show);
+show();
+return chart;`} />
+
 ## Compare markets
 
 Put two instruments on one chart and compare how they move. Prices and returns

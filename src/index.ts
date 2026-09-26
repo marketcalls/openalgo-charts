@@ -5,7 +5,7 @@ export { VERSION, version } from './version';
 
 export { createChart, Chart, compactVolume, PRICE_SCALE_MODES } from './core/chart';
 export type {
-  ChartOptions, ChartNavigationOptions, ChartWatermarkOptions, BrandingChangedEvent, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
+  ChartOptions, ChartNavigationOptions, ChartWatermarkOptions, BrandingChangedEvent, PlotRect, AddSeriesOptions, CrosshairMoveEvent, ChartEventOptions,
   ContextMenuEvent, ContextMenuTarget, ContextMenuTargetKind, PriceAxisState,
   AxisChromeOptions, ZoomAnchor, DoubleClickAction, DoubleClickEvent, ExportSvgOptions,
   PointerModifiers, PointerKind, PointerSample, PointerInfo,
@@ -379,7 +379,7 @@ export type {
 } from './input/shortcuts';
 
 export { beginPick } from './input/pick';
-export type { PickKind, PickHost, PickOptions, PickHandle } from './input/pick';
+export type { PickKind, PickHost, PickOptions, PickHandle, PickPoint } from './input/pick';
 
 export { AlertController } from './alerts/controller';
 export { alertSettingsSchema } from './alerts/schema';

@@ -116,7 +116,7 @@ import { ShortcutManager } from '../input/shortcuts';
 import type { ShortcutManagerOptions } from '../input/shortcuts';
 import { TradingController, DEFAULT_TRADING_COLORS, type TradingColors, type TradingSettings } from './trading-controller';
 import { pinchState, pinchDelta, type PinchState } from '../input/touch';
-import { beginPickResolved, cancelPick, type PickKind, type PickOptions, type PickHandle } from '../input/pick';
+import { beginPickResolved, cancelPick, type PickKind, type PickOptions, type PickHandle, type PickPoint } from '../input/pick';
 import type { IPrimitive, PrimitiveHost, PrimitiveHit, PrimitiveAnchor, PrimitivePlacement } from '../primitives/primitive';
 import { PriceLine, type PriceLineOptions } from '../primitives/price-line';
 import { SeriesMarkers } from '../primitives/markers';
@@ -129,10 +129,19 @@ import { TimeNavigator, type TimeNavigatorOptions } from '../primitives/time-nav
 import type { ChartSettingsState } from '../model/chart-settings';
 import { LogoWatermark, type LogoWatermarkOptions } from '../primitives/watermark';
 import { TextWatermark, type TextWatermarkOptions } from '../primitives/text-watermark';
+import type { TickSchedule } from '../feed/tick-schedule';
 
 /** Optional background text. Blank text follows the chart's symbol and interval. */
 export interface ChartWatermarkOptions extends Partial<TextWatermarkOptions> {
   visible?: boolean;
+}
+
+/** A pane's plot area in container media px, from `Chart.plotRect`. */
+export interface PlotRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 /** Defensive branding snapshot emitted synchronously after setBranding as `branding:changed`. */
@@ -779,6 +788,7 @@ export class Chart {
   private _indicatorLegendCollapsed: boolean;
   private _shortcuts: ShortcutManager | null = null;
   private _trading: TradingController | null = null;
+  private _tickSchedule: TickSchedule | null = null;
   private _pointerInside = false;
   private _keyTarget: HTMLElement | Document | null = null;
   private readonly _now: () => number;
@@ -2807,6 +2817,22 @@ export class Chart {
   }
 
   /**
+   * A pane's plot in container px: `left` and `top` from the container's
+   * top-left corner, inside the price axis columns and above the time axis,
+   * and the size a primitive on that pane paints into. What a host lays an
+   * overlay against, and what a drawing pinned to the screen is a fraction of.
+   * Null for a pane with no plot on screen: one collapsed to its header
+   * strip, one hidden behind a maximized pane, or no pane at that index.
+   */
+  public plotRect(paneIndex: number): PlotRect | null {
+    const layout = this._destroyed || this._collapsedShown(paneIndex) ? undefined : this._paneLayout()[paneIndex];
+    if (!layout || !Number.isSafeInteger(paneIndex)) return null;
+    const width = this._width - this._leftAxisWidth - this._rightAxisWidth;
+    const height = layout.height - (paneIndex === this._bottomPaneIndex() ? this._timeAxisHeight : 0);
+    return width > 0 && height > 0 ? { left: this._leftAxisWidth, top: layout.top, width, height } : null;
+  }
+
+  /**
    * A pane whose prices have a place on screen, scaled. A strip has none: the
    * pointer events report no price there, and a conversion that still did
    * would put an overlay or a nudged drawing inside a strip nobody can read.
@@ -3742,13 +3768,17 @@ export class Chart {
   }
 
   /**
-   * Arm the next plot click to answer with a price or a bar time, handed to
-   * `cb`. Returns a cancel function; arming another pick on this chart cancels
-   * the pending one. `pick:start` and `pick:end` bracket it so a host can show
-   * its own cursor while the pick is live. See `input/pick` for why this does
-   * not touch placement mode.
+   * Arm the next plot click to answer with a price, a bar time, or both as a
+   * `'point'`, handed to `cb`. Returns a cancel function; arming another pick
+   * on this chart cancels the pending one. `pick:start` and `pick:end` bracket
+   * it so a host can show its own cursor while the pick is live. A target's
+   * pane limits where the click counts and its scale is the one a price, a
+   * point's included, is read on. See `input/pick` for why this does not touch
+   * placement mode.
    */
-  public beginPick(kind: PickKind, cb: (value: number) => void, options: PickOptions = {}): PickHandle {
+  public beginPick(kind: 'point', cb: (value: PickPoint) => void, options?: PickOptions): PickHandle;
+  public beginPick(kind: PickKind, cb: (value: number) => void, options?: PickOptions): PickHandle;
+  public beginPick(kind: PickKind | 'point', cb: (value: never) => void, options: PickOptions = {}): PickHandle {
     if (this._destroyed || this._destroying) throw new Error('Cannot pick on a destroyed chart');
     if (this._placementMode) throw new Error('Finish drawing placement before picking a study value');
     if (options === null || typeof options !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(options))
@@ -3758,9 +3788,9 @@ export class Chart {
     const priceScaleId = fields.priceScaleId?.value as PickOptions['priceScaleId'];
     if (paneIndex !== undefined && (!Number.isSafeInteger(paneIndex) || paneIndex < 0 || !this._panes[paneIndex])) throw new RangeError('Invalid pick pane');
     const targetPane = paneIndex ?? (priceScaleId !== undefined ? this._firstPaneSlot() : undefined);
-    if (priceScaleId !== undefined && (kind !== 'price' || !this._validPriceScaleId(priceScaleId)
+    if (priceScaleId !== undefined && (kind === 'time' || !this._validPriceScaleId(priceScaleId)
       || !Object.prototype.hasOwnProperty.call(this._panes[targetPane!]?.scaleStates() ?? {}, priceScaleId))) throw new RangeError('Invalid pick scale');
-    return beginPickResolved(this, kind, cb, payload => {
+    return beginPickResolved(this, kind, cb as (value: number | PickPoint) => void, payload => {
       const click = payload as Partial<ChartClickEvent>, point = click?.point, index = click?.paneIndex;
       if (index === undefined || !Number.isSafeInteger(index) || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
         || click.viaDrag || (click.id !== undefined && click.id !== null) || (targetPane !== undefined && index !== targetPane)) return null;
@@ -3769,9 +3799,9 @@ export class Chart {
       if (!pane || point.x < this._leftAxisWidth || point.x >= this._width - this._rightAxisWidth || point.y < 0 || point.y >= height) return null;
       if (kind === 'time') return click.time ?? null;
       this._ensureScaled(index);
-      if (priceScaleId === undefined) return click.price ?? null;
-      if (!Object.prototype.hasOwnProperty.call(pane.scaleStates(), priceScaleId)) return null;
-      return pane.scaleFor(priceScaleId).yToPrice(point.y);
+      const price = priceScaleId === undefined ? click.price ?? null
+        : Object.prototype.hasOwnProperty.call(pane.scaleStates(), priceScaleId) ? pane.scaleFor(priceScaleId).yToPrice(point.y) : null;
+      return kind === 'price' || price === null ? price : { time: click.time ?? Number.NaN, price };
     });
   }
 
@@ -4254,7 +4284,9 @@ export class Chart {
   }
 
   /**
-   * A price rounded to the tick the pane's own axis is written with.
+   * A price rounded to the tick the pane's own axis is written with, or, on
+   * the price pane of an instrument with a tick schedule, to the tick of the
+   * band the price falls in.
    *
    * A dragged alert's price comes from a pointer, and a pixel maps to a price
    * with a dozen decimals behind it: dropped where the axis reads 1255.90 it
@@ -4263,13 +4295,45 @@ export class Chart {
    * the tick, because it is the one the axis is written with, so this is the
    * chart's answer rather than something every host works out again.
    *
+   * A scale holds one tick, and with a schedule that is the grid every band
+   * lies on: 105.87 is on a 0.01 grid and still no price in a 0.25 band. So
+   * the price pane, whose prices are the instrument's, asks the schedule.
+   * Another pane is in a study's own units, which no schedule describes.
+   *
    * A scale with no declared tick rounds nothing: there is no tick to round to
    * and inventing one would move a price somebody chose.
    */
   public snapPrice(paneIndex: number, price: number): number {
     if (!Number.isFinite(price)) return price;
+    if (this._tickSchedule !== null && paneIndex === this._primaryIndex()) return this._tickSchedule.round(price);
     const step = this._panes[paneIndex]?.priceScale.options.minMove ?? 0;
     return step > 0 ? roundToTick(price, step) : price;
+  }
+
+  /**
+   * The instrument's tick schedule, or null for a constant tick, the default.
+   * `Instrument.applyTo` sets it from the instrument's `tickBands`.
+   */
+  public tickSchedule(): TickSchedule | null {
+    return this._tickSchedule;
+  }
+
+  /**
+   * Hand the chart the instrument's price-dependent ticks, for a host that
+   * keeps its own instrument metadata rather than calling
+   * `Instrument.applyTo`. Price alerts and anything else rounding through
+   * {@link snapPrice} on the price pane then land in the band a price falls
+   * in, and the trading layer's order and bracket drags take the same
+   * schedule, now or when it is built. Null restores the constant tick. It
+   * describes the loaded instrument, so it is not part of the saved state.
+   */
+  public setTickSchedule(schedule: TickSchedule | null): void {
+    // Refused here, where the host made the mistake, rather than on the first drag.
+    if (schedule != null && typeof (schedule as Partial<TickSchedule>).round !== 'function') {
+      throw new TypeError('chart.setTickSchedule takes a schedule built with new TickSchedule(bands), or null');
+    }
+    this._tickSchedule = schedule ?? null;
+    this._trading?.setTickSchedule(this._tickSchedule);
   }
 
   /** Detached JSON state, also available when no alert controller is attached. */
@@ -5095,7 +5159,7 @@ export class Chart {
       price: onPlot ? this._priceAt(p.pane, p.localY) : null,
       time: index === null ? null : (this._dataLayer.indexToTime(index) ?? null),
       index,
-      target: this._contextTarget(p, plotX, onPlot, index),
+      target: this._contextTarget(p, onPlot, index),
       preventDefault: (): void => e.preventDefault(),
     };
   }
@@ -5107,7 +5171,6 @@ export class Chart {
    */
   private _contextTarget(
     p: { x: number; pane: number; localY: number; paneHeight: number },
-    plotX: number,
     onPlot: boolean,
     index: number | null,
   ): ContextMenuTarget {
@@ -5126,7 +5189,7 @@ export class Chart {
 
     const pane = this._panes[p.pane];
     const context = this._renderContext(p.pane);
-    const hit = pane?.hitTestPrimitives(plotX, p.localY, context);
+    const hit = this._hitAt(p.pane, p.x, p.localY);
     // A strip plots nothing, so nothing on it can be under the pointer.
     const record = index === null || this._collapsedShown(p.pane) ? null : this._seriesAt(p.pane, index, p.localY);
     // What is painted on top takes the menu: a drawing placed under a source
@@ -5335,7 +5398,9 @@ export class Chart {
       return;
     }
 
-    if (this._branding !== null && this._brandingHit(p.pane, p.x, p.localY)) {
+    // The mark takes the press only where nothing else answers it: see `_hitAt`.
+    const hit = this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane), this._branding);
+    if (this._branding !== null && !hit && this._brandingHit(p.pane, p.x, p.localY)) {
       this._brandingPress = { pointerId: e.pointerId, mark: this._branding, moved: false };
       this._dragging = false;
       this._pointerMoved = false;
@@ -5352,7 +5417,6 @@ export class Chart {
     }
 
     // If the press lands on a draggable line (order/SL/TP), drag it — don't pan.
-    const hit = this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane));
     // `draggable` primitives (drawing anchors/shapes) arm regardless of a host
     // callback — they publish through the `drag` event bus. The `ns-resize`
     // form is the original price-line path and still needs `subscribeDrag`.
@@ -5622,9 +5686,7 @@ export class Chart {
       this._dragPriceScale = null;
       // Re-evaluate hover at the release point (mouse keeps hovering the line;
       // touch has no pointer any more) and drop the dragging visual state.
-      const hit = e.pointerType === 'touch'
-        ? null
-        : this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane)) ?? null;
+      const hit = e.pointerType === 'touch' ? null : this._hitAt(p.pane, p.x, p.localY);
       this._setHover(hit);
       this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
       return;
@@ -5665,7 +5727,7 @@ export class Chart {
     // Always hit-test a clean click: the chart's own chrome (pane-legend
     // buttons) must work whether or not the host subscribed to clicks.
     if (!this._pointerMoved) {
-      const hit = this._panes[this._downPane]?.hitTestPrimitives(this._downX - this._leftAxisWidth, this._downLocalY, this._renderContext(this._downPane));
+      const hit = this._hitAt(this._downPane, this._downX, this._downLocalY);
       if (wasPanning) this._setHover(e.pointerType === 'touch' ? null : hit ?? null);
       // Pane-legend buttons are the chart's own chrome — handle them here so
       // the host doesn't have to re-implement remove/hide/move/maximize.
@@ -5744,16 +5806,27 @@ export class Chart {
     this._setHover(null);
   };
 
-  private _brandingHit(paneIndex: number, x: number, y: number): boolean {
+  /** The corner mark's hit at a container x and pane y, whatever else is there. */
+  private _brandingHit(paneIndex: number, x: number, y: number): PrimitiveHit | null {
     const pane = this._panes[paneIndex];
-    if (this._branding === null || !pane?.hasPrimitive(this._branding)) return false;
+    if (this._branding === null || !pane?.hasPrimitive(this._branding)) return null;
     const isBottom = paneIndex === this._bottomPaneIndex();
     return this._branding.hitTest(x - this._leftAxisWidth, y, {
       timeScale: this._timeScale, priceScale: pane.priceScale, dataLayer: this._dataLayer,
       plotWidth: this._width - this._leftAxisWidth - this._rightAxisWidth,
       plotHeight: (this._paneLayout()[paneIndex]?.height ?? 0) - (isBottom ? this._timeAxisHeight : 0),
       priceAxisWidth: this._rightAxisWidth, dpr: this._pixelRatio(), theme: this._theme,
-    }) !== null;
+    });
+  }
+
+  /**
+   * What the pointer is over on a pane, at a container x and pane y. The
+   * corner mark comes last: a note pinned over it, or anything else there,
+   * is what the user can see and means to grab, and the mark is only a link.
+   */
+  private _hitAt(paneIndex: number, x: number, y: number): PrimitiveHit | null {
+    return this._panes[paneIndex]?.hitTestPrimitives(x - this._leftAxisWidth, y, this._renderContext(paneIndex), this._branding)
+      ?? this._brandingHit(paneIndex, x, y);
   }
 
   private readonly _onPointerLeave = (): void => {
@@ -5915,7 +5988,9 @@ export class Chart {
     if (this._lastPressOnIndicatorToggle || this._previousPressOnIndicatorToggle) return;
     const p = this._localPoint(e);
     if (this._indicatorLegendHit(p.pane, p.x, p.localY)) return;
-    if (this._brandingHit(p.pane, p.x, p.localY)) return;
+    // The mark's own double click does nothing; one on a drawing over it is the drawing's.
+    if (this._brandingHit(p.pane, p.x, p.localY)
+      && !this._panes[p.pane]?.hitTestPrimitives(p.x - this._leftAxisWidth, p.localY, this._renderContext(p.pane), this._branding)) return;
     const ev: DoubleClickEvent = { paneIndex: p.pane, x: p.x, y: p.y, handled: false };
     this.emit('dblclick', ev);
     // While a tool is armed a double-click means "finish this shape" — a
@@ -6116,7 +6191,7 @@ export class Chart {
       return;
     }
     const pane = this._panes[paneIndex];
-    const hit = pane.hitTestPrimitives(plotX, localY, this._renderContext(paneIndex)) ?? null;
+    const hit = this._hitAt(paneIndex, x, localY);
     // A pane boundary beats a primitive hit: the divider is a thin target and
     // the legend rows sit right below one.
     if (hit === null && this._dividerAt(containerY) !== null) {

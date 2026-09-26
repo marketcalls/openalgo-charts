@@ -5,6 +5,7 @@ import { capturePaneTarget } from './pane-target.js';
 import { createColorPicker, applyTokens, widgetTokens } from '/dist/openalgo-charts.widget.mjs';
 import { bindTypedField, typedFieldValue, typedFieldError, validateTypedRows, mountReferenceInputControls } from './indicator-input-controls.js';
 import { studyAllows } from './host-study.js';
+import { anchoredGrowthSeed } from './anchored-study.js';
 
 let app;
 
@@ -71,11 +72,15 @@ export function renderIndicatorChips() {
   if (!chart.indicators().length) host.innerHTML = '<span style="color:var(--faint);font-size:12px">none</span>';
 }
 
+// A study whose defaults cannot know the loaded history takes its first
+// settings from it: an anchor starts where the user can see and grab it.
+const SEEDS = { 'anchored-growth-sample': anchoredGrowthSeed };
+
 export function addIndicator(id, target = capturePaneTarget(app)) {
   if (!target?.current()) { el('status').textContent = 'chart changed; open the indicator menu again'; return; }
   if ((target.pane === 2 ? app.loading2 || app.loadFailed2 : app.loading || app.loadFailed)
     || !target.chart.primaryBars().length) { el('status').textContent = 'load chart history before adding a study'; return; }
-  const inst = target.chart.addIndicator(id);
+  const inst = target.chart.addIndicator(id, SEEDS[id]?.(target.chart) ?? {});
   if (target.pane === 1) rememberIndicators();
   renderIndicatorChips();
   autosave();

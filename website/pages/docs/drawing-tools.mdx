@@ -348,7 +348,10 @@ chart has a different interval loaded.
 `draw:cut` and `draw:paste` all fire on `chart.on(...)`. The 2.0 pair `drawing:select`
 (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind }`, one per mutation)
 fire alongside them for a host that tracks a multi-selection, and `drawing:hover`
-(`{ id }`) when the unselected drawing under the pointer changes.
+(`{ id }`) when the unselected drawing under the pointer changes. A drag of a
+[study input anchor](/docs/indicators#a-time-and-a-price-that-belong-together) is a step
+of the same undo history and emits `drawing:change` with empty `ids`, so a host's Undo
+button refreshes on the event it already listens to.
 
 <Callout type="info">
 The controller listens on the **event bus** (`click`, `crosshair:move`, `drag`, `drag:end`),
@@ -526,7 +529,11 @@ right edge, with the price axes outside that span. `y` runs from 0 at the top of
 drawing belongs to its pane, so it moves with the pane, keeps its fraction of the pane when
 the separator is dragged, and comes back where it was when a collapsed pane is opened again.
 There is no whole-chart coordinate. Pixel sizes stay pixel sizes: a note's font does not
-scale with the chart, while both corners of a box do.
+scale with the chart, while both corners of a box do. The plot is the rectangle
+[`chart.plotRect(paneIndex)`](/docs/scales-and-panes#where-a-panes-plot-is) reports, so
+an HTML overlay a host lays against it lines up with a pinned drawing, and
+`draw.screenPoints(id)` returns anchors in the same container px. A note pinned over the
+chart's corner logo takes presses there; the logo yields to it.
 
 **Which tools.** Text, rectangle, ellipse and table. Their shape and text come from their
 own anchors, and nothing they print is a price or a time. Tools that print prices (the

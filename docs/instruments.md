@@ -104,8 +104,11 @@ every band, and `applyTo` sets that as the price scale's `minMove`.
 `validatePrice`, `OrderEngine.placeOrder` and `OrderEngine.requestModify` snap on the
 band each price lands in and check price limits after snapping.
 
-`applyTo` also hands the same schedule to `chart.trading`, so dragged order and
-bracket lines snap to it. It does not build the trading layer (that would take the
+`applyTo` also hands the same schedule to the chart (`chart.setTickSchedule`, read
+back with `chart.tickSchedule()`), so a dragged price alert and `chart.snapPrice` on
+the price pane round in the band a price falls in; a host with its own metadata calls
+`chart.setTickSchedule` itself. The chart passes it to `chart.trading`, so dragged
+order and bracket lines snap to it. It does not build the trading layer (that would take the
 host's drag subscription); a layer built later starts from it. Applying a
 constant-tick instrument clears it, so after a symbol switch no drag snaps to the
 previous instrument's bands. Call `chart.trading.setTickSchedule` after `applyTo` to

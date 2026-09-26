@@ -11,9 +11,11 @@ price-dependent tick; `instrument.tickSchedule` is the validated `TickSchedule`,
 or null for a constant tick (one rule, `priceTick`, everywhere). With bands,
 `priceTick` must equal the schedule's `minMove`, the common grid of every band, and
 that is the `minMove` `applyTo` gives the price scale. `applyTo` also hands the
-schedule to `chart.trading` (a layer built later starts from it, and a constant-tick
+schedule to the chart (`chart.setTickSchedule`, read with `chart.tickSchedule()`),
+which rounds dragged price alerts and `chart.snapPrice` on the price pane by band,
+and to `chart.trading` (a layer built later starts from it, and a constant-tick
 instrument clears it on a symbol switch); call `chart.trading.setTickSchedule` after
-`applyTo` to override. See [instrument rules](../../../../docs/instruments.md)
+`applyTo` to override the drag snap of order lines alone. See [instrument rules](../../../../docs/instruments.md)
 for breaks, DST, validation, quantity units and safe host source transitions.
 
 `OpenAlgoConfig.hasOpenInterest(request)` optionally supplies instrument

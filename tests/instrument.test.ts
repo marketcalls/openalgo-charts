@@ -6,6 +6,7 @@ import { CandleBuilder } from '../src/feed/candle-builder';
 import { Chart } from '../src/core/chart';
 import type { PriceScaleId } from '../src/model/series';
 import { fakeDocument } from './helpers/fake-dom';
+import { roundToTick } from '../src/helpers/math';
 import '../src/indicators/index';
 
 const cash = (): InstrumentMetadata => ({
@@ -292,6 +293,16 @@ describe('instrument ticks on chart drags', () => {
     new Instrument(banded()).applyTo(c, '1m');
     end('ord:o1', 19.971);
     expect(modify.mock.calls.map(([event]) => event.newPrice)).toEqual([20.05, 20.031, 19.98]);
+  });
+
+  it('gives the chart the schedule its alert drags round with, and clears it for a constant tick', () => {
+    const c = chart();
+    new Instrument(banded()).applyTo(c, '1m');
+    expect(c.tickSchedule()?.tickAt(20.03)).toBe(0.05);
+    expect(c.snapPrice(0, 20.031)).toBe(20.05);
+    new Instrument(cash()).applyTo(c, '1m');
+    expect(c.tickSchedule()).toBeNull();
+    expect(c.snapPrice(0, 20.031)).toBe(roundToTick(20.031, cash().priceTick));
   });
 
   it('lets the host override the instrument after applying it', () => {

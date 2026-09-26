@@ -208,7 +208,15 @@ alerts. Left and independent scales keep their own units. A range bound stops
 at a valid tick inside the opposite bound. No declared tick means no rounding.
 Manually entered thresholds are preserved until you move them.
 
-`Chart.snapPrice(paneIndex, price)` uses that pane's right-axis tick. For another
+An instrument whose tick depends on the price snaps by band. With a tick schedule
+on the chart (`chart.setTickSchedule(schedule)`, or `Instrument.applyTo` with
+`tickBands`), a dragged price alert lands on the tick of the band it is dropped in:
+with 0.01 below 100 and 0.25 from 100, a drop at 105.87 stores 105.75, where the
+axis grid alone would have kept 105.87. A range bound stops a whole band tick inside
+an off-tick opposite bound. Without a schedule nothing changes.
+
+`Chart.snapPrice(paneIndex, price)` uses that pane's right-axis tick, and the band
+of the schedule on the price pane. For another
 series scale, use `series.priceScale().snapToTick(price)`. A custom
 `AlertChartHost` may expose `primarySeries()` for the owning scale, or use the
 optional `snapPrice` fallback when it has no series handle. Without scale tick

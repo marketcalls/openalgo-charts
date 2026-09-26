@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AlertController, Chart, PriceLine, PriceScale, registerIndicator } from '../src/index';
+import { AlertController, Chart, PriceLine, PriceScale, registerIndicator, TickSchedule } from '../src/index';
+import { roundToTick } from '../src/helpers/math';
 import { DrawingController, type DrawingInput } from '../src/draw/index';
 import type { AlertSource, AlertControllerOptions, AlertTriggeredPayload, Bar, PrimitiveRenderContext } from '../src/index';
 import { fakeDocument } from './helpers/fake-dom';
@@ -730,6 +731,86 @@ describe('a dragged alert lands on the instrument tick', () => {
     expect((alerts.list()[0].source as { price: number }).price).toBe(100);
     chart.emit('drag:end', { id: `alert:${alert.id}:0`, price: 105.8706204379562, paneIndex: 0 });
     expect((alerts.list()[0].source as { price: number }).price).toBeCloseTo(105.85, 10);
+  });
+});
+
+describe('a dragged alert lands on the band of the instrument tick schedule', () => {
+  // Synthetic bands: 0.01 below 100, 0.25 from 100. The axis holds the common
+  // grid, 0.01, which is every price the instrument can trade at, not only
+  // the ones it can trade at in the band a price falls in.
+  const BANDS = () => new TickSchedule([{ tick: 0.01 }, { from: 100, tick: 0.25 }]);
+  const drag = (chart: Chart, id: string, from: number, to: number) => {
+    chart.emit('drag:start', { id, price: from, paneIndex: 0 });
+    chart.emit('drag', { id, price: to, paneIndex: 0 });
+  };
+  const lineAt = (chart: Chart, id: string) => chart.panes()[0].primitives()
+    .find(item => item instanceof PriceLine && item.options().id === id) as PriceLine;
+
+  it('rounds with the band a price falls in, on the price pane only', () => {
+    const { chart } = setup();
+    chart.panes()[0].priceScale.setOptions({ minMove: 0.01 });
+    expect(chart.snapPrice(0, 105.8706204379562)).toBe(105.87);
+    chart.setTickSchedule(BANDS());
+    expect(chart.tickSchedule()?.bands).toHaveLength(2);
+    expect(chart.snapPrice(0, 105.8706204379562)).toBe(105.75);
+    expect(chart.snapPrice(0, 99.8706204379562)).toBe(99.87);
+    expect(chart.snapPrice(0, 99.996)).toBe(100);
+    // A study pane is written in its own units, which no instrument trades in.
+    const id = `tick-band-pane-${Math.random()}`;
+    registerIndicator({ id, name: 'Reading', placement: 'pane', inputs: [],
+      plots: [{ key: 'v', title: 'Reading', type: 'line' }], calc: bars => ({ v: bars.map(() => 30) }) });
+    const study = chart.addIndicator(id);
+    chart.panes()[study.paneIndex].priceScale.setOptions({ minMove: 0.01 });
+    expect(chart.snapPrice(study.paneIndex, 105.8706204379562)).toBe(105.87);
+    chart.setTickSchedule(null);
+    expect(chart.tickSchedule()).toBeNull();
+    expect(chart.snapPrice(0, 105.8706204379562)).toBe(105.87);
+  });
+
+  it('refuses a schedule that was never validated', () => {
+    const { chart } = setup();
+    expect(() => chart.setTickSchedule([{ tick: 0.01 }] as unknown as TickSchedule)).toThrow(/new TickSchedule/);
+    expect(chart.tickSchedule()).toBeNull();
+  });
+
+  it('drops a price alert dragged into the coarse band on a price that band trades at', () => {
+    const { chart, alerts } = alertSetup([60, 120]);
+    chart.panes()[0].priceScale.setOptions({ minMove: 0.01 });
+    chart.primarySeries()!.priceScale().setOptions({ minMove: 0.01 });
+    chart.setTickSchedule(BANDS());
+    const alert = alerts.add({ source: { kind: 'price', price: 99 }, title: 'T' });
+    const id = `alert:${alert.id}:0`;
+    drag(chart, id, 99, 105.8706204379562);
+    expect(lineAt(chart, id).price).toBe(105.75);
+    chart.emit('drag:end', { id, price: 105.8706204379562, paneIndex: 0 });
+    expect((alerts.list()[0].source as { price: number }).price).toBe(105.75);
+    // Below the boundary the fine band still applies.
+    drag(chart, id, 105.75, 99.8706204379562);
+    chart.emit('drag:end', { id, price: 99.8706204379562, paneIndex: 0 });
+    expect((alerts.list()[0].source as { price: number }).price).toBe(99.87);
+  });
+
+  it('keeps a banded range bound inside an opposite bound that is off every tick', () => {
+    const { chart, alerts } = alertSetup([60, 120]);
+    chart.setTickSchedule(BANDS());
+    const alert = alerts.add({ source: { kind: 'price', price: 98, upperPrice: 105.13 }, condition: 'enteringRange' });
+    const id = `alert:${alert.id}:0`;
+    drag(chart, id, 98, 110);
+    // 105.13 rounds up to 105.25, past the bound, so the drag stops a tick below.
+    expect(lineAt(chart, id).price).toBe(105);
+    chart.emit('drag:end', { id, price: 110, paneIndex: 0 });
+    expect(alerts.list()[0].source).toMatchObject({ price: 105, upperPrice: 105.13 });
+  });
+
+  it('keeps the constant tick exactly as it was without a schedule', () => {
+    const { chart, alerts } = alertSetup([60, 120]);
+    chart.panes()[0].priceScale.setOptions({ minMove: 0.05 });
+    chart.primarySeries()!.priceScale().setOptions({ minMove: 0.05 });
+    const alert = alerts.add({ source: { kind: 'price', price: 100 }, title: 'T' });
+    const id = `alert:${alert.id}:0`;
+    drag(chart, id, 100, 105.8706204379562);
+    chart.emit('drag:end', { id, price: 105.8706204379562, paneIndex: 0 });
+    expect((alerts.list()[0].source as { price: number }).price).toBe(roundToTick(105.8706204379562, 0.05));
   });
 });
 

@@ -64,6 +64,47 @@ All notable changes to OpenAlgo Charts.
   reorders by dragging a row onto the upper or lower half of another and refuses a
   drop the bands cannot paint before it lands, and Earlier and Later step through
   the same order.
+- Paired time and price inputs. A `price` input can name a declared `timestamp`
+  input with `timeKey`, making the two one point on the chart; `anchor: true` adds
+  a handle there. Registration refuses a `timeKey` that names no timestamp input,
+  the price itself or a timestamp another price already pairs with, and an
+  `anchor` without a `timeKey`. `chart.beginPick('point', cb, options?)` captures
+  both halves from one click as a `PickPoint` (`{ time, price }`, the time snapped
+  to the bar), reads the price on the target scale and answers only when both
+  resolve; `pick:start` and `pick:end` carry `kind: 'point'`. The widget's and the
+  reference host's settings forms offer **Pick point on chart** on the price row
+  and commit both keys in one patch. The drawing tier draws the anchor on the pane
+  and scale a pick of the price reads (`studyInputTarget(chart, study, key)`,
+  exported from `openalgo-charts/draw`): dragging it previews the point with guides
+  to both axes and writes both settings in one patch on release, Escape cancels, an
+  active drawing tool or a waiting pick takes the press, and a study whose policy is
+  `configurable: false` keeps it still. Each drag is one step of the drawing undo
+  history, in order with the drawings, so Ctrl+Z, the rail and the phone bar take it
+  back in both hosts; the step emits `drawing:change` with empty `ids` so Undo
+  controls refresh. `new DrawingController(chart, { inputAnchors: false })` draws
+  none. The reference host adds the Anchored growth sample.
+- `chart.plotRect(paneIndex)` returns a pane's plot in container px (`PlotRect`:
+  `left`, `top`, `width`, `height`), inside the price axis columns and above the
+  time axis, or null for a collapsed, hidden or missing pane. The draw tier now
+  places, moves and converts drawings pinned to the screen by it rather than
+  working the rectangle out from the scales, so `draw.screenPoints` and a host
+  overlay laid against `plotRect` agree. `DrawingChartHost` gains the optional
+  `plotRect` and drops the optional `priceAxisLayout` it no longer reads.
+- `chart.setTickSchedule(schedule | null)` and `chart.tickSchedule()` put the
+  instrument's price-dependent ticks on the chart. `Instrument.applyTo` sets it,
+  and a host with its own metadata calls it; it also reaches `chart.trading`, now or
+  when that layer is built. `chart.snapPrice` on the price pane then rounds with the
+  band the price falls in, and a dragged price alert lands on that band's tick, a
+  range bound stopping a band tick inside an off-tick opposite bound. With no
+  schedule every rounding is unchanged. `AlertChartHost` gains the optional
+  `tickSchedule()`. The reference host hands its `BANDED` schedule to both charts.
+
+### Fixed
+
+- The corner logo no longer takes a press meant for something over it. A note
+  pinned to the screen in the corner, a drawing crossing the mark or an order line
+  gets the press, the drag, the hover and the double click, and the logo's link
+  opens only where nothing else answers the pointer.
 
 ## 2.5.5
 

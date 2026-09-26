@@ -140,8 +140,11 @@ export class AlertController {
         ? this._chart.indicators?.().find(item => item.id === source.instanceId)?.series(source.plotKey)?.priceScale()
         : undefined;
     const pane = paneIndex ?? payload.paneIndex;
+    // A price alert is in the instrument's own prices, so a tick schedule
+    // outranks the scale's one tick, which is only the grid every band lies on.
+    const ticks = source?.kind === 'price' ? this._chart.tickSchedule?.() ?? null : null;
     // The source scale owns both units and tick size, even on a left or overlay axis.
-    const snapped = scale ? roundToTick(price, scale.options.minMove)
+    const snapped = ticks ? ticks.round(price) : scale ? roundToTick(price, scale.options.minMove)
       : typeof pane === 'number' ? this._chart.snapPrice?.(pane, price) ?? price : price;
     let result = Number.isFinite(snapped) ? snapped : price;
     if (parsed && (source?.kind === 'price' || source?.kind === 'indicator')) {
@@ -151,7 +154,12 @@ export class AlertController {
       if (bound !== undefined && (parsed.index === 0 ? result > bound : result < bound)) {
         result = bound;
         const step = scale?.options.minMove ?? 0;
-        if (step > 0) {
+        if (ticks) {
+          // The band's own neighbour, not the grid's: the tick below a bound
+          // in a coarse band is a whole band tick away.
+          result = ticks.round(bound);
+          if (parsed.index === 0 ? result > bound : result < bound) result = ticks.step(result, parsed.index === 0 ? -1 : 1);
+        } else if (step > 0) {
           result = roundToTick(bound, step);
           const tolerance = Number.EPSILON * Math.max(1, Math.abs(bound)) * 4;
           if (Math.abs(result - bound) <= tolerance) result = bound;

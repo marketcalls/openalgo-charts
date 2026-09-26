@@ -734,8 +734,8 @@ unrecognised status stays visible instead of being silently dropped.
 - `watermarkRect(position, margin, w, h, plotW, plotH)` and
   `tableOrigin(position, margin, w, h, plotW, plotH)` - corner placement
 
-**Interaction.** `beginPick(host, kind, cb)` starts a price or time pick and returns
-its callable `PickHandle`; call it to tear the pick down. `handle.active()` is
+**Interaction.** `beginPick(host, kind, cb)` starts a price, time or `'point'` pick
+and returns its callable `PickHandle`; call it to tear the pick down. `handle.active()` is
 true only while this invocation owns the capture, including after synchronous
 cancellation or replacement during a start notification. `isRebasing(mode)` reports whether
 a `PriceScaleMode` re-bases the series, which is true for `percentage` and
@@ -748,6 +748,48 @@ selected scale converts pane-local coordinates, including hidden overlays.
 Panning and primitive controls do not select values. Active drawing placement
 refuses the pick; starting placement, data replacement, context changes, restore
 and destruction cancel it. Cancelled picks emit `pick:end` with a null value.
+
+`chart.beginPick('point', cb, options?)` captures a time and a price from one
+click and hands `cb` a `PickPoint`, `{ time, price }`: the time of the bar under
+the click (projected past the last bar) and the price on the target scale, which
+`priceScaleId` names as it does for a price pick. `pick:start` and `pick:end`
+carry `kind: 'point'`, and `pick:end.value` is the point or null. It answers only
+when both halves resolve, so a study input pairing a time with a price
+(`timeKey`, see [indicators](indicators.md#paired-time-and-price-inputs)) is
+never written half from one click and half from another.
+
+## Plot rectangle
+
+`chart.plotRect(paneIndex): PlotRect | null` is a pane's plot in container media
+px: `{ left, top, width, height }`, inside the price axis columns and above the
+time axis strip, the same size a primitive on that pane paints into. Lay an HTML
+overlay against it rather than working the rectangle out from `priceToCoordinate`,
+the axis layout and the time scale. It is null for a pane collapsed to its header
+strip, one hidden behind a maximized pane, and an index with no pane. The draw
+tier measures viewport drawings by it, so a pinned drawing and a host overlay read
+one rectangle.
+
+```ts
+const rect = chart.plotRect(0)!;
+badge.style.left = `${rect.left + rect.width - 120}px`;
+badge.style.top = `${rect.top + 8}px`;
+```
+
+## Tick schedule on the chart
+
+`chart.setTickSchedule(schedule | null)` hands the chart the instrument's
+price-dependent ticks (a `TickSchedule`; anything else throws a `TypeError`), and
+`chart.tickSchedule()` reads it back, null for a constant tick, the default.
+`Instrument.applyTo` sets it from `instrument.tickSchedule`; a host keeping its
+own instrument metadata calls it directly. `chart.snapPrice(paneIndex, price)`
+then rounds a price on the price pane with the band the price falls in rather
+than the scale's one `minMove` (the grid every band lies on, which accepts 105.87
+where a 0.25 band trades only 105.75 and 106), and a dragged price alert lands on
+that band's tick, its range bound stopping a whole band tick inside an off-tick
+opposite bound. Other panes keep their own scale's tick. It also reaches
+`chart.trading`, now or when that layer is built. It describes the loaded
+instrument and is not saved in the chart state. With no schedule every path
+rounds exactly as before.
 
 ## Types that name a public signature
 

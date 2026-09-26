@@ -77,7 +77,7 @@ Every name emitted by the engine, verified against the `emit(` call sites in `sr
 | `draw:remove` | `{ drawing }` | A drawing was deleted. Drawing tier only. |
 | `draw:select` | `{ id }` | Selection changed; `id` is the primary (first picked) id, `null` on deselect. Drawing tier only. |
 | `drawing:select` | `{ ids }` | The whole selection in pick order, empty on deselect. Fires with `draw:select`, and only when the selection actually changed. Drawing tier only. |
-| `drawing:change` | `{ ids, kind }` | One event per model mutation, after the per-drawing `draw:*` events; `kind` is `'add' | 'update' | 'remove' | 'reorder'`. Drawing tier only. |
+| `drawing:change` | `{ ids, kind }` | One event per model mutation, after the per-drawing `draw:*` events; `kind` is `'add' | 'update' | 'remove' | 'reorder'`, or `'undo' | 'redo'`. `ids` is empty for an undo step that changed no drawing (a study input anchor's drag), so an Undo control still refreshes. Drawing tier only. |
 | `draw:copy` | `{ drawings }` | A copy reached the clipboard (deep copies, not the live objects). Drawing tier only. |
 | `draw:cut` | `{ drawings }` | A cut wrote **and then** deleted. A refused write emits nothing. Drawing tier only. |
 | `draw:paste` | `{ drawings }` | The newly created drawings, after their own `draw:add` events. Drawing tier only. |

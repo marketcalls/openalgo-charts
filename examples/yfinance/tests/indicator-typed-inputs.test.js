@@ -126,6 +126,25 @@ describe('reference typed indicator controls', () => {
     expect(h.modal.hidden).toBe(true);
     expect(h.dom.doc.body.querySelector('.oac-input-pick')).toBeNull();
   });
+  it('stages both halves of a paired point from one pick and applies them in one patch', () => {
+    const paired = [
+      { key: 'at', type: 'timestamp', label: 'Anchor time', default: 1700000000, pick: true },
+      { key: 'level', type: 'price', label: 'Anchor price', default: 2, min: 0, max: 100, pick: true, timeKey: 'at', anchor: true },
+    ];
+    const h = fixture({ inputs: paired });
+    const trigger = h.host.querySelector('[data-input-action="level"]');
+    expect(trigger.textContent).toBe('Pick point on chart');
+    trigger.click();
+    const scale = h.chart.panes()[0].priceScale, expected = scale.yToPrice(150);
+    h.chart.emit('click', { paneIndex: 0, point: { x: 250, y: 150 }, price: -999, time: 1700000060.4, id: null });
+    expect(collectInputRows(h.host)).toMatchObject({ at: 1700000060, level: expected });
+    // Staged, as every other field of this dialog is, until Apply.
+    expect(h.inst.settings()).toMatchObject({ at: 1700000000, level: 2 });
+    const write = vi.spyOn(h.inst, 'setSettings');
+    expect(collectSettings()).toBe(true);
+    expect(write).toHaveBeenCalledOnce();
+    expect(h.inst.settings()).toMatchObject({ at: 1700000060, level: expected });
+  });
   it('resets native defaults and keeps an invalid draft editable until then', () => {
     const h = fixture(); h.inst.setSettings({ level: 80, note: 'changed' });
     h.field('level').value = 'bad'; expect(collectSettings()).toBe(false);

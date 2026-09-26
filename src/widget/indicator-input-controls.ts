@@ -1,4 +1,5 @@
-import { getIndicator, type IndicatorApi, type IndicatorInput, type IndicatorSettings, type PickHandle, type PickOptions } from 'openalgo-charts';
+import type { IndicatorApi, IndicatorInput, IndicatorSettings, PickHandle, PickPoint } from 'openalgo-charts';
+import { studyInputTarget } from 'openalgo-charts/draw';
 import type { WidgetContext } from './context';
 import { button, el } from './form';
 import { widgetText } from './localization';
@@ -20,23 +21,6 @@ export interface IndicatorInputControlsHandle {
   cancelPick(): void;
   refresh(): void;
   destroy(): void;
-}
-
-/** Resolve actual plot ownership, including plots drawn in a different pane. */
-function priceTarget(ctx: WidgetContext, instance: IndicatorApi,
-  input: Extract<IndicatorInput, { type: 'price' }>): PickOptions | null {
-  const explicit = typeof input.pick === 'object' ? input.pick : {};
-  if (explicit.paneIndex !== undefined && explicit.priceScaleId !== undefined) return { ...explicit };
-  const targets = new Map<string, PickOptions>();
-  for (const plot of getIndicator(instance.indicatorId).plots) {
-    const series = instance.series(plot.key), priceScaleId = instance.plotPriceScaleId(plot.key);
-    if (!series || priceScaleId === null) continue;
-    const scale = series.priceScale(), paneIndex = ctx.chart.panes().findIndex(pane => pane.scales().includes(scale));
-    if (paneIndex < 0 || (explicit.paneIndex !== undefined && explicit.paneIndex !== paneIndex)
-      || (explicit.priceScaleId !== undefined && explicit.priceScaleId !== priceScaleId)) continue;
-    targets.set(`${paneIndex}:${priceScaleId}`, { paneIndex, priceScaleId });
-  }
-  return targets.size === 1 ? [...targets.values()][0] : null;
 }
 
 /** Host actions for typed fields. Values remain ordinary settings scalars. */
@@ -116,21 +100,27 @@ export function mountIndicatorInputControls(ctx: WidgetContext, options: Indicat
     const reason = (): string | null => {
       if (ctx.draw.activeTool() !== null) return widgetText(ctx, 'Finish or cancel the active drawing before picking');
       if (!options.suspend && !ctx.overlays.suspend) return widgetText(ctx, 'This host cannot suspend the settings dialog');
-      if (input.type === 'price' && priceTarget(ctx, instance, input) === null) {
+      if (input.type === 'price' && studyInputTarget(ctx.chart, instance, input.key) === null) {
         return widgetText(ctx, 'Choose an explicit pane and scale for this price input');
       }
       return null;
     };
-    const trigger = button(ctx.document, { label: widgetText(ctx, 'Pick on chart'), onClick: () => {
+    // A price paired with a time is one point: its pick captures both halves
+    // from one click and commits them in one patch.
+    const time = input.type === 'price' && input.timeKey !== undefined
+      ? options.inputs.find(item => item.key === input.timeKey && item.type === 'timestamp') : undefined;
+    const trigger = button(ctx.document, { label: widgetText(ctx, time ? 'Pick point on chart' : 'Pick on chart'), onClick: () => {
       if (!current()) return;
       const why = reason();
       if (why !== null) { ctx.toast(why, 'info'); return; }
       cancelPick();
       for (const picker of pickers) picker.close();
-      const target = input.type === 'price' ? priceTarget(ctx, instance, input)! : undefined;
+      const target = input.type === 'price' ? studyInputTarget(ctx.chart, instance, input.key)! : undefined;
       const resume = options.suspend?.() ?? ctx.overlays.suspend!(options.panel);
       const hint = el(ctx.document, 'div', 'oac-input-pick');
-      hint.appendChild(el(ctx.document, 'span', undefined, widgetText(ctx, 'Pick {label} on the chart', { label: input.label })));
+      hint.appendChild(el(ctx.document, 'span', undefined, time
+        ? widgetText(ctx, 'Pick {time} and {price} on the chart', { time: time.label, price: input.label })
+        : widgetText(ctx, 'Pick {label} on the chart', { label: input.label })));
       const cancel = button(ctx.document, { label: widgetText(ctx, 'Cancel pick'), onClick: cancelPick });
       hint.appendChild(cancel);
       hint.addEventListener('pointerdown', event => event.stopPropagation());
@@ -166,12 +156,15 @@ export function mountIndicatorInputControls(ctx: WidgetContext, options: Indicat
       });
       cancel.focus();
       try {
-        const stop = ctx.chart.beginPick(input.type === 'price' ? 'price' : 'time', value => {
+        const done = (patch: IndicatorSettings): void => {
           if (active !== pending) return;
           guardCompletionClick();
           pending.finish();
-          accept({ [input.key]: value });
-        }, target);
+          accept(patch);
+        };
+        const stop = time
+          ? ctx.chart.beginPick('point', (value: PickPoint) => done({ [input.key]: value.price, [time.key]: value.time }), target)
+          : ctx.chart.beginPick(input.type === 'price' ? 'price' : 'time', value => done({ [input.key]: value }), target);
         pending.cancel = stop;
         starting = false;
         if (active !== pending) stop();

@@ -686,9 +686,15 @@ describe('panes', () => {
     expect(moved.paneIndex).toBe(2);
     expect(moved.viewportPoints).toEqual([{ x: 0.25, y: 0.5 }]);
     const [at] = draw.screenPoints(note.id)!;
-    const top = chart.priceToCoordinate(chart.panes()[2].yToPrice(0), 2)!;
-    expect(at.x).toBeCloseTo(0.25 * size(2).w, 6);
-    expect(at.y).toBeCloseTo(top + 0.5 * size(2).h, 6);
+    // Read off the chart's rectangle, not worked out from the pane's scales:
+    // the moved pane is not scaled until something asks, so a top taken as
+    // priceToCoordinate(yToPrice(0)) reads its range once before scaling and
+    // once after, and comes out below the chart.
+    const rect = chart.plotRect(2)!;
+    expect(rect.width).toBe(size(2).w);
+    expect(at.x).toBeCloseTo(rect.left + 0.25 * rect.width, 6);
+    expect(at.y).toBeCloseTo(rect.top + 0.5 * rect.height, 6);
+    expect(at.y).toBeLessThan(700);
   });
 
   it('survives a pane collapse and comes back where it was', () => {
@@ -708,6 +714,65 @@ describe('panes', () => {
     const after = draw.screenPoints(note.id)!;
     expect(after[0].x).toBeCloseTo(before[0].x, 6);
     expect(after[0].y).toBeCloseTo(before[0].y, 6);
+  });
+});
+
+describe('the plot the chart reports', () => {
+  /**
+   * The chart answers where a pane's plot is (`chart.plotRect`), and a pinned
+   * drawing is a fraction of that answer. A host that moves the plot (an
+   * inset, a custom frame) moves the drawing with it; the controller no longer
+   * works the rectangle out from the scales, so nothing can make the two
+   * disagree.
+   */
+  function insetPlot(chart: Chart, dx: number, dy: number, scale: number): void {
+    const own = chart.plotRect.bind(chart);
+    chart.plotRect = (paneIndex: number) => {
+      const rect = own(paneIndex);
+      return rect && { left: rect.left + dx, top: rect.top + dy, width: rect.width * scale, height: rect.height * scale };
+    };
+  }
+
+  it('places a pinned drawing on the screen by chart.plotRect', () => {
+    const { chart, draw } = mount(800, 700, { panes: 2 });
+    const note = draw.add({ tool: 'text', paneIndex: 1, style: {}, points: [], space: 'viewport',
+      viewportPoints: [{ x: 0.25, y: 0.5 }], text: { value: 'Reported' } });
+    const rect = chart.plotRect(1)!;
+    const [at] = draw.screenPoints(note.id)!;
+    expect(at.x).toBeCloseTo(rect.left + 0.25 * rect.width, 6);
+    expect(at.y).toBeCloseTo(rect.top + 0.5 * rect.height, 6);
+    insetPlot(chart, 12, 7, 0.5);
+    const [inset] = draw.screenPoints(note.id)!;
+    expect(inset.x).toBeCloseTo(rect.left + 12 + 0.25 * rect.width * 0.5, 6);
+    expect(inset.y).toBeCloseTo(rect.top + 7 + 0.5 * rect.height * 0.5, 6);
+  });
+
+  it('pins a data drawing, and places one with the pointer, as fractions of that plot', () => {
+    const { chart, draw, click } = mount();
+    const rect = chart.plotRect(0)!;
+    insetPlot(chart, 0, 0, 2);
+    // The data rectangle stays where it is on screen, so its fractions halve.
+    const d = dataRect(draw);
+    const before = draw.screenPoints(d.id)!;
+    expect(draw.update(d.id, { space: 'viewport' })).toBe(true);
+    const pinned = draw.get(d.id)!.viewportPoints!;
+    pinned.forEach((p, i) => {
+      expect(p.x).toBeCloseTo((before[i].x - rect.left) / (rect.width * 2), 6);
+      expect(p.y).toBeCloseTo((before[i].y - rect.top) / (rect.height * 2), 6);
+    });
+    draw.setTool('text', { space: 'viewport' });
+    click(300, 200);
+    const placed = draw.drawings().find(item => item.tool === 'text')!;
+    expect(placed.viewportPoints![0].x).toBeCloseTo((300 - rect.left) / (rect.width * 2), 6);
+    expect(placed.viewportPoints![0].y).toBeCloseTo((200 - rect.top) / (rect.height * 2), 6);
+  });
+
+  it('has no place for a pinned drawing where the chart reports no plot', () => {
+    const { chart, draw } = mount();
+    const r = viewportRect(draw);
+    chart.plotRect = () => null;
+    expect(draw.screenPoints(r.id)).toBeNull();
+    expect(draw.update(r.id, { space: 'data' })).toBe(false);
   });
 });
 

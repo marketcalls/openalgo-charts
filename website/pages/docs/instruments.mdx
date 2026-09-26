@@ -115,8 +115,12 @@ fields, and `instrument.tickSchedule` is null, so `priceTick` stays its one snap
 rule everywhere. To validate orders, see
 [price-dependent ticks](/docs/trading#price-dependent-ticks).
 
-`applyTo` also hands the schedule to
-[`chart.trading`](/docs/trading-api#price-ticks-while-dragging), so dragged order and
+`applyTo` also hands the schedule to the chart, which `chart.tickSchedule()` reads back:
+a dragged [price alert](/docs/alerts#tick-snapping-and-keyboard-removal) and
+`chart.snapPrice` on the price pane then round in the band a price falls in. A host that
+keeps its own instrument metadata, as the yfinance reference host does, calls
+`chart.setTickSchedule(schedule)` itself; `null` returns to the constant tick. The chart
+passes it on to [`chart.trading`](/docs/trading-api#price-ticks-while-dragging), so dragged order and
 bracket lines snap in their band. It never builds the trading layer itself, which would
 take the host's drag subscription; a layer built later starts from the schedule.
 Applying a constant-tick instrument clears it, so after a symbol switch no drag snaps to

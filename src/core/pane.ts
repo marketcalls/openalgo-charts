@@ -685,11 +685,15 @@ export class Pane {
     return ctx.collapsed === true ? this._primitives.filter(p => p instanceof PaneLegend) : this._primitives;
   }
 
-  /** Topmost primitive hit at media-px (x,y) relative to this pane's plot. */
-  public hitTestPrimitives(x: number, y: number, ctx: PaneRenderContext): PrimitiveHit | null {
+  /**
+   * Topmost primitive hit at media-px (x,y) relative to this pane's plot.
+   * `except` is left out, for the chart's corner mark, which yields to
+   * anything else at the point.
+   */
+  public hitTestPrimitives(x: number, y: number, ctx: PaneRenderContext, except?: IPrimitive | null): PrimitiveHit | null {
     const prc = this._primitiveContext(ctx);
     return bestHit(this._live(ctx).map((p) => {
-      if (!p.hitTest) return null;
+      if (!p.hitTest || p === except) return null;
       const context = this._boundPrimitiveContext(p, prc, ctx);
       const hit = p.hitTest(x, y, context);
       return hit !== null && this._primitiveScales.has(p) ? { ...hit, priceScale: context.priceScale } : hit;

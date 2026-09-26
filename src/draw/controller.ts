@@ -18,7 +18,7 @@
 // is a different type, and a consumer passing the real one got "separate
 // declarations of a private property". The entry is external to tier builds,
 // so this survives as `from 'openalgo-charts'` and stays one identity.
-import type { IPrimitive, DataLayer, AlertDrawingValue, AlertDrawingInfo } from 'openalgo-charts';
+import type { IPrimitive, DataLayer, AlertDrawingValue, AlertDrawingInfo, PlotRect } from 'openalgo-charts';
 import type {
   Drawing, DrawingInput, DrawingPatch, DrawingPoint, DrawingStyle, DrawingTool, DrawingsDocument,
   MagnetMode, ScreenPoint, DrawingGroup, DrawingSpace, DrawingStackTarget, ViewportPoint,
@@ -31,6 +31,7 @@ import { boundsOf } from './geometry';
 import { DrawingClipboard, cloneDrawing, type ClipboardPort } from './clipboard';
 import { migrateDrawings, migrateGroups } from './migrate';
 import { rdpSimplify } from './freehand';
+import { InputAnchors, type InputAnchorHost, type InputAnchorStep } from './input-anchors';
 
 /**
  * The slice of the chart this controller needs.
@@ -80,18 +81,18 @@ export interface DrawingChartHost {
   coordinateToTime?(x: number): number;
   /**
    * Optional, for drawings anchored to the viewport (`space: 'viewport'`):
-   * the time axis, whose `width` is the plot width a viewport `x` is a
-   * fraction of. A host without it still paints them, since the layer reads
-   * the plot size from its render context, but cannot place, move or convert
-   * them.
+   * the time axis, which turns a data anchor's time into a place on the plot
+   * and back when a drawing is pinned or unpinned.
    */
-  readonly timeScale?: { readonly width: number; indexToX(index: number): number; xToIndex(x: number): number };
+  readonly timeScale?: { indexToX(index: number): number; xToIndex(x: number): number };
   /**
-   * Optional: a pane's price columns in container px. On a chart with no bars
-   * to measure against, the innermost left column is where the plot, and so
-   * a viewport drawing's `x`, begins.
+   * Optional, for drawings anchored to the viewport: a pane's plot in
+   * container px, as `Chart.plotRect` reports it, which is what a viewport
+   * anchor is a fraction of. A host without it still paints them, since the
+   * layer reads the plot size from its render context, but cannot place,
+   * move or convert them.
    */
-  priceAxisLayout?(paneIndex?: number): readonly { side: 'left' | 'right'; x: number; width: number }[];
+  plotRect?(paneIndex: number): PlotRect | null;
   /**
    * Optional. It keeps a paste from a chart with more panes than this one
    * landing on a pane the user cannot see: adding a primitive creates the pane
@@ -121,15 +122,6 @@ export interface DrawingChartHost {
 interface PaneProjection {
   priceToY(price: number): number;
   yToPrice(y: number): number;
-  /** Its scale's height is the pane's plot height, what a viewport `y` is a fraction of. */
-  readonly priceScale?: { readonly height: number };
-}
-
-/** A pane's plot on screen: its top in container px, and its size. */
-interface PlotFrame {
-  top: number;
-  width: number;
-  height: number;
 }
 
 export interface DrawingControllerOptions {
@@ -172,6 +164,14 @@ export interface DrawingControllerOptions {
    */
   pasteOffsetBars?: number;
   pasteOffsetPixels?: number;
+  /**
+   * Draw the anchor of every study input that declares one (a `price` input
+   * with a `timeKey` and `anchor: true`): a handle at the point the pair
+   * names that drags both as one settings change and one step of this undo
+   * history. Default true; false draws none, and the inputs are still edited
+   * in settings and picked with `Chart.beginPick('point')`.
+   */
+  inputAnchors?: boolean;
 }
 
 /** How `DrawingController.setTool` arms a tool. */
@@ -185,7 +185,12 @@ export interface DrawingPlacementOptions {
   space?: DrawingSpace;
 }
 
-/** What `drawing:change` reports happened to the listed ids. */
+/**
+ * What `drawing:change` reports happened to the listed ids. The list is empty
+ * for a step of the undo history that changed no drawing, a study input
+ * anchor's drag and its undo or redo, so a control showing whether Undo is
+ * available still refreshes.
+ */
 export type DrawingChangeKind = 'add' | 'update' | 'remove' | 'reorder' | 'undo' | 'redo';
 
 /** Options for a call that changes, groups or deletes drawings. */
@@ -368,10 +373,12 @@ const cutInto = (b0: number, b1: number, a0: number, a1: number, size: number) =
 const pointerKindOf = (p: PointerFacts): DrawingPointerKind =>
   p.pointerType === 'touch' || p.pointerType === 'pen' ? p.pointerType : 'mouse';
 
-type ControllerOptions = Required<Omit<DrawingControllerOptions, 'defaultStyle' | 'clipboard' | 'clipboardFallbackToMemory' | 'magnet'>>
+type ControllerOptions = Required<Omit<DrawingControllerOptions, 'defaultStyle' | 'clipboard' | 'clipboardFallbackToMemory' | 'magnet' | 'inputAnchors'>>
   & { defaultStyle: DrawingStyle; magnet: MagnetMode };
 
-interface DrawingHistoryEntry { before: string; after: string }
+// `external` is a step of the history that is not a drawing edit, a study
+// anchor's drag: its snapshots are the drawings as they stood, unchanged by it.
+interface DrawingHistoryEntry { before: string; after: string; external?: InputAnchorStep }
 
 /** @internal Reserved persistence metadata; a duplicate is a new drawing lineage. */
 export const DRAWING_LINK_METADATA_KEY = 'openalgo-charts/drawing-link';
@@ -445,6 +452,7 @@ export class DrawingController {
     redo: DrawingHistoryEntry[];
   } | null = null;
   private readonly _off: (() => void)[] = [];
+  private _anchors: InputAnchors | null = null;
   private _lastCursor: { time: number; price: number; paneIndex: number } | null = null;
   /**
    * Bar under the cursor, carried by the crosshair event, with the time the
@@ -502,6 +510,12 @@ export class DrawingController {
       this._off.push(chart.on(event, () => { if (this._slotKey !== this._slotSignature()) this._syncLayers(); }));
     }
     this._sync();
+    if (options.inputAnchors !== false && typeof (chart as InputAnchorHost).indicators === 'function') {
+      this._anchors = new InputAnchors(chart as InputAnchorHost, {
+        record: step => this._recordStep(step),
+        placing: () => this._tool !== null,
+      });
+    }
   }
 
   // ── public API ──────────────────────────────────────────────────────────
@@ -1474,7 +1488,7 @@ export class DrawingController {
     // nothing any more, so the press goes on to the step before it.
     for (let snap = this._undo.pop(); snap !== undefined; snap = this._undo.pop()) {
       this._redo.push(snap);
-      if (this._applyHistory(snap.after, snap.before, 'undo')) return true;
+      if (snap.external ? this._external(snap.external.undo(), 'undo') : this._applyHistory(snap.after, snap.before, 'undo')) return true;
     }
     return false;
   }
@@ -1483,7 +1497,7 @@ export class DrawingController {
     this._onDragEnd();
     for (let snap = this._redo.pop(); snap !== undefined; snap = this._redo.pop()) {
       this._undo.push(snap);
-      if (this._applyHistory(snap.before, snap.after, 'redo')) return true;
+      if (snap.external ? this._external(snap.external.redo(), 'redo') : this._applyHistory(snap.before, snap.after, 'redo')) return true;
     }
     return false;
   }
@@ -1627,6 +1641,7 @@ export class DrawingController {
     this._destroyed = true;
     this._linkedPreviews.clear();
     this._chart.emit('draw:destroy', { controller: this });
+    this._anchors?.destroy();
     this._setPlacementMode(false);   // never leave the chart unable to pan
     for (const off of this._off) off();
     this._off.length = 0;
@@ -2201,11 +2216,11 @@ export class DrawingController {
   // ── viewport space ──────────────────────────────────────────────────────
   //
   // A viewport anchor is a fraction of its pane's plot. The layer scales it
-  // by the plot size in its render context; everything here goes through the
-  // same two numbers read off the chart (the time axis width and the pane
-  // scale's height, which the chart sets to exactly the plot's), and through
-  // the pane's own readout scale for y, the scale a gesture's price was read
-  // from. Plot-relative px therefore agree with what the layer painted.
+  // by the plot size in its render context; everything here scales it by the
+  // plot the chart reports (`plotRect`), the same rectangle the chart hands
+  // that render context, and reads y through the pane's own readout scale,
+  // the scale a gesture's price was read from. Plot-relative px therefore
+  // agree with what the layer painted.
 
   /**
    * The drawing's anchors in container media px, the space `timeToCoordinate`
@@ -2228,9 +2243,8 @@ export class DrawingController {
     }
     const frame = this._plotFrame(d.paneIndex);
     if (frame === null) return null;
-    const left = this._plotLeft();
     return placeViewportAnchors(d, d.viewportPoints ?? [], frame.width, frame.height)
-      .map((p) => ({ x: left + p.x, y: frame.top + p.y }));
+      .map((p) => ({ x: frame.left + p.x, y: frame.top + p.y }));
   }
 
   /** A pane's price projection, when the host exposes one. */
@@ -2240,55 +2254,27 @@ export class DrawingController {
   }
 
   /**
-   * Where a pane's plot is and how big, or null when it has none on screen:
-   * a folded pane maps no price, and a pane hidden by a maximize has no
-   * height. A fraction of either would be a fraction of nothing.
+   * Where a pane's plot is and how big, or null when it has none on screen
+   * (folded to a strip, or hidden behind a maximized pane): a fraction of
+   * either would be a fraction of nothing. It needs a pane projection too,
+   * since every gesture reads its y back through one.
    */
-  private _plotFrame(paneIndex: number): PlotFrame | null {
-    const pane = this._pane(paneIndex);
-    const toY = this._chart.priceToCoordinate;
-    const width = this._chart.timeScale?.width ?? 0;
-    const height = pane?.priceScale?.height ?? 0;
-    if (pane === null || toY === undefined || !(width > 0) || !(height > 0)) return null;
-    const price = pane.yToPrice(0);
-    const y = toY.call(this._chart, price, paneIndex);
-    if (y === null || !Number.isFinite(y)) return null;
-    return { top: y - pane.priceToY(price), width, height };
-  }
-
-  /**
-   * The plot's left edge in container px: the chart-wide left axis column.
-   * Any bar maps to both a container x and a plot x, and their gap is the
-   * column; a chart with no bars reads it off the left price columns.
-   */
-  private _plotLeft(): number {
-    const ts = this._chart.timeScale;
-    const toX = this._chart.timeToCoordinate;
-    const dl = this._chart.dataLayer;
-    const t = dl.length > 0 ? dl.indexToTime(0) : undefined;
-    if (ts !== undefined && toX !== undefined && t !== undefined) {
-      const left = toX.call(this._chart, t) - ts.indexToX(dl.timeToIndexFloat(t));
-      if (Number.isFinite(left)) return left;
-    }
-    let left = 0;
-    const panes = this._chart.panes?.().length ?? 1;
-    for (let i = 0; i < panes; i++) {
-      for (const slot of this._chart.priceAxisLayout?.(i) ?? []) if (slot.side === 'left') left = Math.max(left, slot.x + slot.width);
-    }
-    return left;
+  private _plotFrame(paneIndex: number): PlotRect | null {
+    const rect = this._pane(paneIndex) === null ? null : this._chart.plotRect?.(paneIndex) ?? null;
+    return rect !== null && rect.width > 0 && rect.height > 0 ? rect : null;
   }
 
   /**
    * A gesture's position on its pane's plot, in media px. y reads the price
    * back through the pane's readout scale, the exact inverse of how the chart
-   * read it; x is the pointer's container x less the left column, or, for a
-   * payload without one, the time through the time axis.
+   * read it; x is the pointer's container x less the plot's left edge, or,
+   * for a payload without one, the time through the time axis.
    */
   private _gesturePlot(p: { time: number; price: number; point?: { x: number } | null }, paneIndex: number): ScreenPoint | null {
     const pane = this._pane(paneIndex);
     const ts = this._chart.timeScale;
     if (pane === null || !Number.isFinite(p.price)) return null;
-    const x = p.point !== undefined && p.point !== null ? p.point.x - this._plotLeft()
+    const x = p.point !== undefined && p.point !== null ? p.point.x - (this._plotFrame(paneIndex)?.left ?? Number.NaN)
       : ts === undefined ? Number.NaN : ts.indexToX(this._chart.dataLayer.timeToIndexFloat(p.time));
     const y = pane.priceToY(p.price);
     return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
@@ -2359,7 +2345,7 @@ export class DrawingController {
    * stored is what is painted, and no drag can leave the box where the
    * pointer cannot reach it.
    */
-  private _pinPlot(d: Drawing, pts: readonly ScreenPoint[], frame: PlotFrame): ViewportPoint[] {
+  private _pinPlot(d: Drawing, pts: readonly ScreenPoint[], frame: PlotRect): ViewportPoint[] {
     const fraction = (p: ScreenPoint): ViewportPoint => ({ x: p.x / frame.width, y: p.y / frame.height });
     return placeViewportAnchors(d, pts.map(fraction), frame.width, frame.height).map(fraction);
   }
@@ -2370,7 +2356,7 @@ export class DrawingController {
    * holds in from a stored place off the plot (a host's value, a larger
    * chart) moves at once, with no dead travel before it starts.
    */
-  private _shiftPinned(d: Drawing, points: readonly ViewportPoint[], dxPx: number, dyPx: number, frame: PlotFrame): ViewportPoint[] {
+  private _shiftPinned(d: Drawing, points: readonly ViewportPoint[], dxPx: number, dyPx: number, frame: PlotRect): ViewportPoint[] {
     const at = placeViewportAnchors(d, points, frame.width, frame.height);
     return this._pinPlot(d, at.map((p) => ({ x: p.x + dxPx, y: p.y + dyPx })), frame);
   }
@@ -2596,6 +2582,30 @@ export class DrawingController {
     if (ring !== null && !this._layers.has(pane)) this._layerFor(pane).top.setSnapPoint(ring);
   }
 
+  /**
+   * Record a step that is not a drawing edit, a study anchor's drag, in the
+   * same history, so Undo walks it and the drawings in the order they were
+   * made. Like any new edit it clears the redo branch.
+   */
+  private _recordStep(step: InputAnchorStep): void {
+    this._onDragEnd();
+    const text = this._historyText();
+    this._undo.push({ before: text, after: text, external: step });
+    if (this._undo.length > this._opts.historyLimit) this._undo.shift();
+    this._redo = [];
+    this._external(true, 'update');
+  }
+
+  /**
+   * Announce a move of the history that changed no drawing, with no ids, so
+   * a host's Undo and Redo controls, which refresh on `drawing:change`,
+   * follow it. Passes `applied` through.
+   */
+  private _external(applied: boolean, kind: DrawingChangeKind): boolean {
+    if (applied) this._chart.emit('drawing:change', { ids: [], kind });
+    return applied;
+  }
+
   private _pushUndo(): void {
     this._onDragEnd();
     const before = this._historyText();
@@ -2640,7 +2650,8 @@ export class DrawingController {
     const keep = (entry: DrawingHistoryEntry): boolean => {
       entry.before = rewrite(entry.before);
       entry.after = rewrite(entry.after);
-      return entry === this._pendingHistory || this._applyHistory(entry.before, entry.after);
+      // A step outside the drawings keeps whatever the host did to them.
+      return entry === this._pendingHistory || entry.external !== undefined || this._applyHistory(entry.before, entry.after);
     };
     // A drag holds the branches as they were when it began, for a cancel to
     // put back. They share their steps with the live ones, and taking an

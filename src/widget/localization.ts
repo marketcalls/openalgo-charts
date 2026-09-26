@@ -54,6 +54,8 @@ export type WidgetBuiltinMessage =
   | "Choose an explicit pane and scale for this price input"
   | "Pick on chart"
   | "Pick {label} on the chart"
+  | "Pick point on chart"
+  | "Pick {time} and {price} on the chart"
   | "Cancel pick"
   | "The value could not be picked"
   | "Add a study to the chart"

@@ -4,6 +4,7 @@ import { LogoWatermark } from '../src/primitives/watermark';
 import { TextWatermark } from '../src/primitives/text-watermark';
 import { TimeNavigator } from '../src/primitives/time-navigator';
 import { applyChartSettings, chartSettingsSchema, readChartSettings } from '../src/model/chart-settings';
+import { DrawingController } from '../src/draw/index';
 import { fakeDocument, pointer, type FakeElement } from './helpers/fake-dom';
 
 const charts: Chart[] = [];
@@ -196,6 +197,71 @@ describe('owned chart branding', () => {
     expect(nav.hitTest(60, 550)).not.toBeNull();
     el.dispatch('pointermove', pointer('move', 28, 550, { buttons: 0 }));
     expect(nav.hitTest(60, 550)).toBeNull();
+  });
+});
+
+describe('a drawing over the brand mark', () => {
+  /**
+   * The mark sits in a corner of the plot, which is also where a note gets
+   * pinned to the screen. A press there is meant for whatever the user can
+   * see and grab, and the mark is the one thing on the chart that never needs
+   * to be: its link is a courtesy, a drawing is the user's work.
+   */
+  function withNote() {
+    // Frames are not run: the mark's reveal asks for one frame after another,
+    // which a synchronous frame source would answer recursively.
+    const rig = mount({ raf: { schedule: () => 1, cancel: () => {} } });
+    const draw = new DrawingController(rig.chart);
+    const rect = rig.chart.plotRect(0)!;
+    // Anchored just up and left of the mark's centre, so the note's box covers it.
+    const note = draw.add({ tool: 'text', paneIndex: 0, style: {}, points: [], space: 'viewport',
+      viewportPoints: [{ x: 16 / rect.width, y: 540 / rect.height }], text: { value: 'Pinned over the corner mark' } });
+    return { ...rig, draw, note };
+  }
+
+  it('takes a press and a drag meant for the drawing, not the link', () => {
+    const { el, draw, note, opened } = withNote();
+    const before = draw.get(note.id)!.viewportPoints![0];
+    el.dispatch('pointermove', pointer('move', 28, 550, { buttons: 0 }));
+    el.dispatch('pointerdown', pointer('down', 28, 550));
+    for (let i = 1; i <= 5; i++) el.dispatch('pointermove', pointer('move', 28 + i * 30, 550 - i * 40));
+    el.dispatch('pointerup', pointer('up', 178, 350));
+    expect(opened).toEqual([]);
+    const after = draw.get(note.id)!.viewportPoints![0];
+    expect(after.x).toBeGreaterThan(before.x);
+    expect(after.y).toBeLessThan(before.y);
+  });
+
+  it('selects the drawing on a click, lights it on hover and hands it the double click', () => {
+    const { chart, el, draw, note, opened } = withNote();
+    const hovered: unknown[] = [];
+    chart.on('hover', event => hovered.push((event as { id: string | null }).id));
+    el.dispatch('pointermove', pointer('move', 28, 550, { buttons: 0 }));
+    expect(hovered[hovered.length - 1]).toBe(`draw:${note.id}`);
+    click(el);
+    expect(opened).toEqual([]);
+    expect(draw.selection()).toEqual([note.id]);
+    const doubles: unknown[] = [];
+    chart.on('dblclick', event => doubles.push(event));
+    el.dispatch('dblclick', { clientX: 28, clientY: 550, preventDefault() {}, stopPropagation() {} });
+    expect(doubles).toHaveLength(1);
+  });
+
+  it('hands a press on a line crossing the mark to the line', () => {
+    const { chart, el, opened } = mount({ raf: { schedule: () => 1, cancel: () => {} } });
+    const clicks: string[] = [];
+    chart.subscribeClick(id => clicks.push(id));
+    chart.addPriceLine({ price: chart.coordinateToPrice(550, 0)!, id: 'order-line', color: '#2f6df6' });
+    click(el);
+    expect(opened).toEqual([]);
+    expect(clicks).toEqual(['order-line']);
+  });
+
+  it('still opens the link where no drawing covers the mark', () => {
+    const { el, draw, note, opened } = withNote();
+    draw.remove(note.id);
+    click(el);
+    expect(opened).toHaveLength(1);
   });
 });
 

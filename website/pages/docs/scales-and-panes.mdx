@@ -206,6 +206,21 @@ chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id
 chart.timeScale.fitContent(bars.length);
 return chart;`} />
 
+### Where a pane's plot is
+
+`chart.plotRect(paneIndex)` answers where a pane's plot sits in the chart
+container, in CSS px: `{ left, top, width, height }`, inside the price axis columns
+and above the time axis, the size a primitive on that pane paints into. Lay an HTML
+overlay against it instead of working the rectangle out from the axes. It returns
+`null` for a pane collapsed to its header strip, one hidden behind a maximized pane,
+or an index with no pane. Drawings pinned to the screen are placed by the same
+rectangle, so a host overlay and a pinned drawing agree.
+
+```ts
+const rect = chart.plotRect(1);                 // the second pane
+if (rect) Object.assign(badge.style, { left: `${rect.left + 8}px`, top: `${rect.top + 8}px` });
+```
+
 ## Navigation and autoscale animation
 
 Wheel input changes scales in proportion to the normalized CSS-pixel distance. A vertical

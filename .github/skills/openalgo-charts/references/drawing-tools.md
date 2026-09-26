@@ -355,8 +355,20 @@ new DrawingController(chart, {
   clipboard: undefined,     // ClipboardPort; defaults to navigator.clipboard, null disables it
   pasteOffsetBars: 2,       // how far a paste is nudged along time
   pasteOffsetPixels: 16,    // how far a paste is nudged down the price axis
+  inputAnchors: true,       // draw the anchor of every paired study input that declares one
 });
 ```
+
+**Study input anchors.** A study `price` input paired with a `timestamp`
+(`timeKey`) and declared with `anchor: true` gets a handle at its point, drawn by
+the controller on the pane and scale `studyInputTarget(chart, study, key)` names
+(the same target a pick of that price uses; `StudyInputTarget` is
+`{ paneIndex, priceScaleId }`). A drag writes both settings in one patch and is one
+step of this controller's undo history, in order with the drawings; `undo()` and
+`redo()` walk it, and a step whose study has gone or moved on is passed over. The
+step emits `drawing:change` with `ids: []` (and again on undo and redo), so a
+control showing whether Undo is available refreshes. An active drawing tool or a pick takes
+the press instead. See [indicators](indicators.md#paired-time-and-price-inputs).
 
 | Member | Behaviour |
 |---|---|
@@ -387,7 +399,7 @@ new DrawingController(chart, {
 | `migrateDrawings(input)` | The upgrade `fromJSON` runs, exported for a host reading a saved layout on its own: any 1.9.x array or v2 document in, a v2 `DrawingsDocument` out, never throws. |
 | `destroy()` | Unhooks listeners, removes every pane layer, releases placement mode. |
 
-Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select` (the primary id), `draw:copy`, `draw:cut`, `draw:paste`, plus the 2.0 pair `drawing:select` (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind: 'add' | 'update' | 'remove' | 'reorder' }`, one per mutation, after the per-drawing `draw:*` events), and `drawing:hover` (`{ id: string | null }`, when the unselected drawing under the pointer changes). `DrawingChangeKind` names the `kind` union.
+Events on the chart bus: `draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select` (the primary id), `draw:copy`, `draw:cut`, `draw:paste`, plus the 2.0 pair `drawing:select` (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind: 'add' | 'update' | 'remove' | 'reorder' }`, one per mutation, after the per-drawing `draw:*` events; `ids` is empty for a history step that changed no drawing, a study anchor's drag and its undo or redo), and `drawing:hover` (`{ id: string | null }`, when the unselected drawing under the pointer changes). `DrawingChangeKind` names the `kind` union.
 
 **The controller listens on `chart.on(...)`, not `subscribeClick` / `subscribeDrag`.** Those two are single-slot callbacks the host needs for its own order lines; routing drawings through the bus means the two never contend.
 
@@ -904,12 +916,13 @@ any undo on a linked drawing does; if the peers deleted their copies meanwhile,
 it stays on this chart alone and loses the mark, so a later restore does not
 apply their deletion to it.
 
-The controller converts through `DrawingChartHost.timeScale` (its `width` is the
-plot width) and each pane's `priceToY` / `yToPrice` / `priceScale.height`, which
-the built-in `Chart` provides. A host without them still paints viewport
+The controller measures a viewport anchor by the plot the chart reports,
+`DrawingChartHost.plotRect(paneIndex)` (`chart.plotRect`, `{ left, top, width,
+height }` in container px, null where the pane has no plot on screen), the same
+rectangle the chart hands the layer that paints it, and converts time and price
+through `DrawingChartHost.timeScale` and each pane's `priceToY` / `yToPrice`,
+which the built-in `Chart` provides. A host without them still paints viewport
 drawings but cannot place, move or convert them. `screenPoints` adds the plot's
-left edge, which it reads off any bar through `timeToCoordinate`; on a chart
-with no bars it falls back to the optional
-`DrawingChartHost.priceAxisLayout(paneIndex)` (each price column's `side`, `x`
-and `width` in container px), taking the innermost left column's right edge. Types: `DrawingSpace`,
+left edge and top from that rectangle, so an HTML overlay a host lays against
+`chart.plotRect` lines up with the drawing. Types: `DrawingSpace`,
 `ViewportPoint`, `DrawingPlacementOptions`.

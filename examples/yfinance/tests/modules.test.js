@@ -15,6 +15,7 @@ const MODULES = readdirSync(SRC).filter((f) => f.endsWith('.js') && f !== 'main.
 /** The init hook each module hands its state to, where it has one. */
 const INIT = {
   'account.js': 'initAccount',
+  'anchored-study.js': 'initAnchoredStudy',
   'axis-chrome.js': 'initAxisChrome',
   'bracket.js': 'initBracket',
   'chart-settings.js': 'initChartSettings',
@@ -48,7 +49,7 @@ const INIT = {
 describe('demo modules', () => {
   it('lists the modules the README documents', () => {
     expect(MODULES).toEqual([
-      'account.js', 'alerts.js', 'axis-chrome.js', 'bracket.js', 'chart-data-controls.js', 'chart-data.js', 'chart-settings.js', 'clipboard.js', 'compare.js',
+      'account.js', 'alerts.js', 'anchored-study.js', 'axis-chrome.js', 'bracket.js', 'chart-data-controls.js', 'chart-data.js', 'chart-settings.js', 'clipboard.js', 'compare.js',
       'drawing.js', 'expression.js', 'feed.js', 'goto.js', 'grid-view.js', 'grid.js', 'host-study.js', 'hover.js', 'indicator-input-controls.js', 'indicator-source.js', 'indicator-templates.js', 'indicators.js', 'inspection.js', 'intervals.js', 'level-editor.js',
       'link.js', 'market-panels.js', 'menus.js', 'orders.js', 'pane-target.js', 'persist.js', 'properties.js', 'rail-flyout.js',
       'rail.js', 'replay-timing.js', 'replay.js', 'routed-study.js', 'session-marks.js', 'snapshot.js', 'split.js', 'status.js', 'symbol-search.js', 'templates.js', 'text-editor.js',
