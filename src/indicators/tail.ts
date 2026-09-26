@@ -21,9 +21,16 @@
  *
  * Either way the tail also recomputes the bar before it and compares that with
  * the result the runtime still holds. A disagreement means the held result is
- * not this study's own (a descriptor that spread a built-in and reshaped its
- * output) or the history moved under it, and the tail declines so the full
+ * not this study's own (a descriptor that copied a built-in's tail and reshaped
+ * its output) or the history moved under it, and the tail declines so the full
  * `calc` runs. A study that keeps disagreeing stops being offered the tail.
+ *
+ * The tail is not enumerable on the descriptor, so `{ ...SMA, calc }` does not
+ * carry it. A spread that adds a column, blanks the forming bar or passes other
+ * settings to the built-in would otherwise have its own `calc` skipped on every
+ * tick, and neither check above sees all of those. Such a descriptor keeps the
+ * full `calc` it had before the built-ins had tails; copying `calcTail` across
+ * is an explicit choice.
  */
 import type { Bar, IndicatorDescriptor, IndicatorStore, IndicatorValues, IndicatorSettings } from 'openalgo-charts';
 
@@ -54,10 +61,10 @@ export const whole = (v: number): boolean => Number.isSafeInteger(v) && v > 0;
 /**
  * Wrap a built-in's `calc` so that it records, on the store it is handed, that
  * it ran. The tail resumes only from its own study's full result: a descriptor
- * that spreads a built-in and supplies a different `calc` never sets the mark,
- * and its inherited tail declines.
+ * that copies a built-in's tail and supplies a different `calc` never sets the
+ * mark, and the copied tail declines.
  */
-export function owned(calc: Calc): Calc {
+function owned(calc: Calc): Calc {
   return (bars, settings, store, ctx) => {
     if (typeof store === 'object' && store !== null) {
       const prior = claims.get(store);
@@ -67,9 +74,37 @@ export function owned(calc: Calc): Calc {
   };
 }
 
-/** A built-in with its tail: its `calc` marks the store, and `tail(calc)` resumes from that result. */
+/**
+ * A tail that also declines when the held result has a column it does not
+ * write. The runtime keeps only the columns a tail returns, so splicing would
+ * drop that column from the plot. Such a column can only come from another
+ * `calc`, which will write it again next time, so the tail stops for good.
+ */
+function keyed(tail: Tail): Tail {
+  return (bars, settings, from, previous, store, ctx) => {
+    const out = tail(bars, settings, from, previous, store, ctx);
+    if (out === null) return null;
+    for (const key of Object.keys(previous)) {
+      if (!Object.prototype.hasOwnProperty.call(out, key)) {
+        const claim = typeof store === 'object' && store !== null ? claims.get(store) : undefined;
+        if (claim !== undefined) claim.misses = MISSES;
+        return null;
+      }
+    }
+    return out;
+  };
+}
+
+/**
+ * A built-in with its tail: its `calc` marks the store, and `tail(calc)` resumes
+ * from that result. The tail goes on as a property a spread does not copy.
+ */
 export function withTail(descriptor: IndicatorDescriptor, tail: (calc: Calc) => Tail): IndicatorDescriptor {
-  return { ...descriptor, calc: owned(descriptor.calc), calcTail: tail(descriptor.calc) };
+  const out: IndicatorDescriptor = { ...descriptor, calc: owned(descriptor.calc) };
+  Object.defineProperty(out, 'calcTail', {
+    value: keyed(tail(descriptor.calc)), enumerable: false, writable: true, configurable: true,
+  });
+  return out;
 }
 
 /** The claim a tail may continue from, if its own `calc` made it. */

@@ -404,10 +404,10 @@ describe('what a tail resumes from', () => {
     const s = settingsFor(d, {});
     const held = d.calc(data, s, {});
     expect(d.calcTail!(data, s, 49, held, {})).toBeNull();
-    // A descriptor that spreads the built-in and brings its own calc inherits
-    // a tail that must not splice onto someone else's numbers.
+    // A descriptor that copies the built-in's tail and brings its own calc
+    // must not have the tail splice onto someone else's numbers.
     const store: IndicatorStore = {};
-    const doubled: IndicatorDescriptor = { ...d, calc: (b) => ({ ma: b.map((x) => x.close * 2) }) };
+    const doubled: IndicatorDescriptor = { ...d, calc: (b) => ({ ma: b.map((x) => x.close * 2) }), calcTail: d.calcTail };
     const own = doubled.calc(data, s, store);
     expect(doubled.calcTail!(data, s, 49, own, store)).toBeNull();
   });
@@ -425,12 +425,12 @@ describe('what a tail resumes from', () => {
     expect(d.calcTail!(data, s, 59, held, store)).toBeNull();
   });
 
-  it('resumes a matching held result, and a wrapper that calls the built-in keeps it', () => {
+  it('resumes a matching held result, and a wrapper that calls the built-in keeps a copied tail', () => {
     const d = getIndicator('macd');
     const data = bars(80);
     const s = settingsFor(d, {});
     const store: IndicatorStore = {};
-    const wrapped: IndicatorDescriptor = { ...d, calc: (...args) => d.calc(...args) };
+    const wrapped: IndicatorDescriptor = { ...d, calc: (...args) => d.calc(...args), calcTail: d.calcTail };
     const held = wrapped.calc(data, s, store);
     data[79] = { ...data[79], close: data[79].close + 1 };
     const tail = wrapped.calcTail!(data, s, 79, held, store);
@@ -438,6 +438,25 @@ describe('what a tail resumes from', () => {
     const full = d.calc(data, s, {});
     expect(tail!.macd[0]).toBe(full.macd[79]);
     expect(tail!.histogram[0]).toBe(full.histogram[79]);
+  });
+
+  it('declines a copied tail when the held result has a column the tail does not write', () => {
+    const d = getIndicator('sma');
+    const data = bars(40);
+    const s = settingsFor(d, { length: 3 });
+    const store: IndicatorStore = {};
+    const extended: IndicatorDescriptor = {
+      ...d, calc: (...args) => ({ ...d.calc(...args), extra: args[0].map((b) => b.close) }), calcTail: d.calcTail,
+    };
+    const held = extended.calc(data, s, store);
+    // Its `ma` is the built-in's to the bit, so only the extra column tells.
+    expect(extended.calcTail!(data, s, 39, held, store)).toBeNull();
+    // Its calc writes that column every time, so the tail is not tried again
+    // for this instance, while another instance of the built-in keeps its own.
+    const { extra: _extra, ...plain } = extended.calc(data, s, store);
+    expect(extended.calcTail!(data, s, 39, plain, store)).toBeNull();
+    const own: IndicatorStore = {};
+    expect(d.calcTail!(data, s, 39, d.calc(data, s, own), own)).not.toBeNull();
   });
 
   it('rebuilds after a full calc rather than resuming a stale checkpoint', () => {
@@ -454,6 +473,101 @@ describe('what a tail resumes from', () => {
     data[79] = { ...data[79], close: 95 };
     const tail = d.calcTail!(data, s, 79, held, store);
     expect(firstDifference(splice(held, tail!, 79, 80)!, d.calc(data, s, {}))).toBeNull();
+  });
+});
+
+describe('a descriptor that spreads a built-in', () => {
+  // Before the built-ins had tails, a spread of one recomputed in full on every
+  // tick, through its own calc. It still does: the tail is not something a
+  // spread copies, so each of these keeps the values its own calc gives.
+  const mount = () => {
+    const doc = fakeDocument();
+    const chart = new Chart(doc.createElement('div'), {
+      document: doc, timezone: 'Etc/UTC', pixelRatio: () => 1, shortcuts: false, raf: { schedule: () => 1, cancel: () => {} },
+    });
+    chart.applySize(800, 600);
+    const data: Bar[] = Array.from({ length: 30 }, (_, i) => ({
+      time: i * 60, open: 10 + i, high: 11 + i, low: 9 + i, close: 10 + i, volume: 5,
+    }));
+    const series = chart.addSeries('candlestick');
+    series.setData(data);
+    const tick = (close: number): Bar[] => {
+      data[29] = { ...data[29], high: Math.max(data[29].high, close), close };
+      series.update(data[29]);
+      return data;
+    };
+    return { chart, tick };
+  };
+
+  it('carries no calcTail, and the built-in keeps its own', () => {
+    for (const id of Object.keys(CASES)) {
+      const d = getIndicator(id);
+      expect(d.calcTail, id).toBeTypeOf('function');
+      expect({ ...d }.calcTail, id).toBeUndefined();
+      expect(Object.keys(d), id).not.toContain('calcTail');
+    }
+  });
+
+  it('keeps a column it adds to the output of the built-in through a tick', () => {
+    const h = mount();
+    const sma = getIndicator('sma');
+    const d: IndicatorDescriptor = {
+      ...sma, id: 'tail-spread-extra', name: 'extra',
+      plots: [...sma.plots, { key: 'extra', type: 'line', title: 'extra' }],
+      calc: (b, s, st, c) => ({ ...sma.calc(b, s, st, c), extra: b.map((x) => x.close * 2) }),
+    };
+    registerIndicator(d);
+    const api = h.chart.addIndicator(d.id, { length: 3 });
+    const data = h.tick(44);
+    expect(firstDifference(api.values(), d.calc(data, api.settings(), {}))).toBeNull();
+    h.chart.destroy();
+  });
+
+  it('keeps a forming bar it blanks blank through a tick', () => {
+    const h = mount();
+    const ema = getIndicator('ema');
+    const d: IndicatorDescriptor = {
+      ...ema, id: 'tail-spread-closed', name: 'closed',
+      calc: (b, s, st, c) => { const ma = ema.calc(b, s, st, c).ma.slice(); ma[ma.length - 1] = null; return { ma }; },
+    };
+    registerIndicator(d);
+    const api = h.chart.addIndicator(d.id, { length: 3 });
+    h.tick(44);
+    expect(api.values().ma[29]).toBeNull();
+    expect(api.values().ma[28]).not.toBeNull();
+    h.chart.destroy();
+  });
+
+  it('keeps the tail when it copies it by name and returns the built-in result', () => {
+    const h = mount();
+    const ema = getIndicator('ema');
+    let fulls = 0;
+    const d: IndicatorDescriptor = {
+      ...ema, id: 'tail-spread-copied', name: 'copied',
+      calc: (...args) => { fulls++; return ema.calc(...args); },
+      calcTail: ema.calcTail,
+    };
+    registerIndicator(d);
+    const api = h.chart.addIndicator(d.id, { length: 3 });
+    expect(fulls).toBe(1);
+    const data = h.tick(44);
+    expect(fulls).toBe(1);
+    expect(firstDifference(api.values(), ema.calc(data, api.settings(), {}))).toBeNull();
+    h.chart.destroy();
+  });
+
+  it('keeps the settings it hands the built-in through a tick', () => {
+    const h = mount();
+    const rsi = getIndicator('rsi');
+    const d: IndicatorDescriptor = {
+      ...rsi, id: 'tail-spread-doubled', name: 'doubled',
+      calc: (b, s, st, c) => rsi.calc(b, { ...s, length: Number(s.length) * 2 }, st, c),
+    };
+    registerIndicator(d);
+    const api = h.chart.addIndicator(d.id, { length: 7 });
+    const data = h.tick(40.5);
+    expect(firstDifference(api.values(), d.calc(data, api.settings(), {}))).toBeNull();
+    h.chart.destroy();
   });
 });
 

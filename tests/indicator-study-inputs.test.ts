@@ -78,8 +78,7 @@ describe('native dependent study inputs', () => {
   it('calculates a diamond once per node while retaining adversarial display order', () => {
     const h = mount();
     const calls: string[] = [];
-    // Counted through calc, so without the built-in's tail.
-    const rootId = descriptor({ calc: (...args) => { calls.push('root'); return SMA.calc(...args); }, calcTail: undefined });
+    const rootId = descriptor({ calc: (...args) => { calls.push('root'); return SMA.calc(...args); } });
     const scale = (label: string, multiplier: number): string => descriptor({
       inputs: [{ key: 'source', type: 'source', label: 'Source', default: 'close', allowStudyOutputs: true }],
       calc: (bars, settings, _store, context) => {
@@ -143,8 +142,9 @@ describe('native dependent study inputs', () => {
     const h = mount();
     let tails = 0;
     const id = descriptor({ calcTail: () => { tails++; return null; } });
-    // The built-in average has a tail of its own, so the producer here is one without.
-    const producer = h.chart.addIndicator(descriptor({ calcTail: undefined }), { length: 2 });
+    // The built-in average has a tail of its own and a spread of it does not,
+    // so the producer here is a spread.
+    const producer = h.chart.addIndicator(descriptor(), { length: 2 });
     const consumer = h.chart.addIndicator(id, { length: 2, source: reference(producer.id) });
     h.source.update(bar(180, 9));
     expect(consumer.values().ma).toEqual([null, null, 3, 5.5]);
@@ -309,7 +309,6 @@ describe('native dependent study inputs', () => {
     const producer = h.chart.addIndicator('sma', { length: 2 });
     const consumerId = descriptor({
       calc: (...args) => { if (stage === 'calc') mutate(); return SMA.calc(...args); },
-      calcTail: undefined,
       alerts: [{ id: 'change', title: 'Change', frequency: 'everyUpdate', when: () => { if (stage === 'alert') mutate(); return true; } }],
     });
     const consumer = h.chart.addIndicator(consumerId, { length: 2, source: reference(producer.id) });

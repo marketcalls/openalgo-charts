@@ -73,9 +73,6 @@ function counted(id: string): { calls: () => number; restore: () => void } {
       n++;
       return original.calc(...args);
     },
-    // The probe counts recomputes by counting calc, so it carries no tail: a
-    // tail recomputes a tick without calling calc at all.
-    calcTail: undefined,
   };
   registerIndicator(wrapper);
   return { calls: () => n, restore: () => registerIndicator(original) };

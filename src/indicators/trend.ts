@@ -14,7 +14,7 @@ import {
 import type { Bar, IndicatorDescriptor, IndicatorSource, IndicatorStudySource } from 'openalgo-charts';
 import { sma, wma, stdev, highest, lowest, nulls, smaSeededEma } from './calc';
 import type { NumericalWindowOptions } from './statistics';
-import { owned, withTail, whole, cell, claimOf, settle, windowTail, machineTail, type Tail } from './tail';
+import { withTail, whole, cell, claimOf, settle, windowTail, machineTail, type Tail } from './tail';
 import { seeded, smooth, observed, observedStep, supertrendState, supertrendStep, sarState, sarStep } from './steppers';
 
 type Calc = IndicatorDescriptor['calc'];
@@ -63,7 +63,7 @@ function movingAverage(id: string, name: string, color: string, kernel: Kernel, 
     return { ma: nulls(kernel(values, num(s, 'length', 9),
       typeof source === 'string' ? undefined : { missing: 'propagate' })) };
   };
-  return {
+  return withTail({
     id,
     name,
     category: 'Trend',
@@ -74,9 +74,8 @@ function movingAverage(id: string, name: string, color: string, kernel: Kernel, 
       { key: 'color', type: 'color', label: 'Color', default: color },
     ],
     plots: [{ key: 'ma', type: 'line', title: name, colorKey: 'color', style: { color, lineWidth: 1.5 } }],
-    calc: owned(calc),
-    calcTail: recursive ? emaTail(calc) : windowAverageTail(calc, kernel),
-  };
+    calc,
+  }, (own) => (recursive ? emaTail(own) : windowAverageTail(own, kernel)));
 }
 
 /**
@@ -146,7 +145,7 @@ function bollinger(bars: readonly Bar[], s: Readonly<Record<string, unknown>>): 
   return { upper: nulls(upper), basis: nulls(basis), lower: nulls(lower) };
 }
 
-export const BOLLINGER: IndicatorDescriptor = {
+export const BOLLINGER: IndicatorDescriptor = withTail({
   id: 'bollinger',
   name: 'Bollinger Bands',
   category: 'Volatility',
@@ -163,13 +162,12 @@ export const BOLLINGER: IndicatorDescriptor = {
     { key: 'basis', type: 'line', title: 'BB Basis', colorKey: 'basisColor', style: { lineWidth: 1.5 } },
     { key: 'lower', type: 'line', title: 'BB Lower', colorKey: 'bandColor', style: { lineWidth: 1 } },
   ],
-  calc: owned(bollinger),
+  calc: bollinger,
+}, (calc) => windowTail(calc, (s) => {
   // The basis and the deviation both read one window of the source.
-  calcTail: windowTail(bollinger, (s) => {
-    const length = num(s, 'length', 20);
-    return whole(length) ? length - 1 : null;
-  }),
-};
+  const length = num(s, 'length', 20);
+  return whole(length) ? length - 1 : null;
+}));
 
 /**
  * Which calendar boundary restarts the accumulation. The reference also offers
