@@ -54,9 +54,12 @@ describe('pane weights', () => {
     expect(chart.paneWeight(1)).toBe(0.8);
     // The DOM flex-basis must equal the pixel height the canvas was sized to —
     // when they diverge, every hit-test lands somewhere other than what's drawn.
+    // The boundary between them sits on a whole pixel (the ratio is 1 here),
+    // and the pane below takes what the one above leaves.
     const total = 1 + 0.8;
-    const expected = (H * 0.8) / total;
+    const expected = H - Math.round(H / total);
     expect(chart.panes()[1].element.style.flex).toBe(`0 0 ${expected}px`);
+    expect(chart.panes()[1].base.mediaHeight).toBe(expected);
   });
 
   it('clamps a non-positive weight instead of collapsing the layout', () => {
@@ -343,6 +346,9 @@ describe('pane removal, ordering, and maximize', () => {
     expect(chart.maximizedPane()).toBeNull();
     expect(chart.panes().map((p) => p.weight)).toEqual(before);
     expect(chart.panes()[0].element.style.display).toBe('');
+    // Restored, the study pane sits under the price pane again and wears the rule.
+    expect(chart.panes()[1].element.style.borderTopWidth).toBe('1px');
+    expect(chart.panes()[0].element.style.borderTopWidth).toBe('0px');
   });
 
   it('hands the time axis to the maximized pane', () => {

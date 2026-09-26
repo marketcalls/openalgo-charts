@@ -67,7 +67,7 @@ for streaming-builder lifetime and source-transition details.
 
 ## Times past the last bar
 
-`applyTo` also hands the instrument to `chart.dataLayer.setSessionCalendar`, so the
+`applyTo` also hands the instrument to `chart.setSessionCalendar`, so the
 empty space right of the last candle is laid out in the instrument's sessions. On a
 five-minute chart whose last candle is Friday's 15:25, the next bar time is Monday's
 09:15: a trend line or a box drawn there ends on Monday's session, and a saved anchor
@@ -102,10 +102,21 @@ new SessionCalendar({
 It is validated, detached and frozen like an instrument's calendar, throws
 `Invalid session calendar: ...`, and reads with the same `sessionAt` and
 `sessionFrom`. `applyTo` repaints, so drawings already past the last candle move
-to the times they now mean. `chart.dataLayer.setSessionCalendar(calendar)` sets the
-same without asking for a frame, for a host that loads bars or moves the view right
-after; pass `null` there to clear it. Hours a host set itself stay until it replaces
-them. Without a calendar, or when the recent bars do not sit in its sessions (regular
+to the times they now mean.
+
+A host that builds its own hours, from a venue list it keeps or any object with
+`sessionFrom`, sets them on the chart directly, and the chart repaints the same way;
+`null` clears them:
+
+```ts
+chart.setSessionCalendar(myVenueHours);   // drawings past the last bar move now
+chart.setSessionCalendar(null);           // back to the median spacing
+```
+
+`chart.dataLayer.setSessionCalendar(calendar)` sets the same without asking for a
+frame, for a host that loads bars or moves the view right after, either of which
+repaints; on an idle chart a drawing past the last bar would stay where it was painted
+until then. Hours a host set itself stay until it replaces them. Without a calendar, or when the recent bars do not sit in its sessions (regular
 hours against extended-hours data), the space past the last bar runs at the median
 of the recent bar intervals, never at a night- or weekend-sized last gap. The
 reference host does this with each venue's regular hours.

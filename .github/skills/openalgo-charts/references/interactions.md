@@ -186,7 +186,7 @@ The constructor sets `touch-action: none` on the container, so the browser does 
 
 **A scrollable ancestor can still swallow touch before the chart sees it.** Put `touch-action: none` on the scroll container too, or move the chart out of the native-scroll region.
 
-`window.devicePixelRatio` is read at startup and on every resize; override with `pixelRatio: () => 2` for fixed-density screenshots or headless environments.
+`window.devicePixelRatio` is read at startup, on every resize and whenever the ratio changes (the chart watches a `(resolution: Xdppx)` query and the window's `resize`), and every canvas is re-sized and repainted at once; override with `pixelRatio: () => 2` for fixed-density screenshots or headless environments.
 
 The packaged widget adds responsive mobile chrome; the engine itself remains DOM-free.
 See [widget](widget.md#mobile-controls) for the `'auto'`, `'always'` and `'never'` modes,

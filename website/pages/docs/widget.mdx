@@ -313,23 +313,21 @@ widget.isDestroyed;
 ```
 
 `restoreState` applies a saved viewport only when the state was captured on the same
-symbol and interval; on any other dataset the indicators, drawings and panes still land
-and the view is dropped, because a range of bar indices means nothing on different bars.
-A restored layout starts a new undo timeline.
-
-Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z, the rail's Undo and Redo and the mobile sheets all walk
-`widget.history`: a study added or removed, its settings, the chart type, price scale
-settings, pane moves, folds and heights, and drawings, in the order they were made. The
-settings dialogs are one step per session, and a Cancel leaves none; a context-menu row is
-one step. Undo never writes bars, fires an alert or places an order. A change your own code
-makes that should not be a step goes through `widget.history.ignore(fn)`. See
-[Undo and Redo](/docs/undo-history).
 symbol, interval and [data variant](/docs/data-variants); on any other dataset the
 indicators, drawings and panes still land and the view is dropped, because a range of bar
 indices means nothing on different bars. A state without `variant` was saved on the
 feed's default series (so was every state saved before variants existed), and it restores
 onto the default series whatever the widget shows at the time; one this build cannot read
-is refused before anything is applied.
+is refused before anything is applied. A restored layout starts a new undo timeline.
+
+Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z, the rail's Undo and Redo and the mobile sheets all walk
+`widget.history`: a study added or removed, its settings, the chart type, price scale
+settings, pane moves, folds and heights, and drawings, in the order they were made. The
+settings dialogs are one step per session, and a Cancel leaves none; a context-menu row is
+one step, and so is a drag of a study's anchor. Undo never writes bars, fires an alert,
+places an order or overrides a study's policy. A change your own code
+makes that should not be a step goes through `widget.history.ignore(fn)`. See
+[Undo and Redo](/docs/undo-history).
 
 A `Widget` is a thin owner. Anything the chrome does not expose, do on `widget.chart` or
 `widget.draw` directly; the chrome observes the chart and stays in step.

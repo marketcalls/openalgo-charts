@@ -35,8 +35,10 @@ from one point, a bar time and a price that belong together. It starts two third
 across the view at that bar's close, where its orange ring sits. Drag the ring to move
 the time and the price together; Ctrl+Z, the rail's Undo or the phone bar's Undo takes
 the drag back, and Escape during a drag cancels it. In its settings, **Pick point on
-chart** sets both from one click and Apply writes them as one change. While a drawing
-tool is active, a press on the ring places the drawing instead.
+chart** sets both from one click and Apply writes them as one change. Each drag and
+each settings session is one step of the chart's timeline, so undo walks a pick, the
+drags before it and your drawings back one at a time, in the order you made them.
+While a drawing tool is active, a press on the ring places the drawing instead.
 
 Choose **Indicators > Examples > Source signal sample** to add the host-owned
 2.4.6 demonstration to the focused chart. It alternates Up and Down labels every
@@ -505,7 +507,7 @@ exists to show one engine surface carrying real use, not just being present.
 | `indicators.js` | The picker is built from `registeredIndicators()`, so built-ins and the host's opt-in example appear grouped by category. The gear opens a form generated from the descriptor's `inputs`; the same code renders MACD, Bollinger or your own indicator. An input's `visibleWhen` and `activeWhen` are read against the drafts on every committed edit with the widget's own `inputStates`, so a row appears, leaves or greys out as the settings it depends on change (a number box commits as the widget's does, clamped to its bounds, a blank one getting its last value back); a hidden draft is kept, an invalid hidden one never blocks Apply, and the change is announced in a polite live region. Inputs sharing an `inline` id sit on one row. |
 | `indicator-input-controls.js` | Validates typed drafts and connects shared symbol lookup and chart picking to the reference modal, preserving its Apply and Cancel behavior. |
 | `indicator-source.js` | Registers the Source signal sample and resolves source requests against the emitting chart and live instance. The read-only dialog shows the actual host factory and closes when its owner is removed or destroyed. |
-| `anchored-study.js` | Registers the Anchored growth sample, whose anchor time and price are one point (`timeKey`) with a handle on the chart (`anchor: true`): the settings form picks both from one click, and the drawing controller draws the ring, commits a drag as one settings change and walks it with the drawings' Undo. `indicators.js` seeds a new sample at a bar in view, since its defaults cannot know the loaded history. |
+| `anchored-study.js` | Registers the Anchored growth sample, whose anchor time and price are one point (`timeKey`) with a handle on the chart (`anchor: true`): the settings form picks both from one click, and the drawing controller draws the ring, commits a drag as one settings change, and hands the step to the chart's timeline (`history.js`), which walks it with the drawings. `indicators.js` seeds a new sample at a bar in view, since its defaults cannot know the loaded history. |
 | `routed-study.js` | Registers the Routed signal sample: a momentum histogram in its own pane whose Buy and Sell plates, range box and momentum shading name the price pane (`overlay: true`), while its crossing dots and "Now" label (`plot: 'momentum'`) stay with the histogram. The Signals on price input sends the plates back to the study's pane; Momentum shading sends the shading there as a column naming no target, or turns it off. |
 | `chart-settings.js` | The settings dialog is generated from `chartSettingsSchema()`, including the paired up and down colour control on one row, and a control the current context cannot back is drawn disabled with its state visible. |
 | `transforms.js` | Heikin Ashi, Renko, Range Bars, Line Break, Point and Figure and Kagi from the transform tier; P&F reveals its box-sizing mode (ATR, percent, fixed). |
@@ -946,9 +948,12 @@ axis chords, keeps `primaryPane` in its named-workspace allowlist, and forwards
 Each chart keeps one timeline: a study added from the picker or removed from its
 chip or legend, its settings, the chart type, a price scale's mode, invert, auto-fit
 or placement from the axis menu, pane moves, folds and heights, the chart settings
-and study settings dialogs (one step per session; Cancel leaves none) and drawings,
-in the order they were made. A study brought back returns to its pane, height and
-fold, with the drawings its pane held.
+and study settings dialogs (one step per session; Cancel leaves none), a drag of a
+study's anchor ring and drawings, in the order they were made. A study brought back
+returns to its pane, height and fold, with the drawings its pane held, and under the
+id it had. The protected VWAP is the host's: adding or removing it from the menu is
+never a step, and no undo or redo removes, reconfigures or moves it, though a study
+you move past it in its pane's stack is a step like any other and goes back past it.
 
 Ctrl+Z and Ctrl+Y (and Ctrl+Shift+Z) over a chart and the mobile bar's Undo and Redo
 walk the focused chart's timeline. The rail and the drawing toolbar belong to the main

@@ -484,6 +484,8 @@ export class DrawingController {
   } | null = null;
   private readonly _off: (() => void)[] = [];
   private _anchors: InputAnchors | null = null;
+  /** The host's timeline an anchor step goes to instead of this history; see `delegateInputAnchorSteps`. */
+  private _anchorSteps: ((step: InputAnchorStep) => void) | null = null;
   private _lastCursor: { time: number; price: number; paneIndex: number } | null = null;
   /**
    * Bar under the cursor, carried by the crosshair event, with the time the
@@ -543,7 +545,7 @@ export class DrawingController {
     this._sync();
     if (options.inputAnchors !== false && typeof (chart as InputAnchorHost).indicators === 'function') {
       this._anchors = new InputAnchors(chart as InputAnchorHost, {
-        record: step => this._recordStep(step),
+        record: (step, outside) => this._recordStep(step, outside),
         placing: () => this._tool !== null,
       });
     }
@@ -1524,11 +1526,35 @@ export class DrawingController {
    * inputs declare, a study the user may not configure refuses it, and the move
    * is one undo step in this history. For a host control that sets the point
    * another way, such as a point pick on the chart, so Undo takes it back like
-   * a drag. False when the study has no anchor for `key` (or the controller was
+   * a drag. A point written through the study's settings instead (a settings
+   * dialog's Pick point) is one step of this history as well, unless it is
+   * written inside `untracked` or forced on a study the user may not
+   * configure, which are the host's own. False when the study has no anchor for `key` (or the controller was
    * built without input anchors), the study refuses, or it already holds the point.
    */
   public moveInputAnchor(studyId: string, key: string, point: { time: number; price: number }): boolean {
     return this._anchors?.move(studyId, key, point.time, point.price) ?? false;
+  }
+
+  /**
+   * Hand the step each study input anchor move makes (a handle dragged, a
+   * `moveInputAnchor`) to a timeline of the host's instead of this history,
+   * until the returned function gives them back. For a host keeping one undo
+   * history for the whole chart that already records the settings patch the
+   * move writes, as the widget's `ChartHistory` does: held here as well, one
+   * move would be taken back twice, and a press here would reach a step the
+   * other timeline had already taken back. `record` is called once the patch
+   * is written, in the same turn, with the step's own `undo` and `redo`
+   * (each false once the settings have moved on from it); this history
+   * records nothing for it and emits no `drawing:change`. A move made inside
+   * `untracked` is the host's own and reaches neither. A later call takes
+   * the steps from an earlier one. A point written to the settings some other
+   * way, which this history otherwise holds as a step of its own, is not
+   * handed over: the host's timeline sees that write itself.
+   */
+  public delegateInputAnchorSteps(record: (step: InputAnchorStep) => void): () => void {
+    this._anchorSteps = record;
+    return () => { if (this._anchorSteps === record) this._anchorSteps = null; };
   }
 
   // ── history and persistence ─────────────────────────────────────────────
@@ -2689,12 +2715,19 @@ export class DrawingController {
   }
 
   /**
-   * Record a step that is not a drawing edit, a study anchor's drag, in the
+   * Record a step that is not a drawing edit, a study anchor's move, in the
    * same history, so Undo walks it and the drawings in the order they were
-   * made. Like any new edit it clears the redo branch.
+   * made. Like any new edit it clears the redo branch. An `outside` move was
+   * written to the settings by someone else (a settings dialog's Pick point):
+   * it ends no drawing drag, and a host timeline the steps are handed to saw
+   * that write itself, so only this history takes it.
    */
-  private _recordStep(step: InputAnchorStep): void {
-    this._onDragEnd();
+  private _recordStep(step: InputAnchorStep, outside = false): void {
+    if (!outside) this._onDragEnd();
+    // The host's own act, like any edit inside `untracked`: a step nowhere.
+    if (this._untracked > 0) return;
+    const owner = this._anchorSteps;
+    if (owner !== null) { if (!outside) owner(step); return; }
     const text = this._historyText();
     this._undo.push({ before: text, after: text, step: nextStep++, external: step });
     if (this._undo.length > this._opts.historyLimit) this._undo.shift();

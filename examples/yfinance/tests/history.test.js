@@ -110,8 +110,10 @@ describe('the demo timeline', () => {
     await settle();
     expect(historyReady('undo')).toBe(false);
     asStep(1, () => app.chart.setPriceAxisOptions(0, 'right', { inverted: true }), 'Price scale');
-    // The primary scale's invert is a chart setting as well as an axis field.
-    expect(historyFor(1).peekUndo()).toEqual({ label: 'Price scale', changes: expect.arrayContaining(['axis', 'settings']) });
+    // One axis inverted from its menu: the chart-wide defaults stay, so it is
+    // an axis field alone and never a chart setting.
+    expect(historyFor(1).peekUndo()).toEqual({ label: 'Price scale', changes: ['axis'] });
+    expect(app.chart.priceScaleDefaults().inverted).toBeUndefined();
     const end = historyGroup(1, 'Chart settings');
     asStep(1, () => app.chart.setGridOptions({ vertLines: false }));
     asStep(1, () => app.chart.setGridOptions({ vertLines: true }));

@@ -132,7 +132,9 @@ describe('shading that names no target', () => {
     expect(placed(chart, price)).toEqual([{ pane: 0, scale: null, overlay: false }]);
     const ops = [...shading(chart, pane), ...shading(chart, price)].map(layer => layer.ops);
     expect(ops.every(list => list.length > 2)).toBe(true);
-    expect(await digest(ops)).toBe('6e7481c26ab5d9a90a7ca7baf38ab43d6c441376ad0ab285e26930ae43634f27');
+    // Re-pinned when pane boundaries moved onto whole device pixels: with that
+    // rounding bypassed, this op stream still hashes to the digest pinned before.
+    expect(await digest(ops)).toBe('b5ffab1b50bcf7137be8bd8ac95699a8070a11afd41066eac67286a03c0410bf');
   });
 
   it('stacks behind the study\'s other layers where it always did', () => {

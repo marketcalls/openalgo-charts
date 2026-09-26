@@ -154,6 +154,14 @@ const p = chart.coordinateToPrice(y);        // px → price
 wants. A menu raised on one axis strip is the other case: it names a pane and a scale, and
 everything it offers has to be readable back so its own ticks are honest.
 
+The two leave different traces. `chart.priceScaleDefaults()` reads the chart-wide defaults
+that `setPriceScaleOptions` (and the `priceScale` option and the canvas margins) set, which a
+pane added later starts from; `chart.priceScaleOptions()` reads the price pane's own scale.
+A change made to one axis from its menu moves the second and not the first, so comparing
+them tells a chart-wide change from a one-axis one, which an undo history needs to put the
+right one back. Every one of these setters is followed by a `layout:change` event naming it
+(see [Events](/docs/events)).
+
 ```ts
 const s = chart.priceAxisState(0, 'right');   // PriceAxisState | null
 // { paneIndex, scaleId, side, active, autoFit, inverted, mode, scaled, lockRatio, movable }
@@ -161,7 +169,7 @@ const s = chart.priceAxisState(0, 'right');   // PriceAxisState | null
 chart.setPriceAxisOptions(0, 'right', { mode: 'logarithmic', inverted: false });
 chart.setPriceAxisAutoFit(0, 'right', true);
 const locked = chart.setPriceAxisLockRatio(0, 'right', true);   // false: nothing measured
-const moved  = chart.movePriceAxis(0, 'right', 'left');         // false: that side is taken
+const placed = chart.setPriceAxisPlacement(0, 'right', 'left');  // the scale keeps its id
 ```
 
 **Pinning the price-per-bar ratio** holds the geometry the lock was taken at and rescales
@@ -170,11 +178,14 @@ logarithmic axis is correct too. A trend drawn at 45 degrees stays at 45 degrees
 time axis zooms. The axis goes manual while it holds, because auto-fit would re-fit the data
 every frame and undo the ratio; auto-fit or `resetScale()` releases it.
 
-**The legacy `movePriceAxis` method** swaps the two side scale objects rather than copying their state, so the
+**The legacy `movePriceAxis` method**, deprecated and removed in 3.0.0 in favour of
+`setPriceAxisPlacement` (with `movable` in the axis state, which describes only it), swaps
+the two side scale objects rather than copying their state, so the
 range, mode, margins and formatter travel with the axis; the vacated strip starts again from
 the chart-wide defaults, and the column is freed when nothing is left on it. The pane's
 crosshair tag, last-price line, coordinate API and axis drag all follow the scale the prices
-are actually labelled in, and the left strip is draggable. `priceAxisMoved` fires on success.
+are actually labelled in, and the left strip is draggable. `priceAxisMoved` fires on success;
+it goes in 3.0.0 with the method, and `setPriceAxisPlacement` emits `priceAxisPlacementChanged`.
 
 To move or reorder a column while keeping its scale ID, use
 [`setPriceAxisPlacement`](#multiple-axes-on-the-same-side). It also supports
@@ -701,7 +712,8 @@ data or recalculating studies. The method returns `false` before mutation for an
 unchanged assignment, invalid ID, removed or foreign handle, destroyed chart, or
 indicator-owned plot. Use the study's `setPriceScale` to move its local resources
 together, or `setPlotPriceScales` for selected plots. To move every series and bound primitive on one visible axis along
-with that axis's configuration, use `movePriceAxis`.
+with that axis's configuration, the deprecated `movePriceAxis` still works until 3.0.0;
+`setPriceAxisPlacement` moves the column and keeps every scale's id.
 
 ### Reassign a whole study
 

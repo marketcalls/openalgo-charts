@@ -188,7 +188,7 @@ export type { DrawingChartHost } from './controller';
 // paired input's anchor there; a host's own settings form asks the same
 // question before it offers a pick.
 export { studyInputTarget } from './input-anchors';
-export type { StudyInputTarget } from './input-anchors';
+export type { StudyInputTarget, InputAnchorStep } from './input-anchors';
 
 export type { ShortcutEvent } from './tools';
 

@@ -20,6 +20,15 @@ beforeAll(() => {
     plots: [{ key: 'osc', title: 'Osc', type: 'line' }],
     calc: (b) => ({ osc: b.map(x => x.close - x.open) }),
   });
+  registerIndicator({
+    id: 'widget-history-anchored', name: 'History Anchored', placement: 'onchart',
+    inputs: [
+      { key: 'at', type: 'timestamp', label: 'Anchor time', default: T0 + 5 * DAY, pick: true },
+      { key: 'level', type: 'price', label: 'Anchor price', default: 100, pick: true, timeKey: 'at', anchor: true },
+    ],
+    plots: [{ key: 'v', title: 'Level', type: 'line' }],
+    calc: (b, s) => ({ v: b.map(x => (x.time >= (s.at as number) ? s.level as number : null)) }),
+  });
 });
 
 const DAY = 86400;
@@ -212,6 +221,81 @@ describe('dialogs and menus', () => {
     expect(study.settings().length).toBe(21);
     w.history.undo();
     expect(study.settings().length).toBe(9);
+  });
+
+  it('walks a line, an anchor drag and a Pick point on chart one step each, the pick taken back first', async () => {
+    const { w, root } = make();
+    const study = w.chart.addIndicator('widget-history-anchored');
+    await settle();
+    w.history.clear();
+    const line = addLine(w, 97);
+    const id = `input-anchor:${study.id}:level`;
+    w.chart.emit('drag:start', { id, time: T0 + 5 * DAY, price: 100, paneIndex: 0 });
+    w.chart.emit('drag', { id, time: T0 + 12 * DAY, price: 103, paneIndex: 0 });
+    w.chart.emit('drag:end', { id, time: T0 + 12 * DAY, price: 103, paneIndex: 0 });
+    await settle();
+    expect(study.settings()).toMatchObject({ at: T0 + 12 * DAY, level: 103 });
+
+    mountIndicatorSettings(w.context, undefined, { instanceId: study.id });
+    const trigger = root.querySelector('[data-input-action="level"]') as FakeElement;
+    expect(trigger.textContent).toBe('Pick point on chart');
+    trigger.click();
+    const price = w.chart.panes()[0].priceScale.yToPrice(120);
+    w.chart.emit('click', { paneIndex: 0, point: { x: 400, y: 120 }, price, time: T0 + 20 * DAY + 60, id: null });
+    await settle();
+    expect(study.settings()).toMatchObject({ at: T0 + 20 * DAY, level: price });
+    (root.querySelectorAll('.oac-dialog__actions button')[1]).click();   // OK
+    expect(w.draw.historySteps().undo).toHaveLength(1);
+
+    expect(w.history.peekUndo()).toEqual({ label: 'Study settings', changes: ['study-settings'] });
+    w.history.undo();
+    expect(study.settings()).toMatchObject({ at: T0 + 12 * DAY, level: 103 });
+    expect(w.draw.get(line)).toBeDefined();
+    w.history.undo();
+    expect(study.settings()).toMatchObject({ at: T0 + 5 * DAY, level: 100 });
+    expect(w.draw.get(line)).toBeDefined();
+    w.history.undo();
+    expect(w.draw.get(line)).toBeUndefined();
+    expect(w.history.canUndo()).toBe(false);
+    for (let i = 0; i < 3; i++) w.history.redo();
+    expect(w.draw.get(line)).toBeDefined();
+    expect(study.settings()).toMatchObject({ at: T0 + 20 * DAY, level: price });
+    expect(w.history.canRedo()).toBe(false);
+  });
+
+  it('takes a Pick point on chart back first when the rail walks the drawing history alone, and never the line before it', async () => {
+    const { w, root } = make();
+    const [, , , , , undo] = (root.querySelector('.oac-rail') as FakeElement).querySelectorAll('.oac-rail__ctl .oac-rail__btn');
+    const study = w.chart.addIndicator('widget-history-anchored');
+    await settle();
+    // A host that keeps no chart-wide timeline: every press is the drawing controller's own.
+    w.history.destroy();
+    const line = addLine(w, 97);
+    const id = `input-anchor:${study.id}:level`;
+    w.chart.emit('drag:start', { id, time: T0 + 5 * DAY, price: 100, paneIndex: 0 });
+    w.chart.emit('drag', { id, time: T0 + 12 * DAY, price: 103, paneIndex: 0 });
+    w.chart.emit('drag:end', { id, time: T0 + 12 * DAY, price: 103, paneIndex: 0 });
+    expect(study.settings()).toMatchObject({ at: T0 + 12 * DAY, level: 103 });
+
+    mountIndicatorSettings(w.context, undefined, { instanceId: study.id });
+    const trigger = root.querySelector('[data-input-action="level"]') as FakeElement;
+    expect(trigger.textContent).toBe('Pick point on chart');
+    trigger.click();
+    const price = w.chart.panes()[0].priceScale.yToPrice(120);
+    w.chart.emit('click', { paneIndex: 0, point: { x: 400, y: 120 }, price, time: T0 + 20 * DAY + 60, id: null });
+    await settle();
+    (root.querySelectorAll('.oac-dialog__actions button')[1]).click();   // OK
+    expect(study.settings()).toMatchObject({ at: T0 + 20 * DAY, level: price });
+
+    undo.click();
+    expect(w.draw.get(line)).toBeDefined();
+    expect(study.settings()).toMatchObject({ at: T0 + 12 * DAY, level: 103 });
+    undo.click();
+    expect(w.draw.get(line)).toBeDefined();
+    expect(study.settings()).toMatchObject({ at: T0 + 5 * DAY, level: 100 });
+    undo.click();
+    expect(w.draw.get(line)).toBeUndefined();
+    expect(w.draw.canUndo()).toBe(false);
   });
 
   it('keeps the redo branch through a settings dialog that is cancelled', async () => {

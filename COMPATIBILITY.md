@@ -47,9 +47,10 @@ state do not belong in portable layout files.
 ## Deprecated APIs
 
 Each entry keeps working until the release in the "Removed in" column. The
-`depth_level` wire key and the widget message key have no declaration a tag
-can sit on (a key the feed sends on the wire, and one member of a string
-union), so this table is where they are recorded.
+`depth_level` wire key, the widget message key and the `priceAxisMoved` event
+have no declaration a tag can sit on (a key the feed sends on the wire, one
+member of a string union, and a name `chart.on` takes as a string), so this
+table is where they are recorded.
 
 | Deprecated | Declared in | Replacement since | Removed in | Use instead |
 | --- | --- | --- | --- | --- |
@@ -59,8 +60,11 @@ union), so this table is where they are recorded.
 | Widget message key "Enter a valid expiry date and time in UTC" | `src/widget/localization.ts`, a union member | 2.4.6 | 3.0.0 | Nothing: the widget no longer shows it, so drop it from a translation catalog |
 | `ChartClickEvent` flags `shiftKey`, `ctrlKey` and `metaKey` | `src/core/chart.ts` | 2.0.0 | 3.0.0 | `modifiers.shift`, `modifiers.ctrl` and `modifiers.meta`, the same state, beside `alt` |
 | `Chart.renderer` | `src/core/chart.ts` | 2.0.0 | 3.0.0 | `Chart.rendererKind`, the same value under its settled name |
+| `Chart.movePriceAxis` | `src/core/chart.ts` | 2.5.4 | 3.0.0 | `Chart.setPriceAxisPlacement`, which moves the column and keeps the scale's id |
+| `PriceAxisState.movable` | `src/core/chart.ts` | 2.5.4 | 3.0.0 | Nothing: `setPriceAxisPlacement` needs no such check |
+| `priceAxisMoved` event | `src/core/chart.ts` (emitted by `movePriceAxis` alone), an event name | 2.5.4 | 3.0.0 | `priceAxisPlacementChanged`, which `setPriceAxisPlacement` emits with the pane, the scale id and its new side |
 
-Migration, for the three a host is most likely to hold:
+Migration, for the four a host is most likely to hold:
 
 ```ts
 // before
@@ -78,6 +82,11 @@ addIndicatorLevel(level, pane) { draw(level.price, level.lineStyle); }
 chart.on('click', (e) => { if (e.shiftKey || e.ctrlKey) addToSelection(e.id); });
 // after
 chart.on('click', (e) => { if (e.modifiers.shift || e.modifiers.ctrl) addToSelection(e.id); });
+
+// an axis moved to the other strip, before: the scale's id became 'left'
+if (chart.priceAxisState(0, 'right')?.movable) chart.movePriceAxis(0, 'right', 'left');
+// after: the scale keeps the id 'right' and draws in the left column
+chart.setPriceAxisPlacement(0, 'right', 'left');
 ```
 
 ### Kept on purpose

@@ -17,6 +17,8 @@ for (const name of ['core', 'adapters/charts']) {
 typecheckIntegration(['integration/script-engine.test.ts'], {
   'script-engine-under-test': [resolve(scriptRoot, 'dist/core/index.d.ts')],
   'script-engine-under-test/adapters/charts': [resolve(scriptRoot, 'dist/adapters/charts/index.d.ts')],
+  // The version, so a case needing a newer engine can skip on an older one.
+  'script-engine-under-test/package.json': [resolve(scriptRoot, 'package.json')],
 });
 const version = JSON.parse(readFileSync(resolve(scriptRoot, 'package.json'), 'utf8')).version;
 process.stdout.write(`script engine ${version}: public adapter types compatible; testing runtime boundary.\n`);

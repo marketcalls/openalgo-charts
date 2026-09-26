@@ -3,7 +3,11 @@
  * time (`timeKey`) and declared with `anchor: true`. It sits at the point the
  * two settings name, on the pane and scale a pick of that price reads, and a
  * drag moves both halves as one settings change that the drawing history
- * holds as one undo step.
+ * holds as one undo step, or hands to a host's own timeline. A point written
+ * any other way, a settings dialog's Pick point, is a step of the drawing
+ * history too: held nowhere, it would leave the drag before it describing a
+ * point the study no longer holds, and an undo would pass over both to the
+ * drawing before them.
  *
  * The drawing controller owns the anchors because the two share everything
  * that makes an edit on the chart safe: an active drawing tool takes the press
@@ -40,13 +44,24 @@ export interface InputAnchorHost {
   panes?(): readonly unknown[];
 }
 
-/** One recorded change the drawing history walks: false when it no longer applies. */
+/**
+ * One anchor move as an undo step, walked by the drawing history or by the
+ * host's timeline it was handed to (`DrawingController.delegateInputAnchorSteps`).
+ * Each call writes the other side's point, and is false, writing nothing, once
+ * the study no longer holds the point it starts from.
+ */
 export interface InputAnchorStep {
   undo(): boolean;
   redo(): boolean;
 }
 
 interface Point { time: number; price: number }
+
+/** The two settings one anchor writes, on the study that holds them. */
+interface Pair { readonly studyId: string; readonly priceKey: string; readonly timeKey: string }
+
+const samePoint = (a: Point, b: Point): boolean => Object.is(a.time, b.time) && Object.is(a.price, b.price);
+const finitePoint = (p: Point): boolean => Number.isFinite(p.time) && Number.isFinite(p.price);
 
 const RADIUS = 5;
 const HIT_RADIUS = 9;
@@ -180,6 +195,12 @@ type Settings = Readonly<Record<string, unknown>>;
  */
 export class InputAnchors {
   private readonly _handles = new Map<string, AnchorHandle>();
+  /**
+   * The point each anchored input of every study holds, hidden or not, and
+   * the study object it was read from: a point that differs at the next sync
+   * was written by someone else. The anchors' own writes note theirs first.
+   */
+  private readonly _points = new Map<string, { study: IndicatorApi; point: Point }>();
   private readonly _off: (() => void)[] = [];
   private _drag: { handle: AnchorHandle; from: Point } | null = null;
   private _picking = false;
@@ -187,7 +208,7 @@ export class InputAnchors {
 
   public constructor(
     private readonly _chart: InputAnchorHost,
-    private readonly _hooks: { record(step: InputAnchorStep): void; placing(): boolean },
+    private readonly _hooks: { record(step: InputAnchorStep, outside: boolean): void; placing(): boolean },
   ) {
     const on = (event: string, handler: (payload: unknown) => void): void => { this._off.push(_chart.on(event, handler)); };
     for (const event of ['objects:change', 'indicatorRemoved', 'paneMoved', 'paneRemoved']) on(event, () => this._sync());
@@ -211,6 +232,7 @@ export class InputAnchors {
     for (const off of this._off.splice(0)) off();
     for (const handle of this._handles.values()) this._chart.removePrimitive(handle);
     this._handles.clear();
+    this._points.clear();
     this._drag = null;
   }
 
@@ -230,15 +252,18 @@ export class InputAnchors {
   private _sync(): void {
     if (this._destroyed) return;
     const seen = new Set<string>();
+    const watched = new Set<string>();
     for (const study of this._chart.indicators?.() ?? []) {
       let descriptor;
       try { descriptor = getIndicator(study.indicatorId); } catch { continue; }
-      if (!study.visible()) continue;
       for (const input of descriptor.inputs) {
         if (input.type !== 'price' || input.anchor !== true || input.timeKey === undefined) continue;
+        const id = `${PREFIX}${study.id}:${input.key}`;
+        watched.add(id);
+        this._watch(id, study, { studyId: study.id, priceKey: input.key, timeKey: input.timeKey });
+        if (!study.visible()) continue;
         const target = studyInputTarget(this._chart, study, input.key);
         if (target === null) continue;
-        const id = `${PREFIX}${study.id}:${input.key}`;
         seen.add(id);
         let handle = this._handles.get(id);
         if (handle !== undefined && handle.target.paneIndex !== target.paneIndex) {
@@ -270,6 +295,25 @@ export class InputAnchors {
       this._chart.removePrimitive(handle);
       this._handles.delete(id);
     }
+    for (const id of this._points.keys()) if (!watched.has(id)) this._points.delete(id);
+  }
+
+  /**
+   * Note the point one anchored input holds now, and record a move someone
+   * else wrote since the last sync (a settings dialog's Pick point, a price
+   * typed in) as one step, the way a drag is. A study first seen, or seen as
+   * a new object under the same id, only has its point noted. A study the
+   * user may not configure was moved by its host, whose act is no step.
+   */
+  private _watch(id: string, study: IndicatorApi, pair: Pair): void {
+    const settings: Settings = study.settings();
+    const now = { time: settings[pair.timeKey] as number, price: settings[pair.priceKey] as number };
+    const known = this._points.get(id);
+    this._points.set(id, { study, point: now });
+    if (known === undefined || known.study !== study || samePoint(known.point, now)) return;
+    if (study.policy().configurable === false || !finitePoint(known.point) || !finitePoint(now)) return;
+    const from = known.point;
+    this._hooks.record({ undo: () => this._apply(pair, now, from), redo: () => this._apply(pair, from, now) }, true);
   }
 
   private _refresh(): void { for (const handle of this._handles.values()) handle.update(); }
@@ -309,7 +353,7 @@ export class InputAnchors {
     if (handle === undefined || !handle.editable || this._drag?.handle === handle) return false;
     const from = { time: handle.time, price: handle.price }, to = this._point(handle, time, price);
     if (to === null || (to.time === from.time && to.price === from.price) || !this._apply(handle, from, to)) return false;
-    this._hooks.record({ undo: () => this._apply(handle, to, from), redo: () => this._apply(handle, from, to) });
+    this._hooks.record({ undo: () => this._apply(handle, to, from), redo: () => this._apply(handle, from, to) }, false);
     return true;
   }
 
@@ -341,7 +385,7 @@ export class InputAnchors {
       this._sync();
       return;
     }
-    this._hooks.record({ undo: () => this._apply(handle, to, from), redo: () => this._apply(handle, from, to) });
+    this._hooks.record({ undo: () => this._apply(handle, to, from), redo: () => this._apply(handle, from, to) }, false);
   }
 
   /**
@@ -350,16 +394,20 @@ export class InputAnchors {
    * holds `from` (an edit elsewhere since), which is how an undo step that
    * stopped describing the chart lets the press go on to the one before it.
    */
-  private _apply(handle: AnchorHandle, from: Point, to: Point): boolean {
-    const study = this._study(handle.studyId);
+  private _apply(pair: Pair, from: Point, to: Point): boolean {
+    const study = this._study(pair.studyId);
     if (study === undefined) return false;
     const settings = study.settings();
-    if (settings[handle.timeKey] !== from.time || settings[handle.priceKey] !== from.price) return false;
-    try {
-      return study.setSettings({ [handle.timeKey]: to.time, [handle.priceKey]: to.price });
-    } catch {
-      return false;
-    }
+    if (settings[pair.timeKey] !== from.time || settings[pair.priceKey] !== from.price) return false;
+    // Noted before the write, so the sync it sets off finds nothing written from outside.
+    const noted = this._points.get(`${PREFIX}${pair.studyId}:${pair.priceKey}`);
+    const was = noted?.point;
+    if (noted !== undefined && noted.study === study) noted.point = to;
+    let written = false;
+    try { written = study.setSettings({ [pair.timeKey]: to.time, [pair.priceKey]: to.price }); }
+    catch { written = false; }
+    if (!written && noted !== undefined && was !== undefined && noted.point === to) noted.point = was;
+    return written;
   }
 
   private _cancelDrag(): void {

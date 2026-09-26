@@ -244,7 +244,7 @@ changed. Anchors map through `DataLayer.timeToIndexFloat`, which also resolves p
 forecasts live.
 
 The bar times past the last bar follow the chart's session calendar when the host set one,
-with `SessionCalendar.applyTo`, `Instrument.applyTo` or `chart.dataLayer.setSessionCalendar`: on an intraday chart an
+with `chart.setSessionCalendar`, `SessionCalendar.applyTo`, `Instrument.applyTo` or `chart.dataLayer.setSessionCalendar`: on an intraday chart an
 endpoint drawn two bars past Friday's last candle lands on Monday's second bar, not on Friday
 night. Without a calendar they continue at the median recent bar interval, never at the gap
 between the last two bars, which is so often a night or a weekend. See
@@ -345,6 +345,7 @@ chart has a different interval loaded.
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A paste of several drawings is one step. `canUndo()` and `canRedo()` report only a step that still changes something. |
 | `historySteps()` | `{ undo, redo }`: the steps each branch holds, oldest first, by the number `drawing:change` reported them under. For a host that keeps one timeline across drawings and its own edits, such as [`ChartHistory`](/docs/undo-history): a step in neither branch was taken away by a reset, a trim or a host's forced edit. |
 | `untracked(fn)` | Run `fn` as the host's own act: an edit it makes records no undo step and leaves both branches as they are, and every recorded step takes it in, as a forced edit does, so no undo or redo reverses it. It reaches no read-only drawing, and `undo` or `redo` inside it still moves along the branches. [`ChartHistory`](/docs/undo-history) runs its `ignore` and every press through it. |
+| `delegateInputAnchorSteps(record)` | Hand the step each study input anchor move makes (a drag, `moveInputAnchor`) to a timeline of the host's: `record` receives the move's `InputAnchorStep`, its own `undo()` and `redo()`, as the move ends, and this history records nothing for it. The returned function gives the steps back. [`ChartHistory`](/docs/undo-history) takes them, since it records the settings patch the move writes, and one move must be one step. A point written through the study's settings (a settings dialog's Pick point), which this history otherwise holds as a step of its own, is not handed over: the host's timeline sees that write itself. A move inside `untracked` is a step nowhere. |
 | `toJSON()` / `fromJSON(data)` | Explicit serialisation: a `{ version: 2, drawings }` document out; a document or a 1.9.x bare array in, upgraded by `migrateDrawings`. |
 | `setOptions(patch)` | `magnet`, `stayInDrawingMode`, `historyLimit`, `defaultStyle`, `pasteOffsetBars`, `pasteOffsetPixels`, `clipboard`. |
 | `cancel()` / `popAnchor()` | Drop the anchors placed so far (the tool disarms unless `stayInDrawingMode` keeps it); remove the last anchor of a variable-anchor shape still being placed. Escape and Backspace, once the host wires them. |

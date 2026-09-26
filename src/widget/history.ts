@@ -11,8 +11,12 @@
  * menu or a host's own call, and the history compares what it saw before
  * with what it sees once the turn that made the change is over. One user
  * action is one turn, so a study removed with the pane it emptied is one step.
+ * A study input anchor dragged on the chart is a settings patch like any
+ * other: the controller hands its step over (`delegateInputAnchorSteps`)
+ * rather than holding it too, and the patch is recorded here the moment the
+ * move ends, so one move is one step, taken back once.
  *
- * Four rules the design keeps:
+ * Five rules the design keeps:
  *
  * - **A step is taken back by making the chart look like it did, not by
  *   restoring a saved state.** A full restore recreates every study, replays
@@ -29,10 +33,25 @@
  *   by a listener while a press is being applied, drawings included, is
  *   recorded nowhere: the drawing controller runs it `untracked`, so every
  *   recorded step takes it in and no later undo or redo reverses it.
+ * - **A study's policy is its host's.** No press removes, reconfigures or
+ *   moves a study its policy keeps from the user, however old the step: the
+ *   press leaves that part out and does the rest, and a step left with
+ *   nothing to do is dropped, so `canUndo` and `canRedo` stay true. Other
+ *   studies still move past one that may not move, as the chart lets them. A
+ *   change only the host could have made, a forced call on a study it
+ *   protects, is recorded as no step. A study a press brings back takes the
+ *   policy its host holds now, the one it last had on the chart, never an
+ *   older one a step captured; and a study that left the chart by the host's
+ *   hand is the host's to bring back, never a press's.
+ *
+ * A study is told apart by the chart's own object for it, not by its id: a
+ * study the host places under an id that came free is another study, which
+ * no step reaches for the one it names.
  */
-import { applyChartSettings, filterLinkAppearance, readChartSettings } from 'openalgo-charts';
+import { applyChartSettings, DEFAULT_PRICE_SCALE_OPTIONS, filterLinkAppearance, readChartSettings } from 'openalgo-charts';
 import type {
-  Chart, ChartSettingsValues, IndicatorApi, IndicatorSettings, IPrimitive, Pane, PriceAxisSide, PriceScaleId, PriceScaleMode, SeriesApi, SeriesType,
+  Chart, ChartSettingsValues, IndicatorApi, IndicatorPolicy, IndicatorSettings, IPrimitive, Pane, PriceAxisSide, PriceScaleId, PriceScaleMode,
+  PriceScaleOptions, SeriesApi, SeriesType,
 } from 'openalgo-charts';
 import { DRAWING_STATE_VERSION, type Drawing, type DrawingChangeEvent, type DrawingController, type DrawingsDocument } from 'openalgo-charts/draw';
 
@@ -81,6 +100,7 @@ export interface ChartHistoryOptions {
 }
 
 interface StudyShot {
+  /** The history's name for the study (see `_nameOf`): its id, unless another study held that id first. */
   id: string;
   indicatorId: string;
   settings: IndicatorSettings;
@@ -89,6 +109,24 @@ interface StudyShot {
   scale: PriceScaleId | null;
   plots: Record<string, PriceScaleId>;
 }
+
+/**
+ * The chart-wide price scale defaults a pane added later starts from
+ * (`chart.priceScaleDefaults()`), in the fields that describe the axis. They
+ * move only with a chart-wide write, never with one axis changed from its own
+ * menu, so they are captured apart from every pane's own scales.
+ */
+type ScaleDefaults = Partial<Pick<PriceScaleOptions, 'mode' | 'inverted' | 'marginTop' | 'marginBottom'>>;
+const DEFAULT_KEYS = ['mode', 'inverted', 'marginTop', 'marginBottom'] as const;
+
+/**
+ * Chart settings that read the price pane's own scale but write every pane's
+ * and the defaults. The defaults and the axes carry each of them, so as
+ * settings they are never compared: replayed after a change made to one axis
+ * from its own menu, they would move every other pane's scale and the
+ * defaults too.
+ */
+const BROAD = new Set(['scales.mode', 'scales.inverted', 'scales.autoScale']);
 
 interface AxisShot {
   side: PriceAxisSide;
@@ -107,11 +145,14 @@ interface AxisShot {
  * `series` counts every series in the pane, a study's plots and a host's own
  * alike. A pane with none keeps the range its scales last had, and that range
  * is all that places its drawings, so it is held in `ranges` to make such a
- * pane again; it is a view, never compared.
+ * pane again; it is a view, never compared. `host` marks a pane the host
+ * made (for a primitive of its own, or a drawing placed there): like one
+ * holding the host's series, history never makes or removes it.
  */
 interface PaneShot {
   key: number; weight: number; collapsed: boolean; series: number; axes: Record<string, AxisShot>;
   ranges?: Record<string, { min: number; max: number }>;
+  host?: boolean;
 }
 
 interface Shot {
@@ -120,6 +161,7 @@ interface Shot {
   scale: PriceScaleId | null;
   studies: StudyShot[];
   panes: PaneShot[];
+  defaults: ScaleDefaults;
   settings?: ChartSettingsValues;
 }
 
@@ -132,6 +174,7 @@ interface Delta {
   type: boolean;
   scale: boolean;
   settings: string[];
+  defaults: (keyof ScaleDefaults)[];
   studies: Map<string, StudyDelta>;
   kinds: Set<ChartHistoryChange>;
   order: boolean;
@@ -194,8 +237,13 @@ interface Entry {
   linked?: boolean;
 }
 
+// `layout:change` follows the setters that change a pane's weight or a
+// scale's options without an event of their own; a capture reads the weights
+// and the axes, so a change made through them outside a transaction is a step
+// too. What else it announces (a chart setting, auto-fit) is read only in a
+// transaction's full capture, and an observed one finds nothing there.
 const OBSERVED = ['objects:change', 'indicatorRemoved', 'paneAdded', 'paneRemoved', 'paneMoved', 'paneCollapsed',
-  'paneResized', 'priceAxisMoved', 'priceAxisPlacementChanged'];
+  'paneResized', 'priceAxisMoved', 'priceAxisPlacementChanged', 'layout:change'];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -226,45 +274,89 @@ function renameSources(settings: Readonly<IndicatorSettings>, rename: (id: strin
   return out;
 }
 
-/** Captures compared on what both hold: settings and the view-driven axis fields only in full ones. */
-function diff(a: Shot, b: Shot): Delta {
+/**
+ * What the chart lets a step do, read against the chart the stretch starts
+ * from. A study's policy is its host's, and no undo or redo overrides it: a
+ * step leaves a protected study as the policy keeps it and does the rest of
+ * what it records, the way the drawing history leaves a read-only drawing.
+ */
+interface Rules {
+  /** The policy the host holds now for the study a step names, on the chart or not. */
+  policy(id: string): Readonly<IndicatorPolicy>;
+  /** Whether the study is on the chart the stretch starts from. */
+  present(id: string): boolean;
+  /** Whether a step may bring the study back: not one its host took away, nor one it keeps from the user's remove. */
+  returns(id: string): boolean;
+  /** Whether putting one pane's stack into the order `to` records changes it, without two studies that may not move trading places. */
+  order(to: Shot, pane: number): boolean;
+}
+
+/**
+ * Captures compared on what both hold: settings and the view-driven axis
+ * fields only in full ones. With `rules`, what the chart would refuse, and
+ * what the chart the stretch starts from leaves nothing to do for, is left
+ * out: the delta is then what a press can still do.
+ */
+function diff(a: Shot, b: Shot, rules?: Rules): Delta {
   const d: Delta = {
-    type: false, scale: false, settings: [], studies: new Map(), kinds: new Set(), order: false, paneOrder: false, panes: new Map(), born: [], gone: [],
+    type: false, scale: false, settings: [], defaults: [], studies: new Map(), kinds: new Set(), order: false, paneOrder: false,
+    panes: new Map(), born: [], gone: [],
   };
   if (a.type !== b.type) { d.type = true; d.kinds.add('chart-type'); }
   if (a.scale !== b.scale) { d.scale = true; d.kinds.add('series-scale'); }
   if (a.settings && b.settings) {
     for (const key of new Set([...Object.keys(a.settings), ...Object.keys(b.settings)])) {
-      if (key in a.settings && key in b.settings && !same(a.settings[key], b.settings[key])) d.settings.push(key);
+      if (!BROAD.has(key) && key in a.settings && key in b.settings && !same(a.settings[key], b.settings[key])) d.settings.push(key);
     }
-    if (d.settings.length) d.kinds.add('settings');
   }
+  d.defaults = DEFAULT_KEYS.filter(key => !same(a.defaults[key], b.defaults[key]));
+  if (d.settings.length || d.defaults.length) d.kinds.add('settings');
   const left = new Map(a.studies.map(s => [s.id, s]));
   const right = new Map(b.studies.map(s => [s.id, s]));
   const whole: StudyDelta = { presence: true, keys: [], visible: true, scale: true, pane: true };
   for (const [id, s] of left) {
+    // Gone from the chart the stretch starts from: nothing of it is there to take away or change.
+    if (rules !== undefined && !rules.present(id)) continue;
     const t = right.get(id);
-    if (t === undefined) { d.studies.set(id, whole); d.kinds.add('study-remove'); continue; }
-    const keys = [...new Set([...Object.keys(s.settings), ...Object.keys(t.settings)])].filter(key => !same(s.settings[key], t.settings[key]));
-    const sd: StudyDelta = { presence: false, keys, visible: s.visible !== t.visible, scale: s.scale !== t.scale || !same(s.plots, t.plots), pane: s.pane !== t.pane };
+    const policy = rules?.policy(id) ?? {};
+    if (t === undefined) {
+      if (policy.removable !== false) { d.studies.set(id, whole); d.kinds.add('study-remove'); }
+      continue;
+    }
+    const keys = policy.configurable === false ? []
+      : [...new Set([...Object.keys(s.settings), ...Object.keys(t.settings)])].filter(key => !same(s.settings[key], t.settings[key]));
+    const sd: StudyDelta = {
+      presence: false, keys, visible: s.visible !== t.visible,
+      scale: policy.configurable !== false && (s.scale !== t.scale || !same(s.plots, t.plots)),
+      pane: policy.movable !== false && s.pane !== t.pane,
+    };
     if (keys.length) d.kinds.add('study-settings');
     if (sd.visible) d.kinds.add('study-visibility');
     if (sd.scale) d.kinds.add('study-scale');
     if (sd.pane) d.kinds.add('study-pane');
     if (keys.length || sd.visible || sd.scale || sd.pane) d.studies.set(id, sd);
   }
-  for (const id of right.keys()) if (!left.has(id)) { d.studies.set(id, whole); d.kinds.add('study-add'); }
+  for (const id of right.keys()) {
+    if (left.has(id)) continue;
+    // One on the chart already has nothing to come back as; one the host took
+    // away, or keeps from the user's remove, only the host brings back.
+    if (rules !== undefined && (rules.present(id) || !rules.returns(id))) continue;
+    d.studies.set(id, whole);
+    d.kinds.add('study-add');
+  }
   // Stacking is per pane: the order of the studies both captures share, pane by pane.
   const stack = (shot: Shot, pane: number): string[] => shot.studies.filter(s => s.pane === pane && left.has(s.id) && right.has(s.id)).map(s => s.id);
-  for (const pane of new Set(b.studies.map(s => s.pane))) if (!same(stack(a, pane), stack(b, pane))) d.order = true;
+  for (const pane of new Set(b.studies.map(s => s.pane))) {
+    if (!same(stack(a, pane), stack(b, pane)) && (rules === undefined || rules.order(b, pane))) d.order = true;
+  }
   if (d.order) d.kinds.add('study-order');
   const before = new Map(a.panes.map(p => [p.key, p]));
   const after = new Set(b.panes.map(p => p.key));
   // A pane a study brought or took is that study's change. One that came or
-  // went on its own is a step of its own, unless it holds a series: that is a
-  // host's plotted data, which history never makes or removes.
+  // went on its own is a step of its own, unless it holds a series or the
+  // host made it: that is the host's, which history never makes or removes.
   const carried = (p: PaneShot, shot: Shot): boolean => shot.studies.some(s => s.pane === p.key && d.studies.has(s.id));
-  const own = (p: PaneShot, shot: Shot): boolean => carried(p, shot) || p.series === 0;
+  const own = (p: PaneShot, shot: Shot): boolean => carried(p, shot) || (p.series === 0 && p.host !== true);
   d.gone = a.panes.filter(p => !after.has(p.key) && own(p, a)).map(p => p.key);
   d.born = b.panes.filter(p => !before.has(p.key) && own(p, b)).map(p => p.key);
   if (a.panes.some(p => d.gone.includes(p.key) && !carried(p, a))) d.kinds.add('pane-remove');
@@ -285,22 +377,39 @@ function diff(a: Shot, b: Shot): Delta {
     }
     if (pd.weight || pd.collapsed || pd.axes.size) d.panes.set(p.key, pd);
   }
-  // Three chart settings read the price pane's scale but write every pane's.
-  // Replayed after a change made to one axis from its own menu, they would
-  // move every other pane's scale too, so they stay in a step only when the
-  // step moved that field on every pane, as the chart-wide write does. The
-  // axes carry the change either way; auto-fit has no chart-wide default to
-  // restore, so it is left to them always.
-  const broad: Record<string, keyof AxisShot | null> = { 'scales.mode': 'mode', 'scales.inverted': 'inverted', 'scales.autoScale': null };
-  d.settings = d.settings.filter(key => {
-    const field = broad[key];
-    return field === undefined || (field !== null && shared.every(p => d.panes.get(p.key)?.axes.get('right')?.includes(field)));
-  });
-  if (!d.settings.length) d.kinds.delete('settings');
   return d;
 }
 
 const empty = (d: Delta): boolean => d.kinds.size === 0;
+
+/** The change that walking a step the other way makes. The rest read the same both ways. */
+const REVERSED: Partial<Record<ChartHistoryChange, ChartHistoryChange>> = {
+  'study-add': 'study-remove', 'study-remove': 'study-add', 'pane-add': 'pane-remove', 'pane-remove': 'pane-add',
+};
+
+/** One stretch of a step as a press walks it. */
+interface Move { from: Shot; to: Shot; delta: Delta }
+
+/**
+ * The chart a stretch starts from, as far as the rules read it: the studies
+ * on it by name, in the chart's stacking order, and the pane key each is on.
+ * A press walks a step's stretches one after another, so each is read
+ * against the chart the one before it leaves, never the chart before the press.
+ */
+interface View { order: string[]; pane: Map<string, number> }
+
+/**
+ * A study the steps name on a chart the history no longer follows: the id it
+ * had and the policy its host last gave it. The study object itself would keep
+ * that chart, and everything the study computed, alive for as long as a step
+ * names it.
+ */
+interface Former { readonly id: string; policy(): Readonly<IndicatorPolicy> }
+
+function former(study: Former): Former {
+  const id = study.id, policy = { ...study.policy() };
+  return { id, policy: () => policy };
+}
 
 class HistoryFailure extends Error {}
 const fail = (why: string): never => { throw new HistoryFailure(why); };
@@ -338,11 +447,30 @@ export class ChartHistory {
   private _orphans: Orphan[] = [];
   private readonly _keys = new WeakMap<object, number>();
   private _nextKey = 1;
-  /** Study ids as the history knows them, and the ids a study brought back under a new one answers to. */
-  private readonly _canon = new Map<string, string>();
-  private readonly _aliases = new Map<string, string>();
+  /** Every pane key a capture has held, and the panes among them the host made. */
+  private readonly _seen = new Set<number>();
+  private readonly _hostPanes = new Set<number>();
+  /**
+   * The name each study object goes by in the steps, and the object each name
+   * reaches: the one on the chart, or the last one it had, whose policy is the
+   * host's latest word on it. Objects, not ids, tell studies apart. A name is
+   * kept only while its study is on the chart or something a press can reach
+   * names it (`_prune`).
+   */
+  private readonly _names = new WeakMap<object, string>();
+  private readonly _known = new Map<string, IndicatorApi | Former>();
+  /** The name of the study that last held each id, for a setting reading an id no study holds now. */
+  private readonly _lastNames = new Map<string, string>();
+  /** Studies that left the chart by the host's hand: no press brings them back. */
+  private readonly _hostRemoved = new Set<string>();
   private readonly _listeners = new Set<() => void>();
   private _off: (() => void)[] = [];
+  /** Gives the drawing controller its study anchor steps back. */
+  private _release: (() => void) | null = null;
+  /** Numbers the names a study holding an id another study held first goes by. */
+  private _nextHolder = 1;
+  /** `_ready()` as of the last notice. */
+  private _heard = '';
   private _destroyed = false;
 
   public constructor(chart: Chart, options: ChartHistoryOptions = {}) {
@@ -353,6 +481,7 @@ export class ChartHistory {
     this._base = this._shot(false);
     this._drawings = this._document();
     this._listen();
+    this._claim();
   }
 
   public get isDestroyed(): boolean { return this._destroyed; }
@@ -362,21 +491,41 @@ export class ChartHistory {
    * timeline. Panes are matched by slot and studies by id, which is what a
    * chart restored from the old one's `getState` keeps. Drawing steps the old
    * controller held are taken back from the drawings either side of them,
-   * since the new controller holds none of them.
+   * since the new controller holds none of them. A study the old chart held
+   * and the new one does not was left out by the host, and no press brings it back.
    */
   public attach(chart: Chart, draw: DrawingController | null = this._draw): void {
     if (this._destroyed) return;
     for (const off of this._off.splice(0)) off();
     const keys = this._base.panes.map(p => p.key);
+    // The id each study the last capture held had, and its name in the steps.
+    const names = new Map(this._base.studies.map(s => [this._liveId(s.id), s.id]));
     if (draw !== this._draw) this._detachSteps();
+    const previous = this._chart;
     this._chart = chart;
     this._draw = draw;
+    this._claim();
     this._drawings = this._document();
     chart.panes().forEach((pane, slot) => { if (keys[slot] !== undefined) this._keys.set(pane, keys[slot]); });
+    if (!chart.isDestroyed) {
+      for (const study of chart.indicators()) {
+        const name = names.get(study.id);
+        if (name !== undefined) this._bind(name, study);
+      }
+    }
+    // A study the steps name that the new chart does not hold is kept as its
+    // id and policy, not as an object of the chart the host replaced.
+    if (chart !== previous) {
+      const live = new Set<object>(chart.isDestroyed ? [] : chart.indicators());
+      for (const [name, study] of this._known) if (!live.has(study)) this._known.set(name, former(study));
+    }
     this._pending = false;
     this._dragging = false;
     this._deferred = false;
+    const was = this._base;
     this._rebase();
+    this._took(was, this._base);
+    this._prune();
     this._listen();
     this._notify();
   }
@@ -396,11 +545,14 @@ export class ChartHistory {
 
   /**
    * Run `fn` as one step: every change it makes to the chart and its drawings
-   * is taken back by one undo. Changes the chart does not announce (a pane
-   * weight, a scale option, a chart setting) are recorded only this way.
-   * Nested calls join the outermost one. A throw still records what `fn`
-   * changed before it, then rethrows. An `ignore` inside it is left out of
-   * the step, which is taken back on either side of it.
+   * is taken back by one undo. A chart setting (the grid, the status line)
+   * and a scale's auto-fit or pinned ratio are read only in a transaction's
+   * full capture, so they are recorded only this way; a pane weight or a
+   * scale option set outside one is a step of its own, which the chart
+   * announces with `layout:change`. Nested calls join the outermost one. A
+   * throw still records what `fn` changed before it, then rethrows. An
+   * `ignore` inside it is left out of the step, which is taken back on
+   * either side of it.
    */
   public transact<T>(fn: () => T, label?: string): T {
     if (this._destroyed || this._chart.isDestroyed || this._applying > 0 || this._ignoring > 0 || this._tx !== null) return fn();
@@ -453,8 +605,10 @@ export class ChartHistory {
   /**
    * Run `fn` as the host's own change rather than a user step: nothing it
    * does to the chart or its drawings is recorded, and no undo or redo takes
-   * it back. The redo branch is kept. Inside a transaction or a group, the
-   * step is recorded on either side of it and leaves it alone.
+   * it back, so a study it removes is never brought back by a press, and a
+   * command it pushes is not recorded. The redo branch is kept. Inside a
+   * transaction or a group, the step is recorded on either side of it and
+   * leaves it alone.
    */
   public ignore<T>(fn: () => T): T {
     // A press being applied is already the host's, drawings included.
@@ -469,9 +623,12 @@ export class ChartHistory {
         this._pending = false;
         this._orphans = [];
         this._styled = false;
+        const was = this._base;
         this._rebase();
+        this._took(was, this._base);
         // The transaction goes on from here, measured in full as it began.
         if (tx !== null && this._tx === tx) this._base = tx.before = this._shot(true);
+        this._prune();
       }
     }
   }
@@ -482,9 +639,13 @@ export class ChartHistory {
     return draw !== null && !draw.isDestroyed ? draw.untracked(fn) : fn();
   }
 
-  /** Record a host's own reversible step, for a change the history cannot observe. */
+  /**
+   * Record a host's own reversible step, for a change the history cannot
+   * observe. Inside `ignore`, or while a press is applied, it records nothing:
+   * the change is the host's own there.
+   */
   public push(command: ChartHistoryCommand): void {
-    if (this._destroyed || this._applying > 0) return;
+    if (this._destroyed || this._applying > 0 || this._ignoring > 0) return;
     if (this._tx !== null) { this._tx.commands.push(command); return; }
     this._flush();
     this._record({ label: command.label, commands: [command] });
@@ -498,6 +659,11 @@ export class ChartHistory {
     this._pending = false;
     this._orphans = [];
     this._dropped = [];
+    // No step names a study that is gone now: its id is free for the next one to go by.
+    this._hostRemoved.clear();
+    this._lastNames.clear();
+    const live = new Set<object>(this._chart.isDestroyed ? [] : this._chart.indicators());
+    for (const [name, study] of this._known) if (!live.has(study)) this._known.delete(name);
     if (!this._destroyed) { this._drawings = this._document(); this._rebase(); }
     this._notify();
   }
@@ -513,7 +679,34 @@ export class ChartHistory {
     this.clear();
     this._destroyed = true;
     for (const off of this._off.splice(0)) off();
+    this._release?.();
+    this._release = null;
     this._listeners.clear();
+  }
+
+  /**
+   * Take the study anchor steps of the drawing controller in hand, giving the
+   * previous one's back. The controller would otherwise hold each move as a
+   * step of its own beside the settings patch recorded here, so one move
+   * would need two presses, and a press on the drawing history alone would
+   * find a step this timeline had already taken back.
+   */
+  private _claim(): void {
+    this._release?.();
+    this._release = null;
+    const draw = this._draw;
+    if (draw !== null && !draw.isDestroyed) this._release = draw.delegateInputAnchorSteps(() => this._anchorMoved());
+  }
+
+  /**
+   * An anchor move has written its patch: record it now, as the step it is,
+   * rather than at the end of the turn, so a control asking `canUndo` right
+   * after the release already sees it. Inside a transaction or a group it
+   * joins that step as any observed change does.
+   */
+  private _anchorMoved(): void {
+    if (this._destroyed || this._applying > 0 || this._ignoring > 0 || this._restoring > 0 || this._tx !== null) return;
+    this._flush();
   }
 
   // ── recording ────────────────────────────────────────────────────────
@@ -523,6 +716,9 @@ export class ChartHistory {
     if (chart.isDestroyed) return;
     const on = (event: string, fn: (payload: unknown) => void): void => { this._off.push(chart.on(event, fn)); };
     for (const event of OBSERVED) on(event, () => this._observe(event));
+    // A press that grabs something starts an action of its own: whatever came
+    // before it in the same turn is a step already, not part of the drag's.
+    on('drag:start', () => this._flush());
     on('draw:preview', () => { this._dragging = true; });
     on('draw:preview-clear', () => {
       this._dragging = false;
@@ -542,6 +738,7 @@ export class ChartHistory {
       if ((payload as { controller?: unknown } | null)?.controller !== this._draw) return;
       this._detachSteps();
       this._draw = null;
+      this._release = null;
     });
     on('state:restore:start', () => { this._restoring++; this._pending = false; });
     on('state:restore:end', () => {
@@ -632,8 +829,19 @@ export class ChartHistory {
   }
 
   private _record(part: Part): void {
-    const chart = part.before !== undefined && part.after !== undefined && !empty(diff(part.before, part.after));
-    if (!chart && !part.steps?.length && !part.commands?.length) return;
+    const changed = part.before !== undefined && part.after !== undefined && !empty(diff(part.before, part.after));
+    // A change no undo could take back under the policies of the studies it
+    // touches is the host's own, a forced call on a study it protects: no
+    // step, and what follows is measured from it, as after an `ignore`.
+    const chart = changed && !empty(diff(part.after!, part.before!, this._rules));
+    if (changed && !chart) { this._epoch++; this._took(part.before!, part.after!); }
+    if (!chart && !part.steps?.length && !part.commands?.length) {
+      if (changed) this._prune();
+      // Nothing recorded, but a policy set since can have moved what a press
+      // would do (a step about a study now protected): the controls hear it.
+      this._notifyIfMoved();
+      return;
+    }
     let entry: Entry;
     const group = this._group;
     if (group !== null && group.entry !== null) entry = group.entry;
@@ -646,6 +854,8 @@ export class ChartHistory {
     }
     this._merge(entry, part, chart);
     this._redo = [];
+    // The oldest step past the limit and the redo branch are gone.
+    this._prune();
     this._notify();
   }
 
@@ -693,6 +903,8 @@ export class ChartHistory {
           if (!this._redo.length && group.redo !== undefined) this._redo = group.redo;
         }
       }
+      // What the group held aside for a step it never became is held no longer.
+      this._prune();
       this._notify();
     };
   }
@@ -705,8 +917,105 @@ export class ChartHistory {
     return key;
   }
 
-  private _canonical(id: string): string { return this._canon.get(id) ?? id; }
-  private _liveId(id: string): string { return this._aliases.get(id) ?? id; }
+  /**
+   * The history's name for a study: its id, unless a study the history knew
+   * before held that id and is not this one (the host placed another under
+   * an id that came free), which then goes by a name of its own. Told apart
+   * by the chart's object for each study, so another study of the same kind
+   * under the same id is still another study.
+   */
+  private _nameOf(study: IndicatorApi): string {
+    let name = this._names.get(study);
+    if (name !== undefined) return name;
+    name = study.id;
+    const other = this._known.get(name);
+    if (other !== undefined && other !== study) {
+      do name = `${study.id}~${this._nextHolder++}`; while (this._known.has(name));
+    }
+    this._bind(name, study);
+    return name;
+  }
+
+  private _bind(name: string, study: IndicatorApi): void {
+    this._names.set(study, name);
+    this._known.set(name, study);
+  }
+
+  /** The id the study a name reaches answers to, or had last. */
+  private _liveId(name: string): string { return this._known.get(name)?.id ?? name; }
+
+  /** The policy the host holds now for a study: the one it has on the chart, or had when it left. */
+  private _policyOf(name: string): Readonly<IndicatorPolicy> { return this._known.get(name)?.policy() ?? {}; }
+
+  /** Studies `before` held and `after` does not, gone by the host's hand: no press brings them back. */
+  private _took(before: Shot, after: Shot): void {
+    const kept = new Set(after.studies.map(s => s.id));
+    for (const s of before.studies) if (!kept.has(s.id)) this._hostRemoved.add(s.id);
+  }
+
+  /**
+   * Forget every study and pane that is off the chart and that nothing a press
+   * can reach names: a step on either branch, what an open group holds aside
+   * to give back, the open transaction's start, and the baseline the next step
+   * is measured from. The names otherwise outlive the step limit, one for
+   * every study the chart ever had, and each study object held keeps what it
+   * computed alive. Run whenever steps are recorded, trimmed or dropped, and
+   * when an `ignore` ends.
+   */
+  private _prune(): void {
+    const chart = this._chart;
+    const live = new Set<object>(chart.isDestroyed ? [] : chart.indicators());
+    const panes = new Set<number>();
+    if (!chart.isDestroyed) {
+      for (const pane of chart.panes()) {
+        const key = this._keys.get(pane);
+        if (key !== undefined) panes.add(key);
+      }
+    }
+    // Nothing off the chart is held: the usual case, and a cheap one.
+    if (this._hostRemoved.size === 0 && this._lastNames.size <= live.size && this._seen.size <= panes.size
+      && [...this._known.values()].every(study => live.has(study))) return;
+    const names = new Set<string>();
+    const shot = (s: Shot): void => {
+      for (const p of s.panes) panes.add(p.key);
+      for (const study of s.studies) {
+        names.add(study.id);
+        for (const value of Object.values(study.settings)) if (isSource(value)) names.add(value.instanceId);
+      }
+    };
+    const entry = (e: Entry | null | undefined): void => {
+      if (e === null || e === undefined) return;
+      for (const change of e.changes) { shot(change.before); shot(change.after); }
+      for (const orphan of e.orphans) panes.add(orphan.pane);
+    };
+    for (const e of this._undo) entry(e);
+    for (const e of this._redo) entry(e);
+    const group = this._group;
+    if (group !== null) { entry(group.entry); group.redo?.forEach(entry); entry(group.shifted); }
+    if (this._tx !== null) shot(this._tx.before);
+    shot(this._base);
+    for (const orphan of this._orphans) panes.add(orphan.pane);
+    for (const [name, study] of this._known) if (!names.has(name) && !live.has(study)) this._known.delete(name);
+    // Both follow the names: an id or a removal kept for a name no step
+    // reaches would be read for whichever study goes by that name next.
+    for (const name of this._hostRemoved) if (!this._known.has(name)) this._hostRemoved.delete(name);
+    for (const [id, name] of this._lastNames) if (!this._known.has(name)) this._lastNames.delete(id);
+    for (const key of this._seen) if (!panes.has(key)) this._seen.delete(key);
+    for (const key of this._hostPanes) if (!panes.has(key)) this._hostPanes.delete(key);
+  }
+
+  /** The chart as it is now, as the rules read it. */
+  private _view(): View {
+    const view: View = { order: [], pane: new Map() };
+    if (this._chart.isDestroyed) return view;
+    const panes = this._chart.panes();
+    for (const study of this._chart.indicators()) {
+      const name = this._nameOf(study);
+      view.order.push(name);
+      view.pane.set(name, this._keys.get(panes[study.paneIndex]) ?? -1);
+    }
+    return view;
+  }
 
   private _series(): SeriesApi | null {
     const series = this._opts.series ? this._opts.series() : this._chart.primarySeries();
@@ -715,8 +1024,9 @@ export class ChartHistory {
 
   private _shot(full: boolean): Shot {
     const chart = this._chart;
-    const shot: Shot = { full, type: null, scale: null, studies: [], panes: [] };
+    const shot: Shot = { full, type: null, scale: null, studies: [], panes: [], defaults: {} };
     if (chart.isDestroyed) return shot;
+    const first = this._seen.size === 0;
     const panes = chart.panes();
     const keys = panes.map(pane => this._keyOf(pane));
     const series = this._series();
@@ -746,12 +1056,28 @@ export class ChartHistory {
       }
       shot.panes.push(p);
     });
-    shot.studies = chart.indicators().map(study => ({
-      id: this._canonical(study.id), indicatorId: study.indicatorId,
-      settings: renameSources(study.settings(), id => this._canonical(id)),
+    const live = chart.indicators();
+    const names = live.map(study => this._nameOf(study));
+    live.forEach((study, i) => this._lastNames.set(study.id, names[i]));
+    // A study-source setting names a study by its id: the one holding it now, or the last one that did.
+    const nameOf = (id: string): string => this._lastNames.get(id) ?? id;
+    shot.studies = live.map((study, i) => ({
+      id: names[i], indicatorId: study.indicatorId,
+      settings: renameSources(study.settings(), nameOf),
       pane: keys[study.paneIndex] ?? -1, visible: study.visible(),
       scale: study.priceScaleId(), plots: { ...study.plotPriceScaleIds() },
     }));
+    // A pane no capture held before, that no study came with, the host made:
+    // for a primitive of its own, or a drawing it placed there.
+    for (const p of shot.panes) {
+      if (!this._seen.has(p.key)) {
+        this._seen.add(p.key);
+        if (!first && !shot.studies.some(s => s.pane === p.key)) this._hostPanes.add(p.key);
+      }
+      if (this._hostPanes.has(p.key)) p.host = true;
+    }
+    const defaults = chart.priceScaleDefaults();
+    for (const key of DEFAULT_KEYS) if (defaults[key] !== undefined) (shot.defaults as Record<string, unknown>)[key] = defaults[key];
     if (full) shot.settings = readChartSettings(chart);
     return shot;
   }
@@ -759,21 +1085,87 @@ export class ChartHistory {
   // ── applying ─────────────────────────────────────────────────────────
 
   private _peek(stack: Entry[], direction: 'undo' | 'redo'): ChartHistoryStep | null {
-    for (let i = stack.length - 1; i >= 0; i--) if (this._reachable(stack[i], direction)) return this._describe(stack[i]);
+    for (let i = stack.length - 1; i >= 0; i--) if (this._reachable(stack[i], direction)) return this._describe(stack[i], direction);
     return null;
   }
 
-  private _describe(entry: Entry): ChartHistoryStep {
+  /**
+   * The step as it was made, in what a press would still change: the
+   * policies the studies hold now leave out what they keep.
+   */
+  private _describe(entry: Entry, direction: 'undo' | 'redo'): ChartHistoryStep {
     const changes = new Set<ChartHistoryChange>();
-    for (const change of entry.changes) for (const kind of diff(change.before, change.after).kinds) changes.add(kind);
+    // An undo walks a step backwards, so what it removes is what the step added.
+    const made = (kind: ChartHistoryChange): ChartHistoryChange => (direction === 'redo' ? kind : REVERSED[kind] ?? kind);
+    for (const move of this._moves(entry, direction)) for (const kind of move.delta.kinds) changes.add(made(kind));
     if (entry.steps.length) changes.add('drawing');
     if (entry.commands.length) changes.add('command');
     return { ...(entry.label === undefined ? {} : { label: entry.label }), changes: [...changes] };
   }
 
+  /**
+   * The stretches a press would walk, in the order it walks them (newest
+   * first for an undo), each from where it left the chart back to where it
+   * found it, with what the chart lets it change now. Each is read against
+   * the chart the stretches before it in the press leave, so a later one
+   * whose stack the chart holds now still puts back the stack an earlier one
+   * changes. One the policies leave nothing to do is left out.
+   */
+  private _moves(entry: Entry, direction: 'undo' | 'redo'): Move[] {
+    const undo = direction === 'undo';
+    const view = this._view();
+    const moves: Move[] = [];
+    for (const change of undo ? entry.changes.slice().reverse() : entry.changes) {
+      const from = undo ? change.after : change.before, to = undo ? change.before : change.after;
+      const delta = diff(from, to, this._rulesFor(view));
+      if (empty(delta)) continue;
+      moves.push({ from, to, delta });
+      this._project(view, to, delta);
+    }
+    return moves;
+  }
+
+  /** `view` as `_apply` leaves the chart once it has made it look like `to` in what `d` reaches. */
+  private _project(view: View, to: Shot, d: Delta): void {
+    const wanted = new Map(to.studies.map(s => [s.id, s]));
+    let added = false;
+    for (const [id, sd] of d.studies) {
+      const s = wanted.get(id);
+      if (s === undefined) { view.order = view.order.filter(name => name !== id); view.pane.delete(id); continue; }
+      // A study brought back joins the end of the chart's stack; one moved keeps its place in it.
+      if (sd.presence && !view.pane.has(id)) { view.order.push(id); added = true; }
+      if (sd.presence || sd.pane) view.pane.set(id, s.pane);
+    }
+    if (!d.order && !added) return;
+    for (const p of to.panes) {
+      const plan = this._plan(view, to, p.key);
+      if (plan === null || plan.blocked) continue;
+      let next = 0;
+      view.order = view.order.map(name => (view.pane.get(name) === p.key ? plan.desired[next++] : name));
+    }
+  }
+
+  /**
+   * One pane's stack put into the order `to` records, over the studies both
+   * hold, the rest keeping their rows; null when that is the order it has.
+   * `blocked` when two studies that may not move (`movable: false`) would
+   * trade places: another study may pass one, as the chart lets it, but
+   * nothing moves one past another.
+   */
+  private _plan(view: View, to: Shot, key: number): { now: string[]; desired: string[]; blocked: boolean } | null {
+    const now = view.order.filter(name => view.pane.get(name) === key);
+    const known = to.studies.filter(s => s.pane === key).map(s => s.id).filter(id => now.includes(id));
+    const desired = now.slice();
+    let next = 0;
+    now.forEach((id, i) => { if (known.includes(id)) desired[i] = known[next++]; });
+    if (same(desired, now)) return null;
+    const pinned = (id: string): boolean => this._policyOf(id).movable === false;
+    return { now, desired, blocked: !same(now.filter(pinned), desired.filter(pinned)) };
+  }
+
   /** Whether a press would find anything to do in this step. */
   private _reachable(entry: Entry, direction: 'undo' | 'redo'): boolean {
-    if (entry.commands.length || entry.changes.length) return true;
+    if (entry.commands.length || this._moves(entry, direction).length) return true;
     const held = this._draw?.historySteps()[direction] ?? [];
     return entry.steps.some(step => step.detached || held.includes(step.id));
   }
@@ -792,9 +1184,11 @@ export class ChartHistory {
       // A step that failed makes every step behind it unreachable: those
       // describe a chart this one no longer leads back to.
       else from.length = 0;
+      this._prune();
       this._notify();
       return outcome === 'done';
     }
+    this._prune();
     this._notify();
     return false;
   }
@@ -806,11 +1200,10 @@ export class ChartHistory {
     // left it nothing to do) is gone for good; one whose controller was
     // replaced is still taken back, from its documents.
     entry.steps = entry.steps.filter(step => step.detached || (held !== undefined && (held.undo.includes(step.id) || held.redo.includes(step.id))));
-    // Stretches newest first for an undo, each from where it left the chart back to where it found it.
-    const moves = (undo ? entry.changes.slice().reverse() : entry.changes)
-      .map(change => ({ from: undo ? change.after : change.before, to: undo ? change.before : change.after }))
-      .map(move => ({ ...move, delta: diff(move.from, move.to) }))
-      .filter(move => !empty(move.delta));
+    // A step the studies' policies now leave nothing to do (removing a study
+    // the host protected since) is dropped here, as the drawing history
+    // drops one a read-only drawing leaves empty, and the press goes on.
+    const moves = this._moves(entry, direction);
     if (!entry.commands.length && !moves.length && !entry.steps.length) return 'skip';
     const done = { steps: [] as Step[], moves: 0, commands: 0 };
     const look = entry.linked === true ? this._look() : null;
@@ -836,7 +1229,7 @@ export class ChartHistory {
       return 'done';
     } catch (error) {
       this._rollback(entry, direction, done, moves);
-      try { this._opts.onError?.({ direction, step: this._describe(entry), error }); } catch { /* A host's report cannot undo the rollback. */ }
+      try { this._opts.onError?.({ direction, step: this._describe(entry, direction), error }); } catch { /* A host's report cannot undo the rollback. */ }
       return 'fail';
     } finally {
       this._applying--;
@@ -850,12 +1243,12 @@ export class ChartHistory {
 
   /** Put back what a failed press had changed, as far as it can be. */
   private _rollback(entry: Entry, direction: 'undo' | 'redo', done: { steps: Step[]; moves: number; commands: number },
-    moves: readonly { from: Shot; to: Shot }[]): void {
+    moves: readonly Move[]): void {
     const undo = direction === 'undo';
     const quietly = (fn: () => void): void => { try { this._untracked(fn); } catch { /* Best effort: the stacks are trimmed either way. */ } };
     const commands = undo ? entry.commands.slice().reverse() : entry.commands;
     for (const command of commands.slice(0, done.commands).reverse()) quietly(() => { if (undo) command.redo(); else command.undo(); });
-    for (const move of moves.slice(0, done.moves).reverse()) quietly(() => this._apply(move.from, diff(move.to, move.from)));
+    for (const move of moves.slice(0, done.moves).reverse()) quietly(() => this._apply(move.from, diff(move.to, move.from, this._rules)));
     quietly(() => this._drawSteps(done.steps.slice().reverse(), undo ? 'redo' : 'undo', []));
   }
 
@@ -923,10 +1316,32 @@ export class ChartHistory {
     return this._chart.panes().findIndex(pane => this._keys.get(pane) === key);
   }
 
-  private _find(id: string): IndicatorApi | undefined {
-    const live = this._liveId(id);
-    return this._chart.indicators().find(study => study.id === live);
+  /**
+   * The study on the chart a step names: the object the name reaches, while
+   * the chart holds it. A study the host placed under an id that came free is
+   * another object, of whatever kind, and is left alone rather than taken for
+   * the one the step means.
+   */
+  private _find(name: string): IndicatorApi | undefined {
+    const study = this._known.get(name);
+    return study === undefined || this._chart.isDestroyed ? undefined : this._chart.indicators().find(live => live === study);
   }
+
+  /** What the chart `view` describes lets a step do (see `diff`). */
+  private _rulesFor(view: View): Rules {
+    return {
+      policy: name => this._policyOf(name),
+      present: name => view.pane.has(name),
+      returns: name => !this._hostRemoved.has(name) && this._policyOf(name).removable !== false,
+      order: (to, key) => {
+        const plan = this._plan(view, to, key);
+        return plan !== null && !plan.blocked;
+      },
+    };
+  }
+
+  /** What the chart as it is now lets a step do. */
+  private get _rules(): Rules { return this._rulesFor(this._view()); }
 
   /** Make the chart look like `to` in everything `d` reaches, and nothing else. */
   private _apply(to: Shot, d: Delta): void {
@@ -971,7 +1386,7 @@ export class ChartHistory {
       const create = slot < 0;
       if (create) slot = chart.panes().length;
       const live = this._find(s.id);
-      if (live === undefined) { this._add(s, slot); added = true; }
+      if (live === undefined) { this._add(s, slot, to); added = true; }
       else if (live.paneIndex !== slot && !chart.moveIndicator(live.id, slot)) fail('move');
       const pane = chart.panes()[slot];
       if (create && pane !== undefined) { this._keys.set(pane, s.pane); fresh.add(s.pane); }
@@ -1011,6 +1426,17 @@ export class ChartHistory {
       for (const key of d.settings) if (key in to.settings && !same(now[key], to.settings[key])) patch[key] = to.settings[key];
       if (Object.keys(patch).length) applyChartSettings(chart, patch);
     }
+    // The defaults a pane added later starts from, written chart wide as the
+    // change was; the axes then put back what each scale had of its own.
+    if (d.defaults.length) {
+      const now = chart.priceScaleDefaults();
+      const patch: Partial<PriceScaleOptions> = {};
+      for (const key of d.defaults) {
+        const value = to.defaults[key] ?? DEFAULT_PRICE_SCALE_OPTIONS[key];
+        if (!same(now[key] ?? DEFAULT_PRICE_SCALE_OPTIONS[key], value)) (patch as Record<string, unknown>)[key] = value;
+      }
+      if (Object.keys(patch).length) chart.setPriceScaleOptions(patch);
+    }
     // Axes last: the most specific answer for each scale, after the chart-wide settings.
     for (const p of to.panes) {
       const fields = fresh.has(p.key) ? null : d.panes.get(p.key)?.axes;
@@ -1027,24 +1453,46 @@ export class ChartHistory {
     this._check(to, d);
   }
 
-  private _add(s: StudyShot, slot: number): void {
+  /**
+   * Bring a study back under the instance id it had, so the studies reading
+   * it and the alerts naming it find it again, with the policy its host holds
+   * now: the one the study last had on the chart, never an older one the step
+   * captured. A study the host placed under that id since, of whatever kind,
+   * holds it and is another study, so this one comes back under a fresh id
+   * with the settings the step gives it: every step that names it and the
+   * studies `to` has reading it follow, and the holder is left as it is.
+   */
+  private _add(s: StudyShot, slot: number, to: Shot): void {
     const chart = this._chart;
-    const previous = this._liveId(s.id);
-    const options: Record<string, unknown> = { paneIndex: slot, instanceId: s.id };
+    const id = this._liveId(s.id);
+    const options: Parameters<Chart['addIndicator']>[2] = { paneIndex: slot, instanceId: id };
     if (s.scale !== null) options.priceScaleId = s.scale;
     if (Object.keys(s.plots).length) options.plotPriceScaleIds = s.plots;
-    const study = chart.addIndicator(s.indicatorId, this._liveSettings(s.settings), options as Parameters<Chart['addIndicator']>[2]);
-    if (study.id !== previous) {
-      // The chart would not reuse the id, so the study answers to a new one:
-      // every step that names it, and every study reading it, follows.
-      this._canon.delete(previous);
-      this._aliases.set(s.id, study.id);
-      this._canon.set(study.id, s.id);
-      for (const reader of chart.indicators()) {
-        const settings = reader.settings();
+    const policy = this._policyOf(s.id);
+    if (Object.keys(policy).length) options.policy = { ...policy };
+    const settings = this._liveSettings(s.settings);
+    let study: IndicatorApi;
+    try {
+      study = chart.addIndicator(s.indicatorId, settings, options);
+    } catch (error) {
+      if (!chart.indicators().some(other => other.id === id)) throw error;
+      const fresh = { ...options };
+      delete fresh.instanceId;
+      study = chart.addIndicator(s.indicatorId, settings, fresh);
+    }
+    this._bind(s.id, study);
+    this._lastNames.set(study.id, s.id);
+    if (study.id !== id) {
+      // Its readers as the step has them; one the host pointed at the holder is the host's.
+      for (const r of to.studies) {
+        const keys = Object.keys(r.settings).filter(key => isSource(r.settings[key]) && (r.settings[key] as { instanceId: string }).instanceId === s.id);
+        const reader = keys.length ? this._find(r.id) : undefined;
+        if (reader === undefined) continue;
+        const current = reader.settings();
         const patch: IndicatorSettings = {};
-        for (const [key, value] of Object.entries(settings)) {
-          if (isSource(value) && value.instanceId === previous) patch[key] = { ...value, instanceId: study.id };
+        for (const key of keys) {
+          const value = current[key];
+          if (isSource(value) && value.instanceId !== study.id) patch[key] = { ...value, instanceId: study.id };
         }
         if (Object.keys(patch).length) reader.setSettings(patch);
       }
@@ -1092,21 +1540,28 @@ export class ChartHistory {
     }
   }
 
-  /** Put each pane's studies back into `to`'s stacking order. */
+  /**
+   * Put each pane's studies back into `to`'s stacking order, where no two
+   * studies that may not move would have to trade places. One that may not
+   * move is never moved by a call of its own: another study passes it, as the
+   * chart lets it.
+   */
   private _stack(to: Shot): void {
     const chart = this._chart;
     for (const p of to.panes) {
+      const plan = this._plan(this._view(), to, p.key);
+      if (plan === null || plan.blocked) continue;
       const slot = this._slot(p.key);
-      if (slot < 0) continue;
-      const ids = (): string[] => chart.indicators().filter(study => study.paneIndex === slot).map(study => this._canonical(study.id));
-      const known = to.studies.filter(s => s.pane === p.key).map(s => s.id).filter(id => ids().includes(id));
-      const now = ids();
-      const desired = now.slice();
-      let next = 0;
-      now.forEach((id, i) => { if (known.includes(id)) desired[i] = known[next++]; });
+      const { desired } = plan;
+      const ids = (): string[] => chart.indicators().filter(study => study.paneIndex === slot).map(study => this._nameOf(study));
       for (let i = 0; i < desired.length; i++) {
-        for (let at = ids().indexOf(desired[i]); at > i; at--) {
-          if (!chart.reorderIndicator(this._liveId(desired[i]), -1)) fail('study order');
+        for (let row = ids().indexOf(desired[i]); row > i; row--) {
+          // One row up. One that may not move goes by the one above it moving
+          // down instead, which is free: two that may not move never trade.
+          const moved = this._policyOf(desired[i]).movable !== false
+            ? chart.reorderIndicator(this._liveId(desired[i]), -1)
+            : chart.reorderIndicator(this._liveId(ids()[row - 1]), 1);
+          if (!moved) fail('study order');
         }
       }
     }
@@ -1142,8 +1597,8 @@ export class ChartHistory {
   private _check(to: Shot, d: Delta): void {
     const wanted = new Map(to.studies.map(s => [s.id, s]));
     for (const [id, sd] of d.studies) {
-      const live = this._find(id);
       const s = wanted.get(id);
+      const live = this._find(id);
       if ((s === undefined) !== (live === undefined)) fail('study');
       if ((sd.presence || sd.pane) && s !== undefined && live !== undefined && this._slot(s.pane) !== live.paneIndex) fail('study pane');
     }
@@ -1155,9 +1610,19 @@ export class ChartHistory {
   }
 
   private _notify(): void {
+    this._heard = this._ready();
     for (const listener of [...this._listeners]) {
       try { listener(); } catch { /* One listener cannot stop the others hearing of the change. */ }
     }
+  }
+
+  /** What an undo and a redo would do, as `subscribe` reports it: the two peeks, null when a press would do nothing. */
+  private _ready(): string {
+    return this._destroyed ? '' : JSON.stringify([this.peekUndo(), this.peekRedo()]);
+  }
+
+  private _notifyIfMoved(): void {
+    if (this._listeners.size > 0 && this._ready() !== this._heard) this._notify();
   }
 }
 

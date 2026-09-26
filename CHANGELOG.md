@@ -6,6 +6,55 @@ All notable changes to OpenAlgo Charts.
 
 ### Fixed
 
+- A chart follows a change of device pixel ratio: the window moved to a screen
+  of another density, or a zoom that leaves the container's CSS size alone.
+  Before, nothing re-sized the canvases, so the whole chart stayed at the old
+  ratio, stretched and blurred, until something changed the container's size.
+  The chart now watches a `(resolution: Xdppx)` query, made again for each new
+  ratio, and the window's `resize` as well, which a zoom fires and which is the
+  one signal left in a browser whose query list takes no change listener.
+- Pane boundaries now land on whole device pixels, at every ratio, so each
+  canvas covers a whole number of device pixels and the browser no longer
+  stretches a lower pane by a fraction of a pixel. Three panes in 344 px at
+  1 : 0.32 : 0.32 were 209.76 px and 67.12 px tall, boundaries inside a device
+  pixel at every ratio; they are now rounded where they meet, within half a
+  device pixel of their share, and the outer edge stays where the container
+  puts it. At a ratio of 1 a pane's height can therefore differ from its exact
+  share by up to one pixel; weights are untouched. A chart whose panes already
+  share the height in whole pixels is laid out and painted exactly as before.
+  Hit testing and `priceToCoordinate` round at the ratio the panes were laid
+  out at, so they stay on the boxes on screen even when the ratio moves with
+  nothing to say so.
+- At a fractional ratio the separator between panes is a box one device pixel
+  tall laid over the top of the lower pane, where it was a 1 px CSS border. At
+  1.25 and 1.5 that border was 1.25 or 1.5 device pixels, so the canvases
+  under it started part way into a pixel and the browser resampled the whole
+  pane and blended the rule into it. There the lower pane's canvases now start
+  at the pane's top and the rule covers their first row, so a pointer maps to
+  the canvas pixel it is over. At a whole-number ratio (1, 2, 3) the separator
+  is the 1 px border it always was, the canvases under it and pane-local
+  coordinates where they were: a border is whole device pixels there. The
+  separator changes form when the ratio does. `setTheme` recolours it, which
+  the border kept in the previous theme's colour until the next resize.
+- `exportSVG` lays its panes out at a ratio of 1, the ratio the document is at,
+  whatever the screen's: the same chart exports the same document on a 1x,
+  1.5x or 2x screen, with the separator as the 1 px border the screen draws at
+  1.
+- Where the browser reports a canvas's device-pixel box
+  (`devicePixelContentBoxSize`, Chromium and Firefox), the canvas's backing
+  store takes that size, so a chart that starts part way into a pixel is not
+  stretched by one. A report more than a pixel away from media times ratio is
+  refused, which is what an emulated device scale reports. The box is kept
+  through a resize of less than a pixel that leaves it as it was, which the
+  browser does not report again.
+- No blank frame while the chart is resized. Resizing a canvas clears it, and
+  the size arrives in a ResizeObserver callback, after the frame's animation
+  callbacks and before the browser paints, so the repaint waited a frame and
+  every step of a window drag showed one cleared frame. The chart now paints
+  in that callback, on a new ratio, and in the one re-measure a frame after
+  construction, which ran inside an animation callback and had the same gap.
+  A host that supplies its own `raf` scheduler keeps every frame, these
+  included, on it.
 - Ichimoku Cloud reads its three periods and its displacement as whole bars,
   the way the other built-in studies read a length. A fractional period (a
   conversion period of 9.4, say, from a saved layout or a host's own settings
@@ -39,6 +88,12 @@ All notable changes to OpenAlgo Charts.
   writes `rgba()` with the alpha as given, for canvas, and the widget's writes
   `#rrggbb` for an opaque colour and clamps and rounds the alpha, for a token
   value.
+- `npm run test:script-engine` draws a compiled study with two grids and a band
+  whose colour the script computes per bar, built with
+  `descriptorFor(program, { id, chartVersion: VERSION })`, on a real chart, and
+  checks both grids and each run of the band's colour. Against an engine older
+  than 0.8.0, whose adapter refuses such a study, the case is skipped with a
+  note saying so; the engine's version is read from its own `package.json`.
 
 ### Sizes
 
@@ -57,6 +112,37 @@ the shared luminance calculation that shrinks the base, draw and chart-only
 builds costs it 48 bytes. Of about a hundred shapes measured, the only ones
 that shrink the trade file grow the base engine by 129 bytes and the chart-only
 import by 43.
+
+The device-pixel and resize work, `layout:change`, `priceScaleDefaults` and
+`setSessionCalendar` add 1,125 Brotli bytes to every row that carries the base
+engine, measured on the merged build before and after: base engine 124,123 to
+125,248, base + trade 140,810 to 141,935, widget terminal 299,952 to 301,077,
+everything 352,964 to 354,089; the chart-only import grows from 80,041 to
+81,172 bytes. No other tier moved. The budgets are set once for the merged
+build, which already measured over several of them before this change.
+
+The chart-wide undo reconciliation (study anchor steps on one timeline, the
+study policies, instance identity, `layout:change` and the scale defaults, and
+the drawing controller holding a picked point) adds, measured on the merged
+build before and after, Brotli bytes: draw tier 48,058 to 48,420, widget tier
+91,334 to 92,413, widget terminal 301,077 to 302,518 and everything 354,089 to
+355,530. The base engine, base + trade and the chart-only import do not move.
+Each budget is the smallest two-decimal value that passes on the merged build:
+base 125.25 kB, base + trade 141.94 kB, draw 48.42 kB, widget 92.42 kB,
+terminal 302.52 kB, everything 355.53 kB, workspace 10.47 kB and the
+chart-only import 79.27 KiB.
+
+Keeping a canvas's reported device size only while its new box can snap to it,
+and the chart-wide history letting go of the studies and panes no step
+reaches, measured on the merged build before and after, Brotli bytes: base
+engine 125,248 to 125,345, base + trade 141,935 to 142,032, widget tier 92,413
+to 92,720, widget terminal 302,518 to 302,922 and everything 355,530 to
+355,934. The chart-only import falls from 81,172 to 81,148 bytes, and the
+indicator, draw, transform, profile, WebGL2 and workspace rows do not move.
+Each budget that moved is the smallest two-decimal value that passes: base
+125.35 kB, base + trade 142.04 kB, widget 92.72 kB, terminal 302.93 kB,
+everything 355.94 kB and the chart-only import 79.25 KiB.
+
 ### Deprecated
 
 - `mapOrder` is deprecated in favour of `decodeOrder`, which returns the reason a
@@ -74,8 +160,19 @@ import by 43.
 - The flat `shiftKey`, `ctrlKey` and `metaKey` on a `click` event are
   deprecated: read `modifiers`, which carries the same state and `alt` besides.
   `chart.renderer` is deprecated in favour of `chart.rendererKind`, the same
-  value. Both keep working until 3.0.0; their declaration tags follow in a later
-  change to the chart module.
+  value. Both keep working until 3.0.0, and their declarations carry the tag,
+  so an editor strikes them through.
+- `chart.movePriceAxis(pane, from, to)` is deprecated in favour of
+  `chart.setPriceAxisPlacement(pane, scaleId, side)` (since 2.5.4), which moves
+  a scale's column and keeps its id, where the old method swaps the built-in
+  side scales and reassigns their series and studies. `movable` in
+  `priceAxisState()` describes only that old method and goes with it, and so
+  does the `priceAxisMoved` event, which only that method emits: listen for
+  `priceAxisPlacementChanged`. The widget and the reference host already use
+  placement. All three keep working until 3.0.0.
+- The chart's own study host no longer reads the deprecated `dashed` it is
+  handed for a study level; it draws from `lineStyle`, which the study always
+  resolves, so every level looks exactly as before.
 - COMPATIBILITY.md now has a table of every deprecated API with its
   replacement, the release that replacement arrived in and the release that
   removes the old form, and a list of older forms that are kept on purpose (the
@@ -99,6 +196,11 @@ import by 43.
 
 ### Documentation
 
+- The examples page carries the undo example's code again. Merging the data
+  variants example had cut it off after its first line, which left the page
+  unparseable and stopped the website building. Two library lines the website
+  compiles without strict null checks (`addPrimitive`'s pane index and an
+  instrument's open-interest flag) now type there too; neither changes behaviour.
 - README and ARCHITECTURE.md now describe the engine as it is: two canvases per
   pane with the axes painted on the base canvas, a data write (a study
   recompute or a live tick) repainting every pane, a time-scale operation queue
@@ -158,12 +260,16 @@ import by 43.
 
 ### Added
 
+- `chart.setSessionCalendar(calendar)` sets the hours the time axis follows
+  past the last bar and repaints every pane, so a drawing already placed there
+  moves to the time it now means; `null` clears them. Any object with
+  `sessionFrom(utcSeconds)` qualifies (`SessionCalendarSource`), so a host
+  setting hours it built itself needs neither `applyTo`. Both `applyTo` calls
+  below go through it.
 - `chart.dataLayer.setSessionCalendar(calendar)` and the `sessionCalendar`
-  getter set and read the hours the time axis follows past the last bar;
-  `null` clears them. Any object with `sessionFrom(utcSeconds)` qualifies
-  (`SessionCalendarSource`). The setter moves times without asking for a
-  frame, so on an idle chart use one of the `applyTo` calls below, which
-  repaint. `Instrument.applyTo` now sets the instrument itself, so a host that
+  getter set and read the same hours. The data layer cannot reach the chart,
+  so this setter moves times without asking for a frame: the path for a host
+  about to load bars or move the view anyway. `Instrument.applyTo` now sets the instrument itself, so a host that
   applies instrument metadata gets the fix with no other change. Another
   instrument replaces its hours, and a data context moved to another symbol or
   exchange drops them, so a symbol the host holds no instrument for is not laid
@@ -184,6 +290,24 @@ import by 43.
   York, weekdays), on both charts of the split view, and in the host
   instrument's own calendar for a symbol it holds metadata for. Crypto and
   venues without hours keep the median spacing.
+- A `layout:change` event (`LayoutChangeEvent`, naming a `LayoutSetter`)
+  after the setters that change what `getState` saves and had no event of
+  their own: `setPaneWeight`, `setPriceAxisOptions`, `setPriceAxisAutoFit`,
+  `setPriceAxisLockRatio`, `setPriceScaleOptions`, `setAutoScale`,
+  `setGridOptions`, `setCanvasOptions`, `setStatusLineOptions`,
+  `setWatermarkOptions`, `setTradingSettings`, `setAxisChromeOptions`,
+  `setEventOptions` and `applyOptions`. It fires once per outermost call,
+  after the change is applied, so the canvas block setting the grid on its way
+  is one `setCanvasOptions` event; a call naming no pane the chart has fires
+  nothing, and a restore fires none, since it announces itself. A host that
+  saves its layout, or an undo history, now hears these changes when they
+  happen. The reference host autosaves on it, which now covers a grid toggled
+  with the chart's own Alt+V and Alt+H keys.
+- `chart.priceScaleDefaults()` reads the chart-wide price-scale defaults that
+  `setPriceScaleOptions`, the `priceScale` option and the canvas margins set,
+  and that a pane added later starts from. `priceScaleOptions()` reads the
+  price pane's own scale, which a change made to that one axis moves and the
+  defaults do not, so the two tell a chart-wide change from a one-axis one.
 ### Added
 
 - Accent registries for the icon sets: `DRAWING_TOOL_ACCENTS` /
@@ -351,9 +475,11 @@ import by 43.
   to both axes and writes both settings in one patch on release, Escape cancels, an
   active drawing tool or a waiting pick takes the press, and a study whose policy is
   `configurable: false` keeps it still. Each drag is one step of the drawing undo
-  history, in order with the drawings, so Ctrl+Z, the rail and the phone bar take it
-  back in both hosts; the step emits `drawing:change` with empty `ids` so Undo
-  controls refresh. `draw.moveInputAnchor(studyId, key, point)` moves an anchor the
+  history, in order with the drawings, and emits `drawing:change` with empty `ids`
+  so Undo controls refresh; a host keeping one timeline of its own takes the steps
+  with `draw.delegateInputAnchorSteps(record)`, as the chart-wide `ChartHistory`
+  below does, so Ctrl+Z, the rail and the phone bar take a drag back once in both
+  hosts. `draw.moveInputAnchor(studyId, key, point)` moves an anchor the
   way a drag does, as one step, for a host control that sets the point another way
   (a point pick). `new DrawingController(chart, { inputAnchors: false })` draws
   none. The reference host adds the Anchored growth sample.
@@ -429,18 +555,83 @@ import by 43.
   chart's. It records its chart-type rebuild as a command, makes each chart
   settings and study settings session one step, and keeps comparisons, the volume
   row and loaded layouts out of it.
+- A study input anchor's move is one step of the chart-wide timeline, taken back
+  once. `DrawingController.delegateInputAnchorSteps(record)` hands the step each
+  anchor move makes (a drag, `moveInputAnchor`) to a host's own timeline, with its
+  own `undo` and `redo` (`InputAnchorStep`), until the returned function gives the
+  steps back, and records none of them itself. `ChartHistory` takes them from its
+  drawing controller, and from one it is attached to later, and records the
+  settings patch the move wrote as the move ends, so the rail's Undo is on the
+  moment a drag is released. A drag, `moveInputAnchor` and a settings dialog's
+  **Pick point on chart** are each one step, walked in order with the drawings:
+  an undo after a pick takes the pick back, never a drawing made before it. A
+  press that grabs something starts a step of its own, so a change made earlier
+  in the same turn is not taken back with the drag. A move made inside
+  `untracked`, and so inside `ignore`, is the host's own and a step nowhere.
+- Without a chart-wide history, the drawing controller holds a point written
+  through a study's settings, as a settings dialog's **Pick point on chart**
+  writes it, as a step of its own, the way it holds a drag. Before, a drag
+  followed by such a pick left the drag's step describing a point the study no
+  longer held, and an undo passed over it and removed an unrelated drawing made
+  before both, leaving the pick in place. Now the first undo takes the pick back,
+  the next the drag, and only the third the drawing. A write inside `untracked`,
+  or forced on a study the user may not configure, is the host's own and no step,
+  and `delegateInputAnchorSteps` hands over only the anchors' own moves, since a
+  host timeline sees a settings write itself.
+- Undo and redo never override a study's policy. A press leaves a study as its
+  policy keeps it: not removed while `removable: false`, its settings and scales
+  as they are while `configurable: false`, its pane while `movable: false`, and
+  never moved by a call of its own. Other studies still pass one that may not
+  move, as the chart lets them: a user's reorder that moves a free study past a
+  pinned one is a step and is taken back, and a study removed from above a pinned
+  one comes back above it; two pinned studies never trade places. The rest of the
+  step still applies, and a step left with nothing to do (removing a study the
+  host has protected since) is dropped and the press goes on to the one before,
+  as the drawing history treats a read-only drawing, so `canUndo`, `canRedo` and
+  the peeks say what a press would do, and `subscribe` hears when a policy changes
+  that. A change only the host could make, adding a protected study or a forced
+  write or remove on one, is no step.
+- Undo and redo never remove or weaken a policy the host set later. A study a
+  press brings back takes the policy its host holds now, the one it last had on
+  the chart, never an older one the step captured: a restriction added after the
+  step was made is still on the study that comes back. A study that left the
+  chart by the host's hand (inside `ignore`, through a forced remove, or left out
+  of a chart the host rebuilt and passed to `attach`) is the host's to bring
+  back: the part of any step that would re-add it is dropped, and a step with
+  nothing else to do goes with it.
+- A study brought back by an undo or redo takes back the instance id it had, so
+  the studies reading it and the alerts naming it find it again. The history
+  tells studies apart by the chart's own object for each, not by id or kind: if
+  a study the host placed under that id since holds it, of the same kind or
+  another, the one brought back takes a fresh id with the settings the step gives
+  it, the later steps and the studies reading it follow it there, and the host's
+  study keeps the id, its pane and its settings and is never taken for the one a
+  step means.
+- `ChartHistory` records a pane height or a scale option set in code outside a
+  transaction (`setPaneWeight`, `setPriceAxisOptions`, `setPriceScaleOptions` and
+  the other setters the chart now announces with `layout:change`) as a step of
+  its own. The chart-wide price scale defaults (`priceScaleDefaults()`: mode,
+  invert and both margins) are a field of each step apart from every pane's
+  axes: a chart-wide change is taken back with them, so a pane added after the
+  undo starts from the old defaults, while a change to one axis from its menu,
+  on a chart with a single pane too, is replayed on that axis alone and never
+  writes the defaults or announces a linked appearance change. The chart
+  settings `scales.mode`, `scales.inverted` and `scales.autoScale` are no longer
+  compared as settings, since the defaults and the axes carry them.
+- A step made of several stretches (a group or a transaction with an `ignore`
+  inside it) reads each stretch against the chart the stretch before it in the
+  press leaves, rather than the chart before the press, so a later stretch whose
+  stacking order the chart held already still puts back the order an earlier one
+  changed. A command pushed inside `ignore` is no step. A pane a host makes for a
+  primitive of its own (`addPrimitive` at a new index) or a drawing it places
+  there is the host's, like one it plots a series in: no `pane-add` step, and no
+  undo or redo makes or removes it.
 
 ### Changed
 
 - The widget's Undo and Redo chords are listed with the widget's shortcuts
   rather than the drawing ones, since they now reach every step on the chart.
 
-### Known limits
-
-- `addIndicator` cannot yet re-create a study under the instance id it had, so
-  a study brought back by an undo answers to a new id. The history follows it
-  for every later step and rewrites the study-source settings of studies that
-  read it; an indicator alert keyed to the old id does not follow.
 ### Added
 
 - Conditional study inputs. Every `IndicatorInput` (and a chart settings colour

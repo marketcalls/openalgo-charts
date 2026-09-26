@@ -2,7 +2,7 @@
   {
     "name": "Base engine (chart types + indicator registry + watermark + shortcuts + trading API + alerts)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "121.97 kB",
+    "limit": "125.35 kB",
     "brotli": true
   },
   {
@@ -11,7 +11,7 @@
       "dist/openalgo-charts.mjs",
       "dist/openalgo-charts.trade.mjs"
     ],
-    "limit": "138.60 kB",
+    "limit": "142.04 kB",
     "brotli": true
   },
   {
@@ -23,7 +23,7 @@
   {
     "name": "Draw tier (87 drawing tools + controller)",
     "path": "dist/openalgo-charts.draw.mjs",
-    "limit": "47.47 kB",
+    "limit": "48.42 kB",
     "brotli": true
   },
   {
@@ -47,7 +47,7 @@
   {
     "name": "Widget tier (shell, top bar, drawing rail, status line, dialogs, keymap, styles)",
     "path": "dist/openalgo-charts.widget.mjs",
-    "limit": "88.27 kB",
+    "limit": "92.72 kB",
     "brotli": true
   },
   {
@@ -58,13 +58,13 @@
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "288.92 kB",
+    "limit": "302.93 kB",
     "brotli": true
   },
   {
     "name": "Workspace tier (validated documents and asynchronous catalog storage)",
     "path": "dist/openalgo-charts.workspace.mjs",
-    "limit": "10.41 kB",
+    "limit": "10.47 kB",
     "brotli": true
   },
   {
@@ -80,7 +80,7 @@
       "dist/openalgo-charts.widget.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "341.76 kB",
+    "limit": "355.94 kB",
     "brotli": true
   }
 ]

@@ -149,19 +149,80 @@ describe('a study input anchor', () => {
     expect(changes.slice(1)).toEqual([{ ids: [], kind: 'undo' }, { ids: [], kind: 'redo' }]);
   });
 
-  it('lets an undo pass over a drag the settings have moved on from', () => {
+  it('takes back a point a settings dialog picked outside the anchors first, and never a drawing made before it', () => {
     const { chart, draw, dragTo } = mount();
     const study = chart.addIndicator(register());
     chart.exportSVG();
+    const start = { at: study.settings().at, level: study.settings().level };
     const line = draw.add({ tool: 'horizontal-line', paneIndex: 0, style: {}, points: [{ time: T0 + 60, price: 97 }] });
     const from = pointOf(chart, study);
     dragTo(from.x, from.y, chart.timeToCoordinate(T0 + 20 * 60)!, from.y + 40);
-    expect(study.settings().at).toBe(T0 + 20 * 60);
-    // Edited in the settings dialog since: the drag no longer describes the chart.
-    study.setSettings({ level: 120 });
+    const dragged = { at: study.settings().at, level: study.settings().level };
+    expect(dragged.at).toBe(T0 + 20 * 60);
+    // What a settings dialog's Pick point on chart writes: both halves, through the settings.
+    const picked = { at: T0 + 30 * 60, level: 120 };
+    expect(study.setSettings(picked)).toBe(true);
+
+    // The press takes the pick back: the line drawn before any of it stays.
     expect(draw.undo()).toBe(true);
-    expect(study.settings().level).toBe(120);
+    expect(draw.get(line.id)).toBeDefined();
+    expect(study.settings()).toMatchObject(dragged);
+    expect(draw.undo()).toBe(true);
+    expect(draw.get(line.id)).toBeDefined();
+    expect(study.settings()).toMatchObject(start);
+    expect(draw.undo()).toBe(true);
     expect(draw.get(line.id)).toBeUndefined();
+    expect(study.settings()).toMatchObject(start);
+    expect(draw.canUndo()).toBe(false);
+    for (let i = 0; i < 3; i++) expect(draw.redo()).toBe(true);
+    expect(study.settings()).toMatchObject(picked);
+    expect(draw.get(line.id)).toBeDefined();
+    expect(draw.canRedo()).toBe(false);
+  });
+
+  it('takes back a picked point with no drag before it, a hidden study\'s too, and never the drawing before it', () => {
+    const { chart, draw } = mount();
+    const study = chart.addIndicator(register());
+    chart.exportSVG();
+    const start = { at: study.settings().at, level: study.settings().level };
+    const line = draw.add({ tool: 'horizontal-line', paneIndex: 0, style: {}, points: [{ time: T0 + 60, price: 97 }] });
+    study.setSettings({ at: T0 + 30 * 60, level: 120 });
+    // Hidden, it has no handle, and its point is still the chart's to take back.
+    study.setVisible(false);
+    study.setSettings({ level: 125 });
+    expect(draw.undo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: T0 + 30 * 60, level: 120 });
+    expect(draw.undo()).toBe(true);
+    expect(study.settings()).toMatchObject(start);
+    expect(draw.get(line.id)).toBeDefined();
+    expect(draw.undo()).toBe(true);
+    expect(draw.get(line.id)).toBeUndefined();
+  });
+
+  it('records no step for a point the host writes inside untracked or forces on a study the user may not configure, and hands none to a host timeline', () => {
+    const m = mount();
+    const study = m.chart.addIndicator(register());
+    m.chart.exportSVG();
+    m.draw.untracked(() => study.setSettings({ level: 110 }));
+    expect(m.draw.canUndo()).toBe(false);
+    study.setPolicy({ configurable: false });
+    expect(study.setSettings({ level: 111 }, { force: true })).toBe(true);
+    expect(m.draw.canUndo()).toBe(false);
+    study.setPolicy(null);
+    // A host timeline observes the settings it writes itself: only the anchors' own moves go to it.
+    const steps: unknown[] = [];
+    const giveBack = m.draw.delegateInputAnchorSteps(step => steps.push(step));
+    study.setSettings({ level: 112 });
+    expect(steps).toEqual([]);
+    expect(m.draw.canUndo()).toBe(false);
+    giveBack();
+    // A study brought in with its point already set is no step: nothing moved it.
+    m.chart.addIndicator(register(), { at: T0 + 5 * 60, level: 90 });
+    expect(m.draw.canUndo()).toBe(false);
+    study.setSettings({ level: 113 });
+    expect(m.draw.canUndo()).toBe(true);
+    expect(m.draw.undo()).toBe(true);
+    expect(study.settings().level).toBe(112);
   });
 
   it('writes nothing when Escape cancels the drag, and puts the handle back', () => {
@@ -232,6 +293,48 @@ describe('a study input anchor', () => {
     expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 6 * 60, price: 90 })).toBe(false);
     expect(m.draw.moveInputAnchor(study.id, 'at', { time: T0 + 6 * 60, price: 90 })).toBe(false);
     expect(m.draw.moveInputAnchor('missing', 'level', { time: T0 + 6 * 60, price: 90 })).toBe(false);
+  });
+
+  it('hands each move to a host timeline that took the steps, and records none of its own', () => {
+    const m = mount();
+    const study = m.chart.addIndicator(register());
+    m.chart.exportSVG();
+    const start = { ...study.settings() };
+    const changes: unknown[] = [];
+    m.chart.on('drawing:change', event => changes.push(event));
+    const steps: { undo(): boolean; redo(): boolean }[] = [];
+    const giveBack = m.draw.delegateInputAnchorSteps(step => steps.push(step));
+    const from = pointOf(m.chart, study);
+    m.dragTo(from.x, from.y, m.chart.timeToCoordinate(T0 + 20 * 60)!, from.y - 30);
+    const dragged = { ...study.settings() };
+    expect(dragged.at).toBe(T0 + 20 * 60);
+    expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 30 * 60, price: 120 })).toBe(true);
+    expect(steps).toHaveLength(2);
+    expect(m.draw.canUndo()).toBe(false);
+    expect(m.draw.historySteps()).toEqual({ undo: [], redo: [] });
+    expect(changes).toEqual([]);
+    // The steps walk the settings back and forth for the host.
+    expect(steps[1].undo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: dragged.at, level: dragged.level });
+    expect(steps[0].undo()).toBe(true);
+    expect(study.settings()).toMatchObject({ at: start.at, level: start.level });
+    expect(steps[0].undo()).toBe(false);
+    expect(steps[0].redo()).toBe(true);
+    // A move inside `untracked` is the host's own: no step here or there.
+    m.draw.untracked(() => m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 5 * 60, price: 90 }));
+    expect(steps).toHaveLength(2);
+    expect(m.draw.canUndo()).toBe(false);
+    // A later owner takes them; giving back an earlier one's leaves it be.
+    const later: unknown[] = [];
+    const giveBackLater = m.draw.delegateInputAnchorSteps(step => later.push(step));
+    giveBack();
+    expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 6 * 60, price: 91 })).toBe(true);
+    expect(later).toHaveLength(1);
+    giveBackLater();
+    expect(m.draw.moveInputAnchor(study.id, 'level', { time: T0 + 7 * 60, price: 92 })).toBe(true);
+    expect(later).toHaveLength(1);
+    expect(m.draw.canUndo()).toBe(true);
+    expect(changes).toEqual([{ ids: [], kind: 'update' }]);
   });
 
   it('gives the press to an active drawing tool, and a pick the click', () => {

@@ -63,8 +63,11 @@ date. Boundaries resolve and throw exactly as for `sessionAt`.
 `new SessionCalendar({ timezone, sessions, exceptions })` validates, detaches and
 freezes them by the rules above, throws `Invalid session calendar: ...`, and reads
 with `sessionAt` and `sessionFrom`. `applyTo(chart)` sets it as the chart's
-calendar for times past the last bar and repaints; `chart.dataLayer.setSessionCalendar`
-sets the same without asking for a frame.
+calendar for times past the last bar and repaints, through
+`chart.setSessionCalendar(calendar)`, which a host setting hours it built itself
+(any object with `sessionFrom`) calls directly; `null` clears them.
+`chart.dataLayer.setSessionCalendar` sets the same without asking for a frame, for
+a host about to load bars or move the view, either of which repaints.
 
 Construction validates and detaches metadata, freezes its nested arrays/objects
 and omits unrelated source fields. Empty identities, unknown timezones, invalid
@@ -77,7 +80,7 @@ Registration supplies bucketing semantics; the metadata list supplies venue supp
 `formatPrice` affects display only, preserving unrounded source values. `applyTo`
 sets chart timezone, the price tick, primary price-scale formatting and data
 context, including the independent `hasOpenInterest` capability. It also sets the
-instrument as `chart.dataLayer.setSessionCalendar`, so times past the last bar
+instrument through `chart.setSessionCalendar`, so times past the last bar
 follow its sessions: the bar after Friday's last one is Monday's first, closed
 dates are skipped and daily bars step through trading dates. A later instrument
 replaces it, a data context moved to another symbol or exchange drops it,

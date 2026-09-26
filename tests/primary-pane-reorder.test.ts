@@ -185,7 +185,8 @@ describe('moving the primary pane', () => {
   it('lays the price pane out at the bottom, where the default coordinate calls find it', () => {
     const { chart } = reordered();
     const h = heights(chart);
-    expect(h[2]).toBeCloseTo(H / 1.64, 6);
+    // The last pane below boundaries rounded onto whole pixels (the ratio is 1 here).
+    expect(h[2]).toBeCloseTo(H - Math.round(H * 0.64 / 1.64), 6);
     const y = chart.priceToCoordinate(100)!;
     expect(y).toBeGreaterThan(tops(chart)[2]);
     expect(chart.coordinateToPrice(y)).toBeCloseTo(100, 6);
