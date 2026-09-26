@@ -2,7 +2,6 @@ import type { Chart } from '../core/chart';
 import { tryResolveInterval } from './intervals';
 import { isValidTimezone, parseSessionSpec, utcSecondsToZonedParts, zonedWallClockToUtcSeconds, type SessionSpec } from './time';
 import { TickSchedule, type TickBand } from './tick-schedule';
-import { InvalidationLevel } from '../core/invalidate-mask';
 
 export interface InstrumentCalendar {
   /** HHMM-HHMM[:days], with opening weekdays 1 (Sunday) through 7. */
@@ -255,13 +254,13 @@ export class SessionCalendar {
   /**
    * Lay the chart's time axis past the last bar out in these hours, and
    * repaint, so a drawing already placed there moves to the time it now
-   * means. `chart.dataLayer.setSessionCalendar` sets the same without asking
+   * means: `chart.setSessionCalendar(this)`, after checking the chart is
+   * alive. `chart.dataLayer.setSessionCalendar` sets the same without asking
    * for a frame, for a host about to load bars or move the view anyway.
    */
   public applyTo(chart: Chart): void {
     if (chart.isDestroyed) return failWith('session calendar')('chart is destroyed');
-    chart.dataLayer.setSessionCalendar(this);
-    chart.invalidate(mask => mask.invalidateGlobal(InvalidationLevel.Full));
+    chart.setSessionCalendar(this);
   }
 }
 
@@ -342,7 +341,7 @@ export class Instrument {
     // instrument replaces them, and a context moved to another symbol drops
     // them.
     dropHoursOnSymbolChange(chart);
-    chart.dataLayer.setSessionCalendar(this);
+    chart.setSessionCalendar(this);
     // Drags snap by the same schedule the order constraints carry, and a
     // constant tick clears the one an earlier instrument left.
     chart.setTickSchedule(this.tickSchedule);

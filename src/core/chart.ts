@@ -20,7 +20,7 @@ import {
   resolveRenderBackend, type IRenderBackend, type RenderBackendFactory, type RenderBackendKind, type RendererChoice,
   type RendererFallbackReason,
 } from '../render/backend';
-import { DataLayer } from '../model/data-layer';
+import { DataLayer, type SessionCalendarSource } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type SeriesRecord, type PriceScaleId, type PriceFormat, type BarConfirmationOptions, type SeriesUpdateOptions } from '../model/series';
 import { bindSeriesProvenance, SeriesProvenance, validateSeriesOptions } from '../model/series-provenance';
 import { replayWindow, observeReplayWindow } from '../model/replay-window';
@@ -1182,6 +1182,24 @@ export class Chart {
 
   public get dataLayer(): DataLayer {
     return this._dataLayer;
+  }
+
+  /**
+   * Lay the time axis past the last bar out in these trading hours, or drop
+   * them with null, and repaint every pane, so a drawing already placed past
+   * the last bar moves to the time it now means.
+   *
+   * This is the call for a host setting hours on its own: a `SessionCalendar`
+   * or an `Instrument` it holds, or any object with `sessionFrom`.
+   * `Instrument.applyTo` and `SessionCalendar.applyTo` come here too.
+   * `chart.dataLayer.setSessionCalendar` sets the same hours and asks for no
+   * frame, for a host about to load bars or move the view anyway, either of
+   * which repaints.
+   */
+  public setSessionCalendar(calendar: SessionCalendarSource | null): void {
+    if (this._destroyed) return;
+    this._dataLayer.setSessionCalendar(calendar);
+    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
   /** Readonly source bars, without allocating a history copy on each live update. */

@@ -225,9 +225,11 @@ export class DataLayer {
    * median of the recent bar spacing.
    *
    * This changes where times fall but asks for no frame: the data layer has
-   * no way to reach the chart. `SessionCalendar.applyTo` and
-   * `Instrument.applyTo` set it and repaint; call this directly where bars or
-   * a view change follow anyway.
+   * no way to reach the chart, so a drawing already placed past the last bar
+   * stays where it was painted until something repaints. `chart.setSessionCalendar`
+   * sets the same and repaints, and so do `SessionCalendar.applyTo` and
+   * `Instrument.applyTo`, which go through it; call this directly only where
+   * bars or a view change follow anyway.
    */
   public setSessionCalendar(calendar: SessionCalendarSource | null): void {
     this._calendar = calendar;

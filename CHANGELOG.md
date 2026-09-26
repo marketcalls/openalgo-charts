@@ -206,12 +206,16 @@ import by 43.
 
 ### Added
 
+- `chart.setSessionCalendar(calendar)` sets the hours the time axis follows
+  past the last bar and repaints every pane, so a drawing already placed there
+  moves to the time it now means; `null` clears them. Any object with
+  `sessionFrom(utcSeconds)` qualifies (`SessionCalendarSource`), so a host
+  setting hours it built itself needs neither `applyTo`. Both `applyTo` calls
+  below go through it.
 - `chart.dataLayer.setSessionCalendar(calendar)` and the `sessionCalendar`
-  getter set and read the hours the time axis follows past the last bar;
-  `null` clears them. Any object with `sessionFrom(utcSeconds)` qualifies
-  (`SessionCalendarSource`). The setter moves times without asking for a
-  frame, so on an idle chart use one of the `applyTo` calls below, which
-  repaint. `Instrument.applyTo` now sets the instrument itself, so a host that
+  getter set and read the same hours. The data layer cannot reach the chart,
+  so this setter moves times without asking for a frame: the path for a host
+  about to load bars or move the view anyway. `Instrument.applyTo` now sets the instrument itself, so a host that
   applies instrument metadata gets the fix with no other change. Another
   instrument replaces its hours, and a data context moved to another symbol or
   exchange drops them, so a symbol the host holds no instrument for is not laid

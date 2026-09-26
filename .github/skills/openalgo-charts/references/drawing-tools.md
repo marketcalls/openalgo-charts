@@ -77,7 +77,7 @@ Unset `color` falls back to `theme.lineColor`, unset `lineWidth` to `1.5`. `styl
 The time axis is gapless (weekends, holidays, and session breaks collapse) so a pixel anchor would slide the instant the viewport, interval, or dataset changed. Anchors resolve through `DataLayer.timeToIndexFloat`, which is *fractional*, and that has two consequences worth relying on:
 
 - An anchor can sit **inside a collapsed gap** (a Saturday between Friday and Monday) and still map to a stable x.
-- An anchor can sit **past the last bar**, which is where trend projections, `forecast`, and the position tools' targets live. The bar times there come from the session calendar when the host set one (`SessionCalendar.applyTo`, `Instrument.applyTo` or `chart.dataLayer.setSessionCalendar`), so an endpoint drawn past Friday's close lands on Monday's session; without one they run at the median recent bar interval, never at a night- or weekend-sized last gap. See [times past the last bar](data-and-time.md#times-past-the-last-bar).
+- An anchor can sit **past the last bar**, which is where trend projections, `forecast`, and the position tools' targets live. The bar times there come from the session calendar when the host set one (`chart.setSessionCalendar`, `SessionCalendar.applyTo`, `Instrument.applyTo` or `chart.dataLayer.setSessionCalendar`), so an endpoint drawn past Friday's close lands on Monday's session; without one they run at the median recent bar interval, never at a night- or weekend-sized last gap. See [times past the last bar](data-and-time.md#times-past-the-last-bar).
 
 Drag deltas are computed in data space too (`p.time - start.from.time`), so translating a shape keeps it on the same bars.
 
