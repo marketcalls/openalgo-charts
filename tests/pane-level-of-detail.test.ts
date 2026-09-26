@@ -392,3 +392,72 @@ describe('the series pass', () => {
     off.chart.destroy();
   });
 });
+
+describe('the level of detail at the edges', () => {
+  it('changes nothing above the threshold at a pixel ratio of 1.25, and covers the same pixels below it', () => {
+    const bars = walk(3000);
+    // A stick is one device pixel at 1.25, so the threshold is 0.8 CSS px.
+    expect(lodActive(0.85, 1.25, lodColumnWidth(1.25))).toBe(false);
+    expect(lodActive(0.75, 1.25, lodColumnWidth(1.25))).toBe(true);
+    for (const spacing of [0.85, 1, 2.5]) {
+      const on = rig(bars, { dpr: 1.25 });
+      const off = rig(bars, { dpr: 1.25, conflate: false });
+      for (const r of [on, off]) { r.chart.timeScale.setBarSpacing(spacing); r.paint(); }
+      for (let p = 0; p < 2; p++) expect(on.backends[p].series.rec.ops, `spacing ${spacing} pane ${p}`).toEqual(off.backends[p].series.rec.ops);
+      on.chart.destroy();
+      off.chart.destroy();
+    }
+    const on = rig(bars, { dpr: 1.25 });
+    const off = rig(bars, { dpr: 1.25, conflate: false });
+    for (const r of [on, off]) { r.chart.timeScale.setBarSpacing(0.3); r.paint(); }
+    const candles = on.backends[0].series.rec.ops.filter((op) => op.type === 'fillRect');
+    expect(candles.length).toBeLessThan(off.backends[0].series.rec.ops.filter((op) => op.type === 'fillRect').length / 2);
+    expect(coverage(candles)).toEqual(coverage(off.backends[0].series.rec.ops));
+    on.chart.destroy();
+    off.chart.destroy();
+  });
+
+  it('draws an empty series, a single bar and a run of whitespace without a stick to spare', () => {
+    const doc = fakeDocument();
+    const backends: SeriesOnly[] = [];
+    const chart = new Chart(doc.createElement('div'), {
+      document: doc, pixelRatio: () => 1, shortcuts: false, timeNavigator: false,
+      raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} },
+      timeScale: { minBarSpacing: 0.0005 },
+      renderBackend: () => { const b = new SeriesOnly(); backends.push(b); return b; },
+    });
+    chart.applySize(1000, 600);
+    const bars = walk(5000);
+    chart.addSeries('candlestick').setData(bars);
+    chart.addSeries('line');
+    chart.addSeries('line').setData([bars[2500]]);
+    chart.addSeries('histogram').setData(bars.slice(0, 900).map((b) => ({ time: b.time, open: NaN, high: NaN, low: NaN, close: NaN })));
+    chart.timeScale.setBarSpacing(0.1);
+    chart.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    const calls = backends[0].calls;
+    expect(calls.length).toBe(4);
+    expect(calls[0].items.length).toBeGreaterThan(100);
+    expect(calls[1].items).toHaveLength(0);
+    expect(calls[2].items).toHaveLength(1);
+    expect(calls[3].items).toHaveLength(0);
+    chart.destroy();
+  });
+
+  it('survives the chart being destroyed by a primitive in the middle of a frame', () => {
+    const doc = fakeDocument();
+    const chart = new Chart(doc.createElement('div'), {
+      document: doc, pixelRatio: () => 1, shortcuts: false, timeNavigator: false,
+      raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} },
+      timeScale: { minBarSpacing: 0.0005 },
+    });
+    chart.applySize(800, 500);
+    chart.addSeries('candlestick').setData(walk(4000));
+    chart.addSeries('line').setData(walk(4000).map((b) => ({ ...b, close: b.close - 3 })));
+    chart.timeScale.setBarSpacing(0.1);
+    let armed = false;
+    chart.addPrimitive({ zOrder: () => 'bottom', draw: () => { if (armed) { armed = false; chart.destroy(); } } }, 0);
+    armed = true;
+    expect(() => chart.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full))).not.toThrow();
+    expect(armed).toBe(false);
+  });
+});

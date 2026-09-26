@@ -148,7 +148,7 @@ function reference(pane: Pane, ctx: PaneRenderContext, rc: PrimitiveRenderContex
 const summary = (hit: PrimitiveHit | null): unknown =>
   hit === null ? null : { id: hit.externalId, key: hit.hoverKey, d: hit.distance, z: hit.zOrder, cursor: hit.cursor, painter: hit.paintedBy ?? null };
 
-function mount(): { chart: Chart; draw: DrawingController; series: SeriesApi; flush: () => void } {
+function mount(ratio: () => number = () => 1): { chart: Chart; draw: DrawingController; series: SeriesApi; flush: () => void } {
   vi.stubGlobal('window', {});
   const doc = fakeDocument();
   // Frames run only when a test flushes them: the chart is measured once, and
@@ -157,7 +157,7 @@ function mount(): { chart: Chart; draw: DrawingController; series: SeriesApi; fl
   const pending: (() => void)[] = [];
   const flush = (): void => { for (let guard = 0; guard < 8 && pending.length > 0; guard++) pending.splice(0).forEach((cb) => cb()); };
   const chart = new Chart(doc.createElement('div'), {
-    document: doc, shortcuts: false, timeNavigator: false, pixelRatio: () => 1,
+    document: doc, shortcuts: false, timeNavigator: false, pixelRatio: ratio,
     raf: { schedule: (cb: () => void) => { pending.push(cb); return pending.length; }, cancel: () => {} },
   });
   chart.applySize(800, 500);
@@ -296,7 +296,8 @@ describe('the hit-test prefilter', () => {
   });
 
   it('measures again after anything a box follows changes, frame or no frame', () => {
-    const { chart, series } = mount();
+    let ratio = 1;
+    const { chart, series } = mount(() => ratio);
     const seg = new Segment('one', data[40].time, 100, data[50].time, 101);
     chart.addPrimitive(seg, 0);
     const { pane, ctx } = paneOf(chart);
@@ -317,6 +318,14 @@ describe('the hit-test prefilter', () => {
     changed('new bar', () => series.update({ ...data[data.length - 1], time: data[data.length - 1].time + 60 }));
     changed('its own update', () => { seg.p1 = 104; seg.host?.requestUpdate(); });
     changed('another primitive', () => chart.addPrimitive(new Segment('two', data[5].time, 1, data[6].time, 2), 0));
+    // What the render context carries besides the scales: a box may grow its
+    // handles under the pointer, snap to device pixels, or leave room for the
+    // axis tag on whichever side the axis sits.
+    const input = (chart as unknown as { _input: { _hoverId: string | null } })._input;
+    changed('hover', () => { input._hoverId = 'one'; });
+    changed('hover gone', () => { input._hoverId = null; });
+    changed('pixel ratio', () => { ratio = 2; });
+    changed('axis side', () => { expect(chart.setPriceAxisPlacement(0, 'right', 'left')).toBe(true); });
     chart.destroy();
   });
 
