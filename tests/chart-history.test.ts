@@ -1867,3 +1867,181 @@ describe('study input anchors', () => {
     next.destroy();
   });
 });
+
+describe('what the history holds on to', () => {
+  interface Held {
+    _known: Map<string, object & { id: string }>; _lastNames: Map<string, string>; _hostRemoved: Set<string>; _seen: Set<number>;
+    _undo: { changes: { before: { studies: { id: string }[] }; after: { studies: { id: string }[] } }[] }[];
+    _redo: Held['_undo'];
+  }
+  const inside = (history: ChartHistory): Held => history as unknown as Held;
+  /** The names the steps on both branches reach. */
+  const reached = (history: ChartHistory): Set<string> => {
+    const h = inside(history);
+    return new Set([...h._undo, ...h._redo].flatMap(entry => entry.changes.flatMap(c => [...c.before.studies, ...c.after.studies].map(s => s.id))));
+  };
+  const counts = (history: ChartHistory) => {
+    const h = inside(history);
+    return { studies: h._known.size, ids: h._lastNames.size, hostRemoved: h._hostRemoved.size, panes: h._seen.size };
+  };
+  /** Every study the history holds is on the chart or named by a step. */
+  const bounded = (history: ChartHistory, chart: Chart): void => {
+    const names = reached(history);
+    const live = new Set<object>(chart.isDestroyed ? [] : chart.indicators());
+    for (const [name, study] of inside(history)._known) expect(names.has(name) || live.has(study), `holds ${name}`).toBe(true);
+    for (const name of inside(history)._hostRemoved) expect(names.has(name), `host removed ${name}`).toBe(true);
+  };
+
+  it('lets go of the studies the host adds and removes inside ignore, which no step names', async () => {
+    const { chart, history } = rig();
+    for (let i = 0; i < 100; i++) {
+      const study = history.ignore(() => chart.addIndicator('hist-osc'));
+      history.ignore(() => chart.removeIndicator(study.id));
+    }
+    // And a pair inside one ignore, which the history may never have seen.
+    for (let i = 0; i < 100; i++) history.ignore(() => { chart.removeIndicator(chart.addIndicator('hist-osc').id); });
+    await settle();
+    expect(history.canUndo()).toBe(false);
+    expect(counts(history)).toEqual({ studies: 0, ids: 0, hostRemoved: 0, panes: 1 });
+  });
+
+  it('holds no more studies than its limited steps name, and every step still walks', async () => {
+    const chart = makeChart();
+    chart.addSeries('candlestick').setData(bars(80));
+    const draw = new DrawingController(chart);
+    const errors: ChartHistoryError[] = [];
+    const history = new ChartHistory(chart, { draw, limit: 10, onError: e => errors.push(e) });
+    for (let i = 0; i < 60; i++) {
+      const study = chart.addIndicator('hist-osc', { length: i + 1 });
+      await settle();
+      chart.removeIndicator(study.id);
+      await settle();
+    }
+    // Ten steps: the last five studies, each added and removed.
+    expect(counts(history)).toEqual({ studies: 5, ids: 5, hostRemoved: 0, panes: 6 });
+    bounded(history, chart);
+    const lengths: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      expect(history.undo(), `undo ${i}`).toBe(true);
+      lengths.push(...chart.indicators().map(s => Number(s.settings().length)));
+    }
+    expect(history.undo()).toBe(false);
+    expect(lengths).toEqual([60, 59, 58, 57, 56]);
+    for (let i = 0; i < 10; i++) expect(history.redo(), `redo ${i}`).toBe(true);
+    expect(chart.indicators()).toEqual([]);
+    expect(errors).toEqual([]);
+    bounded(history, chart);
+  });
+
+  it('lets go of what only the redo branch named once a new step drops it', async () => {
+    const { chart, history } = rig();
+    for (let i = 0; i < 5; i++) { chart.addIndicator('hist-osc', { length: i + 1 }); await settle(); }
+    for (let i = 0; i < 5; i++) history.undo();
+    expect(chart.indicators()).toEqual([]);
+    // Off the chart, named by the five steps a redo would take.
+    expect(counts(history).studies).toBe(5);
+    bounded(history, chart);
+    chart.addIndicator('hist-overlay');
+    await settle();
+    expect(history.canRedo()).toBe(false);
+    expect(counts(history)).toEqual({ studies: 1, ids: 1, hostRemoved: 0, panes: 1 });
+    bounded(history, chart);
+    expect(history.undo()).toBe(true);
+    expect(history.redo()).toBe(true);
+    expect(chart.indicators().map(s => s.indicatorId)).toEqual(['hist-overlay']);
+  });
+
+  /** A dialog that previews a change to `study` and is cancelled: a group that ends as no step. */
+  const cancelled = async (history: ChartHistory, study: ReturnType<Chart['addIndicator']>): Promise<void> => {
+    const end = history.group('Dialog');
+    const was = study.settings().length;
+    study.setSettings({ length: 9 });
+    await settle();
+    study.setSettings({ length: was });
+    await settle();
+    end();
+  };
+
+  it('keeps a study only the redo branch a group set aside names until the group ends, policy and all', async () => {
+    const { chart, history, errors } = rig();
+    const other = chart.addIndicator('hist-overlay', { length: 4 });
+    await settle();
+    history.clear();
+    chart.addIndicator('hist-osc', { length: 3 }, { policy: { movable: false } });
+    await settle();
+    expect(history.undo()).toBe(true);
+    expect(chart.indicators()).toEqual([other]);
+    // The group's first change drops the redo branch, and gives it back when it cancels.
+    await cancelled(history, other);
+    expect(history.redo()).toBe(true);
+    expect(chart.indicators().find(s => s.indicatorId === 'hist-osc')?.policy()).toEqual({ movable: false });
+    expect(errors).toEqual([]);
+  });
+
+  it('keeps a study only the step a group pushed past the limit names until the group ends, policy and all', async () => {
+    const chart = makeChart();
+    chart.addSeries('candlestick').setData(bars(80));
+    const errors: ChartHistoryError[] = [];
+    const history = new ChartHistory(chart, { limit: 1, onError: e => errors.push(e) });
+    const other = chart.addIndicator('hist-overlay', { length: 4 });
+    const study = chart.addIndicator('hist-osc', { length: 3 }, { policy: { movable: false } });
+    await settle();
+    history.clear();
+    chart.removeIndicator(study.id);
+    await settle();
+    // The group's first change pushes the remove past the limit, and puts it back when it cancels.
+    await cancelled(history, other);
+    expect(history.undo()).toBe(true);
+    const back = chart.indicators().find(s => s.indicatorId === 'hist-osc');
+    expect(back?.id).toBe(study.id);
+    expect(back?.policy()).toEqual({ movable: false });
+    expect(errors).toEqual([]);
+  });
+
+  it('keeps the name a study reading a removed one captures its source by, so no step appears that nobody made', async () => {
+    const chart = makeChart();
+    chart.addSeries('candlestick').setData(bars(80));
+    const history = new ChartHistory(chart, { limit: 1 });
+    // A step names a removed study under the id `x`: another study placed under it goes by a name of its own.
+    const first = chart.addIndicator('hist-osc', {}, { instanceId: 'x' });
+    await settle();
+    chart.removeIndicator(first.id);
+    await settle();
+    const source = history.ignore(() => chart.addIndicator('hist-osc', {}, { instanceId: 'x' }));
+    history.ignore(() => chart.addIndicator('hist-osc', { source: { kind: 'indicator', instanceId: 'x', plotKey: 'value' } }));
+    // The host takes the source away; the reader still names it, and every capture reads it by that name.
+    history.ignore(() => chart.removeIndicator(source.id));
+    chart.addIndicator('hist-overlay');
+    await settle();
+    expect(history.peekUndo()?.changes).toEqual(['study-add']);
+  });
+
+  it('keeps nothing of a rebuilt chart, and still brings back a study a step removed there, with its policy', async () => {
+    const { chart, history, errors } = rig();
+    const kept = chart.addIndicator('hist-overlay', { length: 4 });
+    const removed = chart.addIndicator('hist-osc', { length: 3 }, { policy: { movable: false } });
+    const dropped = history.ignore(() => chart.addIndicator('hist-alerting'));
+    await settle();
+    chart.removeIndicator(removed.id);
+    await settle();
+    const state = chart.getState();
+    chart.destroy();
+    const next = makeChart();
+    next.addSeries('candlestick').setData(bars(80));
+    next.restoreState(state);
+    // The host leaves one study out of the rebuild.
+    next.removeIndicator(next.indicators().find(s => s.indicatorId === 'hist-alerting')!.id);
+    history.attach(next, new DrawingController(next));
+    const values = [...inside(history)._known.values()];
+    for (const old of [kept, removed, dropped]) expect(values).not.toContain(old);
+    const live = new Set<object>(next.indicators());
+    // What is not on the new chart is held as data, not as a study of the old one.
+    for (const value of values) expect(live.has(value) || !('setSettings' in value), 'a study object of the old chart').toBe(true);
+    bounded(history, next);
+    expect(history.undo()).toBe(true);
+    const back = next.indicators().find(s => s.indicatorId === 'hist-osc');
+    expect(back?.id).toBe(removed.id);
+    expect(back?.policy()).toEqual({ movable: false });
+    expect(errors).toEqual([]);
+  });
+});

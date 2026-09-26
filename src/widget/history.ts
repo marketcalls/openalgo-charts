@@ -398,6 +398,19 @@ interface Move { from: Shot; to: Shot; delta: Delta }
  */
 interface View { order: string[]; pane: Map<string, number> }
 
+/**
+ * A study the steps name on a chart the history no longer follows: the id it
+ * had and the policy its host last gave it. The study object itself would keep
+ * that chart, and everything the study computed, alive for as long as a step
+ * names it.
+ */
+interface Former { readonly id: string; policy(): Readonly<IndicatorPolicy> }
+
+function former(study: Former): Former {
+  const id = study.id, policy = { ...study.policy() };
+  return { id, policy: () => policy };
+}
+
 class HistoryFailure extends Error {}
 const fail = (why: string): never => { throw new HistoryFailure(why); };
 
@@ -440,10 +453,12 @@ export class ChartHistory {
   /**
    * The name each study object goes by in the steps, and the object each name
    * reaches: the one on the chart, or the last one it had, whose policy is the
-   * host's latest word on it. Objects, not ids, tell studies apart.
+   * host's latest word on it. Objects, not ids, tell studies apart. A name is
+   * kept only while its study is on the chart or something a press can reach
+   * names it (`_prune`).
    */
   private readonly _names = new WeakMap<object, string>();
-  private readonly _known = new Map<string, IndicatorApi>();
+  private readonly _known = new Map<string, IndicatorApi | Former>();
   /** The name of the study that last held each id, for a setting reading an id no study holds now. */
   private readonly _lastNames = new Map<string, string>();
   /** Studies that left the chart by the host's hand: no press brings them back. */
@@ -486,6 +501,7 @@ export class ChartHistory {
     // The id each study the last capture held had, and its name in the steps.
     const names = new Map(this._base.studies.map(s => [this._liveId(s.id), s.id]));
     if (draw !== this._draw) this._detachSteps();
+    const previous = this._chart;
     this._chart = chart;
     this._draw = draw;
     this._claim();
@@ -497,12 +513,19 @@ export class ChartHistory {
         if (name !== undefined) this._bind(name, study);
       }
     }
+    // A study the steps name that the new chart does not hold is kept as its
+    // id and policy, not as an object of the chart the host replaced.
+    if (chart !== previous) {
+      const live = new Set<object>(chart.isDestroyed ? [] : chart.indicators());
+      for (const [name, study] of this._known) if (!live.has(study)) this._known.set(name, former(study));
+    }
     this._pending = false;
     this._dragging = false;
     this._deferred = false;
     const was = this._base;
     this._rebase();
     this._took(was, this._base);
+    this._prune();
     this._listen();
     this._notify();
   }
@@ -605,6 +628,7 @@ export class ChartHistory {
         this._took(was, this._base);
         // The transaction goes on from here, measured in full as it began.
         if (tx !== null && this._tx === tx) this._base = tx.before = this._shot(true);
+        this._prune();
       }
     }
   }
@@ -812,6 +836,7 @@ export class ChartHistory {
     const chart = changed && !empty(diff(part.after!, part.before!, this._rules));
     if (changed && !chart) { this._epoch++; this._took(part.before!, part.after!); }
     if (!chart && !part.steps?.length && !part.commands?.length) {
+      if (changed) this._prune();
       // Nothing recorded, but a policy set since can have moved what a press
       // would do (a step about a study now protected): the controls hear it.
       this._notifyIfMoved();
@@ -829,6 +854,8 @@ export class ChartHistory {
     }
     this._merge(entry, part, chart);
     this._redo = [];
+    // The oldest step past the limit and the redo branch are gone.
+    this._prune();
     this._notify();
   }
 
@@ -876,6 +903,8 @@ export class ChartHistory {
           if (!this._redo.length && group.redo !== undefined) this._redo = group.redo;
         }
       }
+      // What the group held aside for a step it never became is held no longer.
+      this._prune();
       this._notify();
     };
   }
@@ -922,6 +951,57 @@ export class ChartHistory {
   private _took(before: Shot, after: Shot): void {
     const kept = new Set(after.studies.map(s => s.id));
     for (const s of before.studies) if (!kept.has(s.id)) this._hostRemoved.add(s.id);
+  }
+
+  /**
+   * Forget every study and pane that is off the chart and that nothing a press
+   * can reach names: a step on either branch, what an open group holds aside
+   * to give back, the open transaction's start, and the baseline the next step
+   * is measured from. The names otherwise outlive the step limit, one for
+   * every study the chart ever had, and each study object held keeps what it
+   * computed alive. Run whenever steps are recorded, trimmed or dropped, and
+   * when an `ignore` ends.
+   */
+  private _prune(): void {
+    const chart = this._chart;
+    const live = new Set<object>(chart.isDestroyed ? [] : chart.indicators());
+    const panes = new Set<number>();
+    if (!chart.isDestroyed) {
+      for (const pane of chart.panes()) {
+        const key = this._keys.get(pane);
+        if (key !== undefined) panes.add(key);
+      }
+    }
+    // Nothing off the chart is held: the usual case, and a cheap one.
+    if (this._hostRemoved.size === 0 && this._lastNames.size <= live.size && this._seen.size <= panes.size
+      && [...this._known.values()].every(study => live.has(study))) return;
+    const names = new Set<string>();
+    const shot = (s: Shot): void => {
+      for (const p of s.panes) panes.add(p.key);
+      for (const study of s.studies) {
+        names.add(study.id);
+        for (const value of Object.values(study.settings)) if (isSource(value)) names.add(value.instanceId);
+      }
+    };
+    const entry = (e: Entry | null | undefined): void => {
+      if (e === null || e === undefined) return;
+      for (const change of e.changes) { shot(change.before); shot(change.after); }
+      for (const orphan of e.orphans) panes.add(orphan.pane);
+    };
+    for (const e of this._undo) entry(e);
+    for (const e of this._redo) entry(e);
+    const group = this._group;
+    if (group !== null) { entry(group.entry); group.redo?.forEach(entry); entry(group.shifted); }
+    if (this._tx !== null) shot(this._tx.before);
+    shot(this._base);
+    for (const orphan of this._orphans) panes.add(orphan.pane);
+    for (const [name, study] of this._known) if (!names.has(name) && !live.has(study)) this._known.delete(name);
+    // Both follow the names: an id or a removal kept for a name no step
+    // reaches would be read for whichever study goes by that name next.
+    for (const name of this._hostRemoved) if (!this._known.has(name)) this._hostRemoved.delete(name);
+    for (const [id, name] of this._lastNames) if (!this._known.has(name)) this._lastNames.delete(id);
+    for (const key of this._seen) if (!panes.has(key)) this._seen.delete(key);
+    for (const key of this._hostPanes) if (!panes.has(key)) this._hostPanes.delete(key);
   }
 
   /** The chart as it is now, as the rules read it. */
@@ -1104,9 +1184,11 @@ export class ChartHistory {
       // A step that failed makes every step behind it unreachable: those
       // describe a chart this one no longer leads back to.
       else from.length = 0;
+      this._prune();
       this._notify();
       return outcome === 'done';
     }
+    this._prune();
     this._notify();
     return false;
   }
@@ -1242,7 +1324,7 @@ export class ChartHistory {
    */
   private _find(name: string): IndicatorApi | undefined {
     const study = this._known.get(name);
-    return study !== undefined && !this._chart.isDestroyed && this._chart.indicators().includes(study) ? study : undefined;
+    return study === undefined || this._chart.isDestroyed ? undefined : this._chart.indicators().find(live => live === study);
   }
 
   /** What the chart `view` describes lets a step do (see `diff`). */
