@@ -164,7 +164,10 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // the indicator gap recovery measure 75.07 KiB (76874 bytes); allow 75.08 KiB.
 // Watchlists, news, account state and viewport drawings live in the optional
 // tiers; the widget check below keeps the panels out of this import.
-const LIMIT_BYTES = 75.08 * 1024;
+// Sharing one luminance calculation between the canvas helpers and the widget
+// tokens took the import from 76874 to 76850 bytes (75.05 KiB); the budget
+// follows it down to 75.05 KiB.
+const LIMIT_BYTES = 75.05 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.
