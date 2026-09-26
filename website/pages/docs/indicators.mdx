@@ -829,8 +829,10 @@ registerIndicator({
 ```
 
 - **One column per target.** Two columns for the price pane, for one plot, or with no
-  target at all throw, as does a list mixing colours and columns or a column without a
-  `colors` array. Nothing changes on any shading layer when a pass throws.
+  target at all throw, as does a list mixing colours and columns, a list with a hole in it,
+  or a column without a `colors` array. Nothing changes on any shading layer when a pass
+  throws; the outputs the pass synced before shading stay applied, and the candle colours
+  after it wait for the next good pass, a settings change included.
 - **The column naming no target** is the study's own layer: created on the first pass that
   shades anything, kept through passes that shade nothing, hidden rather than released
   with the study. A pass whose list leaves it out clears it.

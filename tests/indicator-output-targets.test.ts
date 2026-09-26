@@ -980,6 +980,26 @@ describe('routed layer lifecycle', () => {
     expect(markerLayers(chart, study).map(layer => layer.ids)).toEqual([['next']]);
   });
 
+  it('holds back the bar colours of a settings change whose drawing target is rejected', () => {
+    const id = `targets-settings-colours-${seq++}`;
+    registerIndicator({
+      id, name: 'Coloured settings', placement: 'pane', plots: PLOTS, calc: CALC,
+      inputs: [{ key: 'bad', type: 'boolean', label: 'Bad', default: false }],
+      barColors: ({ bars, settings }) => bars.map(() => (settings.bad === true ? '#ff0000' : '#00ff00')),
+      draws: ({ bars, settings }) => [{ kind: 'box', from: { time: bars[10].time, price: 124 }, to: { time: bars[20].time, price: 112 },
+        ...(settings.bad === true ? { plot: 'missing' } : { overlay: true }) } as never],
+    });
+    const { chart } = mount();
+    const study = chart.addIndicator(id);
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+    // The settings path reorders every study's resources after its pass, which must not run the colours of a failed one.
+    study.setSettings({ bad: true });
+    expect(study.dataStatus()?.state).toBe('error');
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+    expect(chart.moveIndicator(study.id, chart.panes().length)).toBe(true);
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+  });
+
   it('keeps a study\'s marks under its shapes on the candles when a later study restacks the pane', () => {
     // The reference sample's shape: plates and a range box on the candles from the first pass.
     const sample = `targets-sample-${seq++}`;

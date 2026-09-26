@@ -18,13 +18,23 @@ All notable changes to OpenAlgo Charts.
   stacks after the study's marks and shapes, its own column first and then its
   targets, price pane first; it paints behind every series, so it always sits
   under the candles, plots, marks and shapes. One column per target: a second
-  column for the same target, a column without colours, colours mixed with
-  columns, an unknown plot, or `plot` with `overlay: true` throw before any
-  shading layer changes. The plain form, and a list whose one column names no
-  target, render exactly as before.
+  column for the same target, a column without colours, a hole in the list,
+  colours mixed with columns, an unknown plot, or `plot` with `overlay: true`
+  throw before any shading layer changes. The plain form, and a list whose
+  one column names no target, render exactly as before.
 - The reference host's Routed signal sample shades the candles by the sign of
   its momentum, with a Momentum shading input that sends the shading to the
   study's own pane or turns it off.
+
+### Fixed
+
+- A settings change whose pass fails keeps the study's last good candle
+  colours, as the documented pass order says. The chart restacks every study
+  after a settings change, and that restack ran the `barColors` hook again on
+  the failed pass: it published the colours of a pass rejected at a drawing,
+  marker or shading target, and when `calc` itself had thrown, a hook reading
+  one of its columns threw out of `setSettings` instead of leaving the error
+  status. Moving or reordering a study whose last pass failed keeps them too.
 
 ## 2.5.5
 

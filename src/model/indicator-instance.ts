@@ -855,8 +855,16 @@ export class IndicatorInstance implements IndicatorApi {
     this._syncMarkers(this._host.sourceBars());
   }
 
-  /** Republish candle colors after a change in instance stacking order. */
-  public refreshBarColors(): void { if (!restacking) this._syncBarColors(this._host.sourceBars()); }
+  /**
+   * Republish candle colors after a change in instance stacking order. After a
+   * failed pass the hook is not run again: the values are that pass's, or none
+   * at all when `calc` threw, and its colours wait for a pass that succeeds.
+   */
+  public refreshBarColors(): void {
+    if (restacking) return;
+    if (this._calcFailed) this.republishBarColors();
+    else this._syncBarColors(this._host.sourceBars());
+  }
 
   /** Calculation order must not choose the visual color-overlay winner. */
   public republishBarColors(): void {
@@ -1156,8 +1164,9 @@ export class IndicatorInstance implements IndicatorApi {
     const out: readonly (string | null | IndicatorBackgroundSpec)[] =
       this._d.background({ bars, values: this._values, settings: this._descriptorSettings() });
     const listed = out.some(item => typeof item === 'object' && item !== null);
-    // Every column and target is checked before any layer changes. `for...of`
-    // visits holes, which `every` would skip.
+    // Every column and target is checked before any shading layer changes; the
+    // outputs this pass synced earlier stay applied. `for...of` visits holes,
+    // which `every` would skip.
     if (listed) for (const item of out) if (!Array.isArray((item as IndicatorBackgroundSpec | null)?.colors)) {
       throw new Error('Indicator background must return colours or a list of columns');
     }

@@ -22,6 +22,7 @@ import type { IndicatorApi } from '../src/model/indicator-instance';
 import type { Bar } from '../src/model/bar';
 import type { IPrimitive, PrimitiveRenderContext } from '../src/primitives/primitive';
 import { IndicatorBackground } from '../src/primitives/indicator-background';
+import { IndicatorDrawings } from '../src/primitives/indicator-draws';
 import { makeCtx } from './helpers/fake-ctx';
 import { fakeDocument, type FakeElement } from './helpers/fake-dom';
 
@@ -456,6 +457,32 @@ describe('shading targets', () => {
     expect(study.dataStatus()?.state).toBe('error');
     expect(layersOf(study)).toEqual(layers);
     expect(shading(chart, study)).toEqual(before);
+  });
+
+  it('keeps the outputs synced before a rejected shading target and holds back the ones after it', () => {
+    const id = `bg-partial-${seq++}`;
+    registerIndicator({
+      id, name: 'Partial pass', placement: 'pane', plots: PLOTS, inputs: [{ key: 'bad', type: 'boolean', label: 'Bad', default: false }],
+      calc: (bars, settings) => ({ ...CALC(bars, settings, {}), osc: bars.map(() => (settings.bad === true ? 2 : 1)) }),
+      draws: ({ bars, settings }) => [{ kind: 'box', from: { time: bars[10].time, price: 40 }, to: { time: bars[20].time, price: 35 },
+        id: settings.bad === true ? 'next' : 'plain' }],
+      background: ({ bars, settings }) => [{ colors: own(bars) }, { colors: sent(bars), ...(settings.bad === true ? { plot: 'missing' } : { overlay: true }) }],
+      barColors: ({ bars, settings }) => bars.map(() => (settings.bad === true ? '#ff0000' : '#00ff00')),
+    });
+    const chart = mount();
+    const study = chart.addIndicator(id);
+    const before = shading(chart, study);
+    const shapes = (): (string | undefined)[] => owned(study).filter(({ primitive }) => primitive instanceof IndicatorDrawings)
+      .flatMap(({ primitive }) => (primitive as unknown as { _items: { id?: string }[] })._items.map(item => item.id));
+    expect(shapes()).toEqual(['plain']);
+    study.setSettings({ bad: true });
+    expect(study.dataStatus()?.state).toBe('error');
+    expect(shading(chart, study)).toEqual(before);
+    // What the documented pass order syncs before shading is applied and not rolled back...
+    expect(study.values().osc[0]).toBe(2);
+    expect(shapes()).toEqual(['next']);
+    // ...and the bar colours, synced after it, wait for a pass that succeeds.
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
   });
 
   it('clears routed shading while a study it reads is unavailable', () => {
