@@ -202,7 +202,7 @@ export class ChartStudies {
    * legend, so the second and later instances rotate through a palette.
    *
    * Only fills colour keys the caller left unset, so an explicit colour always
-   * wins, and the first instance is never touched — it keeps the colours the
+   * wins, and the first instance is never touched: it keeps the colours the
    * descriptor chose.
    */
   private _distinctColors(
@@ -328,7 +328,7 @@ export class ChartStudies {
     this._queueIndicatorDependents(instanceId, true);
     this._host.emit('indicatorRemoved', { instanceId, indicatorId, paneIndex });
     // An indicator pane that just emptied has nothing left to show. This lived
-    // in the legend's close handler, so only the on-chart × pruned the pane — a
+    // in the legend's close handler, so only the on-chart × pruned the pane: a
     // host removing the same indicator from its own UI left it behind, and
     // `getState` then persisted the orphan, so every reload restored a blank
     // region. Doing it here means every caller behaves the same. The price

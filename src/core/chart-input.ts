@@ -212,7 +212,7 @@ export class ChartInput {
   /** The scale a price-axis drag is rescaling: either side's, whichever strip was grabbed. */
   public _axisDragScale: PriceScale | null = null;
   /** Active pane-divider drag: which boundary, and the weights/heights at grab time. */
-  /** True once a primitive drag has actually moved — see the pointerup note. */
+  /** True once a primitive drag has actually moved (see the pointerup note). */
   private _dragMoved = false;
   /** Where the drag was grabbed, in data space, so deltas start at the press. */
   private _dragFrom: { time: number; price: number } = { time: 0, price: 0 };
@@ -257,14 +257,14 @@ export class ChartInput {
   /**
    * The chart renders as stacked canvases, so the browser's right-click
    * "Save image as…" would capture only the topmost (transparent overlay)
-   * layer — a blank image. Just before the native menu opens, composite the
+   * layer: a blank image. Just before the native menu opens, composite the
    * clicked pane's base layer *beneath* its overlay bitmap so the saved image
    * is the visible chart, and freeze overlay repaints (live ticks repaint every
    * few hundred ms and would wipe the snapshot while the menu is open). The
    * freeze lifts on the next pointer/wheel/key input after the menu closes.
    * Apps that present their own menu (preventDefault on contextmenu) are
    * unaffected. Multi-pane note: the native save captures the clicked pane
-   * only — use `downloadScreenshot()` for the full multi-pane composite.
+   * only. Use `downloadScreenshot()` for the full multi-pane composite.
    *
    * A listener on the `contextmenu` **chart** event takes over entirely: it is
    * told what was hit, and the snapshot is skipped, since the app is raising a
@@ -294,7 +294,7 @@ export class ChartInput {
       g.drawImage(pane.base.element, 0, 0);
       g.restore();
       this._overlayFrozen = true;
-    } catch { /* zero-sized or detached canvas — nothing to snapshot */ }
+    } catch { /* zero-sized or detached canvas: nothing to snapshot */ }
   }
 
   /** Build the `contextmenu` payload: where the pointer is, and what it is over. */
@@ -469,7 +469,7 @@ export class ChartInput {
     this._unfreezeOverlay();
     // Only the primary button starts a pan / line-drag. A right-click (context
     // menu) also fires pointerdown, and its pointerup is often swallowed by the
-    // menu — arming the drag state then makes the chart pan with no button held.
+    // menu: arming the drag state then makes the chart pan with no button held.
     if ((e.pointerType === 'mouse' || e.pointerType === 'pen') && e.button !== 0) return;
     this._previousPressOnIndicatorToggle = this._lastPressOnIndicatorToggle;
     this._lastPressOnIndicatorToggle = false;
@@ -484,7 +484,7 @@ export class ChartInput {
     // `setPointerCapture` throws NotFoundError when the pointer id is not
     // currently active (a synthetic event, or one already released). The
     // optional call only guarded against the method being absent, so the throw
-    // aborted the rest of pointerdown — losing the divider grab, the axis-drag
+    // aborted the rest of pointerdown, losing the divider grab, the axis-drag
     // arm, and the line-drag arm. Capture is an optimisation; never fatal.
     try { this._host._container.setPointerCapture?.(e.pointerId); } catch { /* not capturable */ }
     if (this._navigationCancelled) return;
@@ -562,16 +562,16 @@ export class ChartInput {
 
     // While a host is placing something (a drawing tool is armed), a press is the
     // start of a shape, not a pan. Bail before the drag/hit paths so the gesture
-    // can only produce anchors — `_onPointerUp` turns it into clicks.
+    // can only produce anchors: `_onPointerUp` turns it into clicks.
     if (this._placementMode) {
       this._dragging = false;
       this._pointerMoved = false;
       return;
     }
 
-    // If the press lands on a draggable line (order/SL/TP), drag it — don't pan.
+    // If the press lands on a draggable line (order/SL/TP), drag it, don't pan.
     // `draggable` primitives (drawing anchors/shapes) arm regardless of a host
-    // callback — they publish through the `drag` event bus. The `ns-resize`
+    // callback: they publish through the `drag` event bus. The `ns-resize`
     // form is the original price-line path and still needs `subscribeDrag`.
     if (hit && (hit.draggable === true || (hit.cursor === 'ns-resize' && this._dragCb !== null))) {
       this._dragId = hit.externalId;
@@ -584,7 +584,7 @@ export class ChartInput {
         price: this._dragPriceScale?.yToPrice(p.localY) ?? this._host._panes[p.pane].yToPrice(p.localY),
       };
       this._setHover(hit); // active state + cursor even when no hover preceded (touch)
-      // Hide the crosshair while dragging a line — a frozen crosshair at the
+      // Hide the crosshair while dragging a line: a frozen crosshair at the
       // grab point reads as a phantom second line (the axis tag tracks price).
       this._cursor = null;
       this._cursorPane = null;
@@ -617,7 +617,7 @@ export class ChartInput {
     this._unfreezeOverlay();
     // Hover from a second device must not move or release the pointer that owns the gesture.
     if (this._pointers.size > 0 && !this._pointers.has(e.pointerId)) return;
-    // Safety: if the primary button is no longer held (missed pointerup — e.g.
+    // Safety: if the primary button is no longer held (missed pointerup, e.g.
     // released over a context menu or outside the window), end any drag now.
     if ((e.pointerType === 'mouse' || e.pointerType === 'pen') && (e.buttons & 1) === 0
       && (this._pointers.has(e.pointerId) || this._dragging || this._dragId !== null || this._axisDrag !== null || this._brandingPress !== null || this._indicatorTogglePress !== null)) {
@@ -685,7 +685,7 @@ export class ChartInput {
       return;
     }
     // Placement mode suppresses the pan path, which is where `_pointerMoved`
-    // is normally set — track the gesture here so pointerup can still tell a
+    // is normally set. Track the gesture here so pointerup can still tell a
     // click from a drag-to-draw.
     if ((this._placementMode || !this._dragging) && this._pointers.size > 0
       && (Math.abs(p.x - this._downX) > 3 || Math.abs(p.localY - this._downLocalY) > 3)) {
@@ -700,7 +700,7 @@ export class ChartInput {
       const drag: ChartDragEvent = {
         id: this._dragId, price, time, paneIndex: this._downPane,
         // The grab origin, so a consumer's delta starts at the press instead of
-        // the first move — otherwise the shape lags the cursor by one event.
+        // the first move. Otherwise the shape lags the cursor by one event.
         fromPrice: this._dragFrom.price, fromTime: this._dragFrom.time,
         point: { x: p.x, y: localY },
         samples: this._dragSamples(e),
@@ -821,7 +821,7 @@ export class ChartInput {
       };
       this._host.emit('drag:end', end);
       // A press on a draggable primitive arms a drag, so this branch used to
-      // swallow the release — and a plain click on a drawing never reached the
+      // swallow the release, and a plain click on a drawing never reached the
       // click path, leaving it unselectable. A gesture that never moved is a
       // click by any reasonable reading.
       if (!this._dragMoved) {
@@ -849,7 +849,7 @@ export class ChartInput {
     // Placement mode: a press-drag-release is how every charting UI draws a
     // two-point shape, but the click branch below is gated on the pointer having
     // stayed still, so the gesture used to place nothing at all. Replay it as the
-    // two clicks it means — press point, then release point. `viaDrag` lets the
+    // two clicks it means: press point, then release point. `viaDrag` lets the
     // host ignore the second one for single-anchor tools it already completed.
     if (this._placementMode && this._pointerMoved) {
       if (wasPanning) this._setHover(null);
@@ -882,7 +882,7 @@ export class ChartInput {
     if (!this._pointerMoved) {
       const hit = this._hitAt(this._downPane, this._downX, this._downLocalY);
       if (wasPanning) this._setHover(e.pointerType === 'touch' ? null : hit ?? null);
-      // Pane-legend buttons are the chart's own chrome — handle them here so
+      // Pane-legend buttons are the chart's own chrome: handle them here so
       // the host doesn't have to re-implement remove/hide/move/maximize.
       if (hit && this._host._handleLegendAction(hit.externalId)) return;
       if (hit) this._clickCb?.(hit.externalId);
@@ -912,7 +912,7 @@ export class ChartInput {
   /**
    * DOM pointerup entry point. Mirrors the primary-button guard in
    * `_onPointerDown`: a right-click (or any non-primary mouse button) fires
-   * pointerdown *and* pointerup, but `_onPointerDown` ignores it — so the
+   * pointerdown *and* pointerup, but `_onPointerDown` ignores it, so the
    * down state (`_downX`/`_downLocalY`/`_downPane`/`_pointerMoved`) is never
    * refreshed and still holds the *previous* left-click. Letting a non-primary
    * pointerup through would re-run the click branch against that stale position
@@ -1067,8 +1067,8 @@ export class ChartInput {
       && !this._host._panes[p.pane]?.hitTestPrimitives(p.x - this._host._leftAxisWidth, p.localY, this._host._renderContext(p.pane), this._host._branding)) return;
     const ev: DoubleClickEvent = { paneIndex: p.pane, x: p.x, y: p.y, handled: false };
     this._host.emit('dblclick', ev);
-    // While a tool is armed a double-click means "finish this shape" — a
-    // variable-anchor tool has no other way to end — so it must not also throw
+    // While a tool is armed a double-click means "finish this shape" (a
+    // variable-anchor tool has no other way to end), so it must not also throw
     // the view back to its default mid-placement. A listener that took the
     // press for itself has said so on the event.
     if (this._placementMode || ev.handled) return;
@@ -1246,7 +1246,7 @@ export class ChartInput {
       return;
     }
     this._setHover(hit);
-    // The navigator reveals on pointer position, not on hover id — see the note
+    // The navigator reveals on pointer position, not on hover id. See the note
     // in time-navigator.ts. Only the lowest open pane carries it.
     // The hover label occupies the same bottom strip as the navigation row.
     this._host._feedTimeNav(paneIndex === this._host._timeNavPane && !this._brandingHit(paneIndex, x, localY)
@@ -1258,7 +1258,7 @@ export class ChartInput {
       const bars = this._host._dataLayer.visibleBars(this._host._firstDataId.value, index, index);
       if (bars.length > 0) {
         hoveredBar = bars[0].bar;
-        // Magnet only snaps within the pane that holds the price series — never
+        // Magnet only snaps within the pane that holds the price series, never
         // in the volume/indicator panes (their scale isn't a price scale).
         if (this._host._crosshairMode === 'magnet' && paneIndex === this._host._firstPaneSlot()) {
           const snapped = magnetSnapPrice(pane.yToPrice(localY), hoveredBar);
@@ -1284,7 +1284,7 @@ export class ChartInput {
         paneIndex,
         // Whether a pointer is down for this move. Placement mode swallows the
         // pan path, so this is the only way a consumer can tell a hover from a
-        // drag while it is still happening — what freehand drawing samples.
+        // drag while it is still happening: what freehand drawing samples.
         pressed: this._pointers.size > 0,
         ...pointerInfo(source),
         // Only while pressed: a hover has no trail worth carrying, and the key

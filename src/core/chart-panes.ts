@@ -363,7 +363,7 @@ export class ChartPanes {
       this._host._eventPane = home;
     }
     if (this._host._eventPane > index) this._host._eventPane -= 1;
-    // Indicators own their series, so let them tear themselves down first —
+    // Indicators own their series, so let them tear themselves down first,
     // otherwise their series rows would outlive the pane holding them.
     for (let i = this._host._indicators.length - 1; i >= 0; i--) {
       if (this._host._indicators[i].paneIndex !== index) continue;

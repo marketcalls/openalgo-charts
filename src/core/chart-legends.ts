@@ -204,7 +204,7 @@ export class ChartLegends {
     if (action === 'row' && !externalId.startsWith('indicator:')) return true;
     if (!externalId.startsWith('indicator:')) return false;
     const instanceId = externalId.slice('indicator:'.length, sep);
-    // `::row` is the hover target that reveals the controls — never an action.
+    // `::row` is the hover target that reveals the controls, never an action.
     if (action === 'row') return true;
     const indicator = this._host._indicators.find((i) => i.id === instanceId);
     if (indicator === undefined) return false;

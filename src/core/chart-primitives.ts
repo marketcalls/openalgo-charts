@@ -284,7 +284,7 @@ export class ChartPrimitives {
       },
     };
     this._host._panes[paneIndex].addPrimitive(primitive, host);
-    // Track legend rows however they were added — a host can add its own (a
+    // Track legend rows however they were added: a host can add its own (a
     // symbol/OHLC row) and indicator legends must stack beneath it.
     if (primitive instanceof PaneLegend) {
       this._host._legends.push({ legend: primitive, paneIndex });

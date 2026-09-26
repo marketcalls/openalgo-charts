@@ -31,7 +31,7 @@ secondary-series writes do not emit it. Read `chart.primaryBars()` for the
 readonly source history without copying it. The event follows indicator
 invalidation; `chart.indicators()` flushes studies when a host needs their values.
 
-Every name emitted by the engine, verified against the `emit(` call sites in `src/core/chart.ts`, `src/core/trading-controller.ts`, `src/draw/controller.ts`, and `src/replay/controller.ts`.
+Every name emitted by the engine, verified against the `emit(` call sites in `src/core/chart.ts` and the `src/core/chart-*.ts` modules it delegates to, `src/core/trading-controller.ts`, `src/draw/controller.ts`, and `src/replay/controller.ts`.
 
 | Event | Payload | Fires when |
 |---|---|---|

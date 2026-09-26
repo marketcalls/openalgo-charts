@@ -163,8 +163,8 @@ export interface ChartOptions {
   navigation?: Partial<ChartNavigationOptions>;
   /**
    * Where indicator legend rows start inside **one** pane, in media px. A host
-   * that draws its own overlay in a pane's top-left corner — an OHLC readout, a
-   * symbol line, a trade panel — needs to push these clear of it, or the rows
+   * that draws its own overlay in a pane's top-left corner (an OHLC readout, a
+   * symbol line, a trade panel) needs to push these clear of it, or the rows
    * land underneath and their settings / close buttons become invisible and
    * unclickable.
    *
@@ -179,8 +179,8 @@ export interface ChartOptions {
    */
   legendOffset?: { top?: number; left?: number };
   /**
-   * Crosshair behaviour. 'normal' (default) — the cross follows the pointer
-   * exactly. 'magnet' — the horizontal line snaps to the nearest O/H/L/C of the
+   * Crosshair behaviour. 'normal' (default): the cross follows the pointer
+   * exactly. 'magnet': the horizontal line snaps to the nearest O/H/L/C of the
    * bar under the cursor (price pane only).
    */
   crosshairMode?: CrosshairMode;
@@ -319,7 +319,7 @@ export interface ChartOptions {
   timezone?: string;
   /**
    * Hover-revealed zoom / step controls above the time axis, as terminals show.
-   * `true` by default — they stay invisible until the pointer nears the bottom
+   * `true` by default: they stay invisible until the pointer nears the bottom
    * of the chart. Pass `false` to drop them, or an options object to restyle.
    */
   timeNavigator?: boolean | Partial<TimeNavigatorOptions>;
