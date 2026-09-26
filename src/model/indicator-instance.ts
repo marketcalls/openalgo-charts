@@ -12,6 +12,7 @@ import { runAbortable } from './abortable-request';
 import { IndicatorAlertPolicy } from './indicator-alert-policy';
 import { cloneIndicatorSettings, planIndicatorDependencies, type IndicatorDependencyNode } from './indicator-dependencies';
 import { validateIndicatorInputs } from './indicator-inputs';
+import { parseIndicatorPolicy, type IndicatorEditOptions, type IndicatorPolicy } from './indicator-policy';
 import type { PriceFormat, PriceScaleId, SeriesApi, SeriesDataState } from './series';
 import type { PriceLine } from '../primitives/price-line';
 import type { PaneLegend, LegendValue } from '../primitives/pane-legend';
@@ -252,6 +253,8 @@ export interface IndicatorHost {
    * study's pass.
    */
   resourcesChanged?(): void;
+  /** A study's policy changed: the chart redraws its legend buttons and the inventory. */
+  policyChanged?(): void;
   /** Bars of the primary price series — the calculation input. */
   sourceBars(): readonly Bar[];
   /** Optional mutation metadata; absent hosts retain the legacy timestamp heuristic. */
@@ -338,14 +341,28 @@ export interface IndicatorHost {
 export interface IndicatorApi {
   /** Whole-study scale override, or null for descriptor assignments. */
   priceScaleId(): PriceScaleId | null;
-  /** Move local price resources together; null restores descriptor assignments. */
-  setPriceScale(scaleId: PriceScaleId | null): boolean;
+  /**
+   * Move local price resources together; null restores descriptor assignments.
+   * False, and nothing changes, for a study whose policy is not `configurable`
+   * unless `options.force` is set.
+   */
+  setPriceScale(scaleId: PriceScaleId | null, options?: IndicatorEditOptions): boolean;
   /** Effective scale for a declared plot, or null for an unknown key. */
   plotPriceScaleId(plotKey: string): PriceScaleId | null;
   /** Detached explicit per-plot assignments, before descriptor and study defaults. */
   plotPriceScaleIds(): Readonly<Record<string, PriceScaleId>>;
-  /** Atomically patch plot assignments; null clears an override. Invalid patches return false. */
-  setPlotPriceScales(assignments: Readonly<Record<string, PriceScaleId | null>>): boolean;
+  /**
+   * Atomically patch plot assignments; null clears an override. Invalid patches
+   * return false, and so does a study that is not `configurable` unless forced.
+   */
+  setPlotPriceScales(assignments: Readonly<Record<string, PriceScaleId | null>>, options?: IndicatorEditOptions): boolean;
+  /** The restrictions the host set, only the flags that are false. */
+  policy(): Readonly<IndicatorPolicy>;
+  /**
+   * Replace the policy; null lifts every restriction. The host's act, never
+   * restricted itself. Throws on a flag that is not a boolean.
+   */
+  setPolicy(policy: IndicatorPolicy | null): void;
   /** External data state, or null for a study without a managed lifecycle. */
   dataStatus(): Readonly<IndicatorDataStatus> | null;
   /** Observe changes; immediately receives the current managed status, if any. */
@@ -362,8 +379,11 @@ export interface IndicatorApi {
   readonly paneIndex: number;
   /** Current settings (a copy). */
   settings(): IndicatorSettings;
-  /** Merge a settings patch, recompute, and restyle. */
-  setSettings(patch: Readonly<IndicatorSettings>): void;
+  /**
+   * Merge a settings patch, recompute, and restyle. False, and nothing changes,
+   * when the study is removed, or is not `configurable` and `options.force` is not set.
+   */
+  setSettings(patch: Readonly<IndicatorSettings>, options?: IndicatorEditOptions): boolean;
   /** The series backing one plot key, for direct styling. */
   series(plotKey: string): SeriesApi | undefined;
   /** Latest computed values (a reference — do not mutate). */
@@ -376,8 +396,11 @@ export interface IndicatorApi {
   legend(): PaneLegend | null;
   /** Refresh the legend readings for a bar index; omit for the latest bar. */
   updateLegendValues(index?: number): void;
-  /** Remove every series, level, and legend row this indicator created. */
-  remove(): void;
+  /**
+   * Remove every series, level, and legend row this indicator created. False
+   * when it is already gone, or is not `removable` and `options.force` is not set.
+   */
+  remove(options?: IndicatorEditOptions): boolean;
 }
 
 let nextInstance = 1;
@@ -413,6 +436,7 @@ export class IndicatorInstance implements IndicatorApi {
   private _settings: IndicatorSettings;
   private _scaleOverride: PriceScaleId | null;
   private _plotScaleOverrides: Record<string, PriceScaleId>;
+  private _policy: Readonly<IndicatorPolicy>;
   /** Memo for `_descriptorSettings`, keyed on the zone and the settings identity. */
   private _zoned: { zone: string; base: IndicatorSettings; merged: IndicatorSettings } | null = null;
   private readonly _series = new Map<string, SeriesApi>();
@@ -491,9 +515,12 @@ export class IndicatorInstance implements IndicatorApi {
     reservedIds?: ReadonlySet<string>,
     priceScaleId?: PriceScaleId,
     plotPriceScaleIds?: Readonly<Record<string, PriceScaleId>>,
+    policy?: IndicatorPolicy,
   ) {
     this._host = host;
     this._d = descriptor;
+    // Before anything is built: the legend row's buttons are chosen by it.
+    this._policy = policy === undefined ? Object.freeze({}) : parseIndicatorPolicy(policy);
     this._scaleOverride = priceScaleId ?? null;
     this._plotScaleOverrides = parseIndicatorPlotPriceScales(descriptor, plotPriceScaleIds);
     this.indicatorId = descriptor.id;
@@ -563,7 +590,7 @@ export class IndicatorInstance implements IndicatorApi {
     // refuses a descriptor that cannot compute at all. Release its resources
     // before propagating the error so a failed add leaves no orphaned legend.
     try { this.recompute(); }
-    catch (error) { this.remove(); throw error; }
+    catch (error) { this.remove({ force: true }); throw error; }
     this._constructed = true;
     this._attach();
   }
@@ -678,15 +705,29 @@ export class IndicatorInstance implements IndicatorApi {
       && Object.prototype.hasOwnProperty.call(this._plotScaleOverrides, plot.key)).map(plot => [plot.key, this._plotScaleOverrides[plot.key]]));
   }
 
-  public setPriceScale(scaleId: PriceScaleId | null): boolean {
-    if (this._removed || (scaleId !== null && !isPriceScaleId(scaleId))) return false;
+  public policy(): Readonly<IndicatorPolicy> { return this._policy; }
+
+  public setPolicy(policy: IndicatorPolicy | null): void {
+    const next = policy === null ? Object.freeze({}) : parseIndicatorPolicy(policy);
+    if (this._removed) return;
+    this._policy = next;
+    this._host.policyChanged?.();
+  }
+
+  /** Whether a call may make a change the policy reserves for the host. */
+  private _allows(flag: keyof IndicatorPolicy, options: IndicatorEditOptions | undefined): boolean {
+    return options?.force === true || this._policy[flag] !== false;
+  }
+
+  public setPriceScale(scaleId: PriceScaleId | null, options?: IndicatorEditOptions): boolean {
+    if (this._removed || !this._allows('configurable', options) || (scaleId !== null && !isPriceScaleId(scaleId))) return false;
     const assignments = this._overlayScaleOverrides();
     if (scaleId === this._scaleOverride && Object.keys(assignments).length === Object.keys(this._plotScaleOverrides).length) return false;
     return this._assignPriceScales(scaleId, assignments, false);
   }
 
-  public setPlotPriceScales(assignments: Readonly<Record<string, PriceScaleId | null>>): boolean {
-    if (this._removed) return false;
+  public setPlotPriceScales(assignments: Readonly<Record<string, PriceScaleId | null>>, options?: IndicatorEditOptions): boolean {
+    if (this._removed || !this._allows('configurable', options)) return false;
     let patch: [string, PriceScaleId | null][];
     try { patch = plotScaleEntries(this._d, assignments, true); } catch { return false; }
     const next = new Map(Object.entries(this._plotScaleOverrides));
@@ -1546,8 +1587,8 @@ export class IndicatorInstance implements IndicatorApi {
     return this._values;
   }
 
-  public setSettings(patch: Readonly<IndicatorSettings>): void {
-    if (this._removed) return;
+  public setSettings(patch: Readonly<IndicatorSettings>, options?: IndicatorEditOptions): boolean {
+    if (this._removed || !this._allows('configurable', options)) return false;
     this._settings = this._validatedSettings({ ...this._settings, ...cloneIndicatorSettings(patch) });
     this._outputPending = true;
     this._host.indicatorOutputChanged?.(this.id, true);
@@ -1583,6 +1624,7 @@ export class IndicatorInstance implements IndicatorApi {
     this._attach();
     this._host.resourcesChanged?.();
     this._host.emit?.('objects:change', {});
+    return true;
   }
 
   /**
@@ -1838,8 +1880,8 @@ export class IndicatorInstance implements IndicatorApi {
     this._host.setPaneRange(this.paneIndex, range === undefined ? this._d.range?.(this._descriptorSettings()) ?? null : range);
   }
 
-  public remove(): void {
-    if (this._removed) return;
+  public remove(options?: IndicatorEditOptions): boolean {
+    if (this._removed || !this._allows('removable', options)) return false;
     this._removed = true;
     this._lifetime.abort();
     this._dataRetry = null;
@@ -1870,6 +1912,7 @@ export class IndicatorInstance implements IndicatorApi {
     if (this._d.barColors !== undefined) this._host.setBarColors?.(null, this.id);
     if (this._ownPane && !this._host.setIndicatorRange) this._host.setPaneRange(this.paneIndex, null);
     this._host.indicatorRemoved?.(this.id, !this._constructed && this._ownPane ? this.paneIndex : undefined);
+    return true;
   }
 }
 

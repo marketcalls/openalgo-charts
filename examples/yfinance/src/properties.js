@@ -919,11 +919,14 @@ export function mountPropertiesBar(app, anchorEl) {
     order.addEventListener('click', (e) => {
       e.stopPropagation();
       togglePop(order, (p) => {
-        const behind = !!(primary() && primary().zIndex < 0);
+        // Placed between studies (Objects dock) it is on neither side of the series.
+        const d = primary();
+        const between = !!(d?.stackAbove && app.chart.seriesStack?.(d.paneIndex).includes(d.stackAbove));
+        const behind = !between && !!(d && d.zIndex < 0);
         const rows = [
           { act: 'front', icon: chrome('front'), label: 'Bring to front', run: (id) => app.draw.bringToFront(id) },
           { act: 'back', icon: chrome('back'), label: 'Send to back', run: (id) => app.draw.sendToBack(id) },
-          { act: 'above', icon: glyph('above'), label: 'In front of the series', on: !behind, run: (id) => app.draw.bringAboveSeries(id) },
+          { act: 'above', icon: glyph('above'), label: 'In front of the series', on: !behind && !between, run: (id) => app.draw.bringAboveSeries(id) },
           { act: 'behind', icon: glyph('behind'), label: 'Behind the series', on: behind, run: (id) => app.draw.sendBehindSeries(id) },
         ];
         for (const r of rows) {

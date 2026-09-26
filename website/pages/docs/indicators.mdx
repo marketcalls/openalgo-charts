@@ -33,6 +33,60 @@ changes. Existing script descriptors keep their current input kinds.
 
 Try the [typed study inputs example](/examples#typed-study-inputs).
 
+### A time and a price that belong together
+
+A `price` input can name a `timestamp` input with `timeKey`. The two are then one
+point on the chart, a bar time and a price, such as the start of an anchored path.
+Add `anchor: true` for a handle on the chart at that point.
+
+```ts
+registerIndicator({
+  id: 'anchored-growth', name: 'Anchored growth', placement: 'onchart',
+  inputs: [
+    { key: 'from', type: 'timestamp', label: 'Anchor time', default: 0, pick: true },
+    { key: 'price', type: 'price', label: 'Anchor price', default: 0, pick: true, timeKey: 'from', anchor: true },
+    { key: 'rate', type: 'number', label: 'Growth per bar (%)', default: 0.1 },
+  ],
+  plots: [{ key: 'path', title: 'Path', type: 'line' }],
+  calc(bars, s) {
+    const start = bars.findIndex(bar => bar.time >= s.from);
+    return { path: bars.map((_, i) => (start < 0 || i < start ? null : s.price * (1 + s.rate / 100) ** (i - start))) };
+  },
+});
+```
+
+- **One pick sets both.** The settings dialog offers **Pick point on chart** on the
+  price row. One click captures the bar time and the price together
+  ([`chart.beginPick('point')`](/docs/interactions#picking-a-price-or-a-bar)) and
+  commits them in one settings patch; cancelling writes neither. The time row keeps
+  its own time-only pick.
+- **Pane and scale.** The point lives where a pick of the price reads it: the
+  explicit `pick` target, or else the one scale on one pane the study's plots use.
+  `studyInputTarget(chart, study, key)` from `openalgo-charts/draw` answers it. A
+  study whose plots sit on two scales needs an explicit target before it can be
+  picked or anchored.
+- **The anchor drags both.** The drawing tier draws a ring at the point in the
+  study's first plot colour. Dragging it previews the point with guides to both
+  axes, the time snapping to the bar under the pointer and both values held inside
+  the inputs' `min` and `max`, and the release writes both in one patch. Escape
+  cancels the drag. A study whose policy is `configurable: false` keeps its anchor
+  still, and a hidden study shows none. `new DrawingController(chart, { inputAnchors: false })`
+  turns anchors off.
+- **Undo takes a drag back.** Each drag is one step of the drawing undo history, in
+  the order it was made among the drawings, so Ctrl+Z, the rail's Undo and the phone
+  bar reverse it in the widget and the reference host. A step whose study was
+  removed or edited since is passed over. A host control that sets the point another
+  way, a point pick of its own, calls `draw.moveInputAnchor(studyId, key, point)`:
+  the move is snapped, held in bounds and refused exactly as a drag is, and is one
+  step too, so Undo takes it back.
+- **Drawing placement comes first.** While a drawing tool is active, a press on the
+  anchor places the drawing, and while a pick is waiting, a click on it answers the
+  pick.
+
+`timeKey` must name a declared `timestamp` input that no other price pairs with, and
+`anchor` needs a `timeKey`; anything else raises `IndicatorInputError` when the
+descriptor is registered. Try the [anchored study input example](/examples#anchored-study-input).
+
 There are two ways to put an indicator on a chart, and they suit different jobs.
 
 **`chart.addIndicator(id)`** is the managed path: the chart creates the series, picks the
@@ -907,19 +961,85 @@ absent filter means every day. Whitespace around the parts is ignored.
 | `name` | `string` | Display name. |
 | `paneIndex` | `number` | Pane the indicator drew into. |
 | `settings()` | `IndicatorSettings` | Current settings, as a copy. |
-| `setSettings(patch)` | `void` | Merge a patch, recompute, and restyle. |
+| `setSettings(patch, options?)` | `boolean` | Merge a patch, recompute, and restyle. False when the study's policy is not `configurable` and `options` is not `{ force: true }`. |
 | `series(plotKey)` | `SeriesApi \| undefined` | The series behind one plot, for direct styling. |
 | `priceScaleId()` | `PriceScaleId \| null` | Whole-study override, or null for descriptor defaults. Per-plot overrides can still apply. |
-| `setPriceScale(id)` | `boolean` | Assign local resources together and clear their per-plot overrides. Null restores local descriptor defaults. |
+| `setPriceScale(id, options?)` | `boolean` | Assign local resources together and clear their per-plot overrides. Null restores local descriptor defaults. Refused like `setSettings` for a study that is not `configurable`. |
 | `plotPriceScaleId(plotKey)` | `PriceScaleId \| null` | Effective scale of a declared plot, or null for an unknown key. |
 | `plotPriceScaleIds()` | `Readonly<Record<string, PriceScaleId>>` | Detached map of explicit per-plot overrides. |
-| `setPlotPriceScales(patch)` | `boolean` | Apply selected plot assignments atomically. Null values remove those overrides. |
+| `setPlotPriceScales(patch, options?)` | `boolean` | Apply selected plot assignments atomically. Null values remove those overrides. Refused like `setSettings` for a study that is not `configurable`. |
 | `values()` | `IndicatorValues` | Latest computed columns. |
-| `remove()` | `void` | Remove every series and level it created. |
+| `policy()` / `setPolicy(policy)` | `IndicatorPolicy` / `void` | The restrictions its host set (only the flags that are false), and the host's call that replaces them; `null` lifts them. See [Study policies](#study-policies). |
+| `remove(options?)` | `boolean` | Remove every series and level it created. False when it is already gone, or is not `removable` and `options` is not `{ force: true }`. |
 
-`chart.indicators()` lists the live instances; `chart.removeIndicator(id)` removes one by id.
+`chart.indicators()` lists the live instances; `chart.removeIndicator(id, options?)` removes one by id.
 Removing an indicator also prunes the pane it emptied, so a host UI cannot strand a blank
 pane under the chart.
+
+A new study takes an id nothing has used on this chart, even one a removed study
+held. A host that brings a removed study back, as an undo does, passes that id with
+`addIndicator(indicatorId, settings, { instanceId })`, and the study comes back as
+itself: the studies reading its output and the alerts naming it find it again. An id
+a study on the chart holds now throws, since two studies cannot answer to one id.
+
+```ts
+const rsi = chart.addIndicator('rsi', { length: 14 });
+const saved = { id: rsi.id, settings: rsi.settings(), paneIndex: rsi.paneIndex };
+chart.removeIndicator(rsi.id);
+// Undo: the same study, the same identity.
+chart.addIndicator('rsi', saved.settings, { instanceId: saved.id, paneIndex: saved.paneIndex });
+```
+
+### Study policies
+
+A host that places a study of its own (a strategy's signal line, a session band, a
+study a desk requires) needs restrictions the user cannot lift, one at a time, while it
+keeps changing the study itself. `IndicatorPolicy` carries four independent flags. Each
+defaults to `true`, so a study without a policy behaves exactly as before, and the
+contract mirrors the [drawing policies](/docs/drawing-tools#drawing-policies).
+
+```ts
+const signal = chart.addIndicator('vwap', {}, {
+  policy: { removable: false, configurable: false, movable: false },
+});
+
+// The host that placed it still changes and retires it.
+signal.setSettings({ anchor: 'week' }, { force: true });
+chart.removeIndicator(signal.id, { force: true });
+```
+
+| Flag | `false` means | Calls it restricts |
+|---|---|---|
+| `removable` | No legend close button, no Objects remove, the widget's menu row and the picker's remove button greyed with the note "protected". | `chart.removeIndicator(id)`, `indicator.remove()` and `chart.removePane(index)` for a pane holding it. |
+| `configurable` | No legend gear (so no `indicatorSettings` event from it), no Objects settings, the widget's settings dialog declines with the reason. | `indicator.setSettings(patch)`, `setPriceScale(id)` and `setPlotPriceScales(patch)`. |
+| `movable` | It keeps its pane and its place in the pane's stack: no Objects move, Earlier, Later or drag. Other objects still move past it, and the pane controls on its legend still move the pane. | `chart.moveIndicator(id, pane)`, `chart.reorderIndicator(id, direction)` and `chart.moveInSeriesStack(id, ...)`. |
+| `listed` | Left out of `ChartObjects`, every Objects panel, the widget's indicator picker list and its alert source lists (unless the alert being edited already names it). | Every caller of those lists. The legend still shows it. |
+
+A policy restricts **user-facing actions**. Every call in the right-hand column treats
+its caller as the user, because host controls make exactly these calls, and returns false
+with nothing changed when the policy forbids it. The owning host passes `{ force: true }`
+(`IndicatorEditOptions`) to make the change anyway. `setPolicy` is always the host's act:
+it is never restricted and applies at once to the legend buttons and the inventory. A
+legend row whose buttons the host set with `indicator.legend().setOptions({ actions })`
+keeps them through every restack, and the policy only withholds the close button and
+the gear from what the host set. A
+restore (`chart.restoreState`, a workspace load) is also the host's act and replaces a
+protected study like any other. Hiding a study is the user's view of the chart and stays
+available under every flag.
+
+The chart state saves only the restrictions, as `IndicatorState.policy` (`{ removable: false }`),
+so an unrestricted study saves exactly what it always did and a layout from an older
+release restores its studies unrestricted. A malformed policy refuses the whole restore
+before anything changes; `parseIndicatorPolicy(input)` is the same validation for a host
+of its own, and keeps only the four boolean flags. Workspace documents keep policies.
+
+A portable indicator template is the user's own copy of the user's own studies. It
+leaves out every study the host keeps from the user, one that is not `removable` or
+not `listed`, and every study that reads the output of one, and a scale range such a
+study owned is let go; a study with other restrictions is copied without them. A
+template applied in `replace` mode keeps the host's studies, on their own panes, with
+the template's panes taking the free slots around them, so a replace neither copies a
+host study nor takes it away.
 
 ### Plot scale assignments
 

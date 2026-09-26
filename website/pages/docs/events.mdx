@@ -66,7 +66,7 @@ it on teardown (component unmount, route change) so listeners never leak.
 | `indicatorSource` | `{ instanceId, indicatorId, paneIndex }` | The source button of a descriptor with `hasSource: true` was pressed. The [host supplies the code and viewer](/docs/indicators#source-access-and-legend-controls). |
 | `indicator:alert` | `IndicatorAlertPayload` | A condition an indicator descriptor declared came true on a new bar. See [Indicator alerts](#indicator-alerts). |
 | `indicator:data-status` | `{ id, indicatorId, status: IndicatorDataStatus }` | An indicator's managed data state changed: a Tier-2 fetch is loading, ready, empty, unsupported or failed, and since 2.4.0 a `calc` that threw (`{ state: 'error', error }`) or recovered (`ready`). |
-| `pick:start` / `pick:end` | `{ kind }` / `{ kind, value }` | `chart.beginPick` armed, and then resolved or was cancelled (`value` is `null` when cancelled). See [Picking a price or a bar](/docs/interactions#picking-a-price-or-a-bar). |
+| `pick:start` / `pick:end` | `{ kind }` / `{ kind, value }` | `chart.beginPick` armed, and then resolved or was cancelled (`value` is `null` when cancelled). `kind` is `'price'`, `'time'` or `'point'`, whose `value` is `{ time, price }`. See [Picking a price or a bar](/docs/interactions#picking-a-price-or-a-bar). |
 | `replay:*` | `ReplayState` | The [market replay](/docs/market-replay) playhead starts, moves, plays, pauses, ends or stops. |
 | `trading:*` | see [Trading events](#trading-events) | The user interacts with a position, order, or bracket. |
 | `alert:triggered` / `alert:updated` / `alerts:changed` | see [Trader alerts](/docs/alerts) | An `AlertController` reports a trigger or a committed change. Drag previews do not emit saved changes. |
@@ -514,7 +514,7 @@ Every trading event is mirrored onto the main bus, so
 | `trading:bracket_modify` | `{ parentId, bracketRole, newPrice }` |
 
 `newPrice` is the pointer's price unless the chart has a tick schedule, from
-[`chart.trading.setTickSchedule`](/docs/trading-api#price-ticks-while-dragging) or from
+[`chart.setTickSchedule`](/docs/trading-api#price-ticks-while-dragging) or from
 an instrument with `tickBands` applied with `applyTo`, in which case it is the nearest
 price on the instrument's ticks.
 

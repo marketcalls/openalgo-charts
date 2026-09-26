@@ -9,6 +9,7 @@ import { CHART_TYPES, renderToolbar } from './toolbar.js';
 import { INTERVALS, PERIODS } from './intervals.js';
 import { withoutViewportSync } from './split.js';
 import { normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
+import { keepHostStudy } from './host-study.js';
 
 // Both read off their namespaces: a dist/ built before either shipped must
 // still read and write layouts, and a layout on such a build simply keeps
@@ -500,12 +501,26 @@ export function untrustedDrawings(state) {
     : isRecord(drawings) && Array.isArray(drawings.drawings) ? { ...drawings, drawings: drawings.drawings.map(withoutPolicy) } : drawings };
 }
 
+/**
+ * A chart state without the studies that carry a policy. A policy is a
+ * host's restriction on a study it placed itself, so such a study is that
+ * host's, not the file's: brought in unrestricted it would be a copy of
+ * someone else's study, and restricted it would be one no control here
+ * removes. This host keeps its own study through an import instead
+ * (`keepHostStudy`).
+ */
+export function untrustedStudies(state) {
+  if (!isRecord(state) || !Array.isArray(state.indicators)) return state;
+  return { ...state, indicators: state.indicators.filter((study) => !isRecord(study) || !('policy' in study)) };
+}
+
 /** Parse and upgrade a file body. Throws `LayoutError` (or a JSON error) for anything that is not a layout. */
 export function parseLayoutFile(text) {
   let parsed;
   try { parsed = JSON.parse(text); } catch (e) { throw new LayoutError('not JSON: ' + e.message); }
-  const doc = untrustedDrawings(upgradeLayout(isRecord(parsed) && isRecord(parsed.layout) ? parsed.layout : parsed));
-  return isRecord(doc.secondary?.state) ? { ...doc, secondary: { ...doc.secondary, state: untrustedDrawings(doc.secondary.state) } } : doc;
+  const doc = untrustedStudies(untrustedDrawings(upgradeLayout(isRecord(parsed) && isRecord(parsed.layout) ? parsed.layout : parsed)));
+  return isRecord(doc.secondary?.state)
+    ? { ...doc, secondary: { ...doc.secondary, state: untrustedStudies(untrustedDrawings(doc.secondary.state)) } } : doc;
 }
 
 /**
@@ -540,7 +555,7 @@ export async function importLayoutFile(file) {
     toast('error', 'That file is not a layout: ' + e.message);
     return false;
   }
-  const report = applyLayout(doc, { keepView: doc.dataset === datasetKey(app.req), replaceComparisons: true });
+  const report = applyLayout(keepHostStudy(app.chart, doc), { keepView: doc.dataset === datasetKey(app.req), replaceComparisons: true });
   if (!report.applied) return false;
   if (report.secondaryReady && !await report.secondaryReady) return false;
   persistLayoutNow();
@@ -573,7 +588,7 @@ export function initPersist(a) {
   el('lload').addEventListener('click', () => {
     const doc = app.chart ? readLayout() : null;
     if (!doc) { el('status').textContent = 'no saved layout'; toast('error', 'No saved layout'); return; }
-    const report = applyLayout(doc, { keepView: true, replaceComparisons: true });
+    const report = applyLayout(keepHostStudy(app.chart, doc), { keepView: true, replaceComparisons: true });
     // applyLayout has already raised the toast for a refused document.
     if (!report.applied) { el('status').textContent = 'restore failed: ' + report.reason; return; }
     el('status').textContent = `layout restored · ${report.indicators} indicator(s) · ${report.series.length} series descriptor(s)`;

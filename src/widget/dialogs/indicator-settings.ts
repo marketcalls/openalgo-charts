@@ -85,6 +85,8 @@ export function mountIndicatorSettings(
   const resolved = resolveInstance(ctx, anchor, opts);
   if (resolved.inst === null) return declined(ctx, resolved.why ?? widgetText(ctx, 'No indicator to configure'));
   const inst: IndicatorApi = resolved.inst;
+  // Every write would be refused, so the dialog says why instead of opening.
+  if ((inst as Partial<IndicatorApi>).policy?.().configurable === false) return declined(ctx, widgetText(ctx, '{name} settings are protected', { name: inst.name }));
   const descriptor: IndicatorDescriptor = getIndicator(inst.indicatorId);
 
   const tabs: Array<{ id: IndicatorSettingsTab; label: string; icon: string; inputs: readonly IndicatorInput[] }> = [];
@@ -111,11 +113,17 @@ export function mountIndicatorSettings(
   const report = (error: unknown): void => {
     ctx.toast(error instanceof Error ? error.message : widgetText(ctx, 'The study settings could not be applied'), 'error');
   };
+  // The host can lock the study while the dialog is open: a refused write
+  // changed nothing, so it is reported and never counted as an edit.
+  const locked = (): string => widgetText(ctx, '{name} settings are protected', { name: inst.name });
   const write = (patch: IndicatorSettings): boolean => {
     writeError = null;
     if (!current()) { cancel(); return false; }
-    try { inst.setSettings(detached(patch)); }
-    catch (error) {
+    try {
+      if (inst.setSettings(detached(patch)) === false) {
+        writeError = locked(); ctx.toast(writeError, 'error'); return false;
+      }
+    } catch (error) {
       writeError = error instanceof Error ? error.message : widgetText(ctx, 'The study settings could not be applied');
       report(error); return false;
     }
@@ -251,8 +259,11 @@ export function mountIndicatorSettings(
     }
     if (committed || dirty.size === 0) return true;
     const back: IndicatorSettings = Object.fromEntries([...dirty].map(key => [key, before[key]]));
-    try { inst.setSettings(detached(back)); }
-    catch (error) { report(error); renderPane(); return false; }
+    try {
+      // Locked since the edits: nothing this dialog does can take them back,
+      // so it says so and closes rather than holding the user in it.
+      if (inst.setSettings(detached(back)) === false) ctx.toast(locked(), 'error');
+    } catch (error) { report(error); renderPane(); return false; }
     dirty.clear();
     opts.onChange?.(inst);
     return true;

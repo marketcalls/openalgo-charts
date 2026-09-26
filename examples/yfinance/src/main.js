@@ -31,6 +31,7 @@ import { initIndicators, fillIndicatorPicker, renderIndicatorChips, openSettings
 import { chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
 import { bindIndicatorSource, initIndicatorSource } from './indicator-source.js';
 import { initRoutedStudy } from './routed-study.js';
+import { initAnchoredStudy } from './anchored-study.js';
 import { initCompare, attachComparison, invalidateComparisons, syncComparisons, restoreComparisons } from './compare.js';
 import { initSnapshot } from './snapshot.js';
 import { initReplay, exitReplay, attachReplay, syncReplayAlertPause } from './replay.js';
@@ -266,6 +267,9 @@ function render({ keepView = true, state } = {}) {
   // trade at is on it, whichever band that price is in.
   app.ticks = tickScheduleFor(app.req.symbol);
   app.chart.setPriceScaleOptions({ minMove: axisMinMove(app.req.symbol, tickFor(app.req.symbol)) });
+  // The chart rounds a dragged price alert by the same bands, since the axis
+  // grid alone accepts prices a coarse band does not trade at.
+  app.chart.setTickSchedule?.(app.ticks);
   attachVolume(1, !isTransform || sel === 't:heikin-ashi');
   if (!isTransform) {
     app.markersApi = app.price.createMarkers();
@@ -281,7 +285,9 @@ function render({ keepView = true, state } = {}) {
   if (!isTransform) {
     for (const spec of rebuildState ? [] : app.activeIndicators) {
       try {
-        const instance = app.chart.addIndicator(spec.indicatorId, spec.settings, { paneIndex: spec.paneIndex });
+        // A study the host protects comes back protected: the policy rides with the spec.
+        const instance = app.chart.addIndicator(spec.indicatorId, spec.settings, { paneIndex: spec.paneIndex,
+          ...(spec.policy ? { policy: spec.policy } : {}) });
         if (spec.visible === false) instance.setVisible(false);
       }
       catch (e) { console.warn('indicator', spec.indicatorId, e.message); }
@@ -533,6 +539,7 @@ initAccount(app);
 initIndicators(app);
 initIndicatorSource();
 initRoutedStudy();
+initAnchoredStudy();
 
 // The operator keypad lives beside the symbol field. Mounted once: it writes
 // into the field and the ordinary Enter handler does the loading, so nothing

@@ -236,13 +236,14 @@ const rsi = chart.addIndicator('rsi', {}, { paneIndex: macd.paneIndex }); // sha
 | `name` | `string` | Display name. |
 | `paneIndex` | `number` | Mutable: the chart re-indexes it when panes move or are removed. |
 | `settings()` | `IndicatorSettings` | A **copy**. Mutating it does nothing. |
-| `setSettings(patch)` | `void` | Merge, restyle, recompute, re-run `attach`. |
+| `setSettings(patch, options?)` | `boolean` | Merge, restyle, recompute, re-run `attach`. `false` for a study whose policy is not `configurable` unless `options.force`. |
+| `policy()` / `setPolicy(policy \| null)` | `IndicatorPolicy` / `void` | Host restrictions (`removable`, `configurable`, `movable`, `listed`); see [study policies](core-api.md#study-policies). |
 | `series(plotKey)` | `SeriesApi \| undefined` | Backing series, for direct styling. |
 | `values()` | `IndicatorValues` | Live **reference** into the last `calc` result. Do not mutate. |
 | `visible()` / `setVisible(on)` | `boolean` / `void` | The legend eye toggle; hides plots and fills without removing. |
 | `legend()` | `PaneLegend \| null` | This indicator's legend row. |
 | `updateLegendValues(index?)` | `void` | Refresh readings for a bar index; omit for the latest bar. |
-| `remove()` | `void` | Tears down series, levels, fills, legend. Idempotent. |
+| `remove(options?)` | `boolean` | Tears down series, levels, fills, legend. Idempotent. `false` when already gone, or not `removable` without `options.force`. |
 
 `recompute()` exists on `IndicatorInstance` but is **not** on the `IndicatorApi` type: the runtime calls it. Since 1.8.4 a data change only *marks* the indicators stale and requests a frame; the recompute happens in that frame, before the paint.
 
@@ -730,6 +731,58 @@ the original timezone and an explicit host migration.
 The widget and reference host retain invalid drafts, restore the same dialog
 after chart picking, and cancel pending selection on teardown. Existing compiled
 adapters keep their current input types and compiled format.
+
+### Paired time and price inputs
+
+A `price` input can name a declared `timestamp` input with `timeKey`: the two are
+one point on the chart, a bar time and a price that belong together (the start of
+an anchored path, a level that begins at an event). Add `anchor: true` for a
+handle on the chart at that point.
+
+```ts
+registerIndicator({
+  id: 'anchored-growth', name: 'Anchored growth', placement: 'onchart',
+  inputs: [
+    { key: 'from', type: 'timestamp', label: 'Anchor time', default: 0, pick: true },
+    { key: 'price', type: 'price', label: 'Anchor price', default: 0, pick: true, timeKey: 'from', anchor: true },
+  ],
+  plots: [{ key: 'path', title: 'Path', type: 'line' }],
+  calc: (bars, s) => { /* ... */ },
+});
+```
+
+- **Validation.** `timeKey` must name a declared `timestamp` input, not the price
+  itself, and no other price may pair with the same timestamp; `anchor` must be a
+  boolean and needs a `timeKey`. Both raise `IndicatorInputError` at registration.
+  The values stay two ordinary settings, saved as they always were.
+- **One pick.** The widget and the reference host offer **Pick point on chart** on
+  the price row: one click captures both through `chart.beginPick('point')` and
+  commits them in one settings patch (the widget at once, the reference host on
+  Apply). The timestamp row keeps its own time-only pick.
+- **Pane and scale.** The point lives where a pick of the price reads it: the
+  explicit `pick` target, or the one scale on one pane the study's plots are drawn
+  on. `studyInputTarget(chart, study, key)` from `openalgo-charts/draw` answers it,
+  null when it cannot be told (plots on two scales and no explicit target), in
+  which case there is no pick and no anchor.
+- **The anchor.** The drawing tier's `DrawingController` draws it for every study
+  that declares one (`inputAnchors: false` turns them off): a ring in the study's
+  first plot colour, with guides to both axes while it is in hand. A drag previews
+  the point, the time snapping to the bar under the pointer and both halves held
+  inside the inputs' `min` and `max`, and the release writes one settings patch as
+  the user, which a study whose policy is `configurable: false` refuses (its anchor
+  does not take the pointer at all). Escape cancels the drag and writes nothing.
+- **Undo.** Each drag is one step of the drawing history, in order with the
+  drawings, so the host's Undo and Redo (`draw.undo()`, Ctrl+Z) take it back and
+  forward; a step whose study has been removed, or edited since, is passed over.
+  Recording it and walking it emit `drawing:change` with empty `ids`, so a host's
+  Undo control refreshes. A host control that sets the point another way (its own
+  point pick) calls `draw.moveInputAnchor(studyId, key, point)` so that move is a
+  step too; a plain `setSettings` is not recorded, and the drags before it are then
+  passed over.
+- **Conflicts.** An active drawing tool takes the press (the anchor gives no hit
+  while placing), a pick in progress takes the click, and choosing a tool, starting
+  a pick or replacing the data context cancels a drag in hand. A hidden study shows
+  no anchor, and removing the study removes it.
 
 An indicator is data, not code in the core: the chart never switches on an id, and each plot names a registered chart type, so you add no drawing code. `calc` must return one array per plot key, exactly `bars.length` long, with `null` in warmup slots (the line renderer breaks across them and autoscale skips them).
 

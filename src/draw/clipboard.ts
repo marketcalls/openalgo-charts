@@ -132,6 +132,9 @@ export function encodeClipboardPayload(drawings: readonly Drawing[]): string {
         ...(d.props === undefined ? {} : { props: d.props }),
         paneIndex: d.paneIndex,
         zIndex: Number.isFinite(d.zIndex) ? d.zIndex : 0,
+        // Where it sits in the stack travels like its z-index; on a chart
+        // without that entry it paints in front.
+        ...(d.stackAbove === undefined ? {} : { stackAbove: d.stackAbove }),
         ...(d.locked === undefined ? {} : { locked: d.locked }),
         ...(d.visible === undefined ? {} : { visible: d.visible }),
         // No `policy`: it binds the drawing the host placed, and a paste is
@@ -375,6 +378,7 @@ export function sanitizeDrawing(value: unknown): Omit<Drawing, 'id'> | null {
   if (props !== null) out.props = props;
   if (value.locked !== undefined) out.locked = value.locked;
   if (value.visible !== undefined) out.visible = value.visible;
+  if (isShortString(value.stackAbove) && value.stackAbove !== '') out.stackAbove = value.stackAbove;
   if (isFinite_(value.createdAt)) out.createdAt = value.createdAt;
   return out;
 }

@@ -4,6 +4,8 @@ import { autosave } from './persist.js';
 import { capturePaneTarget } from './pane-target.js';
 import { createColorPicker, applyTokens, widgetTokens } from '/dist/openalgo-charts.widget.mjs';
 import { bindTypedField, typedFieldValue, typedFieldError, validateTypedRows, mountReferenceInputControls } from './indicator-input-controls.js';
+import { studyAllows } from './host-study.js';
+import { anchoredGrowthSeed } from './anchored-study.js';
 
 let app;
 
@@ -40,12 +42,20 @@ export function renderIndicatorChips() {
   const target = capturePaneTarget(app);
   const chart = target?.chart;
   if (!chart) return;
-  for (const inst of chart.indicators()) {
+  // A study its host keeps out of the inventory stays out of the chips too.
+  for (const inst of chart.indicators().filter((study) => studyAllows(study, 'listed'))) {
     const chip = document.createElement('span');
     chip.className = 'chip';
     const first = inst.series(Object.keys(inst.values())[0]);
     const color = (inst.settings().color) || '#8892a6';
     chip.innerHTML = `<span class="sw" style="background:${esc(String(color))}"></span><b>${esc(inst.name)}</b>`;
+    // No remove button on a study the host keeps; the chip says why instead.
+    if (!studyAllows(inst, 'removable')) {
+      chip.title = `${inst.name} is protected by the host`;
+      chip.classList.add('is-protected');
+      host.appendChild(chip);
+      continue;
+    }
     const x = document.createElement('button');
     x.textContent = '×';
     x.title = 'remove';
@@ -62,11 +72,15 @@ export function renderIndicatorChips() {
   if (!chart.indicators().length) host.innerHTML = '<span style="color:var(--faint);font-size:12px">none</span>';
 }
 
+// A study whose defaults cannot know the loaded history takes its first
+// settings from it: an anchor starts where the user can see and grab it.
+const SEEDS = { 'anchored-growth-sample': anchoredGrowthSeed };
+
 export function addIndicator(id, target = capturePaneTarget(app)) {
   if (!target?.current()) { el('status').textContent = 'chart changed; open the indicator menu again'; return; }
   if ((target.pane === 2 ? app.loading2 || app.loadFailed2 : app.loading || app.loadFailed)
     || !target.chart.primaryBars().length) { el('status').textContent = 'load chart history before adding a study'; return; }
-  const inst = target.chart.addIndicator(id);
+  const inst = target.chart.addIndicator(id, SEEDS[id]?.(target.chart) ?? {});
   if (target.pane === 1) rememberIndicators();
   renderIndicatorChips();
   autosave();
@@ -95,6 +109,8 @@ export function openSettings(instanceId, target = capturePaneTarget(app)) {
   if (!target?.current()) return;
   const inst = target.chart.indicators().find((i) => i.id === instanceId);
   if (!inst) return;
+  // Every write would be refused, so the dialog says why instead of opening.
+  if (!studyAllows(inst, 'configurable')) { el('status').textContent = `${inst.name} settings are protected by the host`; return; }
   disposeSettings?.();
   settingsTarget = target;
   settingsFor = inst;
@@ -360,11 +376,20 @@ export function renderSettingsTab(draft) {
   if (controls) formPickers.get(host).push(controls);
 }
 
+/** Say that the host locked the study since its settings opened: the write changed nothing. */
+function refused(inst) {
+  const message = `${inst.name} settings are protected by the host`;
+  el('status').textContent = message;
+  toast('error', message);
+  return false;
+}
+
 export function collectSettings() {
   if (!currentSettings()) return false;
   if (!validateTypedRows(el('set-body'))) return false;
-  try { settingsFor.setSettings(collectInputRows(el('set-body'))); }
-  catch (error) {
+  try {
+    if (settingsFor.setSettings(collectInputRows(el('set-body'))) === false) return refused(settingsFor);
+  } catch (error) {
     const message = error instanceof Error ? error.message : 'The study settings could not be applied';
     el('status').textContent = message;
     toast('error', message);
@@ -444,7 +469,7 @@ export function initIndicators(a) {
     if (!currentSettings()) return;
     const d = getIndicator(settingsFor.indicatorId);
     const defaults = indicatorDefaults(d);
-    settingsFor.setSettings(defaults);
+    if (settingsFor.setSettings(defaults) === false) { refused(settingsFor); return; }
     rememberSettings();
     renderIndicatorChips();
     closeSettings();

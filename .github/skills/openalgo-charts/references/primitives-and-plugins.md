@@ -139,6 +139,8 @@ The reason is in `src/core/canvas.ts`: the backing buffer is sized `round(media 
 1. **`zOrder() === 'top'` primitives**
 2. Crosshair, price tag, time tag
 
+A primitive placed with `chart.setPrimitiveStackAbove(primitive, entry)` paints inside step 4 instead of its own band: right after the last series of that entry (`'source:primary'` or `'indicator:<id>'` from `chart.seriesStack(paneIndex)`) on its pane, with a batching backend flushed first. `null` puts it back; an entry with no series on the pane leaves it in its own band, and such a primitive repaints with the base canvas whatever its `zOrder()`. The price source stays the pane's instrument (readout, last-price line, rebased axis) wherever the series band puts it.
+
 Within a z-order band, primitives paint in attach order. `top` sits on the cheap-repaint canvas, so anything that must react to the cursor without a full repaint belongs there. `normal` deliberately paints *after* the last-price line so order pills stay legible when the LTP crosses them.
 
 **Steps 3 and 4 are clipped to the plot; nothing else is (1.8.5).** Bottom-layer primitives and the series draw inside a clip of `plotWidth` by `plotHeight`, which is released before the axis ladder. A bar is positioned by its centre and drawn outward, so without it the newest bar against the right edge put half a body and a wick into the price-axis strip, behind the labels.
@@ -154,6 +156,10 @@ function bestHit(hits: readonly (PrimitiveHit | null)[]): PrimitiveHit | null
 ```
 
 Smallest `distance` wins; on a tie the higher z-order wins (`top` > `normal` > `bottom`). `null` entries are skipped. Use it directly inside a composite primitive that delegates to sub-objects.
+
+The pane ranks its primitives' hits by paint band before distance: a hit painted over the series (a `'normal'` or `'top'` primitive in its own band) beats one painted with or behind the series (a primitive placed with `chart.setPrimitiveStackAbove`, a drawing layer under the front one, a `'bottom'` primitive) wherever both answer. Within each side it is `bestHit`'s order: nearest, then the higher band.
+
+A primitive answering for others sets `PrimitiveHit.paintedBy` to the primitive that painted the hit (the draw tier's front layer does for the layers under it), and the pane sets it on a hit from a primitive placed in the series band. The band ranking reads it, and for the context menu target the chart compares paint order: where that primitive paints under the series under the pointer, the series is the target. A hit without `paintedBy` keeps the menu, as before.
 
 Routing, from `src/core/chart.ts`:
 

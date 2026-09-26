@@ -215,6 +215,68 @@ inputs: [
 ]
 ```
 
+## Anchored study input
+
+The growth path starts at one point: a bar time and a price that belong together. The
+price input names its time (`timeKey`), so **Pick point** sets both from one click, and
+`anchor: true` puts the orange ring on the chart. Drag the ring to move both at once, then
+use **Undo** and **Redo**: a drag and a pick are one step each, because the pick goes
+through `draw.moveInputAnchor`. Escape during a drag cancels it. See
+[a time and a price that belong together](/docs/indicators#a-time-and-a-price-that-belong-together).
+
+<RunnableExample height={400} tiers={['draw']} caption="Drag the ring, or press Pick point and click a bar. Each drag and each pick is one undo step." code={`const bar = document.createElement('div');
+bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px;font-size:12px';
+el.appendChild(bar);
+const host = document.createElement('div');
+host.style.cssText = 'height:330px';
+el.appendChild(host);
+
+lib.registerIndicator({
+  id: 'example-anchored-growth', name: 'Anchored growth', placement: 'onchart',
+  inputs: [
+    { key: 'from', type: 'timestamp', label: 'Anchor time', default: 0, pick: true },
+    { key: 'price', type: 'price', label: 'Anchor price', default: 0, pick: true, timeKey: 'from', anchor: true },
+    { key: 'rate', type: 'number', label: 'Growth per bar (%)', default: 0.15 },
+  ],
+  plots: [{ key: 'path', title: 'Growth path', type: 'line', style: { color: '#f59e0b', lineWidth: 2 } }],
+  calc(bars, s) {
+    const start = bars.findIndex(b => b.time >= s.from);
+    return { path: bars.map((_, i) => (start < 0 || i < start ? null : s.price * (1 + s.rate / 100) ** (i - start))) };
+  },
+});
+
+const chart = lib.createChart(host);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.setVisibleLogicalRange({ from: 40, to: 165 });
+// The drawing controller draws the anchor and holds its undo steps.
+const draw = new lib.DrawingController(chart);
+const study = chart.addIndicator('example-anchored-growth', { from: bars[90].time, price: bars[90].close });
+
+const readout = document.createElement('span');
+const show = () => {
+  const s = study.settings();
+  readout.textContent = 'Anchor: ' + new Date(s.from * 1000).toISOString().slice(0, 16).replace('T', ' ')
+    + ' UTC at ' + s.price.toFixed(2);
+};
+const button = (label, run) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = label;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+  b.onclick = run;
+  bar.appendChild(b);
+};
+// One click answers with the bar time and the price together, and moving the
+// anchor through the drawing controller makes the pick an undo step like a drag.
+button('Pick point', () => chart.beginPick('point', p => draw.moveInputAnchor(study.id, 'price', p)));
+button('Undo', () => draw.undo());
+button('Redo', () => draw.redo());
+bar.appendChild(readout);
+chart.on('objects:change', show);
+show();
+return chart;`} />
+
 ## Compare markets
 
 Put two instruments on one chart and compare how they move. Prices and returns
@@ -392,6 +454,60 @@ const button = (label, space) => {
 button('Pin selected', 'viewport');
 button('Unpin selected', 'data');
 return chart;`} />
+
+## Draw order across studies
+
+A drawing can sit behind the series, over the candles and under a study, over a study, or
+in front of everything, and the candles can move over a study. The line under the buttons
+lists the pane back to front, the order it paints in. See
+[Draw order](/docs/objects#draw-order).
+
+<RunnableExample height={400} tiers={['indicators', 'draw']} caption="Simulated prices. Each button moves one object; the list reads the pane from back to front." code={`const bar = document.createElement('div');
+bar.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px';
+el.appendChild(bar);
+const order = document.createElement('div');
+order.style.cssText = 'color:#94a3b8;font:12px system-ui, sans-serif;margin-bottom:6px';
+el.appendChild(order);
+const host = document.createElement('div');
+host.style.cssText = 'height:300px';
+el.appendChild(host);
+
+const chart = lib.createChart(host);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.setVisibleLogicalRange({ from: 110, to: 200 });
+const ema = chart.addIndicator('ema', { length: 9, color: '#f5c542' });
+const draw = new lib.DrawingController(chart);
+const span = bars.slice(140, 181);
+const box = draw.add({ tool: 'rectangle', paneIndex: 0,
+  style: { color: '#4f8cff', fill: true, fillOpacity: 0.85, lineWidth: 2 }, points: [
+    { time: bars[140].time, price: Math.max(...span.map(b => b.high)) },
+    { time: bars[180].time, price: Math.min(...span.map(b => b.low)) },
+  ] });
+// One list for the whole pane: the same inventory an Objects panel reads.
+const objects = new lib.ChartObjects(chart, { drawings: draw });
+const label = row => row.band === 'above' ? row.name + ' (in front)'
+  : row.band === 'below' ? row.name + ' (behind the series)' : row.name;
+const show = () => { order.textContent = 'Back to front: ' + objects.stack(0).map(label).join(', '); };
+objects.subscribe(show);
+
+const moves = [
+  ['Box in front', () => draw.bringAboveSeries(box.id)],
+  ['Box over the average', () => draw.placeInStack(box.id, { entry: 'indicator:' + ema.id }, 'above')],
+  ['Box over the candles', () => draw.placeInStack(box.id, { entry: 'source:primary' }, 'above')],
+  ['Box behind the series', () => draw.sendBehindSeries(box.id)],
+  ['Candles over the average', () => chart.moveInSeriesStack('source:primary', 'indicator:' + ema.id, 'above')],
+  ['Candles under the average', () => chart.moveInSeriesStack('source:primary', 'indicator:' + ema.id, 'below')],
+];
+for (const [label, run] of moves) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+  b.onpointerdown = (event) => event.stopPropagation();
+  b.onclick = run;
+  bar.appendChild(b);
+}
+return { destroy() { objects.destroy(); draw.destroy(); chart.destroy(); } };`} />
 
 ## The terminal in one call
 
@@ -594,7 +710,8 @@ const bars = Array.from({ length: 90 }, (_, i) => {
 chart.addSeries('candlestick').setData(bars);
 chart.addPriceLine({ price: 100, color: '#8892a6', lineStyle: 'dotted', id: 'boundary',
   leftLabel: 'tick 0.05 from here, 0.01 below' }, 0);
-chart.trading.setTickSchedule(ticks);
+// The chart hands it to its trading layer, and rounds dragged alerts with it too.
+chart.setTickSchedule(ticks);
 const order = { id: 'entry', type: 'limit', side: 'buy', price: 99.62, size: 10 };
 chart.trading.setOrders([order]);
 chart.trading.on('trading:order_modify', (event) => {

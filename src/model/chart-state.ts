@@ -15,6 +15,7 @@ import type { IndicatorSettings } from './indicator-registry';
 import type { PriceScaleMode } from '../scale/price-scale';
 import type { AlertsDocument } from '../alerts/types';
 import type { PriceAxisPlacement } from './price-axis-layout';
+import type { IndicatorPolicy } from './indicator-policy';
 
 /**
  * The newest state version this build reads and writes. Bumped when the shape
@@ -169,6 +170,12 @@ export interface IndicatorState {
   paneIndex: number;
   /** Omitted by older layouts, which restore the indicator as visible. */
   visible?: boolean;
+  /**
+   * The restrictions its host set, written only when a flag is false, so an
+   * unrestricted study saves exactly what it always did. Omission restores it
+   * unrestricted.
+   */
+  policy?: IndicatorPolicy;
 }
 
 export interface ChartState {
@@ -196,6 +203,13 @@ export interface ChartState {
   /** Informational: `restoreState` does not recreate these (it has no data). */
   series?: SeriesState[];
   indicators?: IndicatorState[];
+  /**
+   * Instance id of the study the price source paints directly above, present
+   * only when the source was moved over a study on its pane. Omission, as in
+   * every layout from before the source could move, paints the source behind
+   * the studies. Read with `indicators`: a restore without them leaves it be.
+   */
+  sourceAbove?: string;
   /**
    * Opaque slot the drawing tier fills. The base engine round-trips it
    * untouched, so an app that persists state keeps drawings for free once the

@@ -84,10 +84,14 @@ latest candle. Missing readings say **Unavailable**, while actual zero stays zer
 Shifted studies report the value drawn at that candle. The timestamp uses the
 chart's timezone. Text can be selected and copied.
 
-Objects groups rows by pane. Reorder drawings and studies with drag and drop or
-the **Earlier** and **Later** controls. Move a study using its pane selector;
-its instance ID and alert references remain intact. Select drawings and create a
-named group to show, hide, lock, or remove them together. See [Objects](/docs/objects).
+Objects groups rows by pane, each pane listed in draw order from back to front.
+Drag a row onto the upper half of another to put it under that row, or onto the
+lower half to put it over it; a drop the chart cannot paint is refused before it
+lands. **Earlier** and **Later** step through the same order, so a drawing can sit
+behind the series, between two studies or in front, and the price source can move
+over a study. Move a study using its pane selector; its instance ID and alert
+references remain intact. Select drawings and create a named group to show, hide,
+lock, or remove them together. See [Objects](/docs/objects#draw-order).
 
 Set `panels: false` to retain the standalone Objects popup and omit Data from
 the toolbar. This affects the widget chrome only.
@@ -133,6 +137,15 @@ host already owns direct typing.
 
 The Indicators picker lists **Running studies** separately from the catalogue.
 Remove a specific running instance without removing another copy of that study.
+
+A study your host protects with a [policy](/docs/indicators#study-policies) shows
+only what the policy allows: its legend has no close button or gear, its Objects row
+no remove, settings, move or reordering, and the right-click menu rows and the
+picker's remove button are greyed with the note **protected**. Its settings dialog
+declines with the reason, and a dialog already open when the host locks the study
+reports each refused change instead of counting it, then closes on Cancel with the
+same note. An unlisted study is left out of Objects, the picker's running list and
+the alert source lists. Hiding it stays available.
 Colour controls share a compact palette, recent colours, and a native custom
 colour chooser. Values with alpha retain it; opacity is editable for those values.
 Unsupported colour expressions remain unchanged until the user selects a colour.

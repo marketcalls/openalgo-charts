@@ -31,6 +31,17 @@ export function validateIndicatorInputs(inputs: readonly IndicatorInput[], setti
         if (priceScaleId !== undefined && !(priceScaleId === 'right' || priceScaleId === 'left' || priceScaleId === ''
           || (typeof priceScaleId === 'string' && priceScaleId.startsWith('overlay:')))) fail('invalid pick scale');
       }
+      if (input.type === 'price') {
+        // A pair is one point: its time must be a declared absolute instant,
+        // and one instant cannot be the time of two different prices.
+        const { timeKey, anchor } = input;
+        if (timeKey !== undefined && (typeof timeKey !== 'string' || timeKey === input.key
+          || inputs.find(item => item.key === timeKey)?.type !== 'timestamp'
+          || inputs.some(item => item !== input && item.type === 'price' && item.timeKey === timeKey))) {
+          fail('timeKey must name a declared timestamp input no other price pairs with');
+        }
+        if (anchor !== undefined && (typeof anchor !== 'boolean' || (anchor && timeKey === undefined))) fail('an anchor needs a boolean and a timeKey');
+      }
     } else {
       if (typeof input.default !== 'string' || typeof value !== 'string') fail('expected text');
       if (input.type === 'session' && (!parseSessionSpec(input.default) || !parseSessionSpec(value as string))) fail('expected a session such as 0930-1600:23456');

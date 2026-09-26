@@ -48,6 +48,10 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
     ? widgetText(ctx, 'Price pane') : widgetText(ctx, 'Pane {number}', { number: pane + 1 });
   const paneLabel = (row: ChartObjectSnapshot): string => paneName(row.paneIndex);
   const kindLabel = (row: ChartObjectSnapshot): string => widgetText(ctx, `schema.object.kind.${row.kind}`, {}, KINDS[row.kind]);
+  // A host's own inventory may predate the stack; its rows then keep their list order.
+  const stackOf = (pane: number): readonly ChartObjectSnapshot[] => typeof objects.stack === 'function' ? objects.stack(pane) : [];
+  const canPlace = (id: string, target: string, where: 'above' | 'below'): boolean =>
+    typeof objects.canPlace === 'function' && objects.canPlace(id, target, where);
   const doc = ctx.document;
   let closed = false;
   let all: readonly ChartObjectSnapshot[] = [];
@@ -103,12 +107,37 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
     paint();
   }
 
-  function dropOn(id: string): void {
+  /**
+   * Where a drop on `node` puts the dragged row in paint order. The list runs
+   * back to front, so the upper half of a row means under it and the lower
+   * half over it. A row with no box to measure (no layout yet) takes the
+   * dragged row into its place, the way a drop on a row always did.
+   */
+  function dropSide(node: HTMLElement, event: DragEvent, id: string): 'above' | 'below' {
+    const box = node.getBoundingClientRect();
+    if (box.height > 0) return event.clientY < box.top + box.height / 2 ? 'below' : 'above';
+    const stack = stackOf(objects.get(id)?.paneIndex ?? -1);
+    return stack.findIndex(item => item.id === draggedId) > stack.findIndex(item => item.id === id) ? 'below' : 'above';
+  }
+
+  function clearDropMarks(): void {
+    for (const row of rows.values()) row.el.classList.remove('is-drop-before', 'is-drop-after');
+  }
+
+  /** A drop onto a row of another pane moves the dragged row there first. */
+  function dropOn(id: string, where: 'above' | 'below'): void {
+    clearDropMarks();
     if (closed || draggedId === null || draggedId === id) return;
     const source = objects.get(draggedId);
     const target = objects.get(id);
-    if (!source || !target || source.kind !== target.kind) return;
-    if (source.paneIndex !== target.paneIndex && !objects.move(source.id, target.paneIndex)) return;
+    if (!source || !target) return;
+    if (source.paneIndex !== target.paneIndex && !(source.capabilities.move && objects.move(source.id, target.paneIndex))) return;
+    if (canPlace(source.id, target.id, where)) {
+      if (!objects.place(source.id, target.id, where)) ctx.toast(text('reorderFailed', 'Could not reorder object'), 'error');
+      return;
+    }
+    // Rows outside a pane's stack keep their own order among their kind.
+    if (source.kind !== target.kind || source.band !== undefined) return;
     // Re-read after every step because model listeners publish synchronously.
     for (let n = 0; n < all.length; n++) {
       const peers = objects.list().filter(item => item.kind === source.kind && item.paneIndex === objects.get(source.id)?.paneIndex);
@@ -117,6 +146,33 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
       if (from < 0 || to < 0 || from === to || !objects.reorder(source.id, from < to ? 1 : -1)) break;
       if (Math.abs(from - to) === 1) break;
     }
+  }
+
+  /**
+   * One step through the pane's draw order, as `place` would take it: a
+   * drawing over or under the row next to it, a source or study over the
+   * next slot or under the previous one, taking what is placed on it along.
+   */
+  function step(item: ChartObjectSnapshot, direction: -1 | 1): { target: string; where: 'above' | 'below' } | null {
+    const stack = stackOf(item.paneIndex);
+    const at = stack.findIndex(row => row.id === item.id);
+    if (at < 0) return null;
+    if (item.kind === 'drawing') {
+      const next = stack[at + direction];
+      return next ? { target: next.id, where: direction === 1 ? 'above' : 'below' } : null;
+    }
+    const entry = (row: ChartObjectSnapshot | undefined): boolean => row !== undefined && row.kind !== 'drawing';
+    if (direction === -1) {
+      let i = at - 1;
+      while (i >= 0 && !entry(stack[i]) && stack[i].band === 'series') i--;
+      return entry(stack[i]) ? { target: stack[i].id, where: 'below' } : null;
+    }
+    let i = at + 1;
+    while (i < stack.length && stack[i].band === 'series' && !entry(stack[i])) i++;
+    if (!entry(stack[i])) return null;
+    let top = i;
+    while (stack[top + 1]?.band === 'series' && !entry(stack[top + 1])) top++;
+    return { target: stack[top].id, where: 'above' };
   }
 
   function act(action: Action, id: string, event?: MouseEvent): void {
@@ -143,17 +199,32 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
     node.dataset.objectId = item.id;
     node.setAttribute('role', 'listitem');
     node.addEventListener('dragstart', event => {
-      if (closed || !objects.get(item.id)?.capabilities.reorder) { event.preventDefault(); return; }
+      const current = objects.get(item.id);
+      if (closed || !(current?.capabilities.place || current?.capabilities.reorder)) { event.preventDefault(); return; }
       event.stopPropagation();
       draggedId = item.id;
       event.dataTransfer?.setData('text/plain', item.id);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
     });
-    node.addEventListener('dragend', () => { draggedId = null; });
-    node.addEventListener('dragover', event => { if (draggedId !== null) event.preventDefault(); });
+    node.addEventListener('dragend', () => { draggedId = null; clearDropMarks(); });
+    node.addEventListener('dragleave', () => { node.classList.remove('is-drop-before', 'is-drop-after'); });
+    // Only a drop the bands can paint is accepted, so the pointer shows a
+    // refused drop before release rather than the order snapping back after.
+    node.addEventListener('dragover', event => {
+      // The row decides: the pane section under it would take any drop as a pane move.
+      event.stopPropagation();
+      if (draggedId === null || draggedId === item.id) return;
+      const source = objects.get(draggedId), where = dropSide(node, event, item.id);
+      const allowed = source !== undefined && (source.paneIndex !== item.paneIndex ? source.capabilities.move === true
+        : canPlace(source.id, item.id, where) || (source.band === undefined && source.kind === item.kind && source.capabilities.reorder === true));
+      clearDropMarks();
+      if (!allowed) return;
+      event.preventDefault();
+      node.classList.add(where === 'below' ? 'is-drop-before' : 'is-drop-after');
+    });
     node.addEventListener('drop', event => {
       event.preventDefault(); event.stopPropagation();
-      dropOn(item.id); draggedId = null;
+      dropOn(item.id, dropSide(node, event, item.id)); draggedId = null;
     });
     const summary = item.capabilities.select
       ? button(doc, { label: '', onClick: event => act('select', item.id, event) })
@@ -177,10 +248,16 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
 
   function updateRow(row: ObjectRow, item: ChartObjectSnapshot): void {
     row.name.textContent = item.name;
-    row.el.draggable = item.capabilities.reorder === true;
+    row.el.draggable = item.capabilities.reorder === true || item.capabilities.place === true;
     row.el.dataset.groupId = item.groupId ?? '';
     row.el.classList.toggle('is-group-member', item.groupId !== undefined);
     const meta = [kindLabel(item), paneLabel(item), item.visible ? widgetText(ctx, 'Visible') : widgetText(ctx, 'Hidden')];
+    // Where a drawing paints, when it is not the default place in front.
+    if (item.kind === 'drawing' && item.band === 'below') meta.push(text('behind', 'Behind series'));
+    if (item.kind === 'drawing' && item.band === 'series') {
+      const under = all.find(other => other.id === item.stackAbove);
+      meta.push(text('above', 'Above {name}', { name: under?.name ?? text('hidden', 'a hidden study') }));
+    }
     if (item.locked !== undefined) meta.push(item.locked ? widgetText(ctx, 'Locked') : widgetText(ctx, 'Unlocked'));
     if (item.selected) meta.push(widgetText(ctx, 'Selected'));
     if (item.groupId) { const group = all.find(row => row.id === item.groupId); if (group) meta.push(group.name); }
@@ -232,18 +309,27 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
     }
     for (const [action, direction] of [['earlier', -1], ['later', 1]] as const) {
       let control = row.buttons.get(action);
-      if (!item.capabilities.reorder) { control?.remove(); row.buttons.delete(action); continue; }
+      if (!item.capabilities.reorder && !item.capabilities.place) { control?.remove(); row.buttons.delete(action); continue; }
       if (!control) {
         control = button(doc, { label: '', variant: 'ghost', onClick: () => {
           if (closed) return;
-          if (!objects.reorder(item.id, direction)) ctx.toast(text('reorderFailed', 'Could not reorder object'), 'error');
+          // A row in its pane's stack steps through the draw order the panel
+          // shows; any other keeps stepping among its own kind.
+          const current = objects.get(item.id);
+          const move = current?.band !== undefined ? step(current, direction) : null;
+          const done = current?.band !== undefined
+            ? move !== null && objects.place(item.id, move.target, move.where)
+            : objects.reorder(item.id, direction);
+          if (!done) ctx.toast(text('reorderFailed', 'Could not reorder object'), 'error');
         } });
         control.dataset.action = action;
         row.buttons.set(action, control);
       }
       control.textContent = text(action, direction === -1 ? 'Earlier' : 'Later');
       control.setAttribute('aria-label', text(action + 'Label', direction === -1 ? 'Move {name} earlier' : 'Move {name} later', { name: item.name }));
-      control.disabled = objects.canReorder ? !objects.canReorder(item.id, direction) : false;
+      const move = item.band !== undefined ? step(item, direction) : null;
+      control.disabled = item.band !== undefined ? move === null || !canPlace(item.id, move.target, move.where)
+        : objects.canReorder ? !objects.canReorder(item.id, direction) : false;
       if (row.actions.children[index] !== control) row.actions.insertBefore(control, row.actions.children[index] ?? null);
       index++;
     }
@@ -315,8 +401,19 @@ export function createObjectsPanelContent(ctx: WidgetContext, opts: ObjectsPanel
       }
       if (list.children[index] !== section.element) list.insertBefore(section.element, list.children[index] ?? null);
     });
+    // Each pane lists its stack in draw order, back to front, a group where its
+    // first member paints; rows outside the stack follow in inventory order.
+    const order = new Map<string, number>();
+    for (const pane of paneIndices) stackOf(pane).forEach((item, index) => order.set(item.id, index));
+    const rank = (item: ChartObjectSnapshot): number => {
+      if (order.has(item.id)) return order.get(item.id)!;
+      const members = all.filter(member => member.groupId === item.id && order.has(member.id)).map(member => order.get(member.id)!);
+      return members.length ? Math.min(...members) - 0.5 : Number.MAX_SAFE_INTEGER;
+    };
+    const sorted = shown.map((item, index) => ({ item, index }))
+      .sort((a, b) => rank(a.item) - rank(b.item) || a.index - b.index).map(entry => entry.item);
     const positions = new Map<HTMLElement, number>();
-    shown.forEach(item => {
+    sorted.forEach(item => {
       let row = rows.get(item.id);
       if (row === undefined || row.selectable !== item.capabilities.select) {
         row?.el.remove();
@@ -400,6 +497,8 @@ export const OBJECTS_PANEL_CSS = `
 .oac-widget .oac-objects__row { display: flex; flex-direction: column; gap: 4px; padding: 6px; margin-bottom: 4px;
   border: 1px solid var(--oac-bd-soft); border-radius: 6px; min-width: 0; }
 .oac-widget .oac-objects__row.is-selected { border-color: var(--oac-acc); background: var(--oac-elev); }
+.oac-widget .oac-objects__row.is-drop-before { box-shadow: inset 0 2px 0 var(--oac-acc); }
+.oac-widget .oac-objects__row.is-drop-after { box-shadow: inset 0 -2px 0 var(--oac-acc); }
 .oac-widget .oac-objects__summary { display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
   gap: 2px; width: 100%; min-width: 0; height: auto; padding: 3px 4px; text-align: left; white-space: normal; }
 .oac-widget .oac-objects__name { font-weight: 600; overflow-wrap: anywhere; }

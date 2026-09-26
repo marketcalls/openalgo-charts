@@ -1,5 +1,5 @@
-import type { ChartState, ChartSettingsState, IndicatorState, PaneState, PriceScaleId, SeriesState } from 'openalgo-charts';
-import { parseAlertsDocument, parsePaneState } from 'openalgo-charts';
+import type { ChartState, ChartSettingsState, IndicatorPolicy, IndicatorState, PaneState, PriceScaleId, SeriesState } from 'openalgo-charts';
+import { parseAlertsDocument, parseIndicatorPolicy, parsePaneState } from 'openalgo-charts';
 import { boolean, choice, list, number, readJson, record, string, WorkspaceDocumentError, type Json } from './json';
 
 export { WorkspaceDocumentError } from './json';
@@ -59,7 +59,11 @@ function priceScaleId(input: Json, label: string): PriceScaleId {
   return input as PriceScaleId;
 }
 
-function indicatorStates(input: Json | undefined, preserveIdentity = true): IndicatorState[] {
+/**
+ * `keepPolicy` false drops each study's policy: a portable template is the
+ * user's own copy, and a host's restriction must not ride along into it.
+ */
+function indicatorStates(input: Json | undefined, preserveIdentity = true, keepPolicy = true): IndicatorState[] {
   const ids = new Set<string>();
   return list(input, 'indicators', 256).map(item => {
     const entry = record(item, 'indicator');
@@ -85,6 +89,12 @@ function indicatorStates(input: Json | undefined, preserveIdentity = true): Indi
       out.studyInputs = keys;
     }
     if (entry.visible !== undefined) out.visible = boolean(entry.visible, 'indicator visibility');
+    if (keepPolicy && entry.policy !== undefined) {
+      let policy: ReturnType<typeof parseIndicatorPolicy>;
+      try { policy = parseIndicatorPolicy(entry.policy); }
+      catch { throw new WorkspaceDocumentError('Invalid indicator policy'); }
+      if (Object.keys(policy).length) out.policy = { ...policy };
+    }
     if (entry.priceScaleId !== undefined) {
       out.priceScaleId = priceScaleId(entry.priceScaleId, 'indicator priceScaleId');
     }
@@ -105,13 +115,55 @@ function indicatorStates(input: Json | undefined, preserveIdentity = true): Indi
 /** Keep repeated/custom descriptor IDs; availability is checked by the applying host. */
 export function parseIndicatorStates(input: unknown): IndicatorState[] { return indicatorStates(readJson(input)); }
 
-function templateIndicatorStates(input: Json | undefined, requireIdentity = false): IndicatorState[] {
-  const entries = list(input, 'indicators', 256);
+/**
+ * Whether a study is its host's rather than the user's: one the user may not
+ * remove, or cannot see. Internal, shared with the template planners.
+ */
+export function hostOwnedStudy(policy: Readonly<IndicatorPolicy> | undefined): boolean {
+  return policy?.removable === false || policy?.listed === false;
+}
+
+/**
+ * Which entries a portable template keeps. A study its host keeps from the
+ * user is the host's, and so is every study that reads its output, since a
+ * copy would read nothing. Also returns the ids of the entries left out.
+ */
+function portableEntries(entries: readonly Json[]): { kept: Json[]; left: Set<string> } {
+  const records = entries.map(item => record(item, 'indicator'));
+  const out = records.map(entry => {
+    if (entry.policy === undefined) return false;
+    try { return hostOwnedStudy(parseIndicatorPolicy(entry.policy)); }
+    catch { throw new WorkspaceDocumentError('Invalid indicator policy'); }
+  });
+  const left = new Set<string>();
+  const reads = (entry: Record<string, Json>): boolean => {
+    const settings = entry.settings, keys = Array.isArray(entry.studyInputs) ? entry.studyInputs : [];
+    if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) return false;
+    return keys.some(key => {
+      const source = typeof key === 'string' ? settings[key] : undefined;
+      return source !== null && typeof source === 'object' && !Array.isArray(source)
+        && typeof source.instanceId === 'string' && left.has(source.instanceId);
+    });
+  };
+  for (let grew = true; grew;) {
+    grew = false;
+    records.forEach((entry, index) => {
+      if (!out[index] && reads(entry)) out[index] = grew = true;
+      if (out[index] && typeof entry.instanceId === 'string' && !left.has(entry.instanceId)) { left.add(entry.instanceId); grew = true; }
+    });
+  }
+  return { kept: entries.filter((_, index) => !out[index]), left };
+}
+
+function templateIndicatorStates(input: Json | undefined, requireIdentity = false, left?: Set<string>): IndicatorState[] {
+  // A portable template is the user's own copy of the user's own studies.
+  const portable = portableEntries(list(input, 'indicators', 256)), entries = portable.kept;
+  for (const id of portable.left) left?.add(id);
   const connected = entries.some(item => {
     const keys = record(item, 'indicator').studyInputs;
     return Array.isArray(keys) && keys.length > 0;
   });
-  const states = indicatorStates(entries, connected || requireIdentity);
+  const states = indicatorStates(entries, connected || requireIdentity, false);
   if (requireIdentity && states.some(state => state.instanceId === undefined)) {
     throw new WorkspaceDocumentError('Template layout requires every indicator instance ID');
   }
@@ -171,7 +223,8 @@ function chartPanes(input: Json | undefined): PaneState[] {
 function templatePayload(input: Json): IndicatorTemplatePayload {
   if (Array.isArray(input)) return { indicators: templateIndicatorStates(input) };
   const source = record(input, 'indicator template payload');
-  const indicators = templateIndicatorStates(source.indicators, source.layout !== undefined);
+  const left = new Set<string>();
+  const indicators = templateIndicatorStates(source.indicators, source.layout !== undefined, left);
   if (source.layout === undefined) return { indicators };
   const layout = record(source.layout, 'indicator template layout');
   const panes = chartPanes(layout.panes);
@@ -181,6 +234,13 @@ function templatePayload(input: Json): IndicatorTemplatePayload {
     if (study.paneIndex >= panes.length) throw new WorkspaceDocumentError('Template indicator pane is missing');
   }
   for (const pane of panes) for (const scale of [pane.priceScale, ...Object.values(pane.scales ?? {})]) {
+    // A scale a study left out owned lets go of its range, as it would on a replace.
+    const owner = scale?.indicatorRange;
+    if (scale && owner && left.has(owner.instanceId)) {
+      delete scale.indicatorRange; delete scale.fixedRange;
+      if (!owner.manual) { scale.autoScale = true; delete scale.range; delete scale.ratioLock; }
+      continue;
+    }
     if (scale?.indicatorRange && !studies.has(scale.indicatorRange.instanceId)) {
       throw new WorkspaceDocumentError('Template scale range owner is missing');
     }
@@ -191,7 +251,10 @@ function templatePayload(input: Json): IndicatorTemplatePayload {
     }
   };
   const bindings = new Map<string, Map<string, PriceScaleId>>();
-  const plots = list(layout.plots, 'template plot bindings', 100000).map(item => {
+  const plots = list(layout.plots, 'template plot bindings', 100000).filter(item => {
+    const id = record(item, 'template plot binding').instanceId;
+    return typeof id !== 'string' || !left.has(id);
+  }).map(item => {
     const binding = record(item, 'template plot binding');
     const instanceId = string(binding.instanceId, 'template plot instanceId');
     const study = studies.get(instanceId);
@@ -251,6 +314,7 @@ function chartState(input: Json | undefined): WorkspaceChartState {
   if (source.priceOnlyAutoScale !== undefined) out.priceOnlyAutoScale = boolean(source.priceOnlyAutoScale, 'priceOnlyAutoScale');
   if (source.indicatorLegendCollapsed !== undefined) out.indicatorLegendCollapsed = boolean(source.indicatorLegendCollapsed, 'indicatorLegendCollapsed');
   if (source.indicators !== undefined) out.indicators = indicatorStates(source.indicators);
+  if (source.sourceAbove !== undefined) out.sourceAbove = string(source.sourceAbove, 'sourceAbove');
   if (source.alerts !== undefined) {
     try { out.alerts = parseAlertsDocument(source.alerts); }
     catch (error) { throw new WorkspaceDocumentError(error instanceof Error ? error.message : 'Invalid alert document'); }

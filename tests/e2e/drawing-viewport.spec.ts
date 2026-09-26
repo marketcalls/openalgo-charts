@@ -622,3 +622,36 @@ test('a pinned ellipse and table hold through a pan, a note follows its pane thr
   await page.screenshot({ path: info.outputPath('panes-after-paste.png') });
   expect(errors).toEqual([]);
 });
+
+test('a pinned box paints inside chart.plotRect, beside a left axis and in a lower pane', async ({ page }, info) => {
+  const errors = await mount(page);
+  const layout = await page.evaluate(() => {
+    const { chart, draw, box, note, moving } = (window as any).__pin;
+    for (const id of [box, note, moving]) draw.remove(id);
+    // A left scale gives the plot a left column, and a second pane moves the plot down.
+    const bars = chart.primaryBars();
+    chart.addSeries('line', { priceScaleId: 'left' }).setData(bars.map((bar: { time: number; close: number }) => ({ time: bar.time, value: bar.close / 100 })));
+    chart.addSeries('line', { paneIndex: 1 }).setData(bars.map((bar: { time: number; close: number }) => ({ time: bar.time, value: bar.close })));
+    const pinned = draw.add({ tool: 'rectangle', paneIndex: 1, points: [], space: 'viewport',
+      viewportPoints: [{ x: 0.2, y: 0.25 }, { x: 0.6, y: 0.75 }], style: { color: '#ff00ff', lineWidth: 4 } });
+    (window as any).__pin.box = pinned.id;
+    return { rect: chart.plotRect(1), top0: chart.plotRect(0), screen: draw.screenPoints(pinned.id), dpr: devicePixelRatio };
+  });
+  expect(layout.rect.left).toBeGreaterThan(20);
+  expect(layout.rect.top).toBeGreaterThan(layout.top0.top + layout.top0.height - 1);
+  // The host reads the same rectangle the drawing is placed by.
+  expect(layout.screen[0].x).toBeCloseTo(layout.rect.left + 0.2 * layout.rect.width, 6);
+  expect(layout.screen[0].y).toBeCloseTo(layout.rect.top + 0.25 * layout.rect.height, 6);
+  expect(layout.screen[1].x).toBeCloseTo(layout.rect.left + 0.6 * layout.rect.width, 6);
+  expect(layout.screen[1].y).toBeCloseTo(layout.rect.top + 0.75 * layout.rect.height, 6);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.screenshot({ path: info.outputPath('pinned-in-lower-pane.png') });
+  // Pane 1's top canvas: its pixels sit where the rectangle says, within a stroke.
+  const ink = await inkBox(page, MAGENTA, '#c canvas', 3);
+  const { rect, dpr } = layout, stroke = 4 * dpr;
+  expect(Math.abs(ink.x0 - (rect.left + 0.2 * rect.width) * dpr)).toBeLessThanOrEqual(stroke);
+  expect(Math.abs(ink.x1 - (rect.left + 0.6 * rect.width) * dpr)).toBeLessThanOrEqual(stroke);
+  expect(Math.abs(ink.y0 - 0.25 * rect.height * dpr)).toBeLessThanOrEqual(stroke);
+  expect(Math.abs(ink.y1 - 0.75 * rect.height * dpr)).toBeLessThanOrEqual(stroke);
+  expect(errors).toEqual([]);
+});

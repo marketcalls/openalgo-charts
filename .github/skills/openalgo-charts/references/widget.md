@@ -238,6 +238,14 @@ symbol and its `exchangeKey` commit together; a missing exchange defaults to
 an empty string. Without lookup, manual symbol entry remains available.
 Price picks resolve the study's actual pane and scale, including hidden scales;
 a mixed-scale study needs an explicit target. Drawing placement blocks picking.
+A price paired with a timestamp (`timeKey`) gets **Pick point on chart** instead:
+one click through `chart.beginPick('point')` fills both fields and reaches
+`onPatch` as one patch holding both keys, and cancelling writes neither. The
+hint reads "Pick {time} and {price} on the chart" (message keys
+`Pick point on chart` and `Pick {time} and {price} on the chart`). The target is
+`studyInputTarget` from the draw tier, the same one the chart's anchor uses. The
+widget's `DrawingController` draws an `anchor: true` pair's handle, and Mod+Z,
+the rail's Undo and the phone bar take a drag of it back.
 Context changes, study removal and chart destruction cancel pending controls.
 
 Alert panels use optional `WidgetContext.alerts`, supplied automatically by
@@ -369,6 +377,24 @@ selection, and external-indicator data status. Only supported actions appear; an
 action returning `false` or throwing reports through the existing toast. No primary
 source removal control is offered. Settings reuse the widget's current chart,
 indicator and drawing editors. Drawing actions use existing undo history.
+
+Each pane section lists its stack in draw order, back to front (`objects.stack(pane)`),
+a group at its first member's place and rows outside the stack after. A drawing row
+notes **Behind series** or **Above** and the row it sits on. Dragging a row onto the
+upper half of another puts it under that row in paint order, the lower half over it;
+`dragover` accepts only a drop `objects.canPlace` allows, marking the row
+`is-drop-before` / `is-drop-after`, so an unpaintable drop is refused before release.
+**Earlier** and **Later** step through the same order with `objects.place` (a source or
+study steps between whole slots); rows outside the stack keep `reorder`. A drop onto a
+row of another pane moves the row there first. A custom `objects` model without `stack`
+keeps the list order.
+
+Study policies reach the panel the same way: an unlisted study has no row, and a
+protected one offers only the actions its policy allows. Elsewhere the widget greys the
+context menu's settings and remove rows with the note "protected", greys the indicator
+picker's remove button, declines the settings dialog with a toast ("{name} settings are
+protected"), and leaves unlisted studies out of the picker's running list and the alert
+source lists. See [study policies](core-api.md#study-policies).
 
 Drawing policies reach the panel through the inventory: an unlisted drawing
 (`policy.listed: false`) has no row, a read-only one (`policy.editable: false`)

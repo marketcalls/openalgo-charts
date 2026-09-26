@@ -505,6 +505,32 @@ draw(ctx, rc) {
 
 The array is the live one the data layer holds. Treat it as read-only.
 
+### Painting between studies
+
+`zOrder()` picks a band: `'bottom'` behind every series, `'normal'` over them with the
+price lines and markers, `'top'` on the overlay canvas. A primitive can also paint inside
+the series band, directly above the price source or one study of its pane, with
+`chart.setPrimitiveStackAbove(primitive, entry)`. The entry is an id from
+`chart.seriesStack(paneIndex)`: `'source:primary'` or `'indicator:<instance id>'`.
+
+```ts
+chart.addPrimitive(shade, 0);
+// Over the candles, under every study drawn after them.
+chart.setPrimitiveStackAbove(shade, 'source:primary');
+// Back to its own band.
+chart.setPrimitiveStackAbove(shade, null);
+```
+
+It paints right after that entry's last series on the pane, and a renderer that batches
+series (the WebGL2 backend) flushes first, so the order holds on every backend. While the
+entry plots no series on that pane the primitive paints in its own `zOrder()` band. A
+placed primitive repaints with the base canvas whatever its `zOrder()`, and the pointer
+ranks it by where it paints: a primitive painted over the series (a `'normal'` or
+`'top'` one in its own band) takes the press wherever it answers, and a study painted
+over it takes the context menu. This is how the draw tier puts a drawing between
+studies; see [Draw order](/docs/drawing-tools#draw-order).
+The call returns false for a primitive that is on no pane.
+
 ## `bestHit` helper
 
 When a pane contains several independent primitives that each implement `hitTest`, the chart
@@ -537,6 +563,12 @@ function bestHit(hits: readonly (PrimitiveHit | null)[]): PrimitiveHit | null
 ```
 
 `null` entries in the input array are skipped. Returns `null` if every entry is `null`.
+
+A primitive that answers for others (the draw tier's front layer answers for the
+layers under it) sets `paintedBy` on a hit to the primitive that painted it. Where
+that hit and a series lie under a right-click, the chart compares where each paints
+and gives the context menu to the one on top. A hit without `paintedBy` takes the
+menu over any series, as it always did.
 
 Composite primitives may return an optional `hoverKey` to distinguish regions
 that share an `externalId`. The chart forwards the key in `PrimitiveRenderContext`

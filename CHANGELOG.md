@@ -262,6 +262,130 @@ import by 43.
   budget). The release that ships it re-measures every size fact written out
   by hand (the README tier table, the website, the landing page, the diagram
   and the skills), which still carry the 2.5.5 figures.
+### Added
+
+- Study policies. A study carries an `IndicatorPolicy` of four independent flags,
+  each defaulting to true, the way a drawing carries its `DrawingPolicy`:
+  `removable`, `configurable`, `movable` and `listed`. Pass it with
+  `addIndicator(id, settings, { policy })`, read it with `indicator.policy()`
+  (the flags that are false) and replace it with `indicator.setPolicy(policy)`,
+  or `null`, which is always the host's act. A policy restricts the user: every
+  native call a user control makes treats its caller as the user unless it passes
+  `{ force: true }` (`IndicatorEditOptions`), and returns false with nothing
+  changed when refused. `removable` covers `chart.removeIndicator`,
+  `indicator.remove` and `chart.removePane` for a pane holding the study;
+  `configurable` covers `setSettings`, `setPriceScale` and `setPlotPriceScales`;
+  `movable` covers `chart.moveIndicator`, `chart.reorderIndicator` and
+  `chart.moveInSeriesStack`. `setSettings` and `remove` now return a boolean. The
+  legend row drops its close button and gear (and a stale press on either does
+  nothing); a row whose buttons the host set with `legend().setOptions({ actions })`
+  keeps them through every restack, with the policy laid over them. `ChartObjects`
+  withholds remove, settings, reorder, move and place and leaves an unlisted study
+  out, and the widget greys its settings and remove menu rows and the picker's
+  remove button with the note "protected", declines the settings dialog with the
+  reason, reports a write the host refused after locking the study while the
+  dialog was open, and leaves an unlisted study out of the picker and the alert
+  source lists. Hiding a study stays the user's choice. A restore is the host's act
+  and replaces a protected study. The chart state saves only the restrictions
+  (`IndicatorState.policy`), so an unrestricted layout is written exactly as before
+  and older layouts restore unrestricted; a malformed policy refuses the restore.
+  Workspace documents keep policies. A portable template is the user's copy of the
+  user's own studies: it leaves out every study the host keeps from the user (one
+  that is not `removable` or not `listed`) and every study reading the output of
+  one, lets go of a scale range such a study owned, and copies a study with other
+  restrictions without them. A template applied in `replace` mode keeps the host's
+  studies, on their own panes, so it neither copies nor removes them.
+  `parseIndicatorPolicy` validates a policy. The yfinance host adds **Add Protected
+  VWAP** to its chart menu and removes it with `force`; importing or loading a
+  layout keeps it, and a layout file's own restricted studies are left out.
+- Draw order across sources, studies and drawings. A pane paints in bands, back
+  to front: behind the series, the series band, the overlay band (price lines,
+  markers, study levels) and in front. The series band holds the price source and
+  each study in paint order, read with `chart.seriesStack(paneIndex)`, and
+  `chart.moveInSeriesStack(id, target, 'above' | 'below', options?)` moves the source
+  or a study next to another entry; a study's fills, levels and markers keep their
+  bands and follow the new study order. A drawing can now sit between studies:
+  `Drawing.stackAbove` names the entry it paints directly above,
+  `draw.placeInStack(id, { drawing } | { entry }, where)` puts it next to another
+  drawing or an entry as one undo step, `reorder`, `bringToFront` and `sendToBack`
+  work within the slot it paints in, and `sendBehindSeries` and `bringAboveSeries`
+  take it out of the series band. Any primitive can be placed the same way with
+  `chart.setPrimitiveStackAbove(primitive, entry)`; a batching renderer flushes
+  before it, so the WebGL2 backend keeps the order. `ChartObjects.stack(paneIndex)`
+  lists a pane back to front, and `canPlace` and `place` move a drawing anywhere in
+  its pane and a source or study only between whole slots, taking the drawings
+  placed on it along; a move the bands cannot paint is refused. Rows gain `band`,
+  `stackAbove` and the `place` capability (`ChartObjectBand`,
+  `ChartObjectDrawingSource.placeInStack`, `DrawingStackTarget`). The pointer takes
+  what is painted on top: the front drawing layer answers for every layer of its
+  pane front to back; whatever paints over the series (the overlay band and the
+  front) takes a press, a hover, a click or the context menu from whatever paints
+  with or behind it (a drawing or primitive placed in the series band, a drawing
+  behind the series, a bottom primitive) wherever it answers, whatever the
+  distance, so a box placed under an order line gives the line the press; and a
+  right-click over a drawing or placed primitive and a series painted over it
+  targets the series (`PrimitiveHit.paintedBy`). A bottom primitive, such as a
+  bracket's stop line, now yields the same way to a primitive over the series
+  within reach, where it used to win by being nearer. The price source stays the pane's instrument wherever it
+  paints: the crosshair readout, the last-price line and a rebased axis describe it.
+  A moved source saves `ChartState.sourceAbove`; a drawing's slot is saved in the
+  drawing document and carried by duplicate and the clipboard; a drawing whose
+  study is gone paints in front until the study returns. Layouts and drawing
+  documents from 2.5.5 load and paint unchanged. The widget's Objects panel lists
+  each pane in draw order, notes a drawing behind the series or above an entry,
+  reorders by dragging a row onto the upper or lower half of another and refuses a
+  drop the bands cannot paint before it lands, and Earlier and Later step through
+  the same order.
+- Paired time and price inputs. A `price` input can name a declared `timestamp`
+  input with `timeKey`, making the two one point on the chart; `anchor: true` adds
+  a handle there. Registration refuses a `timeKey` that names no timestamp input,
+  the price itself or a timestamp another price already pairs with, and an
+  `anchor` without a `timeKey`. `chart.beginPick('point', cb, options?)` captures
+  both halves from one click as a `PickPoint` (`{ time, price }`, the time snapped
+  to the bar), reads the price on the target scale and answers only when both
+  resolve; `pick:start` and `pick:end` carry `kind: 'point'`. The widget's and the
+  reference host's settings forms offer **Pick point on chart** on the price row
+  and commit both keys in one patch. The drawing tier draws the anchor on the pane
+  and scale a pick of the price reads (`studyInputTarget(chart, study, key)`,
+  exported from `openalgo-charts/draw`): dragging it previews the point with guides
+  to both axes and writes both settings in one patch on release, Escape cancels, an
+  active drawing tool or a waiting pick takes the press, and a study whose policy is
+  `configurable: false` keeps it still. Each drag is one step of the drawing undo
+  history, in order with the drawings, so Ctrl+Z, the rail and the phone bar take it
+  back in both hosts; the step emits `drawing:change` with empty `ids` so Undo
+  controls refresh. `draw.moveInputAnchor(studyId, key, point)` moves an anchor the
+  way a drag does, as one step, for a host control that sets the point another way
+  (a point pick). `new DrawingController(chart, { inputAnchors: false })` draws
+  none. The reference host adds the Anchored growth sample.
+- `chart.plotRect(paneIndex)` returns a pane's plot in container px (`PlotRect`:
+  `left`, `top`, `width`, `height`), inside the price axis columns and above the
+  time axis, or null for a collapsed, hidden or missing pane. It scales the pane
+  first, as a price conversion does, so a pane no frame has painted yet (just made
+  or just moved) answers in its prices and not its placeholder range. The draw tier now
+  places, moves and converts drawings pinned to the screen by it rather than
+  working the rectangle out from the scales, so `draw.screenPoints` and a host
+  overlay laid against `plotRect` agree. `DrawingChartHost` gains the optional
+  `plotRect` and drops the optional `priceAxisLayout` it no longer reads.
+- `chart.setTickSchedule(schedule | null)` and `chart.tickSchedule()` put the
+  instrument's price-dependent ticks on the chart. `Instrument.applyTo` sets it,
+  and a host with its own metadata calls it; it also reaches `chart.trading`, now or
+  when that layer is built. `chart.snapPrice` on the price pane then rounds with the
+  band the price falls in, and a dragged price alert lands on that band's tick, a
+  range bound stopping a band tick inside an off-tick opposite bound. With no
+  schedule every rounding is unchanged. A schedule without `round` and `step` is
+  refused when it is set, not on the first drag. `AlertChartHost` gains the optional
+  `tickSchedule()`. The reference host hands its `BANDED` schedule to both charts.
+- `chart.addIndicator(id, settings, { instanceId })` gives the study that id, so a
+  host that brings a removed study back (an undo) brings back its identity and the
+  studies reading its output and the alerts naming it find it again. An id a study
+  on the chart holds now throws; the id of a removed study is free to take back.
+
+### Fixed
+
+- The corner logo no longer takes a press meant for something over it. A note
+  pinned to the screen in the corner, a drawing crossing the mark or an order line
+  gets the press, the drag, the hover and the double click, and the logo's link
+  opens only where nothing else answers the pointer.
 
 ## 2.5.5
 

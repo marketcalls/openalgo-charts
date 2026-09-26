@@ -3,6 +3,7 @@ import type { Bar } from '../model/bar';
 import type { ChartDataContext } from '../model/indicator-registry';
 import type { IndicatorApi } from '../model/indicator-instance';
 import type { IPrimitive } from '../primitives/primitive';
+import type { TickSchedule } from '../feed/tick-schedule';
 
 /** A primary-source mutation, emitted after indicator invalidation. */
 export interface ChartDataUpdate {
@@ -31,6 +32,12 @@ export interface AlertChartHost {
    * nothing to round to, and inventing one would move a price somebody chose.
    */
   snapPrice?(paneIndex: number, price: number): number;
+  /**
+   * The instrument's tick schedule, or null for a constant tick. A dragged
+   * price alert lands on the band its price falls in. Optional; absent keeps
+   * the source scale's one tick.
+   */
+  tickSchedule?(): TickSchedule | null;
   /**
    * Slot of the price pane, where a price alert draws and where a drawing
    * needs no input plot. It moves when a host puts the price pane below its

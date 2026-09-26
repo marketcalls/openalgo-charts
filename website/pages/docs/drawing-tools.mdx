@@ -336,8 +336,10 @@ chart has a different interval loaded.
 | `finish()` | End a variable-anchor shape (`path`, `polyline`) at the anchors placed so far. Returns whether it committed. Double-click already calls it. |
 | `select(id \| ids \| null, additive?)` / `selected()` / `selection()` | Selection. `additive` toggles each id; `selected()` is the primary id, `selection()` the list in pick order. |
 | `duplicate(ids)` / `nudge(ids, dx, dy)` | Clone with the paste offset and select the clones; move by a screen distance. One undo step each. |
-| `setZIndex(id, z)` / `bringToFront(id)` / `sendToBack(id)` | Paint order within the drawing's own side of the series. |
-| `sendBehindSeries(id)` / `bringAboveSeries(id)` | Cross the series: below zero paints under the candles. |
+| `setZIndex(id, z)` / `bringToFront(id)` / `sendToBack(id)` | Paint order within the slot the drawing paints in: its side of the series, or the entry it is placed above. |
+| `reorder(id, direction)` | One step through the same slot, as one undo step. |
+| `sendBehindSeries(id)` / `bringAboveSeries(id)` | Cross the series: below zero paints under the candles. Either one takes a drawing out of the series band. |
+| `placeInStack(id, target, where)` | Put a drawing directly `'above'` or `'below'` another drawing (`{ drawing: id }`) or a series-band entry (`{ entry: 'indicator:<id>' }`) of its pane, as one undo step. See [Draw order](#draw-order). |
 | `copy(target?)` / `cut(target?)` / `paste()` | Clipboard, all async. See [Drawing Clipboard](/docs/drawing-clipboard). |
 | `clipboard()` | The `DrawingClipboard` behind those three, for reporting why a copy did not reach the OS clipboard. |
 | `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A paste of several drawings is one step. `canUndo()` and `canRedo()` report only a step that still changes something. |
@@ -353,7 +355,10 @@ chart has a different interval loaded.
 `draw:cut` and `draw:paste` all fire on `chart.on(...)`. The 2.0 pair `drawing:select`
 (`{ ids }`, the whole selection) and `drawing:change` (`{ ids, kind }`, one per mutation)
 fire alongside them for a host that tracks a multi-selection, and `drawing:hover`
-(`{ id }`) when the unselected drawing under the pointer changes.
+(`{ id }`) when the unselected drawing under the pointer changes. A drag of a
+[study input anchor](/docs/indicators#a-time-and-a-price-that-belong-together) is a step
+of the same undo history and emits `drawing:change` with empty `ids`, so a host's Undo
+button refreshes on the event it already listens to.
 
 <Callout type="info">
 The controller listens on the **event bus** (`click`, `crosshair:move`, `drag`, `drag:end`),
@@ -445,7 +450,7 @@ makes.
 A copy is the user's own drawing: paste and duplicate never carry a policy. A policy is
 data, so it survives a save and a restore for a persistent drawing, and the migration keeps
 only the four boolean flags; strip `policy` before `fromJSON` when importing a document you
-do not trust, the way the yfinance host does for every layout file it imports. Stacking order (front, back, either side of the series) is outside the policy.
+do not trust, the way the yfinance host does for every layout file it imports. Stacking order (front, back, either side of the series, a place in the series band) is outside the policy.
 
 The widget draws every edit control for a read-only selection disabled with the note
 "read-only" (context menu, properties dialog, rail, mobile bar) and keeps copy and duplicate.
@@ -453,6 +458,60 @@ The [Objects](/docs/objects) panel leaves unlisted drawings out and offers a rea
 no hide, lock or remove. The yfinance reference host's **Mark ... for This Session** menu
 row places a read-only, transient, unlisted line, puts it back after every rebuild or
 restore, and clears the marks with `force`.
+
+## Draw order
+
+A pane paints in bands, back to front:
+
+1. **Behind the series**: study fills and shading, profiles, and drawings sent behind the series (`zIndex` below zero).
+2. **The series band**: the price source and each study, in the order `chart.seriesStack(paneIndex)` lists them, and drawings placed directly above one of them.
+3. **The overlay band**: price lines, markers and study levels.
+4. **In front**: drawings (the default place), legends, tables and trading controls.
+
+A drawing's `stackAbove` names the series-band entry it sits on: `'source:primary'` or
+`'indicator:<instance id>'`, the same ids the [Objects](/docs/objects) inventory uses. It
+paints right after that entry's series and before the next entry's, so a box can sit over
+the candles and under a moving average, or between two studies. `zIndex` orders the
+drawings placed on the same entry.
+
+```ts
+const ema = chart.addIndicator('ema', { length: 21 });
+const box = draw.add({ tool: 'rectangle', paneIndex: 0, style: { fill: true }, points });
+
+// Over the candles, under the average.
+draw.placeInStack(box.id, { entry: 'source:primary' }, 'above');
+// Directly above the average.
+draw.placeInStack(box.id, { entry: 'indicator:' + ema.id }, 'above');
+// Next to another drawing: it joins the slot that drawing paints in.
+draw.placeInStack(box.id, { drawing: other.id }, 'below');
+```
+
+`placeInStack` renumbers the drawings of the slot it lands in (below the series up to -1,
+elsewhere from 0) and records one undo step; like every stacking call it is outside a
+drawing's [policy](#drawing-policies). Below an entry means on top of the slot under it,
+and below the first entry means on top of the drawings behind the series. It returns
+false, and records nothing, for a target on another pane or a move that changes nothing.
+
+While the entry a drawing is placed on plots no series on its pane (the study was removed
+or moved to another pane) the drawing paints in front, by its `zIndex`, and it returns to
+its place when the entry does: `stackAbove` is kept, saved in the drawing document and
+carried by copy, duplicate and paste. On another chart the entry does not exist, so a paste
+there lands in front. Older documents have no `stackAbove` and paint exactly as before.
+
+The pointer takes what is painted on top. The front layer answers for every layer of its
+pane, front to back: a click lands on the uppermost drawing under it wherever each one
+paints, and the selected drawing's handles always paint in front. Whatever paints over
+the series (price lines, order lines, markers, drawings in front) takes the press, the
+hover and the menu from a drawing placed in the series band or sent behind the series
+wherever it answers, whatever the distance, so a box placed under an order line gives
+the line the press. Where a drawing and a source or study both lie under a right-click,
+the one painted on top is the menu's target, so a drawing behind the series or under a
+study gives way to that series there.
+
+A study or the price source moves in the series band with `chart.moveInSeriesStack(id,
+target, where)`. The drawings placed on it move with it, since nothing can paint between an
+entry and a drawing placed on it. The [Objects](/docs/objects#draw-order) inventory
+combines both into one list per pane and refuses a move the bands cannot paint.
 
 ## Pinned to the screen
 
@@ -483,7 +542,11 @@ right edge, with the price axes outside that span. `y` runs from 0 at the top of
 drawing belongs to its pane, so it moves with the pane, keeps its fraction of the pane when
 the separator is dragged, and comes back where it was when a collapsed pane is opened again.
 There is no whole-chart coordinate. Pixel sizes stay pixel sizes: a note's font does not
-scale with the chart, while both corners of a box do.
+scale with the chart, while both corners of a box do. The plot is the rectangle
+[`chart.plotRect(paneIndex)`](/docs/scales-and-panes#where-a-panes-plot-is) reports, so
+an HTML overlay a host lays against it lines up with a pinned drawing, and
+`draw.screenPoints(id)` returns anchors in the same container px. A note pinned over the
+chart's corner logo takes presses there; the logo yields to it.
 
 **Which tools.** Text, rectangle, ellipse and table. Their shape and text come from their
 own anchors, and nothing they print is a price or a time. Tools that print prices (the

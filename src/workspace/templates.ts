@@ -1,5 +1,5 @@
 import type { IndicatorState } from 'openalgo-charts';
-import { parseIndicatorStates, parseTemplateIndicatorStates } from './documents';
+import { hostOwnedStudy, parseIndicatorStates, parseTemplateIndicatorStates } from './documents';
 import { WorkspaceDocumentError } from './json';
 
 export type IndicatorTemplateMode = 'replace' | 'append';
@@ -41,7 +41,23 @@ export function planIndicatorTemplate(
     // chart's, and its study panes take the chart's slots in order around it.
     for (const item of additions) item.paneIndex = fromTemplatePane(item.paneIndex, primaryPaneIndex);
   }
-  const planned = mode === 'replace' ? additions : [...previous, ...additions];
+  // Replacing is the user's act, so a study the host keeps from the user (one
+  // they may not remove, or cannot see) stays, on its own pane, and the
+  // template's pane groups take the free slots after it.
+  const kept = mode === 'replace' ? previous.filter(item => hostOwnedStudy(item.policy)) : [];
+  const occupied = new Set(kept.map(item => item.paneIndex).filter(index => index !== primaryPaneIndex));
+  if (occupied.size) {
+    const groups = [...new Set(additions.map(item => item.paneIndex).filter(index => index !== primaryPaneIndex))].sort((a, b) => a - b);
+    const slots = new Map<number, number>();
+    let next = -1;
+    for (const group of groups) {
+      do next++; while (occupied.has(next) || next === primaryPaneIndex);
+      slots.set(group, next);
+    }
+    for (const item of additions) item.paneIndex = slots.get(item.paneIndex) ?? item.paneIndex;
+    if (next > 31) throw new WorkspaceDocumentError('Indicator pane limit exceeded');
+  }
+  const planned = mode === 'replace' ? [...kept, ...additions] : [...previous, ...additions];
   if (planned.length > 256) throw new WorkspaceDocumentError('At most 256 indicator instances are supported');
   const missing = [...new Set(planned.filter(item => !available.has(item.indicatorId)).map(item => item.indicatorId))];
   if (missing.length) throw new WorkspaceDocumentError(`Missing indicators: ${missing.join(', ')}`);

@@ -64,7 +64,22 @@ export type IndicatorInput =
   | { key: string; type: 'session'; label: string; default: string; group?: string; tooltip?: string }
   | { key: string; type: 'multiline'; label: string; default: string; group?: string; tooltip?: string }
   | { key: string; type: 'price'; label: string; default: number; min?: number; max?: number; step?: number;
-      pick?: boolean | { paneIndex?: number; priceScaleId?: PriceScaleId }; group?: string; tooltip?: string }
+      pick?: boolean | { paneIndex?: number; priceScaleId?: PriceScaleId }; group?: string; tooltip?: string;
+      /**
+       * Key of a declared `timestamp` input this price pairs with: together
+       * they name one point, a bar time and a price. A host picks both from
+       * one click (`Chart.beginPick('point')`) and writes them in one settings
+       * patch, so the study never computes on the time of one pick and the
+       * price of another. A timestamp pairs with one price at most.
+       */
+      timeKey?: string;
+      /**
+       * With `timeKey`: a handle on the chart at the point, on the same pane
+       * and scale a pick of this price uses, that drags the time and the price
+       * together as one settings change and one undo step. The drawing tier's
+       * controller draws it; a study the user may not configure keeps it still.
+       */
+      anchor?: boolean }
   /** Absolute UTC seconds. Independent of the chart timezone and legacy wall-clock `time` inputs. */
   | { key: string; type: 'timestamp'; label: string; default: number; min?: number; max?: number; step?: number;
       pick?: boolean; group?: string; tooltip?: string }

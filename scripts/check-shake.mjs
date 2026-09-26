@@ -174,7 +174,28 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // 0.66 KiB). Reading each session window's bar offset rather than one for all
 // brings it to 77575 bytes (75.76 KiB); allow 75.76 KiB. SessionCalendar
 // itself only rides in by type.
-const LIMIT_BYTES = 75.76 * 1024;
+// Study policies and the uniform draw order are core chart behaviour: every
+// study call a user control makes honours its policy, the legend drops the
+// buttons a policy withholds, the pane paints a primitive placed in the series
+// band between two studies (flushing a batching backend first), the context
+// menu ranks a drawing against the series painted over it, the price source
+// stays the instrument wherever it paints, and the chart state saves both.
+// Measured 75.07 to 76.63 KiB (1.56 KiB); allow 76.63 KiB. The inventory's
+// placement rules, the drawing layers and the panel stay out of this import.
+// A study's paired time and price are one point, and the chart answers what a
+// host asks about it: the pair's validation, the 'point' pick that captures
+// both from one click, the plot rectangle a host overlay and the draw tier's
+// pinned drawings both read (chart.plotRect), the tick schedule the chart now
+// holds so a dragged price alert rounds by band, and the corner mark yielding
+// the pointer to whatever lies over it. Measured 76.63 to 76.90 KiB (0.27
+// KiB), with the base bundle 121.49 to 121.76 kB; allow 76.91 KiB. The anchor
+// handle, its drag and its undo step live in the draw tier and stay out.
+// Review fixes add 0.17 KiB: a legend row keeps the buttons its host set, the
+// pane ranks a hit by the band it paints in before its distance, plotRect
+// scales the pane it answers for, addIndicator takes back a removed study's
+// id, and a tick schedule must round and step. Measured 76.90 to just over
+// 77.07 KiB, with the base bundle 121.76 to 121.97 kB; allow 77.08 KiB.
+const LIMIT_BYTES = 77.08 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

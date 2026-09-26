@@ -2,7 +2,6 @@ import type { Chart } from '../core/chart';
 import { tryResolveInterval } from './intervals';
 import { isValidTimezone, parseSessionSpec, utcSecondsToZonedParts, zonedWallClockToUtcSeconds, type SessionSpec } from './time';
 import { TickSchedule, type TickBand } from './tick-schedule';
-import { applyInstrumentTicks } from '../core/trading-controller';
 import { InvalidationLevel } from '../core/invalidate-mask';
 
 export interface InstrumentCalendar {
@@ -344,6 +343,6 @@ export class Instrument {
     chart.dataLayer.setSessionCalendar(this);
     // Drags snap by the same schedule the order constraints carry, and a
     // constant tick clears the one an earlier instrument left.
-    applyInstrumentTicks(chart, this.tickSchedule);
+    chart.setTickSchedule(this.tickSchedule);
   }
 }

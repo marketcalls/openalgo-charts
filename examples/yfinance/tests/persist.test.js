@@ -528,6 +528,24 @@ describe('layout files', () => {
     expect(toastsShown(dom).pop()).toContain('not a layout');
   });
 
+  it('leaves out a study a file restricts, and keeps the protected study of this host through the import', async () => {
+    const doc = { ...upgradeLayout(V1_DOC), dataset: 'MSFT|1h|1mo',
+      indicators: [
+        { indicatorId: 'rsi', settings: {}, paneIndex: 1 },
+        { indicatorId: 'vwap', settings: {}, paneIndex: 0, instanceId: 'theirs', policy: { removable: false } },
+      ],
+      secondary: { state: { indicators: [{ indicatorId: 'sma', settings: {}, paneIndex: 0, policy: { listed: false } }] } } };
+    const parsed = parseLayoutFile(JSON.stringify({ layout: doc }));
+    expect(parsed.indicators).toEqual([{ indicatorId: 'rsi', settings: {}, paneIndex: 1 }]);
+    expect(parsed.secondary.state.indicators).toEqual([]);
+    // The chart holds the host's protected study: the import brings the file's studies and keeps it.
+    const own = { indicatorId: 'vwap', settings: {}, paneIndex: 0, instanceId: 'vwap-9', policy: { removable: false, configurable: false, movable: false } };
+    app.chart.state.indicators = [own];
+    app.chart.indicators = () => [{ id: 'vwap-9', indicatorId: 'vwap', policy: () => own.policy }];
+    expect(await importLayoutFile(JSON.stringify({ layout: doc }))).toBe(true);
+    expect(app.chart.restored[0].indicators).toEqual([{ indicatorId: 'rsi', settings: {}, paneIndex: 1 }, own]);
+  });
+
   it('drops every drawing policy from a file, so a shared layout cannot plant a drawing no control removes', async () => {
     const planted = { id: 'x', tool: 'horizontal-line', paneIndex: 0, zIndex: 0, style: {}, points: [{ time: 1, price: 2 }],
       policy: { editable: false, selectable: false, listed: false } };

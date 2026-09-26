@@ -53,6 +53,17 @@ describe('reference indicator template actions', () => {
     expect(h.app.activeIndicators).toEqual(h.state.indicators); expect(h.app.applyingTemplate).toBe(false);
   });
 
+  it('saves a template without the protected study of the host, and a replace keeps that study once', () => {
+    const h = setup();
+    const pinned = h.chart.addIndicator('rsi', {}, { policy: { removable: false, configurable: false, movable: false } });
+    const captured = captureIndicatorTemplate(h.app, h.target);
+    expect(captured.indicators.map(item => item.indicatorId)).toEqual(['ema']);
+    applyIndicatorTemplate(h.app, h.target, captured, 'replace');
+    expect(h.state.indicators.map(item => item.indicatorId)).toEqual(['rsi', 'ema']);
+    expect(h.chart.indicators()[0].id).toBe(pinned.id);
+    expect(h.chart.indicators()[0].policy()).toEqual({ removable: false, configurable: false, movable: false });
+  });
+
   it('keeps the primary mirror untouched when appending to the second chart', () => {
     const h = setup(2);
     applyIndicatorTemplate(h.app, h.target, [study({ indicatorId: 'rsi', paneIndex: 1 })], 'append');

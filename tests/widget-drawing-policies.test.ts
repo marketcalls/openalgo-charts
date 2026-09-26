@@ -5,7 +5,7 @@
  * must draw it disabled, with the reason, or leave it out.
  */
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
-import { Chart, darkTheme } from 'openalgo-charts';
+import { Chart, darkTheme, registerIndicator } from 'openalgo-charts';
 import type { Bar, ContextMenuEvent, ContextMenuTarget } from 'openalgo-charts';
 import { DrawingController, registerBuiltinDrawingTools, type DrawingInput, type DrawingPolicy } from 'openalgo-charts/draw';
 import { createOverlayStack, WidgetBus, WidgetStorage, type OverlayStack, type WidgetContext } from '../src/widget/context';
@@ -122,6 +122,26 @@ describe('the context menu on a read-only drawing', () => {
     const fib = add(rig.draw, 'fib-retracement', { policy: READ_ONLY });
     expect(menuFor(rig, note.id).find((r) => r.id === 'draw-text')?.disabled).toBe(true);
     expect(menuFor(rig, fib.id).find((r) => r.id === 'draw-levels')?.disabled).toBe(true);
+  });
+});
+
+describe('the alert dialog\'s study lists', () => {
+  it('leave a study its host keeps unlisted out, unless the alert already names it', () => {
+    const rig = makeRig();
+    registerIndicator({ id: 'policy-level', name: 'Level', placement: 'onchart', inputs: [],
+      plots: [{ key: 'v', title: 'Level', type: 'line' }], calc: bars => ({ v: bars.map(() => 100) }) });
+    const shown = rig.chart.addIndicator('policy-level');
+    const quiet = rig.chart.addIndicator('policy-level', {}, { policy: { listed: false } });
+    const line = add(rig.draw, 'horizontal-line', { points: [{ time: T0 + 600, price: 100 }] });
+    const choices = (key: string, draft: Record<string, unknown>): string[] => {
+      const control = alertSourceFields(rig.ctx, draft).controls.find((c) => c.key === key);
+      return (control?.options ?? []).map((o) => o.value);
+    };
+    expect(choices('instanceId', { kind: 'indicator' })).toEqual([shown.id]);
+    expect(choices('instanceId', { kind: 'indicator', instanceId: quiet.id })).toEqual([shown.id, quiet.id]);
+    // The study a drawing alert compares with follows the same rule.
+    expect(choices('inputInstanceId', { kind: 'drawing', drawingId: line.id })).toEqual(['', shown.id]);
+    expect(choices('inputInstanceId', { kind: 'drawing', drawingId: line.id, inputInstanceId: quiet.id })).toEqual(['', shown.id, quiet.id]);
   });
 });
 
