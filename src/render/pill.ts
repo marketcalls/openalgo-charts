@@ -5,6 +5,7 @@
  * both light and dark themes.
  */
 
+/** A parsed colour: channels on the 0 to 255 scale and alpha on 0 to 1, neither clamped. */
 export interface Rgba { r: number; g: number; b: number; a: number; }
 
 /** Parse #rgb/#rrggbb/#rrggbbaa and rgb()/rgba() strings. Null when unknown. */

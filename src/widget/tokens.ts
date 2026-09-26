@@ -14,10 +14,12 @@
  * touches an element, and it only writes `style.setProperty`.
  */
 import type { ChartTheme } from 'openalgo-charts';
-// A pure helper, so importing it by path inlines the one function and nothing else.
-import { srgbLuminance, type Rgba } from '../render/pill';
-
-export type { Rgba } from '../render/pill';
+// A pure helper, so importing it by path inlines the one function and nothing
+// else. It reads the canvas module's `Rgba`, which the widget's own `Rgba` below
+// matches field for field. The widget keeps its own declaration because it is
+// published: re-exporting the canvas one would move the reference page and hand
+// the type the pill module's header as its doc comment.
+import { srgbLuminance } from '../render/pill';
 
 /** Every custom property carries this prefix, so a host stylesheet cannot collide with one. */
 export const TOKEN_PREFIX = '--oac-';
@@ -26,6 +28,8 @@ export type WidgetThemeName = 'dark' | 'light';
 
 /** Property name (with the prefix) to value. */
 export type WidgetTokens = Readonly<Record<string, string>>;
+
+export interface Rgba { r: number; g: number; b: number; a: number }
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
 

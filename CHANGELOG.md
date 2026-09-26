@@ -18,20 +18,26 @@ All notable changes to OpenAlgo Charts.
 
 - The indicator tier's warmup-gap alignment and its Smoothing block are
   written once, in an internal module the tier does not export, instead of as
-  private copies in seven study modules: four of the gapped EMA, three of the
-  Smoothing kernel switch and two of the first-value alignment. The canvas
+  private copies in eight study modules: four of the gapped EMA, four of the
+  Smoothing kernel switch (the moving-average ribbon's among them), three of
+  the first-value alignment and three of the Smoothing option list. The canvas
   colour helpers and the widget's tokens share one luminance calculation, each
   still reading colours through its own parser, because the two parsers
-  disagree on malformed input and merging them would move a colour. No output
-  changed: all 105 built-in studies over 16 synthetic datasets and 31,312
-  setting combinations, and 12,037 colour probes across both parsers, give
-  bit-identical results before and after, from source and from the built
-  bundles. `tests/shared-helpers.test.ts` checks the merged helpers bitwise
-  against the copies they replaced.
-- The two public `withAlpha` functions stay separate on purpose, and their
-  declarations now say so: the base package's writes `rgba()` with the alpha
-  as given, for canvas, and the widget's writes `#rrggbb` for an opaque colour
-  and clamps and rounds the alpha, for a token value.
+  disagree on malformed input and merging them would move a colour. The
+  widget still declares its own `Rgba`, so its declaration and reference page
+  are unchanged. The merge moved no output: all 105 built-in studies over 16
+  synthetic datasets and 31,312 setting combinations, their declared inputs
+  and options, and 12,037 colour probes across both parsers give bit-identical
+  results before and after it, from source and from the built bundles (the
+  Ichimoku fix above is the only change in study output).
+  `tests/shared-helpers.test.ts` checks the merged helpers bitwise against
+  independent copies of the ones they replaced, and fails if a private copy
+  comes back.
+- The two public `withAlpha` functions share a name, not a behaviour, and stay
+  separate on purpose; their declarations now say so. The base package's
+  writes `rgba()` with the alpha as given, for canvas, and the widget's writes
+  `#rrggbb` for an opaque colour and clamps and rounds the alpha, for a token
+  value.
 
 ### Sizes
 

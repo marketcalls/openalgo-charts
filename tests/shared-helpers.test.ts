@@ -7,6 +7,7 @@
  * bitwise (`Object.is`, which also tells 0 from -0 and NaN from NaN), and the
  * oracles are the copies as they were written before the merge.
  */
+import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
 import { fromFirstValue, emaOfGapped, smoothingMa } from '../src/indicators/smoothing';
 import { sma, wma, rma, vwma, smaSeededEma } from '../src/indicators/calc';
@@ -292,6 +293,30 @@ describe('relative luminance', () => {
     expect(themeMode({ background: 'rgb(1 2 3)' })).toBe('dark');
     expect(contrastText('#12345g')).toBe('#ffffff');
     expect(themeMode({ background: '#12345g' })).toBe('light');
+  });
+});
+
+describe("the widget's Rgba", () => {
+  // The kernel takes the canvas module's `Rgba`, but the widget publishes its
+  // own. Re-exporting the canvas one moved the widget's declaration and its API
+  // page to render/pill.ts, and the pill module's file header rode along as the
+  // type's doc comment in dist/widget/index.d.ts. The compiler's view of the
+  // widget entry is what both the declaration bundle and the API reference read.
+  it('is still declared by the widget, with no doc comment borrowed from another module', () => {
+    const root = decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1');
+    const files = ['src/widget/index.ts', 'src/widget/tokens.ts', 'src/render/pill.ts'].map((f) => root + f);
+    // noResolve keeps the program to these three files; the exports between
+    // them still resolve, and nothing else is parsed.
+    const program = ts.createProgram(files, {
+      noResolve: true, noEmit: true, target: ts.ScriptTarget.ES2020,
+      module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
+    });
+    const checker = program.getTypeChecker();
+    const entry = checker.getSymbolAtLocation(program.getSourceFile(files[0])!)!;
+    const exported = checker.getExportsOfModule(entry).find((sym) => sym.name === 'Rgba')!;
+    const rgba = exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
+    expect(rgba.declarations?.map((d) => d.getSourceFile().fileName)).toEqual([files[1]]);
+    expect(ts.displayPartsToString(rgba.getDocumentationComment(checker))).toBe('');
   });
 });
 
