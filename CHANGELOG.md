@@ -386,6 +386,61 @@ import by 43.
   pinned to the screen in the corner, a drawing crossing the mark or an order line
   gets the press, the drag, the hover and the double click, and the logo's link
   opens only where nothing else answers the pointer.
+### Added
+
+- One undo timeline for the whole chart. `ChartHistory` in the widget tier
+  records a study added or removed (with its settings, visibility, pane,
+  stacking row and price scale), study settings, visibility and scale
+  assignments, the chart type and the primary series' scale, price scale
+  settings (mode, invert, margins, auto-fit, pinned ratio and axis placement),
+  pane moves, folds and heights, panes added or removed on their own, the chart
+  settings the settings dialog writes, and drawings, in the order they were
+  made. The widget builds one as
+  `widget.history` (and `ctx.history`): Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z, the
+  rail's Undo and Redo, and the mobile sheets all walk it. The mobile More
+  sheet now opens with Undo and Redo, and the Drawing sheet gains Redo.
+- A step is taken back by making the chart look the way it did in exactly the
+  fields that step changed, through the chart's public calls, never by
+  restoring a whole saved state. A study removed with the pane it emptied comes
+  back to its slot with the pane's height, fold and axes and the drawings that
+  pane held. Undo never writes bars, never fires an alert (a study brought back
+  reseeds silently) and never places an order.
+- The chart settings and study settings dialogs are one step per session, and
+  a Cancel that restores every value leaves none; each context-menu row is one
+  step. `transact(fn, label)` records what the chart does not announce,
+  `group(label)` merges a live edit, `ignore(fn)` keeps a host's own change out,
+  drawings included and the redo branch kept, `push(command)` records a host's
+  own reversible step, and `attach(chart, draw)` keeps the timeline across a
+  host's chart rebuild. A listener's change while a step is applied is not a
+  step either, and a Cancel gives the redo branch back. A step that cannot be
+  applied is rolled back, dropped with the steps behind it, and reported to
+  `onError`; a new action clears redo; `restoreState` starts a new timeline.
+- `DrawingController.historySteps()` and a `step` number on the `drawing:change`
+  that closes a recorded step (`DrawingChangeEvent`), so a host can hold drawing
+  steps in a timeline of its own, and `DrawingController.untracked(fn)`, which
+  runs a host's own edits without recording a step or touching either branch,
+  taking them into every recorded step the way a forced edit is.
+- A linked appearance change is an undo step of the chart that made it only: the
+  chart grid and the reference host's split view apply it on the others outside
+  their timelines, and undoing or redoing it announces the result again, so linked
+  charts never drift apart.
+- The yfinance reference host walks one timeline per chart: the keyboard and the
+  mobile bar walk the focused chart's, the drawing toolbar and the rail the main
+  chart's. It records its chart-type rebuild as a command, makes each chart
+  settings and study settings session one step, and keeps comparisons, the volume
+  row and loaded layouts out of it.
+
+### Changed
+
+- The widget's Undo and Redo chords are listed with the widget's shortcuts
+  rather than the drawing ones, since they now reach every step on the chart.
+
+### Known limits
+
+- `addIndicator` cannot yet re-create a study under the instance id it had, so
+  a study brought back by an undo answers to a new id. The history follows it
+  for every later step and rewrites the study-source settings of studies that
+  read it; an indicator alert keyed to the old id does not follow.
 
 ## 2.5.5
 

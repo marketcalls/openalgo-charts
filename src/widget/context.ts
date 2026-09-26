@@ -19,6 +19,7 @@ import type { ToastHandle, ToastKind } from './toast';
 import type { WidgetThemeName } from './tokens';
 import type { WidgetTranslator } from './localization';
 import type { SymbolSearch } from './symbol-picker';
+import type { ChartHistory } from './history';
 
 // ── small DOM helpers ───────────────────────────────────────────────────
 
@@ -57,6 +58,24 @@ export function glyph(doc: Document, svg: string, kind: 'tool' | 'chrome'): HTML
  */
 export function editableIds(draw: DrawingController, ids: readonly string[]): string[] {
   return ids.filter((id) => draw.get(id)?.policy?.editable !== false);
+}
+
+/**
+ * One undo or redo press from any control: the chart-wide timeline when the
+ * context carries one, the drawing controller's own otherwise, so every
+ * button, chord and sheet walks the same steps.
+ */
+export function historyPress(ctx: Pick<WidgetContext, 'draw' | 'history'>, direction: 'undo' | 'redo'): boolean {
+  const history = ctx.history;
+  if (history !== undefined && !history.isDestroyed) return direction === 'undo' ? history.undo() : history.redo();
+  return direction === 'undo' ? ctx.draw.undo() : ctx.draw.redo();
+}
+
+/** Whether that press would do anything, for the control's enabled state. */
+export function historyReady(ctx: Pick<WidgetContext, 'draw' | 'history'>, direction: 'undo' | 'redo'): boolean {
+  const history = ctx.history;
+  if (history !== undefined && !history.isDestroyed) return direction === 'undo' ? history.canUndo() : history.canRedo();
+  return direction === 'undo' ? ctx.draw.canUndo() : ctx.draw.canRedo();
 }
 
 /** Whether a key event came from a text control, where chords stay out of the way. */
@@ -669,6 +688,12 @@ export interface WidgetContext {
   readonly objects?: ChartObjects;
   /** Trader alerts owned by the widget, optional for custom contexts. */
   readonly alerts?: AlertController;
+  /**
+   * The chart-wide undo timeline. Every undo and redo control goes through it
+   * when it is there; a custom context without one falls back to the drawing
+   * controller's own history.
+   */
+  readonly history?: ChartHistory;
   /** The `.oac-widget` element every piece of chrome lives in. */
   readonly root: HTMLElement;
   readonly document: Document;

@@ -15,6 +15,7 @@ import { openAlerts } from './alerts.js';
 import { capturePaneTarget, selectedPane } from './pane-target.js';
 import { autosave } from './persist.js';
 import { rememberIndicators, renderIndicatorChips } from './indicators.js';
+import { recordChartType } from './history.js';
 import { mountSymbolPicker, mountIndicatorPicker } from '/dist/openalgo-charts.widget.mjs';
 import { referenceSymbolSearch } from './symbol-search.js';
 import { toggleInspection } from './inspection.js';
@@ -202,17 +203,27 @@ function changeType(target, chartType, pfmode) {
   if (!currentTarget(target)) return;
   const busy = target.pane === 2 ? app.loading2 || app.loadFailed2 : app.loading || app.loadFailed;
   if (busy) { el('status').textContent = 'wait for chart history before changing its type'; return; }
-  if (target.pane === 2) {
-    app.p2.chartType = chartType;
-    app.p2.pfmode = pfmode;
-    app.rebuildSecondary({ typeChanged: true });
-  } else {
-    el('ctype').value = chartType;
-    el('pfmode').value = pfmode;
-    app.render();
-  }
-  renderToolbar();
-  autosave();
+  const pane = target.pane;
+  const from = pane === 2
+    ? { chartType: app.p2.chartType || 'candlestick', pfmode: app.p2.pfmode || 'atr' }
+    : { chartType: el('ctype').value, pfmode: el('pfmode').value };
+  // The type is a rebuild here, so the switch is recorded as a command that
+  // rebuilds again: one step on that chart's timeline.
+  const show = (type) => {
+    if (pane === 2) {
+      app.p2.chartType = type.chartType;
+      app.p2.pfmode = type.pfmode;
+      app.rebuildSecondary({ typeChanged: true });
+    } else {
+      el('ctype').value = type.chartType;
+      el('pfmode').value = type.pfmode;
+      app.render();
+    }
+    renderToolbar();
+    autosave();
+  };
+  show({ chartType, pfmode });
+  recordChartType(pane, from, { chartType, pfmode }, show);
 }
 
 /** Rebuild shared controls from their explicitly selected chart. */

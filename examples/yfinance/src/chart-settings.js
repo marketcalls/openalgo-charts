@@ -8,6 +8,7 @@ import { syncAxisChromeFromChart, syncStatusLineFromChart, syncTradeChoiceFromCh
 import { foldedInterval } from './intervals.js';
 import { restyleTradeChrome } from './orders.js';
 import { autosave } from './persist.js';
+import { asStep, historyGroup, withoutHistory } from './history.js';
 import { capturePaneTarget } from './pane-target.js';
 import { VOLUME_TAB, volumeSettings, applyVolumeSettings } from './volume.js';
 
@@ -76,11 +77,16 @@ const settingsValues = target => ({ ...readChartSettings(target.chart), ...volum
 function writeSettings(target, patch) {
   if (patch['time.timezone'] !== undefined && patch['time.timezone'] !== target.chart.timezone()) exitReplay(target.pane);
   const chartPatch = Object.fromEntries(Object.entries(patch).filter(([key]) => !key.startsWith('volume.') && key !== 'legend.iconSize'));
-  if (Object.keys(chartPatch).length) applyChartSettings(target.chart, chartPatch);
+  // The chart's settings are a step on its timeline; the chart does not
+  // announce them, so each write is measured as one.
+  if (Object.keys(chartPatch).length) asStep(target.pane, () => applyChartSettings(target.chart, chartPatch), 'Chart settings');
   if (patch['legend.iconSize'] !== undefined) target.chart.setLegendIconSize(normalizeLegendIconSize(patch['legend.iconSize']));
-  applyVolumeSettings(target.pane, patch);
+  // The volume row is the demo's own, saved with its layout, and an undo
+  // of the chart would not put the demo's copy of it back.
+  withoutHistory(target.pane, () => applyVolumeSettings(target.pane, patch));
   afterChartSettingsWrite(target);
 }
+let endSettingsStep = () => {};
 
 export function openChartSettings(tabId, target = capturePaneTarget(app)) {
   if (!target?.current()) return;
@@ -96,6 +102,8 @@ export function openChartSettings(tabId, target = capturePaneTarget(app)) {
   chartSetDirty.clear();
   chartSetTab = tabId || (tabs[0] && tabs[0].id);
   app.chartSettingsEditing = true;
+  // The session is one step, and a Cancel that puts everything back leaves none.
+  endSettingsStep = historyGroup(target.pane, 'Chart settings');
   disposeSettings = target.chart.on('destroy', discardChartSettings);
   renderChartSettings();
   el('chartset').hidden = false;
@@ -266,6 +274,9 @@ function discardChartSettings() {
   destroyInputRows(el('cset-body'));
   disposeSettings?.();
   disposeSettings = null;
+  const end = endSettingsStep;
+  endSettingsStep = () => {};
+  end();
   el('chartset').hidden = true;
   chartSetBefore = null;
   chartSetTarget = null;

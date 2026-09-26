@@ -560,7 +560,9 @@ built-in events:
   state persistence.** These live in your app or your feed. The engine exposes
   the hooks (`setData`, `update`, `prependData`, `setHistoryLoader`,
   `setTheme`-style options) so you own the policy. See
-  [Data Loading](/docs/data-loading) and [Live Data](/docs/live-data).
+  [Data Loading](/docs/data-loading) and [Live Data](/docs/live-data). For undo and
+  redo the widget tier's [`ChartHistory`](/docs/undo-history) builds one timeline from
+  these events, and a bare chart can use it too.
 
 This keeps the base bundle small and the API easy to reason about: a handful of
 events you will actually use, each with a plain payload and a one-call

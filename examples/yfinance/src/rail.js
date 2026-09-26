@@ -7,6 +7,7 @@ import {
   RAIL_FLYOUT_CSS, toolGlyph, chromeGlyph, attachRailTip, hideRailTip, refreshTipLabel,
   openFlyout, closeFlyout, flyoutOpen, flyoutEl, openRailMenu, closeRailMenu, railMenuOpen,
 } from './rail-flyout.js';
+import { historyPress, historyReady, initHistory, onHistoryChange } from './history.js';
 
 let app;
 
@@ -536,14 +537,15 @@ function controlsBlock() {
     cls: 'rail__btn--chrome',
     glyph: chromeGlyph('undo'),
     tip: () => ({ title: 'Undo', chord: 'Ctrl+Z', side: 'right' }),
-    onClick: () => { app.draw.undo(); refreshControls(); },
+    // The main chart's whole timeline: a study or a pane, not only a drawing.
+    onClick: () => { historyPress('undo', 1); refreshControls(); },
   });
   box.appendChild(ctl.undo);
   ctl.redo = makeBtn({
     cls: 'rail__btn--chrome',
     glyph: chromeGlyph('redo'),
     tip: () => ({ title: 'Redo', chord: 'Ctrl+Y', side: 'right' }),
-    onClick: () => { app.draw.redo(); refreshControls(); },
+    onClick: () => { historyPress('redo', 1); refreshControls(); },
   });
   box.appendChild(ctl.redo);
   return box;
@@ -582,8 +584,8 @@ export function refreshControls() {
   setState(ctl.lock, { off: none, on: locked, pressed: locked, glyph: locked ? 'unlock' : 'lock' });
   setState(ctl.eye, { off: none, on: hidden, pressed: hidden, glyph: hidden ? 'eye-off' : 'eye' });
   setState(ctl.trash, { off: none });
-  setState(ctl.undo, { off: !d || !d.canUndo() });
-  setState(ctl.redo, { off: !d || !d.canRedo() });
+  setState(ctl.undo, { off: !historyReady('undo', 1) });
+  setState(ctl.redo, { off: !historyReady('redo', 1) });
   // The accessible name says what the button would do now, not what it
   // said when it was built or last hovered.
   for (const b of Object.values(ctl)) refreshTipLabel(b);
@@ -792,8 +794,9 @@ function onGlobalKey(e) {
     return h ? [h] : [];
   };
   switch (action.type) {
-    case 'undo': d.undo(); break;
-    case 'redo': d.redo(); break;
+    // The focused chart's timeline, which holds its drawings with everything else.
+    case 'undo': historyPress('undo', d === app.draw2 ? 2 : 1); break;
+    case 'redo': historyPress('redo', d === app.draw2 ? 2 : 1); break;
     case 'delete': for (const id of targets()) d.remove(id); break;
     case 'duplicate': if (typeof d.duplicate === 'function') d.duplicate(targets()); break;
     case 'nudge': if (typeof d.nudge === 'function') d.nudge(targets(), action.dx, action.dy); break;
@@ -840,12 +843,15 @@ export function openTextDialog(id) {
  */
 export function initRail(a, opts = {}) {
   app = a;
+  initHistory(a);
   loadPrefs();
   const rail = el('rail');
   if (typeof opts.mountPropertiesBar === 'function') {
     propertiesBar = opts.mountPropertiesBar(app, rail ? rail.parentElement : document.body) || null;
   }
   ensureChrome();
+  // A study or a pane changes what Undo would do without any drawing event.
+  onHistoryChange(refreshControls);
   window.addEventListener('keydown', onGlobalKey, true);
   const closeAll = () => { closeFlyout(); closeRailMenu(); hideRailTip(); };
   window.addEventListener('blur', closeAll);
@@ -904,11 +910,10 @@ export function syncMobileControls(tool) {
     magnet.textContent = 'Magnet ' + mode;
     magnet.setAttribute('aria-pressed', String(mode !== 'off'));
   }
-  const draw = activeDraw();
   const undo = el('mobile-undo');
   const redo = el('mobile-redo');
-  if (undo) undo.disabled = !draw || (typeof draw.canUndo === 'function' && !draw.canUndo());
-  if (redo) redo.disabled = !draw || (typeof draw.canRedo === 'function' && !draw.canRedo());
+  if (undo) undo.disabled = !historyReady('undo');
+  if (redo) redo.disabled = !historyReady('redo');
 }
 
 /** Follow history changes regardless of whether they came from touch, keyboard or another host control. */
@@ -939,6 +944,7 @@ function setMobileTool(tool) {
 /** Wire the host-owned touch bar to the same controllers and actions as the desktop chrome. */
 export function initMobile(a) {
   app = a;
+  initHistory(a);
   const picker = el('mobile-draw');
   if (!picker) return;
   picker.innerHTML = '';
@@ -955,8 +961,9 @@ export function initMobile(a) {
 
   picker.addEventListener('change', () => setMobileTool(picker.value));
   el('mobile-cursor').addEventListener('click', () => setMobileTool(null));
-  el('mobile-undo').addEventListener('click', () => { const draw = activeDraw(); if (draw) draw.undo(); syncMobileControls(draw?.activeTool()); });
-  el('mobile-redo').addEventListener('click', () => { const draw = activeDraw(); if (draw) draw.redo(); syncMobileControls(draw?.activeTool()); });
+  el('mobile-undo').addEventListener('click', () => { historyPress('undo'); syncMobileControls(activeDraw()?.activeTool()); });
+  el('mobile-redo').addEventListener('click', () => { historyPress('redo'); syncMobileControls(activeDraw()?.activeTool()); });
+  onHistoryChange(() => syncMobileControls(activeDraw()?.activeTool()));
   el('mobile-magnet').addEventListener('click', () => { cycleMagnet(); syncMobileControls(activeDraw()?.activeTool()); });
   el('mobile-zoom-out').addEventListener('click', () => zoomVisibleRange(activeChart(), 1.25));
   el('mobile-zoom-in').addEventListener('click', () => zoomVisibleRange(activeChart(), 0.8));

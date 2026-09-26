@@ -193,6 +193,21 @@ export interface DrawingPlacementOptions {
  */
 export type DrawingChangeKind = 'add' | 'update' | 'remove' | 'reorder' | 'undo' | 'redo';
 
+/** The `drawing:change` payload. */
+export interface DrawingChangeEvent {
+  ids: string[];
+  kind: DrawingChangeKind;
+  /** Set on a change another chart's link applied; it records no step here. */
+  linked?: true;
+  /**
+   * The undo step this change was recorded as, on the change that closes it.
+   * Absent for everything the history does not hold: a host's forced edit, a
+   * linked commit, a restore, and a move along the branches (`undo`, `redo`).
+   * {@link DrawingController.historySteps} lists the step by this number.
+   */
+  step?: number;
+}
+
 /** Options for a call that changes, groups or deletes drawings. */
 export interface DrawingEditOptions {
   /**
@@ -322,6 +337,9 @@ const STROKE_EPSILON_PX = 1.5;
 const REST_PRESSURE = 0.5;
 
 let nextId = 1;
+// Shared by every controller on the page, so a chart rebuilt with a new
+// controller never hands out a step a history still holds for the old one.
+let nextStep = 1;
 
 const sameIds = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((id, i) => id === b[i]);
@@ -386,7 +404,9 @@ type ControllerOptions = Required<Omit<DrawingControllerOptions, 'defaultStyle' 
 
 // `external` is a step of the history that is not a drawing edit, a study
 // anchor's drag: its snapshots are the drawings as they stood, unchanged by it.
-interface DrawingHistoryEntry { before: string; after: string; external?: InputAnchorStep }
+// `step` is the chart-wide history's number for the entry, so drawing edits
+// interleave with the chart's own steps in one timeline.
+interface DrawingHistoryEntry { before: string; after: string; step: number; external?: InputAnchorStep }
 
 /** @internal Reserved persistence metadata; a duplicate is a new drawing lineage. */
 export const DRAWING_LINK_METADATA_KEY = 'openalgo-charts/drawing-link';
@@ -442,6 +462,9 @@ export class DrawingController {
   private _undo: DrawingHistoryEntry[] = [];
   private _redo: DrawingHistoryEntry[] = [];
   private _pendingHistory: DrawingHistoryEntry | null = null;
+  /** Depth of `untracked` runs, and the drawings as they were before the host's edit in progress. */
+  private _untracked = 0;
+  private _hostEdit: string | null = null;
   /** The host's patches the recorded steps have yet to take, merged per drawing. */
   private readonly _hostPatches = new Map<string, DrawingPatch>();
   /**
@@ -1176,11 +1199,17 @@ export class DrawingController {
   }
 
   private _emitChange(ids: readonly string[], kind: DrawingChangeKind): void {
-    if (this._pendingHistory !== null) {
-      this._pendingHistory.after = this._historyText();
+    const recorded = this._pendingHistory;
+    if (recorded !== null) {
+      recorded.after = this._historyText();
       this._pendingHistory = null;
     }
-    this._chart.emit('drawing:change', { ids: ids.slice(), kind });
+    this._takeInHostEdit();
+    const change: DrawingChangeEvent = { ids: ids.slice(), kind };
+    // A trim can push the step out of the branch while it is being recorded,
+    // and a step nothing holds is not one to report.
+    if (recorded !== null && this._undo.includes(recorded)) change.step = recorded.step;
+    this._chart.emit('drawing:change', change);
   }
 
   // ── z-order ─────────────────────────────────────────────────────────────
@@ -1615,6 +1644,60 @@ export class DrawingController {
 
   public canUndo(): boolean { return this._undo.length > 0; }
   public canRedo(): boolean { return this._redo.length > 0; }
+
+  /**
+   * The steps each branch holds, oldest first, by the number `drawing:change`
+   * reported them under. For a host that keeps one timeline across drawings
+   * and its own edits: a step missing from both branches has been taken away
+   * (a reset, a trim, a host edit that left it nothing to do), and pressing
+   * undo for it would reach an older step instead. A step still being
+   * recorded, a drag in progress, is not listed until its change closes it.
+   */
+  public historySteps(): { undo: number[]; redo: number[] } {
+    const closed = (entry: DrawingHistoryEntry): boolean => entry !== this._pendingHistory;
+    return { undo: this._undo.filter(closed).map(entry => entry.step), redo: this._redo.map(entry => entry.step) };
+  }
+
+  /**
+   * Run `fn` as the host's own act. An edit it makes records no undo step and
+   * leaves both branches as they are, and every step already recorded takes
+   * it in, the way a forced call does, so no later undo or redo reverses it.
+   * Unlike `force` it reaches no read-only drawing, and `undo` or `redo`
+   * inside it still moves along the branches. For a host keeping one timeline
+   * across drawings and its own changes, whose own changes are never steps.
+   */
+  public untracked<T>(fn: () => T): T {
+    this._untracked++;
+    try { return fn(); }
+    finally {
+      // An edit a throw cut short is still the host's, and must not join the next one.
+      if (--this._untracked === 0) this._takeInHostEdit();
+    }
+  }
+
+  /** Give every recorded step the host's edit, drawing by drawing and group by group. */
+  private _takeInHostEdit(): void {
+    const from = this._hostEdit;
+    if (from === null) return;
+    this._hostEdit = null;
+    const was = migrateDrawings(JSON.parse(from));
+    const now = this._document(this._drawings);
+    const take = <T extends { id: string }>(list: T[], before: readonly T[], after: readonly T[]): T[] => {
+      const left = new Map(before.map(item => [item.id, JSON.stringify(item)]));
+      const right = new Map(after.map(item => [item.id, item]));
+      const changed = new Set([...left.keys(), ...right.keys()]
+        .filter(id => left.get(id) !== (right.has(id) ? JSON.stringify(right.get(id)) : undefined)));
+      // Changed where a step has it, gone everywhere, and made everywhere: a
+      // drawing the host changed is not put into a step from before it existed.
+      const out = list.filter(item => !changed.has(item.id) || right.has(item.id)).map(item => (changed.has(item.id) ? right.get(item.id)! : item));
+      for (const id of changed) if (!left.has(id) && !out.some(item => item.id === id)) out.push(right.get(id)!);
+      return out;
+    };
+    this._rebase(document => {
+      document.drawings = take(document.drawings, was.drawings, now.drawings);
+      document.groups = take(document.groups ?? [], was.groups ?? [], now.groups ?? []);
+    });
+  }
 
   /**
    * Serialisable document, the same shape `ChartState.drawings` carries.
@@ -2613,7 +2696,7 @@ export class DrawingController {
   private _recordStep(step: InputAnchorStep): void {
     this._onDragEnd();
     const text = this._historyText();
-    this._undo.push({ before: text, after: text, external: step });
+    this._undo.push({ before: text, after: text, step: nextStep++, external: step });
     if (this._undo.length > this._opts.historyLimit) this._undo.shift();
     this._redo = [];
     this._external(true, 'update');
@@ -2632,7 +2715,10 @@ export class DrawingController {
   private _pushUndo(): void {
     this._onDragEnd();
     const before = this._historyText();
-    this._pendingHistory = { before, after: before };
+    // The host's own act: no step, both branches kept, and the recorded
+    // steps take the change in once it is made.
+    if (this._untracked > 0) { this._hostEdit ??= before; return; }
+    this._pendingHistory = { before, after: before, step: nextStep++ };
     this._undo.push(this._pendingHistory);
     if (this._undo.length > this._opts.historyLimit) this._undo.shift();
     this._redo = []; // a new edit invalidates the redo branch

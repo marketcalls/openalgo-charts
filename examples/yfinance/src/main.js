@@ -28,7 +28,8 @@ import { tickScheduleFor, axisMinMove, sessionCalendarFor } from './ticks.js';
 import { initBracket, attachBracketLines, setBracketPrice, updateBracket, removeBracket } from './bracket.js';
 import { initAccount } from './account.js';
 import { initIndicators, fillIndicatorPicker, renderIndicatorChips, openSettings, rememberIndicators } from './indicators.js';
-import { chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
+import { afterChartSettingsWrite, chartDecorationsForRebuild, initChartSettings, normalizeLegendIconSize, restorePrimaryStyle } from './chart-settings.js';
+import { initHistory, attachHistory, historyFor, recordChartType } from './history.js';
 import { bindIndicatorSource, initIndicatorSource } from './indicator-source.js';
 import { initRoutedStudy } from './routed-study.js';
 import { initAnchoredStudy } from './anchored-study.js';
@@ -233,6 +234,9 @@ function render({ keepView = true, state } = {}) {
   const sel = el('ctype').value;
   const isTransform = sel.startsWith('t:');
   el('pfmode').hidden = sel !== 't:point-figure';
+  // What the chart was last built as, so a switch from the select can be
+  // recorded with the type it replaced.
+  app.renderedType = { chartType: sel, pfmode: el('pfmode').value };
 
   // Family-B transforms replace the plotted series with derived elements, so
   // Trading uses real prices. Volume also needs a source-bar mapping, which
@@ -376,6 +380,9 @@ function render({ keepView = true, state } = {}) {
   joinLink();
   attachTimeline(app, 1, app.currentBars);
   attachInspection(app);
+  // Last: everything above built this chart, and none of it is a step. The
+  // timeline itself carries over from the chart this one replaced.
+  attachHistory(1);
   window.__chart = () => app.chart;
   window.__draw = () => app.draw;
   window.__chart2 = () => app.chart2;
@@ -415,6 +422,9 @@ function installWorkspace({ layout, bars }) {
   // is applied against the final plot width, without a later resize correction.
   installSecondaryWorkspace(layout.secondary, bars[1]);
   render({ state: layout });
+  // A workspace is a new document: no step taken on the one it replaced applies to it.
+  historyFor(1)?.clear();
+  historyFor(2)?.clear();
   focusChart(layout.focusPane);
   const focused = app.focusPane === 2 ? app.chart2 : app.chart;
   const request = app.focusPane === 2 ? app.p2 : app.req;
@@ -528,6 +538,7 @@ async function load(opts) {
 initHover();
 // Before the first render(): the shell sets the theme the chart is built in.
 initShell(app);
+initHistory(app);
 initStatus(app);
 initTimezone(app);
 initAxisChrome(app);
@@ -570,7 +581,32 @@ el('save').addEventListener('click', () => {
   a.click();
 });
 // switching chart type / P&F box mode re-renders cached bars (no network round-trip)
-['ctype', 'pfmode'].forEach((id) => el(id).addEventListener('change', () => { if (app.currentBars.length) render(); }));
+['ctype', 'pfmode'].forEach((id) => el(id).addEventListener('change', () => {
+  if (!app.currentBars.length) return;
+  const from = app.renderedType;
+  render();
+  if (from) recordChartType(1, from, app.renderedType, showPrimaryType);
+}));
+
+/** Build the main chart as `type`: what undoing or redoing a type switch does. */
+function showPrimaryType(type) {
+  el('ctype').value = type.chartType;
+  el('pfmode').value = type.pfmode;
+  render();
+  renderToolbar();
+  autosave();
+}
+app.showPrimaryType = showPrimaryType;
+
+// An undo or redo can bring back a study, a zone or a scale the demo keeps
+// its own copy of; read them back from the chart, the way a rebuild does.
+app.afterHistory = (pane) => {
+  afterChartSettingsWrite(capturePaneTarget(app, pane));
+  if (pane === 1) rememberIndicators();
+  renderIndicatorChips();
+  renderToolbar();
+  autosave();
+};
 // toggle grid lines live (no rebuild needed)
 // These legacy fields belong to the primary chart; the shared toolbar captures its owner.
 const applyGrid = () => {

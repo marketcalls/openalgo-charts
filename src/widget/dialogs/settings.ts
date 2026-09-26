@@ -69,9 +69,17 @@ export function mountSettingsDialog(
   let form: FormHandle | null = null;
   let committed = false;
 
+  // The whole session is one step on the chart's timeline, and a Cancel that
+  // puts everything back leaves none. Settings are not announced by the
+  // chart, so each write is a transaction the history can measure.
+  const endStep = ctx.history?.group('Chart settings') ?? ((): void => {});
+  const applyNow = (patch: ChartSettingsValues): void => {
+    if (ctx.history !== undefined) ctx.history.transact(() => applyChartSettings(chart, patch));
+    else applyChartSettings(chart, patch);
+  };
   const write = (patch: ChartSettingsValues): void => {
     for (const k of Object.keys(patch)) dirty.add(k);
-    applyChartSettings(chart, patch);
+    applyNow(patch);
     opts.onApply?.(patch);
   };
 
@@ -127,7 +135,7 @@ export function mountSettingsDialog(
 
   // Escape and the scrim are the shell's, and both mean Cancel.
   const offContext = chart.on('data:context', renderPane);
-  const handle = openPanel(ctx, frame.el, { placement: 'center', modal: true, onClose: () => { offContext(); form?.destroy(); } }, () => cancel());
+  const handle = openPanel(ctx, frame.el, { placement: 'center', modal: true, onClose: () => { offContext(); form?.destroy(); endStep(); } }, () => cancel());
 
   function revert(): void {
     if (committed || dirty.size === 0) return;
@@ -137,7 +145,7 @@ export function mountSettingsDialog(
       if (v !== undefined) back[key] = v;
     }
     dirty.clear();
-    applyChartSettings(chart, back);
+    applyNow(back);
     opts.onApply?.(back);
   }
   function cancel(): void {

@@ -13,6 +13,7 @@ import { alertContextEntries } from './alerts.js';
 import { addSessionMark, sessionMarks, clearSessionMarks } from './session-marks.js';
 import { addHostStudy, hostStudy, removeHostStudy, studyAllows } from './host-study.js';
 import { capturePaneTarget } from './pane-target.js';
+import { asStep } from './history.js';
 
 // Price-level family (previous close, session extremes, extended hours,
 // bid/ask). Read off the namespace for the same reason as the block above:
@@ -429,7 +430,9 @@ function paintAxisMenu() {
 
 /** Run an axis action, then repaint whatever is on screen showing its state. */
 function runAxis(action) {
-  action();
+  // A scale's mode, invert, auto-fit and placement are the user's steps, and
+  // the chart announces none of them, so each row is measured as one.
+  asStep(1, action, 'Price scale');
   if (!axMenu.hidden) paintAxisMenu();
   if (!axSub.hidden) { paintAxisSub(); markOpenSubRow(); }
   autosave();

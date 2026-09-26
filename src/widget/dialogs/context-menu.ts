@@ -488,7 +488,14 @@ export function mountContextMenu(ctx: WidgetContext, anchor?: HTMLElement, opts:
       } else {
         row.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          item.run?.();
+          // One row is one step, including what the chart does not announce
+          // (an axis mode, an auto-fit switch). A row that changes nothing
+          // (fit, copy, an order) records nothing.
+          if (item.run !== undefined) {
+            const run = item.run;
+            if (ctx.history !== undefined) ctx.history.transact(() => run(), item.id);
+            else run();
+          }
           if (item.keepOpen === true) paint(rows.indexOf(row));
           else handle.close();
         });

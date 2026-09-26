@@ -215,3 +215,44 @@ test('importing a workspace replaces every chart at once, and a failed import ch
   await page.screenshot({ path: info.outputPath('grid-imported.png') });
   expect(errors).toEqual([]);
 });
+
+test('a linked appearance change is a step of the chart it was made on, and undoing it there takes it back on both', async ({ page }, info) => {
+  // Stacked, so each chart's top bar has the whole width and every control on it is reachable.
+  const errors = await mount(page, '2x1', { width: 1200, height: 900 });
+  await page.evaluate(() => (window as any).fixture.readyAll());
+  await expect.poll(() => counts(page)).toEqual([120, 120]);
+  await page.evaluate(() => (window as any).fixture.grid.setLinks({ appearance: true }));
+  const vertical = (): Promise<boolean[]> => page.evaluate(() => (window as any).fixture.grid.cells().map((cell: any) => cell.widget.chart.gridOptions().vertLines));
+  const canUndo = (): Promise<boolean[]> => page.evaluate(() => (window as any).fixture.grid.cells().map((cell: any) => cell.widget.history.canUndo()));
+  const start = await vertical();
+  expect(start[0]).toBe(start[1]);
+  const cells = page.locator('.oac-grid__cell');
+  const charts = page.locator('.oac-grid__cell .oac-chart');
+
+  // The first chart's settings dialog; the second chart follows the link.
+  await charts.nth(0).click();
+  await cells.nth(0).locator('.oac-topbar button[aria-label="Chart settings"]').click();
+  await page.locator('.oac-settings [role="tab"][data-tab="appearance"]').click();
+  await page.locator('#oac-cset-canvas-grid-vertLines').click({ force: true });
+  await page.getByRole('button', { name: 'OK', exact: true }).click();
+  await expect.poll(vertical).toEqual([!start[0], !start[0]]);
+  expect(await canUndo()).toEqual([true, false]);
+
+  // The second chart's own step, walked back with its own chord, leaves the linked grid alone.
+  await page.evaluate(() => (window as any).fixture.grid.cells()[1].widget.chart.addIndicator('rsi'));
+  await charts.nth(1).click();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(() => page.evaluate(() => (window as any).fixture.grid.cells()[1].widget.chart.indicators().length)).toBe(0);
+  expect(await vertical()).toEqual([!start[0], !start[0]]);
+  await page.screenshot({ path: info.outputPath('grid-linked-follower-undone.png') });
+
+  // The first chart's undo takes the linked change back on both, and its redo applies it to both.
+  await charts.nth(0).click();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(vertical).toEqual(start);
+  await page.screenshot({ path: info.outputPath('grid-linked-undone.png') });
+  await page.keyboard.press('ControlOrMeta+y');
+  await expect.poll(vertical).toEqual([!start[0], !start[0]]);
+  await page.screenshot({ path: info.outputPath('grid-linked-redone.png') });
+  expect(errors).toEqual([]);
+});

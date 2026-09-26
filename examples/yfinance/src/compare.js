@@ -5,6 +5,7 @@ import { fetchBars } from './feed.js';
 import { renderToolbar } from './toolbar.js';
 import { autosave } from './persist.js';
 import { capturePaneTarget, selectedPane } from './pane-target.js';
+import { withoutHistory } from './history.js';
 
 const { addComparison, comparisonController } = engine;
 export const CMP_COLORS = ['#e6b53c', '#7e57c2', '#29b6f6', '#ec407a', '#8bc34a'];
@@ -88,7 +89,16 @@ export function indexCompare(spec) {
   }
 }
 
+/**
+ * A comparison is the demo's own overlay, saved with its layout: it borrows
+ * the price scale's mode while it is up, and none of that is a chart step
+ * an undo should take back underneath it.
+ */
 export function attachComparison(spec, pane = 1) {
+  withoutHistory(pane, () => attachComparisonNow(spec, pane));
+}
+
+function attachComparisonNow(spec, pane) {
   const target = captureComparisonTarget(pane);
   if (!target?.current() || !addComparison || !spec.bars?.length) return;
   if (spec.dataKey && spec.dataKey !== sourceKey(target)) return;
@@ -158,8 +168,10 @@ export function removeComparison(spec, pane = comparisonState(2).items.includes(
   const pending = chart && runtimes.get(chart)?.pending;
   pending?.get(spec.symbol)?.abort();
   pending?.delete(spec.symbol);
-  spec.handle?.remove();
-  if (spec.legend && spec.chart) spec.chart.removePrimitive(spec.legend);
+  withoutHistory(pane, () => {
+    spec.handle?.remove();
+    if (spec.legend && spec.chart) spec.chart.removePrimitive(spec.legend);
+  });
   spec.handle = null; spec.legend = null; spec.chart = null;
   items.splice(items.indexOf(spec), 1);
   if (!items.length) app[pane === 2 ? 'cmpBaseMode2' : 'cmpBaseMode'] = null;
@@ -237,7 +249,7 @@ export async function addCompareSymbol(symbol, target = actionTarget()) {
 export function setCompareMode(mode, target = actionTarget()) {
   if (!target?.current() || !MODES.includes(mode)) return;
   app[target.pane === 2 ? 'cmpMode2' : 'cmpMode'] = mode;
-  comparisonController?.(target.chart).setMode(mode);
+  withoutHistory(target.pane, () => comparisonController?.(target.chart).setMode(mode));
   autosave();
 }
 
