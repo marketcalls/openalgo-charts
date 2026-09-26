@@ -535,7 +535,8 @@ be unused; other named columns on its side do not prevent the move. Source and
 destination placements reset to their named sides, and the vacated scale resets
 to chart defaults. `PriceAxisState.movable` describes this operation, including
 its study-resource restrictions. Success emits `priceAxisMoved` with
-`{ paneIndex, from, to }`.
+`{ paneIndex, from, to }`, an event deprecated with the method and removed in 3.0.0;
+placement emits `priceAxisPlacementChanged`.
 
 <Callout type="warning">
 The four scale modes are one field, so a menu must render them as a **single choice** (a

@@ -22,6 +22,8 @@ import { ESLint } from 'eslint';
 import pkg from '../package.json';
 import compatibility from '../COMPATIBILITY.md?raw';
 import timeSource from '../src/feed/time.ts?raw';
+import skillEvents from '../.github/skills/openalgo-charts/references/events-and-state.md?raw';
+import siteEvents from '../website/pages/docs/events.mdx?raw';
 
 // Same root derivation as widget-packaging.test.ts: the suite carries no Node
 // typings, and ESLint wants absolute paths.
@@ -292,14 +294,53 @@ describe('the compatibility shims', () => {
     const untagged: string[] = [];
     for (const row of deprecationRows()) {
       const file = /`(src\/[^`]+\.ts)`/.exec(row[1] ?? '')?.[1];
-      // A wire key or a union member has no declaration to carry a tag; the row says which.
-      if (file === undefined || /a wire key|a union member/.test(row[1] ?? '')) continue;
+      // A wire key, a union member or an event name has no declaration to carry a tag; the row says which.
+      if (file === undefined || /a wire key|a union member|an event name/.test(row[1] ?? '')) continue;
       const names = namesIn(row[0] ?? '');
       const isTagged = tagged.some(t => t.file === file && names.includes(t.name));
       const isPending = PENDING_TAGS.some(p => p.file === file && names.includes(p.name));
       if (!isTagged && !isPending) untagged.push(row[0] ?? '');
     }
     expect(untagged).toEqual([]);
+  });
+
+  it('list each event only a deprecated method emits, and mark it where events are documented', () => {
+    // An event name has no declaration to carry a tag: `on` takes a string.
+    // One that only a deprecated method emits goes with that method, so the
+    // table and the event pages have to say so themselves.
+    const emitted = (node: ts.Node, out: string[]): string[] => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'emit'
+        && node.arguments[0] !== undefined && ts.isStringLiteral(node.arguments[0])) out.push(node.arguments[0].text);
+      ts.forEachChild(node, child => { emitted(child, out); });
+      return out;
+    };
+    const fromDeprecated = new Set<string>();
+    const fromOthers = new Set<string>();
+    for (const [key, text] of Object.entries(SOURCES)) {
+      if (!text.includes('emit(')) continue;
+      const source = ts.createSourceFile(key, text, ts.ScriptTarget.Latest, true);
+      const visit = (node: ts.Node): void => {
+        if (ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) {
+          const deprecated = ts.getJSDocTags(node).some(tag => tag.tagName.text === 'deprecated');
+          for (const name of emitted(node, [])) (deprecated ? fromDeprecated : fromOthers).add(name);
+          return;
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    const onlyDeprecated = [...fromDeprecated].filter(name => !fromOthers.has(name));
+    expect(onlyDeprecated).toContain('priceAxisMoved');
+    const rows = deprecationRows();
+    /** The table row an events page gives `name`, by its first cell. */
+    const rowOf = (text: string, name: string): string | undefined =>
+      text.split('\n').find(line => line.startsWith(`| \`${name}\` |`));
+    for (const name of onlyDeprecated) {
+      expect(rows.some(row => namesIn(row[0] ?? '').includes(name) && /an event name/.test(row[1] ?? '') && row[3] === NEXT), name).toBe(true);
+      for (const [page, text] of [['events-and-state.md', skillEvents], ['events.mdx', siteEvents]] as const) {
+        expect(rowOf(text, name), `${name} in ${page}`).toContain(`Deprecated, removed in ${NEXT}`);
+      }
+    }
   });
 
   it('wait on another change only while the tag is still missing', () => {

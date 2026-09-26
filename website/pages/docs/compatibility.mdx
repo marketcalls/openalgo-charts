@@ -29,6 +29,7 @@ that names no removal release, so none can stay open-ended.
 | `chart.renderer` | 3.0.0 | `chart.rendererKind`, the same value |
 | `chart.movePriceAxis(pane, from, to)` | 3.0.0 | `chart.setPriceAxisPlacement(pane, scaleId, side)`, which keeps the scale's id |
 | `movable` in `chart.priceAxisState(...)` | 3.0.0 | Nothing: placement needs no such check |
+| The `priceAxisMoved` event, which only `movePriceAxis` emits | 3.0.0 | `priceAxisPlacementChanged`, which `setPriceAxisPlacement` emits |
 
 ```ts
 // before

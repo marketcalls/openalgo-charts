@@ -142,9 +142,10 @@ trade 141.75 kB, draw 48.06 kB, widget 91.34 kB, terminal 300.89 kB, workspace
   `chart.setPriceAxisPlacement(pane, scaleId, side)` (since 2.5.4), which moves
   a scale's column and keeps its id, where the old method swaps the built-in
   side scales and reassigns their series and studies. `movable` in
-  `priceAxisState()` describes only that old method and goes with it. The
-  widget and the reference host already use placement. Both keep working until
-  3.0.0.
+  `priceAxisState()` describes only that old method and goes with it, and so
+  does the `priceAxisMoved` event, which only that method emits: listen for
+  `priceAxisPlacementChanged`. The widget and the reference host already use
+  placement. All three keep working until 3.0.0.
 - The chart's own study host no longer reads the deprecated `dashed` it is
   handed for a study level; it draws from `lineStyle`, which the study always
   resolves, so every level looks exactly as before.

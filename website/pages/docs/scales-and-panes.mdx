@@ -184,7 +184,8 @@ the two side scale objects rather than copying their state, so the
 range, mode, margins and formatter travel with the axis; the vacated strip starts again from
 the chart-wide defaults, and the column is freed when nothing is left on it. The pane's
 crosshair tag, last-price line, coordinate API and axis drag all follow the scale the prices
-are actually labelled in, and the left strip is draggable. `priceAxisMoved` fires on success.
+are actually labelled in, and the left strip is draggable. `priceAxisMoved` fires on success;
+it goes in 3.0.0 with the method, and `setPriceAxisPlacement` emits `priceAxisPlacementChanged`.
 
 To move or reorder a column while keeping its scale ID, use
 [`setPriceAxisPlacement`](#multiple-axes-on-the-same-side). It also supports
