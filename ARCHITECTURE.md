@@ -80,7 +80,7 @@ forwarding object is built.
 | `chart-primitives.ts` | Primitives on panes, the draw order (series stack) and the event strip |
 | `chart-appearance.ts` | Branding, the text watermark, the option batch and the image and SVG exports |
 | `chart-input.ts` | Pointer, wheel, double-click, pinch, keyboard, shortcut, context-menu, hover and cursor routing |
-| `chart-motion.ts` | Kinetic scroll and the eased wheel zoom |
+| `chart-motion.ts` | Kinetic scroll and the eased wheel zoom, stepped at the top of each render frame |
 | `chart-pixels.ts` | Following the container's size and the device pixel ratio |
 | `chart-state.ts` | `getState` and `restoreState` |
 
@@ -101,7 +101,7 @@ We are writing our own engine from scratch, with no external charting dependency
 | **Shared data/time layer** merging all series by time to logical indices | Keeps price + volume + indicator panes perfectly aligned on one x-axis. See §4. |
 | **Indexed plot rows with cached visible range** | O(log n) visible-range lookup, so the series pass walks the *visible* bars. A study recompute still walks its full history once per frame that carries a tick; §1 records what that costs. |
 | **Bitmap vs media coordinates** | Draw in device pixels so 1px lines stay crisp on HiDPI/retina without blur. |
-| **Per-pane invalidation mask** (global level + per-pane + time-scale ops) | A crosshair move repaints the overlay canvas only. The mask can also target one pane, but in 2.5.7 a study recompute and a live tick still repaint every pane. See §3.2. |
+| **Per-pane invalidation mask** (global level + per-pane map) | A crosshair move repaints the overlay canvas only. The mask can also target one pane, but in 2.5.7 a study recompute and a live tick still repaint every pane. See §3.2. |
 | **Renderers are pure functions of draw-data** | Renderer takes a plain data object + canvas context, draws, returns. No state, easy to test, tree-shakeable. |
 | **Primitive/plugin extension API** with views + lifecycle + z-order + hit-test | The trade layer (order lines, DOM ladder) and markers/events are *primitives*, not hardcoded, keeps core lean. See §8. |
 
@@ -314,37 +314,32 @@ The ratio itself is watched: a `(resolution: Xdppx)` media query for the ratio i
 
 ### 3.2 Render loop & invalidation (`core/render-loop.ts`, `core/invalidate-mask.ts`)
 
-The central trick for performance: **never redraw more than necessary.** A single global level is too coarse for multi-pane indicators and trade overlays (review point 2). The mask is a **global level + a per-pane map + a queue of time-scale operations.**
+The central trick for performance: **never redraw more than necessary.** A single global level is too coarse for multi-pane indicators and trade overlays (review point 2). The mask is a **global level + a per-pane map.**
 
 ```ts
 const InvalidationLevel = { None: 0, Cursor: 1, Light: 2, Full: 3 }
 
 interface PaneInvalidation { level: InvalidationLevel; autoScale: boolean }   // per-pane, merges by max + OR
 
-type TimeScaleOp =                       // declared, not yet queued by anything
-  | { type: 'fitContent' }
-  | { type: 'applyBarSpacing'; value: number }
-  | { type: 'applyRightOffset'; value: number }
-  | { type: 'reset' }
-
 class InvalidateMask {
   globalLevel: InvalidationLevel
   panes: Map<paneIndex, PaneInvalidation>   // a pane can be invalidated without touching others
-  timeScaleOps: TimeScaleOp[]
   merge(other): void                         // coalesce multiple invalidations in one frame
 }
 ```
 
-What 2.5.7 does with it:
+What the chart does with it:
 - **Cursor work stays on the overlay.** A crosshair move, and a hover change between top-layer primitives, raise `Cursor`: every pane repaints its top canvas and no base canvas is touched.
 - **Per-pane invalidation is used by primitives.** A primitive's `requestUpdate` raises its own pane only, at `Cursor` for a top-layer primitive and `Light` otherwise; attaching or removing a primitive and dragging a price axis are pane-local too.
 - **Data changes are still global.** Writing series data raises a global `Full`, and a study's plots are series, so an indicator recompute repaints every pane, not only the study's own. The source-bar update path does the same, so a live tick repaints every pane. Repainting only the panes whose data or scale moved is planned work, not current behaviour.
 - **`autoScale` flag per pane**: separates "rescale this pane's price axis" from "repaint at current scale". A `Full` level autoscales every pane regardless.
-- **The time-scale queue is declared but unused.** `addTimeScaleOp` has no caller in 2.5.7 and the frame never reads the queue. Fit, bar spacing, right offset and scroll-to-realtime change the time scale directly, and the repaint goes through the ordinary invalidation. Kinetic scroll and eased wheel zoom each schedule their own animation frames (`input/kinetic.ts`, `input/zoom-glide.ts` drive the maths) and invalidate on every step, so the paint follows one frame behind the step.
-- `chart.invalidate(mask)` merges into the pending mask and schedules one rAF; multiple calls per frame coalesce.
+- **Glides step inside the frame.** Kinetic scroll and the eased wheel zoom schedule no animation frames of their own (`input/kinetic.ts` and `input/zoom-glide.ts` hold the maths). The frame steps them (`ChartMotion._step`) before it takes the mask, so each frame paints the step it made, and a glide asks for one animation frame per frame.
+- **No time-scale operation queue.** Fit, bar spacing, right offset, scroll-to-realtime and both glides change the time scale directly, and the repaint goes through the ordinary invalidation. The public mask keeps `addTimeScaleOp` and `timeScaleOps` for compatibility, but `addTimeScaleOp` has no caller in the chart and the frame never reads the queue.
+- `chart.invalidate(mask)` merges into the pending mask and schedules one rAF; multiple calls per frame coalesce. What the frame's own first steps invalidate, a glide step or a study recompute, lands in that frame's mask and asks for no frame after it.
 
 ```
 function frame(now) {                                // Chart._onFrame
+  moving = stepGlides()                              // kinetic scroll and eased zoom move the time scale
   flushIndicators()                                  // coalesced recompute, before the mask is taken
   const mask = takePendingMask()
   for (const [i, pane] of panes) {
@@ -354,6 +349,7 @@ function frame(now) {                                // Chart._onFrame
     if (level >= Cursor) pane.paintTop()             // crosshair, hover, dragged primitives
   }
   if (autoscaleStillEasing) invalidate(Light)        // re-arms the next frame
+  if (moving) requestFrame()                         // the next glide step, once this one is painted
 }
 ```
 
@@ -514,9 +510,9 @@ These directly affect Indian instruments, options, MCX, label correctness, and o
 
 ### 5.4 Time-scale features & edge cases
 
-- **`fitContent` / `setVisibleRange` / `setVisibleLogicalRange` / `scrollToRealtime`** change the time scale directly; the time-scale op queue in the mask is not used for them (§3.2).
+- **`fitContent` / `setVisibleRange` / `setVisibleLogicalRange` / `scrollToRealtime`** change the time scale directly (§3.2).
 - **Right offset** (empty bars after the last) and **bar-spacing clamp** `[min,max]`.
-- **Animations**: kinetic scroll decay and eased wheel zoom each run their own animation-frame loop and invalidate the chart on every step (§3.2), rather than being stepped by the render frame.
+- **Animations**: kinetic scroll decay and eased wheel zoom are stepped by the render frame, before it paints, and schedule no animation frames of their own (§3.2).
 - **Whitespace handling**: times that exist for alignment but carry no value for a series don't break tick generation.
 
 ### 5.3 Non-trading gaps: gapless by default (locked decision)
@@ -1086,9 +1082,9 @@ The current implementation keeps these boundaries in 2.5.7:
 - **Repainting only what changed** - the mask can target one pane, but data
   writes raise a global `Full`, so a study recompute or a live tick repaints
   every pane (§3.2).
-- **The time-scale operation queue and one animation loop** - the queue is
-  declared in `InvalidateMask` with no caller, and kinetic scroll and eased
-  zoom run their own animation-frame loops (§3.2).
+- **The time-scale operation queue** - `InvalidateMask` keeps
+  `addTimeScaleOp` for compatibility, and nothing in the chart queues an
+  operation or reads the queue; the time scale is changed directly (§3.2).
 - **Render budgets** - frame time is recorded by the endurance harness, not
   enforced; 10,000 and 50,000 bars per chart miss its gates today (§1,
   `docs/browser-endurance.md`). What the render benchmark should look at
@@ -1127,7 +1123,7 @@ Point-by-point mapping of the implementation review to where each is now address
 | # | Review point | Resolution | Section |
 |---|---|---|---|
 | 1 | Canvas/layout underspecified ("one canvas") | Explicit base+top canvas per pane; the axes paint on the base canvas (separate axis canvases deferred, §13a); layout diagram | §0 table, **§3.1** |
-| 2 | Invalidation too simple (global only) | Global level **+ per-pane map (+autoScale flag)**; the per-pane map serves primitives while data writes stay global, and the time-scale op queue is declared but unused (§13a) | **§3.2** |
+| 2 | Invalidation too simple (global only) | Global level **+ per-pane map (+autoScale flag)**; the per-pane map serves primitives while data writes stay global, and nothing in the chart reads the time-scale op queue the public mask keeps (§13a) | **§3.2** |
 | 3 | Shared time/data layer missing | Single `DataLayer` merges all series by time to shared logical indices, whitespace, `baseIndex`; per-series rows derive from it | **§4.1**, §3.3 |
 | 4 | History prepend/update semantics | Mutation API: `setData` / `update` / **`prependData` (index-shift + viewport preserve)**; out-of-order upsert; `mergeRange` not implemented | **§4.2** |
 | 5 | Live candle aggregation missing | `candle-builder.ts`: bucketing, **session reset, volume-delta (cumulative-day vs ltq), late-tick policy, tz** | **§10.2** |
