@@ -146,8 +146,10 @@ describe('descriptors that name no target', () => {
       { kind: 'IndicatorDrawings', pane: 0, overlay: false, scale: 'right' },
     ]);
     expect(paneLayers.every(layer => layer.ops.length > 0) && priceLayers.every(layer => layer.ops.length > 0)).toBe(true);
-    expect(await digest(paneLayers.map(layer => layer.ops))).toBe('53bd135f90d67b4e86db39afd7837a05d8c2bc94d5308f2ccbc712af31fbd07d');
-    expect(await digest(priceLayers.map(layer => layer.ops))).toBe('25f04af979b9d3e88e7b1a818355bb0671666a039180df3eedaeacfb705a9eb8');
+    // Re-pinned when pane boundaries moved onto whole device pixels: with that
+    // rounding bypassed, these op streams still hash to the digests pinned before.
+    expect(await digest(paneLayers.map(layer => layer.ops))).toBe('fa75466e0876a1a537e6859d4bf8f96a02ee4be5671ae9a3d2fd16c9de6d8723');
+    expect(await digest(priceLayers.map(layer => layer.ops))).toBe('e6737b9553bd21ee5cfe92260aa35ea63819a5146141eb449efbf061918bf833');
   });
 
   it('leave a layer first made on a live pass above the studies after it, and restack nothing', () => {

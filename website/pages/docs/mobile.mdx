@@ -74,7 +74,7 @@ chart.subscribeDrag(
 
 ## Responsive layout
 
-The chart installs a `ResizeObserver` on its container element at construction time. Whenever the container changes size -- viewport resize, device orientation change, or a flex/grid parent reflowing -- the chart recalculates pane layout and repaints automatically with no extra code required.
+The chart installs a `ResizeObserver` on its container element at construction time. Whenever the container changes size -- viewport resize, device orientation change, or a flex/grid parent reflowing -- the chart recalculates pane layout and repaints automatically with no extra code required. It paints inside the observer's callback, before the browser shows the frame, so a resize or a rotation never flashes a cleared chart.
 
 Use a fluid container so the chart fills its available space:
 
@@ -133,6 +133,8 @@ the rest of the chrome. See [The Widget Tier](/docs/widget#mobile-widget-control
 ## Crisp rendering
 
 The chart reads `window.devicePixelRatio` automatically at startup and draws every canvas at the physical pixel density of the screen. On 2x Retina displays and 3x mobile screens the output is sharp with no CSS-scaling blur.
+
+It follows a change of ratio too: a window dragged to a screen of another density, or a zoom. The chart watches a resolution media query for the ratio in force, made again after each change, and the window's `resize`, and re-sizes and repaints every canvas at once. At fractional ratios such as 1.25 and 1.5, common on laptop screens, each boundary between panes is rounded onto a device pixel and the separator is one device pixel tall, so no pane is stretched by a fraction of a pixel. Where the browser reports a canvas's device-pixel box (Chromium, Firefox), the canvas takes exactly that many pixels.
 
 To override the ratio -- for testing, fixed-density screenshots, or environments without `window` -- pass a `pixelRatio` function in `ChartOptions`. The value is re-read on every resize and repaint, so a function that reads `window.devicePixelRatio` dynamically is valid:
 

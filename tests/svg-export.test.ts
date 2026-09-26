@@ -166,17 +166,21 @@ describe('chart.exportSVG', () => {
     const { chart } = loaded();
     const [p0, p1] = chart.panes();
     const total = p0.weight + p1.weight;
-    const h0 = Math.round(((H * p0.weight) / total) * 100) / 100;
-    const h1 = Math.round(((H * p1.weight) / total) * 100) / 100;
+    // The boundary between the panes sits on a whole pixel, as it does on screen.
+    const h0 = Math.round((H * p0.weight) / total);
+    const h1 = H - h0;
     const svg = chart.exportSVG();
     expect(count(svg, /<g data-pane="/g)).toBe(2);
-    // The first pane sits at the top; the second is one row down, behind the
-    // separator the DOM draws as its border, and one row shorter for it.
+    // Each pane fills its own box, the second starting where the first ends,
+    // and the separator is laid over the second pane's first row after it,
+    // the way the DOM lays its rule over that pane's canvases.
     expect(svg).toContain(`<g data-pane="0" transform="translate(0 0)" clip-path="url(#`);
-    expect(svg).toContain(`<g data-pane="1" transform="translate(0 ${h0 + 1})" clip-path="url(#`);
+    expect(svg).toContain(`<g data-pane="1" transform="translate(0 ${h0})" clip-path="url(#`);
     const clips = svg.match(/<clipPath id="c\d+"><rect x="0" y="0" width="800" height="([\d.]+)"\/><\/clipPath>/g) ?? [];
-    expect(clips.map((c) => /height="([\d.]+)"/.exec(c)?.[1])).toEqual([String(h0), String(h1 - 1)]);
-    expect(svg).toContain(`<rect x="0" y="${h0}" width="800" height="1" fill="${chart.theme().paneSeparator}"/>`);
+    expect(clips.map((c) => /height="([\d.]+)"/.exec(c)?.[1])).toEqual([String(h0), String(h1)]);
+    const rule = `<rect x="0" y="${h0}" width="800" height="1" fill="${chart.theme().paneSeparator}"/>`;
+    expect(svg).toContain(rule);
+    expect(svg.indexOf(rule)).toBeGreaterThan(svg.indexOf('<g data-pane="1"'));
   });
 
   it('keeps the axis labels as text', () => {

@@ -7,6 +7,7 @@
 import { InvalidateMask, InvalidationLevel } from './invalidate-mask';
 import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop';
 import { Pane, type PaneRenderContext } from './pane';
+import { alignToDevicePixels, hairlineHeight, type CanvasLayer } from './canvas';
 import type { PriceAxisPlacement, PriceAxisSide, PriceAxisSlot } from '../model/price-axis-layout';
 import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale, type TimeScaleOptions } from '../scale/time-scale';
@@ -777,6 +778,14 @@ export class Chart {
   private _pending: InvalidateMask | null = null;
   private _scaleMutationDepth = 0;
   private _resizeObserver: ResizeObserver | null = null;
+  /** Watches the canvases' device-pixel boxes, where the browser reports them. */
+  private _deviceObserver: ResizeObserver | null = null;
+  /** Matches the device pixel ratio the canvases were last sized at; made again on every change. */
+  private _ratioQuery: MediaQueryList | null = null;
+  /** The window whose `resize` also re-checks the ratio. */
+  private _ratioView: Window | null = null;
+  /** The device pixel ratio the canvases were last sized at. */
+  private _layoutRatio = 0;
   private _width = 0;
   private _height = 0;
   private _hasFitContent = false;
@@ -1128,6 +1137,7 @@ export class Chart {
     this.setBranding(options.branding ?? true);
     this.setWatermarkOptions(options.watermark ?? false);
     this._observeSize();
+    this._watchPixelRatio();
     this._attachInput();
     // Direct navigation shares the chart's events; internal gestures and data
     // updates already own their repaint, animation and notification boundaries.
@@ -3358,26 +3368,23 @@ export class Chart {
           ...this._renderContext(i),
           dpr: 1, hoverId: null, hoverKey: null, dragId: null, paintBackground: background,
         };
-        // The DOM draws the separator as a 1px border on the pane box and lets
-        // the canvas start below it, its last row hidden by the overflow clip.
-        // The export reproduces that box exactly, or the second pane would sit
-        // one pixel higher than it does on screen.
-        const first = i === topPane;
-        const top = layout[i].top + (first ? 0 : 1);
-        const paneHeight = layout[i].height - (first ? 0 : 1);
-        if (!first) {
-          svg.fillStyle = this._theme.paneSeparator;
-          svg.fillRect(0, layout[i].top, width, 1);
-        }
+        // The DOM starts each canvas at its pane box's top and lays the
+        // separator over the first row, so the export paints the pane in that
+        // same box and the rule over it, or the second pane would sit a pixel
+        // away from where it is on screen.
         svg.pushGroup(
           { 'data-pane': i },
-          { translate: { x: 0, y: top }, clip: { x: 0, y: 0, width, height: paneHeight } },
+          { translate: { x: 0, y: layout[i].top }, clip: { x: 0, y: 0, width, height: layout[i].height } },
         );
         // A Full frame's sequence for one pane, minus the crosshair.
         pane.autoscale(ctx);
         pane.paintBase(ctx, g);
         pane.paintTop(null, ctx, g);
         svg.popGroup();
+        if (i !== topPane) {
+          svg.fillStyle = this._theme.paneSeparator;
+          svg.fillRect(0, layout[i].top, width, hairlineHeight(1));
+        }
       }
     } finally {
       if (resized) {
@@ -3723,6 +3730,7 @@ export class Chart {
     if (this._priceScaleOptions) pane.priceScale.setOptions(this._scalePatchFor(pane, this._priceScaleOptions));
     this._panes.push(pane);
     this._container.appendChild(pane.element);
+    this._observeCanvases(pane, true);
     return pane;
   }
 
@@ -3831,6 +3839,8 @@ export class Chart {
   public setTheme(theme: ChartTheme): void {
     this._theme = theme;
     this._container.style.background = theme.background;
+    // The rules are DOM, not paint: a frame does not recolour them.
+    this._syncSeparators();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
   }
 
@@ -4411,6 +4421,9 @@ export class Chart {
     const height = this._container.clientHeight;
     if (!(width > 0) || !(height > 0)) return;
     this.applySize(width, height);
+    // Inside an animation frame callback: a frame requested now runs in the
+    // next one, after this one has shown the canvases the resize cleared.
+    this._paintNow();
   }
 
   public applySize(width: number, height: number): void {
@@ -4441,8 +4454,8 @@ export class Chart {
       this._restackLegends();
     }
     const dpr = this._pixelRatio();
+    if (!geometryOnly) this._layoutRatio = dpr;
     const layout = this._paneLayout();
-    const topPane = this._topPaneIndex();
     const bottomPane = this._bottomPaneIndex();
     this._panes.forEach((pane, paneIndex) => {
       const h = layout[paneIndex].height;
@@ -4459,18 +4472,25 @@ export class Chart {
         // boundaries, legend buttons, and crosshair mapping all landed elsewhere.
         // Deriving both from one number makes layout == hit-test by construction.
         pane.element.style.flex = `0 0 ${h}px`;
-        // A hairline between stacked panes: every pane but the first. Drawn on
-        // the DOM box, so it sits exactly on the boundary the user drags.
-        const first = paneIndex === topPane;
-        pane.element.style.borderTopWidth = first ? '0px' : '1px';
-        pane.element.style.borderTopColor = first ? 'transparent' : this._theme.paneSeparator;
         pane.resize(this._width, h, dpr);
       }
       // Scale height is a layout property (see Pane.setScaleHeights). A strip's
       // scales span the strip, so nothing measured against them reaches below it.
       pane.setScaleHeights(Math.max(0, h - (paneIndex === bottomPane ? this._timeAxisHeight : 0)));
     });
+    if (!geometryOnly) this._syncSeparators();
     this._timeScale.setWidth(Math.max(0, this._width - this._rightAxisWidth - this._leftAxisWidth));
+  }
+
+  /**
+   * A hairline between stacked panes: over every pane but the one against the
+   * chart's top, a whole number of device pixels tall. It sits on the DOM box,
+   * so it is exactly on the boundary the user drags.
+   */
+  private _syncSeparators(): void {
+    const height = hairlineHeight(this._pixelRatio());
+    const topPane = this._topPaneIndex();
+    this._panes.forEach((pane, i) => pane.setSeparator(height, i === topPane ? null : this._theme.paneSeparator));
   }
 
   /**
@@ -4620,6 +4640,7 @@ export class Chart {
       this._seriesProvenance.delete(record.dataId);
       if (this._firstDataId.value === record.dataId) this._firstDataId.value = null;
     }
+    this._observeCanvases(pane, false);
     pane.destroy();
     this._panes.splice(index, 1);
     // Keep the maximize target on the pane it named. Removing the maximized
@@ -4891,8 +4912,18 @@ export class Chart {
    * strip one legend row tall, with the time axis under it when it is the
    * bottom pane, and the open panes share what is left by weight, so folding
    * one never rewrites a stored weight.
+   *
+   * Every boundary between panes sits on a device pixel (`alignToDevicePixels`),
+   * so each canvas covers a whole number of device pixels and the separator
+   * gets a row of its own. It is done here rather than where the boxes
+   * are sized, so hit testing agrees with the pixels by construction.
    */
   private _paneLayout(): { top: number; height: number }[] {
+    return alignToDevicePixels(this._paneShares(), this._pixelRatio());
+  }
+
+  /** The layout by weight and strip height alone, before device-pixel rounding. */
+  private _paneShares(): { top: number; height: number }[] {
     const bottom = this._bottomPaneIndex();
     const strip = paneLegendRowHeight({ iconSize: this._legendIconSize }) + 2 * DEFAULT_LEGEND_TOP;
     const strips = this._panes.map((_, i) => this._collapsedShown(i) ? strip + (i === bottom ? this._timeAxisHeight : 0) : 0);
@@ -5024,9 +5055,127 @@ export class Chart {
     if (typeof ResizeObserver === 'undefined') return;
     this._resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) this.applySize(entry.contentRect.width, entry.contentRect.height);
+      if (!entry) return;
+      this.applySize(entry.contentRect.width, entry.contentRect.height);
+      // Resizing a canvas clears it, and this callback runs after the
+      // frame's animation callbacks, just before the browser paints. Left
+      // to the next frame, the repaint would put one cleared frame on screen
+      // for every step of a window drag.
+      this._paintNow();
     });
     this._resizeObserver.observe(this._container);
+    if (typeof ResizeObserverEntry !== 'undefined' && 'devicePixelContentBoxSize' in ResizeObserverEntry.prototype) {
+      this._deviceObserver = new ResizeObserver(entries => this._onDevicePixels(entries));
+      for (const pane of this._panes) this._observeCanvases(pane, true);
+    }
+  }
+
+  /** Start or stop reading a pane's canvases' device-pixel boxes. */
+  private _observeCanvases(pane: Pane, on: boolean): void {
+    const observer = this._deviceObserver;
+    if (observer === null) return;
+    for (const layer of [pane.base, pane.top]) {
+      if (on) observer.observe(layer.element, { box: 'device-pixel-content-box' });
+      else observer.unobserve(layer.element);
+    }
+  }
+
+  /**
+   * Give each canvas the backing store the browser says its box covers. A
+   * canvas that starts part way into a device pixel is snapped to one pixel
+   * more or fewer than `media x dpr`, and a store one pixel off is stretched
+   * over the box, blurring every line on it.
+   */
+  private _onDevicePixels(entries: readonly ResizeObserverEntry[]): void {
+    if (this._destroyed || this._destroying) return;
+    let changed = false;
+    for (const entry of entries) {
+      const layer = this._canvasLayerOf(entry.target);
+      const device = entry.devicePixelContentBoxSize?.[0];
+      const box = entry.contentBoxSize?.[0];
+      if (layer === null || device === undefined || box === undefined) continue;
+      // Measured before a relayout in this same frame: the box it describes
+      // is gone, and the entry for the new one follows before the paint.
+      if (Math.abs(box.inlineSize - layer.mediaWidth) > 0.05 || Math.abs(box.blockSize - layer.mediaHeight) > 0.05) continue;
+      if (layer.setDeviceSize(device.inlineSize, device.blockSize)) changed = true;
+    }
+    if (!changed) return;
+    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    this._paintNow();
+  }
+
+  private _canvasLayerOf(target: Element): CanvasLayer | null {
+    for (const pane of this._panes) {
+      if (pane.base.element === target) return pane.base;
+      if (pane.top.element === target) return pane.top;
+    }
+    return null;
+  }
+
+  /** The window the chart's document shows in, or null outside a browser. */
+  private _view(): Window | null {
+    const view = this._doc.defaultView;
+    if (view) return view;
+    return typeof window === 'undefined' ? null : window;
+  }
+
+  /**
+   * Follow the device pixel ratio. It changes with no box changing size when
+   * the window moves to a screen of another density, and no size observer
+   * hears of that, so the canvases would stay at the old ratio, stretched and
+   * blurred. A resolution query matches the one ratio it was made for, so
+   * each change makes a new one for the ratio now in force.
+   *
+   * The window's `resize` is heard too: a zoom fires it, and it is the one
+   * signal left in a browser whose query list takes no change listener. It
+   * costs a comparison when the ratio has not moved.
+   */
+  private _watchPixelRatio(): void {
+    this._unwatchPixelRatio();
+    const view = this._view();
+    if (view === null || this._destroying || this._destroyed) return;
+    if (typeof view.addEventListener === 'function') {
+      view.addEventListener('resize', this._checkPixelRatio);
+      this._ratioView = view;
+    }
+    if (typeof view.matchMedia !== 'function') return;
+    const query = view.matchMedia(`(resolution: ${view.devicePixelRatio || 1}dppx)`);
+    if (typeof query?.addEventListener !== 'function') return;
+    query.addEventListener('change', this._onPixelRatio);
+    this._ratioQuery = query;
+  }
+
+  private _unwatchPixelRatio(): void {
+    this._ratioQuery?.removeEventListener('change', this._onPixelRatio);
+    this._ratioQuery = null;
+    this._ratioView?.removeEventListener('resize', this._checkPixelRatio);
+    this._ratioView = null;
+  }
+
+  private readonly _onPixelRatio = (): void => {
+    if (this._destroyed || this._destroying) return;
+    this._watchPixelRatio();
+    this._checkPixelRatio();
+  };
+
+  /** Size the canvases again if the ratio is no longer the one they were sized at. */
+  private readonly _checkPixelRatio = (): void => {
+    if (this._destroyed || this._destroying || this._pixelRatio() === this._layoutRatio) return;
+    this._relayout();
+    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
+    this._paintNow();
+  };
+
+  /**
+   * Run the pending frame now rather than on the next animation frame, for
+   * the callbacks that clear a canvas once this frame's animation callbacks
+   * have run: a resize observed before the browser paints, a new pixel ratio.
+   * Waiting would show the cleared canvas for a frame.
+   */
+  private _paintNow(): void {
+    if (this._destroyed || this._destroying || this._pending === null || this._scaleMutationDepth > 0) return;
+    this._loop.stop();
+    this._onFrame();
   }
 
   private _onFrame(): void {
@@ -6371,6 +6520,9 @@ export class Chart {
     for (const indicator of this._indicators.splice(0)) indicator.remove({ force: true });
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;
+    this._deviceObserver?.disconnect();
+    this._deviceObserver = null;
+    this._unwatchPixelRatio();
     if (typeof window !== 'undefined') {
       const el = this._container;
       el.removeEventListener('pointerdown', this._onPointerDown);

@@ -260,7 +260,14 @@ class CanvasLayer {
 - *Media scope*: `ctx.scale(dpr,dpr)` applied, draw in CSS px (text, anti-aliased fills).
 - *Bitmap scope*: no scaling, draw in device px, snap line edges to integer pixels for crisp 1px lines (candles, grid, crosshair). This integer-snapping is what keeps lines sharp instead of blurry on HiDPI displays.
 
-A single `ResizeObserver` on the container drives `resize()`. We inline the ~30 lines of HiDPI sizing rather than depend on a separate package.
+A single `ResizeObserver` on the container drives `resize()`, and the chart paints inside its callback: resizing a canvas clears it, and the callback runs after the frame's animation callbacks and before the browser paints, so a repaint left to the next frame would show one cleared frame per resize step. We inline the HiDPI sizing rather than depend on a separate package.
+
+**Device pixels, exactly.** Three things keep every canvas one to one with the screen:
+- *Pane boundaries on device pixels.* `_paneLayout` rounds each boundary between panes (the running total, not each height) onto a device pixel with `alignToDevicePixels`, within half a device pixel of its weighted share; the container's own outer edge is left alone. DOM boxes, canvases and hit testing all read this one layout.
+- *The separator is a box, not a border.* A 1 px CSS border is 1.25 or 1.5 device pixels at those ratios, which starts the canvases under it part way into a pixel. The rule is an element `hairlineHeight(dpr)` CSS px tall (one device pixel, or 1 px at ratios 1, 2 and 3) laid over the lower pane's first row, so its canvases start at the pane's own top and pane-local y is canvas y.
+- *The browser's own device box where it gives one.* A second `ResizeObserver` watches every canvas's `device-pixel-content-box` (Chromium and Firefox report it) and `CanvasLayer.setDeviceSize` takes that size when the box starts part way into a pixel; a report more than a pixel from `media × dpr` (what an emulated device scale reports) is refused.
+
+The ratio itself is watched: a `(resolution: Xdppx)` media query for the ratio in force, made again after each change, plus the window's `resize` (a zoom fires it, and it is the one signal left where a query takes no change listener). A change re-lays the panes, re-sizes every canvas and paints at once. A device-scale override that keeps the CSS viewport (a DevTools scale-only emulation) changes `devicePixelRatio` with no resize, query change or ResizeObserver entry at all, so nothing can follow it; a zoom-shaped override, the viewport shrinking as the scale grows, fires both.
 
 ### 3.2 Render loop & invalidation (`core/render-loop.ts`, `core/invalidate-mask.ts`)
 

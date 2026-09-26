@@ -8,8 +8,15 @@
  *   base canvas (2D context, z 0): background, grid, the series pass, the
  *     normal-layer primitives, the axis strip (ladder, last-price tag, value
  *     tags, trading pills). Repainted on Light and Full.
- *   top canvas (2D context, z 1): crosshair, hover highlights, primitives
- *     being dragged. Repainted on Cursor.
+ *   top canvas (2D context, z 1): the crosshair and its tags, and the
+ *     top-layer primitives (drawings over the series or lifted for a drag,
+ *     legends, tables, trading buttons, trade markers). Repainted on Cursor.
+ *     Order and position lines are normal-layer price lines on the base canvas.
+ *
+ * Both canvases cover the pane box exactly. Their backing store is `media x
+ * dpr`, or the device-pixel box the browser reports where it reports one
+ * (`CanvasLayer.setDeviceSize`), and the chart puts every pane boundary on a
+ * device pixel, so neither canvas is ever stretched by a fraction of a pixel.
  *
  * A GPU backend adds no canvas to the pile. It rasterises the series pass on
  * one page-wide offscreen surface shared by every pane of every chart and
@@ -148,6 +155,8 @@ export class Pane {
   public readonly element: HTMLElement;
   public readonly base: CanvasLayer;
   public readonly top: CanvasLayer;
+  /** The rule over the pane's top edge, shown on every pane but the one against the chart's top. */
+  private readonly _separator: HTMLElement;
   /**
    * What paints this pane's series onto `base`. Everything else on that canvas
    * (background, grid, axes, primitives) the pane draws itself on the 2D
@@ -198,16 +207,30 @@ export class Pane {
     this.element.style.width = '100%';
     this.element.style.flex = '1 1 auto';
     this.element.style.overflow = 'hidden';
-    // The rule between stacked panes. A CSS border rather than a canvas line:
-    // it lands on the DOM box boundary, so it cannot drift from the pane it
-    // separates when weights change, and costs nothing to repaint.
-    this.element.style.borderTopStyle = 'solid';
-    this.element.style.borderTopWidth = '0px';
     this.element.style.boxSizing = 'border-box';
     this.base = new CanvasLayer(doc, 0);
     this.top = new CanvasLayer(doc, 1);
     this.element.appendChild(this.base.element);
     this.element.appendChild(this.top.element);
+    // The rule between stacked panes, as a box laid over the canvases' first
+    // rows rather than a canvas line: it sits on the DOM box boundary, so it
+    // cannot drift from the pane it separates when weights change, and costs
+    // nothing to repaint. Not a border: a 1 px border is 1.25 or 1.5 device
+    // pixels at those ratios, which starts the canvases under it part way into
+    // a device pixel, and the browser then resamples the whole pane and blends
+    // the rule into it. A box can be exactly one device pixel tall.
+    const rule = doc.createElement('div');
+    const s = rule.style;
+    s.position = 'absolute';
+    s.left = '0';
+    s.top = '0';
+    s.width = '100%';
+    s.height = '0px';
+    s.zIndex = '2';
+    s.pointerEvents = 'none';
+    s.display = 'none';
+    this._separator = rule;
+    this.element.appendChild(rule);
     this._backend = backend;
     // The base canvas already holds a 2D context (CanvasLayer asks for it on
     // construction), so the backend is handed that one rather than left to ask
@@ -722,6 +745,18 @@ export class Pane {
       }
     }
     return best;
+  }
+
+  /**
+   * Show the rule over this pane's top edge, `height` CSS px tall, or hide it
+   * with a null colour. It covers the canvases' first rows rather than moving
+   * them down, so the canvases keep starting on the device pixel the pane does.
+   */
+  public setSeparator(height: number, color: string | null): void {
+    const s = this._separator.style;
+    s.display = color === null ? 'none' : '';
+    s.height = `${color === null ? 0 : height}px`;
+    s.background = color ?? 'transparent';
   }
 
   public resize(width: number, height: number, dpr: number): void {

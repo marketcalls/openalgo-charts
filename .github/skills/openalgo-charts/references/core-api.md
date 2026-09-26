@@ -67,7 +67,7 @@ does not need to be loaded again.
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `document` | `Document` | `container.ownerDocument` | Element factory (SSR / multi-window). |
-| `pixelRatio` | `() => number` | `window.devicePixelRatio ?? 1` | Called per frame; canvases resize to media x dpr. |
+| `pixelRatio` | `() => number` | `window.devicePixelRatio ?? 1` | Called per frame; canvases resize to media x dpr. Read again whenever the device ratio changes: the chart watches a `(resolution: Xdppx)` query, made again for each new ratio, and the window's `resize`, and re-sizes and repaints every canvas at once. |
 | `raf` | `{ schedule, cancel? }` | `requestAnimationFrame` | Injectable frame scheduler (deterministic tests). |
 | `theme` | `ChartTheme` | `DEFAULT_THEME` | See [themes-and-styling](themes-and-styling.md). |
 | `priceAxisWidth` | `number` | `56` | Media px. Also the width reserved for a left axis when one exists. |
@@ -297,7 +297,8 @@ and legacy template parsing retain structurally valid maps for later validation.
 ## Lifecycle and sizing
 
 - `chart.destroy()`: the only teardown method. **There is no `chart.remove()`.** It stops the render loop and kinetic animation, removes every indicator, disconnects the `ResizeObserver`, unbinds all pointer/wheel/keyboard listeners, destroys every pane, and clears the container's cursor hint.
-- `chart.applySize(width, height)`: media px; no-ops when unchanged. A `ResizeObserver` on the container calls it automatically, so manual calls are only needed in hosts without `ResizeObserver`.
+- `chart.applySize(width, height)`: media px; no-ops when unchanged. A `ResizeObserver` on the container calls it automatically, so manual calls are only needed in hosts without `ResizeObserver`. The chart paints inside that observer's callback, which runs after the frame's animation callbacks and before the browser paints, so a resize never shows a cleared canvas for a frame.
+- **Device pixels.** Every boundary between panes is rounded onto a device pixel (within half a device pixel of its weighted share; the outer edge stays the container's), so each canvas covers whole device pixels, and where the browser reports a canvas's `devicePixelContentBoxSize` (Chromium, Firefox) the backing store takes exactly that size. The separator between panes is a box one device pixel tall (1 px at ratios 1, 2 and 3) laid over the lower pane's first row, so its canvases start on the pane's own top and pane-local y is canvas y. A pane's height can differ from its exact weighted share by up to one device pixel.
 - `chart.applyOptions(opts)` takes a runtime subset only: `theme`, `grid`, `canvas`, `statusLine`, `priceScale`, `priceFormatter`, `timeFormatter`, `timezone`, `crosshairMode`. Nothing else from `ChartOptions` is re-appliable.
 
 ## Object inventory and management
