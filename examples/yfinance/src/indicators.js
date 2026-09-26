@@ -2,6 +2,7 @@ import { registeredIndicators, getIndicator, indicatorDefaults, indicatorStyleIn
 import { el, esc, currentTheme, chartTheme, toast, closeOverlay } from './ui.js';
 import { autosave } from './persist.js';
 import { capturePaneTarget } from './pane-target.js';
+import { historyGroup } from './history.js';
 import { createColorPicker, applyTokens, widgetTokens } from '/dist/openalgo-charts.widget.mjs';
 import { bindTypedField, typedFieldValue, typedFieldError, validateTypedRows, mountReferenceInputControls } from './indicator-input-controls.js';
 
@@ -91,13 +92,24 @@ function studySource(value) {
 }
 
 let settingsTab = 'inputs';
+// Each tab switch commits the form and so does OK; the whole session is one
+// step on that chart's timeline, and a session that changed nothing is none.
+let endSettingsStep = () => {};
+function endStudyStep() {
+  const end = endSettingsStep;
+  endSettingsStep = () => {};
+  end();
+}
+
 export function openSettings(instanceId, target = capturePaneTarget(app)) {
   if (!target?.current()) return;
   const inst = target.chart.indicators().find((i) => i.id === instanceId);
   if (!inst) return;
   disposeSettings?.();
+  endStudyStep();
   settingsTarget = target;
   settingsFor = inst;
+  endSettingsStep = historyGroup(target.pane, 'Study settings');
   const offDestroy = target.chart.on('destroy', closeSettings);
   const offRemoved = target.chart.on('indicatorRemoved', () => {
     if (currentSettings() && validateTypedRows(el('set-body'))) renderSettingsTab(collectInputRows(el('set-body')));
@@ -409,6 +421,7 @@ export function closeSettings() {
   destroyInputRows(el('set-body'));
   disposeSettings?.();
   disposeSettings = null;
+  endStudyStep();
   el('setmodal').hidden = true;
   closeOverlay(el('setmodal'));
   settingsTab = 'inputs';

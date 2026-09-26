@@ -3,12 +3,13 @@
 // a command, the demo's own changes left out, and the drawing controller's
 // own history as the fallback before a chart has a timeline.
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createChart, registerIndicator } from '/dist/openalgo-charts.mjs';
+import { applyChartSettings, createChart, createLinkGroup, registerIndicator } from '/dist/openalgo-charts.mjs';
 import { DrawingController } from '/dist/openalgo-charts.draw.mjs';
 import { fakeDocument } from '../../../tests/helpers/fake-dom';
 import {
   initHistory, attachHistory, historyFor, historyPress, historyReady, withoutHistory, asStep, historyGroup, recordChartType,
 } from '../src/history.js';
+import { initSplit, joinLink } from '../src/split.js';
 
 const bars = Array.from({ length: 60 }, (_, i) => {
   const close = 100 + 10 * Math.sin(i / 4);
@@ -143,5 +144,38 @@ describe('the demo timeline', () => {
     expect(historyReady('undo', 1)).toBe(false);
     historyPress('undo');
     expect(app.chart2.indicators()).toHaveLength(0);
+  });
+
+  it('applies a linked appearance change to the other chart outside its timeline, and walks it back on both', async () => {
+    // The split view's divider asks the page for its bar; nothing else here needs a document.
+    vi.stubGlobal('document', { getElementById: () => ({ addEventListener() {} }) });
+    try {
+      const app = demo();
+      Object.assign(app, { chart2: build().chart });
+      app.draw2 = new DrawingController(app.chart2);
+      attachHistory(2);
+      initSplit(app);
+      app.linkGroup = createLinkGroup({ appearance: true, crosshair: false, viewport: false });
+      Object.assign(app, { req: { symbol: 'AAA', interval: '1d' }, p2: { symbol: 'BBB', interval: '1d' } });
+      joinLink();
+      const mode = chart => chart.priceAxisState(0, 'right')?.mode;
+
+      historyFor(1).transact(() => applyChartSettings(app.chart, { 'scales.mode': 'logarithmic' }), 'Chart settings');
+      expect(mode(app.chart2)).toBe('logarithmic');
+      expect(historyReady('undo', 2)).toBe(false);
+      app.chart2.addIndicator('demo-history-study');
+      await settle();
+      expect(historyFor(2).peekUndo()?.changes).toEqual(['study-add']);
+      historyPress('undo', 2);
+      expect([mode(app.chart), mode(app.chart2)]).toEqual(['logarithmic', 'logarithmic']);
+      historyPress('undo', 1);
+      expect([mode(app.chart), mode(app.chart2)]).toEqual(['linear', 'linear']);
+      historyPress('redo', 1);
+      expect([mode(app.chart), mode(app.chart2)]).toEqual(['logarithmic', 'logarithmic']);
+      app.linkGroup.destroy();
+      app.drawingLinkGroup.destroy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

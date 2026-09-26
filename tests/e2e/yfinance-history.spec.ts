@@ -116,3 +116,77 @@ test('Ctrl+Z and Ctrl+Y walk a study, a line, a scale and a type rebuild on the 
   expect(await page.evaluate(() => (window as any).__oac.app.orders.length)).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('a study settings session is one step, and a linked appearance change is undone on both charts', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const study = await page.evaluate(() => {
+    const app = (window as any).__oac.app;
+    const made = app.chart.addIndicator('ema', { length: 20 });
+    return made.id;
+  });
+  await page.evaluate(() => (window as any).__oac.app.history.clear());
+  const length = () => page.evaluate(id => (window as any).__oac.app.chart.indicators().find((s: any) => s.id === id)?.settings().length, study);
+
+  // One session: a tab switch commits the form, and so does Apply.
+  await page.evaluate(async id => (await import('/examples/yfinance/src/indicators.js' as string)).openSettings(id), study);
+  await expect(page.locator('#setmodal')).toBeVisible();
+  await page.locator('#set-body [data-key="length"]').fill('9');
+  await page.locator('.set-tab[data-tab="style"]').click();
+  await expect.poll(length).toBe(9);
+  await page.locator('.set-tab[data-tab="inputs"]').click();
+  await page.locator('#set-body [data-key="length"]').fill('15');
+  await page.locator('#set-ok').click();
+  await expect.poll(length).toBe(15);
+  expect(await page.evaluate(() => (window as any).__oac.app.history.peekUndo())).toEqual({ label: 'Study settings', changes: ['study-settings'] });
+  const box = await chartBox(page);
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(length).toBe(20);
+  expect(await page.evaluate(() => (window as any).__oac.app.history.canUndo())).toBe(false);
+  await paint(page);
+  await page.screenshot({ path: info.outputPath('reference-study-session-undone.png') });
+
+  // A second chart with appearance linked: the first chart's colour is its step, and both follow its undo.
+  await page.getByRole('button', { name: /Open a second, linked chart/ }).click();
+  await page.waitForFunction(() => (window as any).__oac?.app.chart2?.primaryBars().length > 0 && !(window as any).__oac.app.loading2);
+  await page.getByRole('button', { name: /^Chart linking \(/ }).click();
+  await page.getByRole('button', { name: /^Appearance/ }).click();
+  await page.keyboard.press('Escape');
+  const up = () => page.evaluate(async () => {
+    const { readChartSettings } = await import('/dist/openalgo-charts.mjs' as string);
+    const app = (window as any).__oac.app;
+    return [readChartSettings(app.chart)['symbol.upColor'], readChartSettings(app.chart2)['symbol.upColor']];
+  });
+  const start = await up();
+  await page.locator('#chart').focus();
+  await page.getByRole('button', { name: 'Chart settings (or right-click the chart)', exact: true }).click();
+  await page.locator('#cset-tabs').getByRole('button', { name: 'Price', exact: true }).click();
+  await page.locator('[data-key="symbol.upColor"]').fill('#11aa22');
+  await page.locator('#cset-ok').click();
+  await expect.poll(up).toEqual(['#11aa22', '#11aa22']);
+  expect(await page.evaluate(() => (window as any).__oac.app.history2.canUndo())).toBe(false);
+  const green = () => page.evaluate(() => {
+    const canvas = (window as any).__oac.app.chart2.panes()[0].element.querySelector('canvas') as HTMLCanvasElement;
+    const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+    let count = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i] === 0x11 && data[i + 1] === 0xaa && data[i + 2] === 0x22) count++;
+    return count;
+  });
+  await paint(page);
+  await expect.poll(green).toBeGreaterThan(50);
+  await page.screenshot({ path: info.outputPath('reference-linked-colour.png') });
+  const first = await chartBox(page);
+  await page.mouse.move(first.x + first.width * 0.5, first.y + first.height * 0.5);
+  await page.locator('#chart').focus();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(up).toEqual(start);
+  await paint(page);
+  await expect.poll(green).toBe(0);
+  await page.screenshot({ path: info.outputPath('reference-linked-undone.png') });
+  await page.keyboard.press('ControlOrMeta+y');
+  await expect.poll(up).toEqual(['#11aa22', '#11aa22']);
+  await paint(page);
+  await expect.poll(green).toBeGreaterThan(50);
+  expect(errors).toEqual([]);
+});

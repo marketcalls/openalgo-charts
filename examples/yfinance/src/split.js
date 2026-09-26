@@ -23,7 +23,7 @@ import { symbolStatus, exchangeOf, nameOf } from './status.js';
 import { axisMinMove } from './ticks.js';
 import { attachReplay, exitReplay, syncReplayAlertPause } from './replay.js';
 import { attachTimeline } from './timeline.js';
-import { attachHistory, historyFor } from './history.js';
+import { attachHistory, historyFor, withoutHistory } from './history.js';
 
 // 1.3 surfaces: chart linking, the bar cache and the interval registry.
 // Same namespace read for the same reason: this page must still draw
@@ -119,7 +119,7 @@ export function joinLink() {
   if (!app.linkGroup) return;
   if (app.chart) {
     app.linkGroup.add(app.chart, {
-      appearance: appearanceAdapter(app.chart),
+      appearance: appearanceAdapter(app.chart, 1),
       symbol: app.req.symbol,
       interval: app.req.interval,
       onInterval: interval => {
@@ -140,7 +140,7 @@ export function joinLink() {
   }
   if (app.chart2) {
     app.linkGroup.add(app.chart2, {
-      appearance: appearanceAdapter(app.chart2),
+      appearance: appearanceAdapter(app.chart2, 2),
       symbol: app.p2.symbol,
       interval: app.p2.interval,
       onInterval: interval => {
@@ -164,10 +164,12 @@ export function joinLink() {
 export const drawingLinkContext = request => ({ symbol: request.symbol, exchange: 'YFINANCE' });
 const drawingContextReader = chart => () => drawingLinkContext(chart.getDataContext() || {});
 
-function appearanceAdapter(chart) {
+// A linked change is the other chart's step, taken back on its timeline and
+// sent here again; on this chart's own timeline it is never a step.
+function appearanceAdapter(chart, pane) {
   return {
     read: () => engine.readChartSettings(chart),
-    apply: values => engine.applyChartSettings(chart, values),
+    apply: values => withoutHistory(pane, () => engine.applyChartSettings(chart, values)),
   };
 }
 
