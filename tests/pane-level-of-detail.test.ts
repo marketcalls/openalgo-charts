@@ -18,7 +18,7 @@ import { Chart } from '../src/core/chart';
 import { InvalidationLevel } from '../src/core/invalidate-mask';
 import { Canvas2dBackend } from '../src/render/canvas2d-backend';
 import type { IRenderBackend } from '../src/render/backend';
-import type { DrawItem, RendererEntry, SeriesRenderContext } from '../src/model/chart-type-registry';
+import { getChartType, registerChartType, type DrawItem, type RendererEntry, type SeriesRenderContext } from '../src/model/chart-type-registry';
 import type { SeriesStyle } from '../src/render/series-style';
 import { createLodColumns, lodActive, lodColumnWidth, lodKind, type LodKind } from '../src/model/conflation';
 import type { Bar } from '../src/model/bar';
@@ -459,5 +459,32 @@ describe('the level of detail at the edges', () => {
     armed = true;
     expect(() => chart.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full))).not.toThrow();
     expect(armed).toBe(false);
+  });
+});
+
+describe('a host renderer under a built-in name', () => {
+  it('gets every bar, as any custom type does', () => {
+    const builtIn = getChartType('candlestick');
+    const seen: number[] = [];
+    registerChartType('candlestick', { ...builtIn, draw: (...args) => { seen.push(args[1].length); builtIn.draw(...args); } });
+    try {
+      const bars = walk(4000);
+      const r = rig(bars, { conflate: true });
+      r.chart.timeScale.setBarSpacing(0.1);
+      seen.length = 0;
+      r.paint();
+      // Every bar in view reaches the host's renderer, not one stick per column.
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toBe(bars.length);
+      r.chart.destroy();
+    } finally {
+      registerChartType('candlestick', builtIn);
+    }
+    // The built-in one, back in place, is reduced again.
+    const again = rig(walk(4000), { conflate: true });
+    again.chart.timeScale.setBarSpacing(0.1);
+    again.paint();
+    expect(again.backends[0].calls[0].items.length).toBeLessThanOrEqual(again.chart.timeScale.width + 1);
+    again.chart.destroy();
   });
 });

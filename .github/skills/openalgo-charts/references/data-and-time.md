@@ -325,7 +325,7 @@ const every = createChart(el, { conflate: false });
 - **Candles, OHLC bars, high-low bars and the HLC area** merge each column into one stick: open from the first bar, close from the last, high and low the column's extremes, volume summed, open interest the last reading, and the colour overrides of the bar that closed the column. Never averaged. The sticks sit on the column grid and tile without overlap; a column holding only whitespace draws nothing.
 - **Lines, steps, areas and baselines** keep real bars: the first, lowest, highest and last of each unbroken run in a column, which cover the pixels the full line covers. A gap stays a gap, kept as one whitespace bar.
 - **Columns and histograms** keep each column's lowest and highest bar, drawn from the base, which cover what every bar in it would.
-- **Any other type** (a host's `registerChartType` renderer, Point and Figure, Kagi) is drawn in full: its renderer may read fields or neighbours a merge cannot know about.
+- **Any other renderer** (a host's `registerChartType` renderer, even one registered under a built-in name, Point and Figure, Kagi) is drawn in full: it may read fields or neighbours a merge cannot know about.
 
 It is a render-time step only: the DataLayer, `getData()`, indicators, autoscale and the crosshair readout all see every bar.
 

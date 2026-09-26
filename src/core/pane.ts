@@ -38,7 +38,7 @@ import type { SeriesRecord, PriceScaleId } from '../model/series';
 import type { PriceScaleState } from '../model/chart-state';
 import { PriceAxisLayout, type PriceAxisPlacement, type PriceAxisSide, type PriceAxisSlot } from '../model/price-axis-layout';
 import { computeGridLines, drawGrid, resolveGridStyle, resolveScaleStyle, type CanvasOptions } from '../render/grid';
-import { getChartType, type SeriesRenderContext } from '../model/chart-type-registry';
+import { getChartType, registeredChartTypes, type SeriesRenderContext } from '../model/chart-type-registry';
 import type { SeriesStyle } from '../render/series-style';
 import { lodActive, lodColumnWidth, lodKind } from '../model/conflation';
 import { createSeriesDrawItems, visibleSpan, type LodRequest, type SeriesDrawItems, type VisibleSpan } from '../render/draw-items';
@@ -165,6 +165,14 @@ const HIT_RANK: Record<ZOrder, number> = { bottom: 0, normal: 2, top: 3 };
  */
 const SPAN: VisibleSpan = { start: 0, lastTime: 0 };
 const LOD: LodRequest = { kind: 'ohlc', dpr: 1, factor: 1 };
+
+/**
+ * The renderers the level of detail may hand merged bars to: the built-in ones,
+ * as registered before any host code ran. A host may register its own
+ * renderer under a built-in name, and it gets every bar, as any other custom
+ * type does: it may read fields or neighbours a merge cannot know about.
+ */
+const LOD_RENDERERS = new Set(registeredChartTypes().map(getChartType));
 
 export class Pane {
   public readonly element: HTMLElement;
@@ -1149,7 +1157,7 @@ export class Pane {
       // A shifted series is painted `barOffset` bars from where its data sits,
       // so the bars in view are the ones whose shifted position lands in range.
       const shift = s.style.barOffset ?? 0;
-      const kind = lodOn ? lodKind(s.type) : null;
+      const kind = lodOn && LOD_RENDERERS.has(entry) ? lodKind(s.type) : null;
       if (kind !== null) lod.kind = kind;
       let buffer = this._drawItems.get(s);
       if (buffer === undefined) this._drawItems.set(s, buffer = createSeriesDrawItems());

@@ -504,7 +504,7 @@ registerChartType('range-band', {
 chart.addSeries('range-band').setData(bars);
 ```
 
-`RendererEntry` in full: `defaultStyle: SeriesStyle`, `isPriceSeries: boolean`, `draw(ctx, items, toY, barSpacing, dpr, style, rc)`, `extents(bar, style)`. `items` is `{ x: number /* bar centre, media px */, bar: Bar }[]`, already culled to the visible range. A custom type is never reduced by the level of detail (`conflate`); the built-in ones are below one CSS px per bar. The array and its objects belong to the pane, which rewrites them in place the next time it draws the series: copy anything kept past that. `rc` is `{ plotHeight, maxVolume, theme }`, media px, the visible-window volume peak, and the palette.
+`RendererEntry` in full: `defaultStyle: SeriesStyle`, `isPriceSeries: boolean`, `draw(ctx, items, toY, barSpacing, dpr, style, rc)`, `extents(bar, style)`. `items` is `{ x: number /* bar centre, media px */, bar: Bar }[]`, already culled to the visible range. A custom type is never reduced by the level of detail (`conflate`), even one registered under a built-in name; the built-in renderers are below one CSS px per bar. The array and its objects belong to the pane, which rewrites them in place the next time it draws the series: copy anything kept past that. `rc` is `{ plotHeight, maxVolume, theme }`, media px, the visible-window volume peak, and the palette.
 
 `registeredChartTypes()` lists every registered id. `'point-figure'` and `'kagi'` live in the transform tier and only resolve once `openalgo-charts/transform` is imported.
 
