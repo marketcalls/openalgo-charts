@@ -41,7 +41,7 @@ function prng(seed: number): () => number {
   };
 }
 
-type Clock = 'nse' | 'nyse' | 'daily' | 'continuous' | 'irregular' | 'opening' | 'hourly';
+type Clock = 'nse' | 'nyse' | 'daily' | 'continuous' | 'irregular' | 'opening' | 'hourly' | 'threshold' | 'spans';
 
 interface Flavour {
   clock: Clock;
@@ -95,6 +95,31 @@ function timeline(clock: Clock, rnd: () => number): () => number {
       t = Number.isNaN(t) ? day : t + hours * 3600;
       return t;
     };
+    // Minute bars whose breaks land exactly on the session threshold (four
+    // hours, since four minute gaps are less), a minute short of it, or well
+    // past it: the one gap length where "at least" and "more than" part.
+    case 'threshold': return () => {
+      const r = rnd();
+      t = Number.isNaN(t) ? day : t + (r < 0.03 ? 4 * 3600 : r < 0.05 ? 4 * 3600 - 60 : r < 0.06 ? 3 * DAY : 60);
+      return t;
+    };
+    // Minute sessions whose opens sit 24, 36 or 60 hours apart, some a minute
+    // past: a span of at most 36 hours counts as a daily cadence, and only an
+    // open exactly on it tells "at most" from "under". Opening at 18:00 UTC
+    // or 06:00 UTC, a session can run across midnight in IST, which is where
+    // reading sessions and falling back to the calendar part ways.
+    case 'spans': {
+      let open = NaN;
+      let left = 0;
+      return () => {
+        if (Number.isNaN(t)) { open = day + 18 * 3600; t = open; left = 20 + Math.floor(rnd() * 40); return t; }
+        if (left-- > 0) { t += 60; return t; }
+        open += [24, 36, 36, 60][Math.floor(rnd() * 4)] * 3600 + (rnd() < 0.2 ? 60 : 0);
+        t = open;
+        left = 20 + Math.floor(rnd() * 40);
+        return t;
+      };
+    }
     case 'irregular': return () => {
       const r = rnd();
       const gap = r < 0.55 ? 60 : r < 0.7 ? 120 : r < 0.8 ? 300 : r < 0.9 ? 3600 * (1 + Math.floor(rnd() * 20)) : DAY * (1 + Math.floor(rnd() * 3));
@@ -106,7 +131,7 @@ function timeline(clock: Clock, rnd: () => number): () => number {
 
 function price(rnd: () => number, f: Flavour, base: number): number {
   const r = rnd();
-  if (r < f.extremes) return [1e308, 1.7e308, -1e308, 1e154, 5e-324][Math.floor(rnd() * 5)];
+  if (r < f.extremes) return [1e308, 1.7e308, -1e308, 1e154, 5e-324, Infinity, -Infinity][Math.floor(rnd() * 7)];
   if (r < f.extremes + f.zeros) return rnd() < 0.5 ? 0 : -0;
   return base;
 }
@@ -130,6 +155,8 @@ function makeBar(rnd: () => number, f: Flavour, time: number, prev: Bar | undefi
   const v = rnd();
   if (v < 0.08) { /* no volume at all */ } else if (v < 0.11) bar.volume = NaN;
   else if (v < 0.15) bar.volume = 0;
+  // A feed can send what no exchange prints; VWAP's totals meet it all the same.
+  else if (v < 0.17) bar.volume = [Infinity, -5, 0.5, 1e300][Math.floor(rnd() * 4)];
   else bar.volume = Math.floor(rnd() * 5000);
   const h = rnd();
   if (h < f.holes) {
@@ -223,6 +250,8 @@ const FLAVOURS: Flavour[] = [
   { clock: 'nse', holes: 0.02, extremes: 0, zeros: 0, grid: 0.5 },
   { clock: 'continuous', holes: 0.01, extremes: 0, zeros: 0.01, grid: 1 },
   { clock: 'hourly', holes: 0.02, extremes: 0, zeros: 0 },
+  { clock: 'threshold', holes: 0.02, extremes: 0, zeros: 0 },
+  { clock: 'spans', holes: 0.02, extremes: 0, zeros: 0 },
 ];
 
 /** Settings for each built-in: defaults first, then the edges of its inputs. */
@@ -336,7 +365,7 @@ describe('VWAP restarts across sessions and anchors', () => {
       let events = 0;
       let tails = 0;
       for (const timezone of ['Asia/Kolkata', 'America/New_York']) {
-        for (const clock of ['nse', 'nyse', 'daily', 'opening', 'hourly'] as const) {
+        for (const clock of ['nse', 'nyse', 'daily', 'opening', 'hourly', 'threshold', 'spans'] as const) {
           for (const initial of [1, 2, 12, 90]) {
             const f: Flavour = { clock, holes: 0.03, extremes: 0, zeros: 0 };
             const run = drive(d, settingsFor(d, { anchor, timezone, showBand2: true }), initial * 13 + clock.length, f, { initial, events: 150 });
@@ -391,6 +420,51 @@ describe('through the chart', () => {
     for (const st of studies) expect(st.counts.tails, st.d.id).toBeGreaterThan(110);
     chart.destroy();
   });
+});
+
+describe('a built-in over a built-in', () => {
+  // A producer that takes its tail keeps its output's history revision, so a
+  // dependent built-in is offered its own tail as well, reading the producer's
+  // column through the resolver. Both must still read what a reload computes.
+  for (const [up, key, down] of [['sma', 'ma', 'ema'], ['rsi', 'rsi', 'sma'], ['macd', 'macd', 'wma']] as const) {
+    it(`${down} over ${up}.${key} on a live chart`, () => {
+      const doc = fakeDocument();
+      const chart = new Chart(doc.createElement('div'), {
+        document: doc, timezone: 'Etc/UTC', pixelRatio: () => 1, shortcuts: false, raf: { schedule: () => 1, cancel: () => {} },
+      });
+      chart.applySize(800, 600);
+      const rnd = prng(up.length * 101 + down.length);
+      const f: Flavour = { clock: 'continuous', holes: 0.04, extremes: 0, zeros: 0, grid: 0.25 };
+      const next = timeline(f.clock, rnd);
+      const data: Bar[] = [];
+      for (let i = 0; i < 200; i++) data.push(makeBar(rnd, f, next(), data[i - 1], false));
+      const price = chart.addSeries('candlestick');
+      price.setData(data);
+      const consumerDescriptor = getIndicator(down);
+      let fulls = 0;
+      registerIndicator({
+        ...consumerDescriptor, id: `tail-chain-${down}`,
+        calc: (...args) => { fulls++; return consumerDescriptor.calc(...args); },
+        calcTail: consumerDescriptor.calcTail,
+      });
+      const producer = chart.addIndicator(up, { length: 5 });
+      const consumer = chart.addIndicator(`tail-chain-${down}`, { length: 4, source: { kind: 'indicator', instanceId: producer.id, plotKey: key } });
+      const settled = fulls;
+      for (let e = 0; e < 80; e++) {
+        const last = data[data.length - 1];
+        const bar = rnd() < 0.3 ? makeBar(rnd, f, next(), last, false) : makeBar(rnd, f, last.time, last, true);
+        if (bar.time === last.time) data[data.length - 1] = bar; else data.push(bar);
+        price.update(bar);
+        const column = getIndicator(up).calc(data, producer.settings(), {})[key];
+        expect(firstDifference(producer.values(), getIndicator(up).calc(data, producer.settings(), {})), `${up} after ${e}`).toBeNull();
+        const expected = consumerDescriptor.calc(data, consumer.settings(), {}, { resolveSource: () => column } as never);
+        expect(firstDifference(consumer.values(), expected), `${down} after ${e}`).toBeNull();
+      }
+      // The consumer ran its full calc on only a handful of the 80 events.
+      expect(fulls - settled).toBeLessThan(8);
+      chart.destroy();
+    });
+  }
 });
 
 describe('what a tail resumes from', () => {
@@ -571,14 +645,60 @@ describe('a descriptor that spreads a built-in', () => {
   });
 });
 
+describe('what a tick costs', () => {
+  // The point of a tail. Once it has resumed, a tick or an appended bar reads a
+  // window's or a step's worth of bars, not the history; a tail that quietly
+  // rebuilt from bar 0 would still be right and would still pass every test
+  // above. So the bars each tail reads are counted.
+  it('each built-in reads a bounded number of bars per tick and per appended bar', () => {
+    for (const id of Object.keys(CASES)) {
+      const d = getIndicator(id);
+      const settings = settingsFor(d, {});
+      const rnd = prng(4242);
+      const f: Flavour = { clock: 'nse', holes: 0, extremes: 0, zeros: 0, grid: 0.05 };
+      const next = timeline(f.clock, rnd);
+      const bars: Bar[] = [];
+      for (let i = 0; i < 3000; i++) bars.push(makeBar(rnd, f, next(), bars[i - 1], false));
+      const store: IndicatorStore = {};
+      let held = d.calc(bars, settings, store);
+      let reads = 0;
+      const counted = new Proxy(bars, {
+        get(target, key, receiver) {
+          if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      const after: number[] = [];
+      for (let e = 0; e < 40; e++) {
+        const n0 = bars.length;
+        if (e % 4 === 3) bars.push(makeBar(rnd, f, next(), bars[n0 - 1], false));
+        else bars[n0 - 1] = makeBar(rnd, f, bars[n0 - 1].time, bars[n0 - 1], true);
+        reads = 0;
+        const tail = d.calcTail!(counted, settings, n0 - 1, held, store);
+        expect(tail, `${id} event ${e}`).not.toBeNull();
+        held = splice(held, tail!, n0 - 1, bars.length)!;
+        // The first tail after a full calc walks the history once to rebuild.
+        if (e === 0) expect(reads, id).toBeGreaterThan(0);
+        else after.push(reads);
+      }
+      expect(Math.max(...after), id).toBeLessThan(100);
+    }
+  });
+});
+
 describe('the resumable kernels are the batch kernels', () => {
   // Pinned directly as well as through the studies, so a drifted copy is named
   // by the kernel it drifted from.
+  // From seed 60 on, a third of the values sit near the top of the range, so a
+  // seed window overflows and is retried a bar later, a path ordinary data
+  // almost never takes.
   const series = (seed: number, n: number): number[] => {
     const rnd = prng(seed);
+    const heavy = seed >= 60;
     return Array.from({ length: n }, () => {
       const r = rnd();
       if (r < 0.06) return NaN;
+      if (heavy && r < 0.4) return [1e308, 1.7e308, -1e308, 9e307][Math.floor(rnd() * 4)];
       if (r < 0.08) return [1e308, -1e308, 1.7e308, Infinity, 0, -0][Math.floor(rnd() * 6)];
       return (rnd() - 0.4) * 100;
     });
@@ -586,7 +706,7 @@ describe('the resumable kernels are the batch kernels', () => {
   const same = (a: readonly number[], b: readonly number[]): boolean => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
 
   it('smooth is smaSeededEma and rma', () => {
-    for (let seed = 1; seed < 60; seed++) {
+    for (let seed = 1; seed < 120; seed++) {
       const values = series(seed, 120);
       for (const period of [1, 2, 3, 7, 20]) {
         for (const exponential of [true, false]) {
@@ -599,7 +719,7 @@ describe('the resumable kernels are the batch kernels', () => {
   });
 
   it('rsiStep is rsi, atrStep and trueRangeAt are atr and trueRange, meanAt is sma', () => {
-    for (let seed = 1; seed < 60; seed++) {
+    for (let seed = 1; seed < 120; seed++) {
       const closes = series(seed, 120);
       const data: Bar[] = closes.map((c, i) => ({ time: i, open: c, high: c + Math.abs(series(seed + 1, 120)[i]), low: c - 1, close: c }));
       const high = data.map((b) => b.high);
