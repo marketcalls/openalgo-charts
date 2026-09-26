@@ -3,8 +3,8 @@
  *
  * Each cell of `measuredP95Ms` is the p95 step cost, in milliseconds, that the
  * bench measured on the reference machine for one renderer, one bar count and
- * one scenario: the lowest of five full runs. Other work shared the machine
- * while it measured, and load only ever adds time, so the lowest run is the
+ * one scenario: the lowest of five full runs. Other work can share the machine
+ * while it measures, and load only ever adds time, so the lowest run is the
  * closest to what the machine itself costs. The budget that fails the run is
  * that figure times `margin`, never below `floorMs`:
  *
@@ -32,19 +32,19 @@
  */
 
 export const RENDER_BENCH_BUDGETS = {
-  reference: 'the 2.5.7 build, lowest p95 of five runs on an 8-core desktop CPU (16 logical) in headless Chromium 149, 2026-09-26',
+  reference: 'the merged Release 3 build before its 2.5.8 version bump, lowest p95 of five runs on an 8-core desktop CPU (16 logical) in headless Chromium 149, 2026-09-26',
   margin: 4,
   floorMs: 17,
   measuredP95Ms: {
     canvas2d: {
-      10000: { pan: 3.1, zoomOut: 21.2, tick: 209.1 },
-      50000: { pan: 3.2, zoomOut: 65.4, tick: 1166.3 },
-      200000: { pan: 2.9, zoomOut: 278.2, tick: 5591.7 },
+      10000: { pan: 2.2, zoomOut: 5.3, tick: 20.1 },
+      50000: { pan: 2.2, zoomOut: 19.8, tick: 49.2 },
+      200000: { pan: 2.1, zoomOut: 53, tick: 152.2 },
     },
     webgl2: {
-      10000: { pan: 12.4, zoomOut: 20.4, tick: 206.3 },
-      50000: { pan: 12.5, zoomOut: 57.5, tick: 1089.9 },
-      200000: { pan: 12.1, zoomOut: 232, tick: 5785.6 },
+      10000: { pan: 11.1, zoomOut: 13.1, tick: 28.4 },
+      50000: { pan: 10.8, zoomOut: 21.3, tick: 56.6 },
+      200000: { pan: 11.1, zoomOut: 58.3, tick: 167.5 },
     },
   },
 };

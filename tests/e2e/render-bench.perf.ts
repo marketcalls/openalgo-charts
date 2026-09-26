@@ -80,18 +80,21 @@ const BROWSER_ARGS: Record<Renderer, string[]> = {
 
 /**
  * Steps per scenario and bar count. Warmup steps run the same code and are not
- * recorded. On 2.5.7 a tick with ten studies costs one to two seconds at 50k
- * bars and five to seven at 200k, and a frame with 200k bars in view a quarter
- * of a second, so those rows take fewer steps to keep the run in minutes. With
- * fewer than twenty samples the p95 is the slowest step. Raise the counts as
- * the paths get faster: more samples make a p95 steadier, not cheaper.
+ * recorded. More samples make a p95 steadier, not cheaper: with fewer than
+ * twenty it is the slowest step, so one collection decides it.
+ *
+ * Since plots are written in place and the common studies take their tail, a
+ * tick with ten studies costs tens of milliseconds at 50k bars and a few
+ * hundred at 200k, where 2.5.7 took one to two seconds and five to seven. The
+ * 50k tick therefore records as many steps as the 10k one. The 200k rows stay
+ * at twenty (the p95 is then the second slowest) for the sake of a regression:
+ * a tick back at 2.5.7's cost, on a runner four times slower than the
+ * reference, still finishes twenty-odd steps inside the test timeout, so it
+ * fails on its budget and the report says which path went wrong.
  */
 function planFor(bars: number): Record<Metric, { warmup: number; samples: number }> {
-  return {
-    pan: { warmup: 10, samples: 60 },
-    zoomOut: bars >= 200_000 ? { warmup: 3, samples: 20 } : { warmup: 5, samples: 40 },
-    tick: bars >= 200_000 ? { warmup: 1, samples: 5 } : bars >= 50_000 ? { warmup: 1, samples: 10 } : { warmup: 5, samples: 40 },
-  };
+  const steps = bars >= 200_000 ? { warmup: 3, samples: 20 } : { warmup: 5, samples: 40 };
+  return { pan: { warmup: 10, samples: 60 }, zoomOut: steps, tick: steps };
 }
 
 interface SceneReport {
