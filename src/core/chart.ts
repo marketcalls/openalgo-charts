@@ -45,20 +45,12 @@ import {
 import { DataLayer, type SessionCalendarSource } from '../model/data-layer';
 import { createSeriesRecord, type SeriesApi, type SeriesRecord, type PriceScaleId, type BarConfirmationOptions, type SeriesUpdateOptions } from '../model/series';
 import { bindSeriesProvenance, SeriesProvenance, validateSeriesOptions } from '../model/series-provenance';
-import { replayWindow, observeReplayWindow } from '../model/replay-window';
-import { runAbortable } from '../model/abortable-request';
-import { cloneIndicatorSettings, planIndicatorDependencies } from '../model/indicator-dependencies';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
 import {
-  getIndicator, plotStyleKeys,
-  type IndicatorBarsProvider, type IndicatorBarsProviderAccess, type IndicatorDescriptor, type IndicatorSettings,
+  getIndicator,
+  type IndicatorBarsProvider, type IndicatorBarsProviderAccess, type IndicatorSettings,
 } from '../model/indicator-registry';
 
-/**
- * Colours the 2nd and later instances of the same indicator rotate through.
- * Chosen to stay apart on both dark and light panes and to read as distinct at
- * a 1px stroke, which rules out near-neighbour hues.
- */
 /** PaneLegend's own defaults, restated so a pane can be reset to them. */
 const DEFAULT_LEGEND_TOP = 6;
 const DEFAULT_LEGEND_LEFT = 8;
@@ -79,12 +71,8 @@ function leadActions(actions: readonly PaneLegendAction[] = [], lead: boolean): 
  */
 const KINETIC_VELOCITY_HALFLIFE_MS = 50;
 
-const INSTANCE_PALETTE: readonly string[] = [
-  '#f5a623', '#26a69a', '#ab47bc', '#ef5350',
-  '#26c6da', '#8bc34a', '#ff7043', '#5c6bc0',
-];
-import { IndicatorInstance, parseIndicatorPlotPriceScales, validateIndicatorScaleAssignment, type IndicatorApi, type IndicatorHost } from '../model/indicator-instance';
-import { parseIndicatorPolicy, type IndicatorEditOptions, type IndicatorPolicy } from '../model/indicator-policy';
+import { type IndicatorInstance, type IndicatorApi, type IndicatorHost } from '../model/indicator-instance';
+import { type IndicatorEditOptions, type IndicatorPolicy } from '../model/indicator-policy';
 import type { AlertsDocument } from '../alerts/types';
 import { copyAlert, parseAlertsDocument, validateAlert } from '../alerts/document';
 import type { ChartDataContext } from '../model/indicator-registry';
@@ -106,8 +94,6 @@ import { SeriesMarkers } from '../primitives/markers';
 import { EventMarkers, type ChartEvent, type EventGroup, type EventMarkersOptions } from '../primitives/event-markers';
 import { PaneLegend, paneLegendRowHeight, type PaneLegendAction, type LegendStatusLineOptions } from '../primitives/pane-legend';
 import { IndicatorLegendToggle, INDICATOR_LEGEND_TOGGLE } from '../primitives/indicator-legend-toggle';
-import { validateIndicatorInputs } from '../model/indicator-inputs';
-import { ChartTable } from '../primitives/table';
 import { TimeNavigator, type TimeNavigatorOptions } from '../primitives/time-navigator';
 import type { ChartSettingsState } from '../model/chart-settings';
 import { LogoWatermark, type LogoWatermarkOptions } from '../primitives/watermark';
@@ -117,6 +103,7 @@ import { DEFAULT_TIMEZONE, isValidTimezone } from '../feed/time';
 import { clamp, roundToTick } from '../helpers/math';
 // Last, so the runtime modules imported above still load in the order they did.
 import { ChartPersistence, type PersistenceHost, type PreservedScaleFormats } from './chart-state';
+import { ChartStudies, type StudiesHost } from './chart-studies';
 
 /** A zone name the runtime recognises, or a readable failure at the call site. */
 function checkedTimezone(zone: string): string {
@@ -399,24 +386,11 @@ export class Chart {
   private _barsRequests = new AbortController();
   private _barsProviderRevision = 0;
   private _requestedDataRevision = 0;
-  /** Guards indicator recompute against re-entry via its own `series.setData`. */
-  private _recomputing = false;
+  /** Adding, moving and recomputing studies, and the host they talk to; see chart-studies.ts. */
+  private readonly _studies = new ChartStudies(this, this._studiesHost());
   private _indicatorsDirty = false;
   private readonly _indicatorRefreshes = new Map<string, boolean>();
-  private _indicatorWork: Map<string, boolean> | null = null;
-  private _indicatorProcessed: Set<string> | null = null;
   private readonly _indicatorReservedIds = new Set<string>();
-  /** Instance id of the indicator whose colours are on the price bars, if any. */
-  private _barColorOwner: string | null = null;
-  private _barColors: readonly (string | null)[] | null = null;
-  /**
-   * Each price bar's own colour, indexed like the series. The overlay overwrites
-   * `Bar.color`, so a bar's own value is only readable the first time we touch
-   * it, and removing the indicator has to put something back.
-   */
-  private readonly _barColorBase: (string | undefined)[] = [];
-  /** Time of bar 0 when the snapshot was taken, to catch a replaced history. */
-  private _barColorAnchor = 0;
   /** Opaque drawing-tier payload, round-tripped through get/restoreState. */
   private _drawingState: unknown = undefined;
   private _alertState: AlertsDocument | undefined;
@@ -903,7 +877,7 @@ export class Chart {
     if (owner.indicatorOwned || record.scaleId === scaleId) return false;
     const target = owner.pane.scaleFor(scaleId);
     record.scaleId = scaleId;
-    this._reconcileIndicatorRanges();
+    this._studies._reconcileIndicatorRanges();
     this._applySeriesPriceFormat(target, owner.priceFormat);
     if (record.style.precision !== undefined) this._applyPrecision(target, record.style.precision);
     this._recomputeAxisColumns();
@@ -1028,7 +1002,7 @@ export class Chart {
         this._seriesProvenance.delete(dataId);
         if (this._firstDataId.value === dataId) this._firstDataId.value = null;
         if (this._primary?.record === record) { this._primary = null; owner.pane.setSourceSeries(null); }
-        if (!owner.indicatorOwned) this._reconcileIndicatorRanges();
+        if (!owner.indicatorOwned) this._studies._reconcileIndicatorRanges();
         this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
         this._recomputeAxisColumns();
         this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
@@ -1049,7 +1023,7 @@ export class Chart {
     this._seriesRecords.set(api, record);
     bindSeriesProvenance(api, provenance);
     this._seriesOwners.set(api, owner);
-    if (!owner.indicatorOwned) this._reconcileIndicatorRanges();
+    if (!owner.indicatorOwned) this._studies._reconcileIndicatorRanges();
     if (isPrimary) {
       this._primary = { api, record };
       this._panes[paneIndex].setSourceSeries(record);
@@ -1236,66 +1210,7 @@ export class Chart {
       policy?: IndicatorPolicy; instanceId?: string;
     } = {},
   ): IndicatorApi {
-    const instanceId = options.instanceId;
-    if (instanceId !== undefined && (typeof instanceId !== 'string' || !instanceId.trim())) throw new TypeError('Invalid indicator instance id');
-    if (instanceId !== undefined && this._indicators.some(item => item.id === instanceId)) throw new Error(`Indicator instance id already in use: ${instanceId}`);
-    if (options.priceScaleId !== undefined && !this._validPriceScaleId(options.priceScaleId)) throw new TypeError('Invalid indicator price scale');
-    const policy = options.policy === undefined ? undefined : parseIndicatorPolicy(options.policy);
-    const descriptor = getIndicator(indicatorId);
-    const validatedSettings = cloneIndicatorSettings(settings);
-    validateIndicatorInputs(descriptor.inputs, validatedSettings);
-    const plotPriceScaleIds = options.plotPriceScaleIds === undefined ? undefined : parseIndicatorPlotPriceScales(descriptor, options.plotPriceScaleIds);
-    validateIndicatorScaleAssignment(descriptor, options.priceScaleId, plotPriceScaleIds,
-      options.paneIndex ?? (descriptor.placement === 'onchart' ? this._primaryIndex() : this._panes.length), this._primaryIndex());
-    this._flushIndicators();
-    const reserved = new Set([...this._indicatorReservedIds, ...this._indicators.map(item => item.id)]);
-    for (const edges of planIndicatorDependencies(this._indicators.map(item => item.dependencyNode())).dependencies.values()) {
-      for (const edge of edges) reserved.add(edge.source.instanceId);
-    }
-    const instance = new IndicatorInstance(
-      this._indicatorHost(),
-      descriptor,
-      this._distinctColors(descriptor, validatedSettings),
-      options.paneIndex,
-      instanceId,
-      reserved,
-      options.priceScaleId,
-      plotPriceScaleIds,
-      policy,
-    );
-    this._indicators.push(instance);
-    this._restackLegends();
-    this._indicatorReservedIds.add(instance.id);
-    this._queueIndicatorDependents(instance.id, true);
-    this.emit('objects:change', {});
-    return instance;
-  }
-
-  /**
-   * Give a repeated indicator its own colours. Three EMAs all in the
-   * descriptor's default blue are indistinguishable on the chart *and* in the
-   * legend, so the second and later instances rotate through a palette.
-   *
-   * Only fills colour keys the caller left unset, so an explicit colour always
-   * wins, and the first instance is never touched — it keeps the colours the
-   * descriptor chose.
-   */
-  private _distinctColors(
-    descriptor: IndicatorDescriptor,
-    settings: Readonly<IndicatorSettings>,
-  ): Readonly<IndicatorSettings> {
-    const nth = this._indicators.filter((i) => i.indicatorId === descriptor.id).length;
-    if (nth === 0) return settings;
-    const out: IndicatorSettings = { ...settings };
-    const plots = descriptor.plots;
-    for (let i = 0; i < plots.length; i++) {
-      const key = plotStyleKeys(plots[i]).color;
-      if (out[key] !== undefined) continue; // an explicit colour always wins
-      // Stride by the plot count so a multi-plot indicator (MACD) shifts as a
-      // block rather than landing on the previous instance's colours.
-      out[key] = INSTANCE_PALETTE[(nth * plots.length + i) % INSTANCE_PALETTE.length];
-    }
-    return out;
+    return this._studies.addIndicator(indicatorId, settings, options);
   }
 
   /**
@@ -1306,8 +1221,7 @@ export class Chart {
    * turn would otherwise see the previous tick's numbers.
    */
   public indicators(): readonly IndicatorApi[] {
-    this._flushIndicators();
-    return this._indicators;
+    return this._studies.indicators();
   }
 
   /**
@@ -1315,46 +1229,7 @@ export class Chart {
    * A study whose policy is not `movable` stays unless `options.force` is set.
    */
   public moveIndicator(instanceId: string, paneIndex: number, options: IndicatorEditOptions = {}): boolean {
-    const instance = this._indicators.find(item => item.id === instanceId);
-    if (this.isDestroyed || !instance || !this._policyAllows(instance, 'movable', options) || !Number.isInteger(paneIndex) || paneIndex < 0 || paneIndex > this._panes.length || instance.paneIndex === paneIndex || !instance.canRelocate(paneIndex)) return false;
-    const previous = instance.paneIndex;
-    const freshTarget = paneIndex === this._panes.length;
-    this._ensurePane(paneIndex);
-    const target = this._panes[paneIndex];
-    const resources = instance.renderResources();
-    for (const { api, overlay } of resources.series) {
-      if (overlay) continue;
-      const owner = this._seriesOwners.get(api);
-      const record = this._seriesRecords.get(api);
-      if (!owner || !record || owner.pane === target) continue;
-      const scale = owner.pane.scaleOf(record);
-      const options = scale.options;
-      owner.pane.removeSeries(record);
-      target.addSeries(record);
-      owner.pane = target;
-      if (freshTarget && target.series().filter(item => item.scaleId === record.scaleId).length === 1) target.scaleOf(record).setOptions(options);
-      this._applySeriesPriceFormat(target.scaleOf(record), owner.priceFormat);
-      if (record.style.precision !== undefined) this._applyPrecision(target.scaleOf(record), record.style.precision);
-    }
-    for (const { primitive, overlay } of resources.primitives) {
-      if (overlay) continue;
-      this._panes.find(pane => pane.hasPrimitive(primitive))?.transferPrimitive(primitive, target);
-    }
-    instance.relocate(paneIndex);
-    // The source keeps its place when the study it sat on leaves its pane.
-    this._reanchorSource();
-    this._syncLegendPanes();
-    // Alert visuals resolve the instance's new pane before we decide whether its old pane is empty.
-    this.emit('objects:change', {});
-    // Retain a pane holding drawings or host visuals even after its last plot moves.
-    const source = this._panes[previous];
-    if (source !== this._primaryPane && source.series().length === 0 && source.primitives().every(primitive => primitive === this._timeNav || this._anchored.some(entry => entry.primitive === primitive))) this.removePane(previous);
-    this._reorderIndicatorResources();
-    this._recomputeAxisColumns();
-    this._relayout();
-    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
-    this.emit('objects:change', {});
-    return true;
+    return this._studies.moveIndicator(instanceId, paneIndex, options);
   }
 
   /**
@@ -1362,35 +1237,7 @@ export class Chart {
    * policy is not `movable` stays unless `options.force` is set.
    */
   public reorderIndicator(instanceId: string, direction: -1 | 1, options: IndicatorEditOptions = {}): boolean {
-    if (direction !== -1 && direction !== 1) return false;
-    const index = this._indicators.findIndex(item => item.id === instanceId);
-    if (this.isDestroyed || index < 0 || !this._policyAllows(this._indicators[index], 'movable', options)) return false;
-    const paneIndex = this._indicators[index].paneIndex;
-    let target = index + direction;
-    while (target >= 0 && target < this._indicators.length && this._indicators[target].paneIndex !== paneIndex) target += direction;
-    if (target < 0 || target >= this._indicators.length) return false;
-    [this._indicators[index], this._indicators[target]] = [this._indicators[target], this._indicators[index]];
-    this._reorderIndicatorResources();
-    this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
-    this.emit('objects:change', {});
-    return true;
-  }
-
-  private _reorderIndicatorResources(): void {
-    for (const instance of this._indicators) instance.refreshBarColors();
-    const resources = this._indicators.map(instance => instance.renderResources());
-    const records = resources.flatMap(resource => resource.series.flatMap(({ api }) => {
-      const record = this._seriesRecords.get(api);
-      return record ? [record] : [];
-    }));
-    const primitives = resources.flatMap(resource => resource.primitives.map(item => item.primitive));
-    for (const pane of this._panes) { pane.reorderSeries(records); pane.reorderPrimitives(primitives); }
-    const legends = this._indicators.flatMap(instance => instance.legend() ? [instance.legend()!] : []);
-    const owned = new Set(legends);
-    let index = 0;
-    for (const entry of this._legends) if (owned.has(entry.legend)) entry.legend = legends[index++];
-    this._placeSource();
-    this._syncLegendPanes();
+    return this._studies.reorderIndicator(instanceId, direction, options);
   }
 
   /** Whether a call may make a change a study's policy reserves for its host. */
@@ -1444,7 +1291,7 @@ export class Chart {
     for (let i = 0; i < this._indicators.length; i++) if (members.has(this._indicators[i])) this._indicators[i] = studies[k++];
     const at = next.indexOf('source:primary');
     if (at >= 0) this._sourceAbove = at === 0 ? null : next[at - 1].slice('indicator:'.length);
-    this._reorderIndicatorResources();
+    this._studies._reorderIndicatorResources();
     this.invalidate(m => m.invalidateGlobal(InvalidationLevel.Full));
     this.emit('objects:change', {});
     return true;
@@ -1537,33 +1384,7 @@ export class Chart {
    * `options.force` is set.
    */
   public removeIndicator(instanceId: string, options: IndicatorEditOptions = {}): boolean {
-    const instance = this._indicators.find(x => x.id === instanceId);
-    return instance !== undefined && instance.remove(options);
-  }
-
-  private _forgetIndicator(instanceId: string, failedOwnedPane?: number): void {
-    const i = this._indicators.findIndex((x) => x.id === instanceId);
-    if (i < 0) {
-      const pane = failedOwnedPane === undefined ? undefined : this._panes[failedOwnedPane];
-      if (failedOwnedPane !== undefined && pane !== undefined && pane !== this._primaryPane && pane.series().length === 0 && pane.primitives().every(primitive => primitive === this._timeNav || this._anchored.some(entry => entry.primitive === primitive))) this.removePane(failedOwnedPane);
-      return;
-    }
-    const { indicatorId, paneIndex } = this._indicators[i];
-    this._indicators.splice(i, 1);
-    this._reanchorSource();
-    this._restackLegends();
-    this._indicatorReservedIds.add(instanceId);
-    this._indicatorRefreshes.delete(instanceId);
-    this._queueIndicatorDependents(instanceId, true);
-    this.emit('indicatorRemoved', { instanceId, indicatorId, paneIndex });
-    // An indicator pane that just emptied has nothing left to show. This lived
-    // in the legend's close handler, so only the on-chart × pruned the pane — a
-    // host removing the same indicator from its own UI left it behind, and
-    // `getState` then persisted the orphan, so every reload restored a blank
-    // region. Doing it here means every caller behaves the same. The price
-    // pane stays whatever emptied it, and it can sit in any slot.
-    const pane = this._panes[paneIndex];
-    if (pane !== undefined && pane !== this._primaryPane && pane.series().length === 0) this.removePane(paneIndex);
+    return this._studies.removeIndicator(instanceId, options);
   }
 
   /** Optional instrument identity supplied by the host, never inferred from bars. */
@@ -1696,404 +1517,82 @@ export class Chart {
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
   }
 
+  /**
+   * The `IndicatorHost` a study instance talks to; see chart-studies.ts. Kept
+   * here by name because the restore and tests build a host through it.
+   */
   private _indicatorHost(preservedFormats?: PreservedScaleFormats): IndicatorHost {
+    return this._studies._indicatorHost(preservedFormats);
+  }
+
+  /** What the study host reads, writes and drives of the chart; see `StudiesHost`. */
+  private _studiesHost(): StudiesHost {
+    // A getter's own `this` is the host literal, so the live fields are read
+    // and written through the chart.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const chart = this;
     return {
-      assignIndicatorScale: (id, series, primitives, commit) => this._assignIndicatorScale(id, series, primitives, commit),
-      bindIndicatorPrimitiveScale: (primitive, scaleId) => {
-        this._panes.find(pane => pane.hasPrimitive(primitive))?.bindPrimitiveScale(primitive, scaleId);
-        this._recomputeAxisColumns();
-        this.invalidate(mask => mask.invalidateGlobal(InvalidationLevel.Full));
-      },
-      setIndicatorRange: (id, paneIndex, scaleId, range, series) => {
-        const previous = this._indicatorRanges.get(id);
-        const pane = this._panes[paneIndex];
-        if (range && pane) this._indicatorRanges.set(id, { pane, scaleId, range, series, token: previous?.token ?? {} });
-        else this._indicatorRanges.delete(id);
-        this._reconcileIndicatorRanges();
-      },
-      legendIndex: () => this._readoutIndex(),
-      indicatorRemoved: (id, failedOwnedPane): void => this._forgetIndicator(id, failedOwnedPane),
-      flushIndicators: (): void => this._flushIndicators(),
-      validateIndicatorSettings: (id, descriptor, settings) => {
-        const nodes = this._indicators.filter(item => item.id !== id).map(item => item.dependencyNode());
-        nodes.push({ id, descriptor, settings });
-        planIndicatorDependencies(nodes);
-      },
-      studyOutput: reference => this._indicators.find(item => item.id === reference.instanceId)?.studyOutput(reference.plotKey),
-      indicatorOutputChanged: (id, refresh) => this._queueIndicatorDependents(id, refresh),
-      indicatorRecompute: (id, refresh, fallback) => {
-        if (!this._indicators.some(item => item.id === id)) { fallback(); return; }
-        if (this._recomputing) {
-          fallback();
-          this._indicatorWork?.delete(id);
-          this._indicatorProcessed?.add(id);
-          return;
-        }
-        this._indicatorRefreshes.set(id, refresh || this._indicatorRefreshes.get(id) === true);
-        this._queueIndicatorDependents(id, refresh);
-        const sourcePending = this._indicatorsDirty;
-        this._flushIndicators();
-        // An explicit refresh cannot consume the source pass already queued by
-        // a data write. That pass can recover a failed external calculation.
-        if (sourcePending) { this._indicatorsDirty = true; this._loop.requestFrame(); }
-      },
-      resourcesChanged: (): void => this._reorderIndicatorResources(),
-      // The scale that draws the ladder is the one that decides how a number on
-      // that pane is written, floor, tick, custom formatter and all.
-      formatPrice: (paneIndex: number, value: number, series?: SeriesApi): string | undefined =>
-        (series?.priceScale() ?? this._panes[paneIndex]?.priceScale)?.format(value),
-      policyChanged: (): void => {
-        this._restackLegends();
-        this.emit('objects:change', {});
-      },
-      addIndicatorLegend: (o): PaneLegend => {
-        // A row starts with its own show / settings / delete. Stacking it gives
-        // it the pane-level controls when it is the first study row of a lower
-        // pane, so they follow whichever row leads rather than the row count
-        // at creation, which a host row above it would throw off.
-        const paneActions: PaneLegendAction[] = ['hide', 'settings', 'close'];
-        // The source button sits next to the gear, because the two are the
-        // same errand at different depths: what this study is set to, and what
-        // it is. Only a descriptor that says it has source gets one.
-        if (o.hasSource === true) paneActions.splice(paneActions.indexOf('settings') + 1, 0, 'source');
-        // _syncLegendOffsets decides which pane wears the offset, and runs on
-        // every relayout; this is just the initial placement.
-        const legend = new PaneLegend({ ...o, actions: paneActions });
-        this._legendActions.set(legend, [paneActions, legend.options().actions]);
-        this._studyLegends.add(legend);
-        this._addPrimitive(o.paneIndex, legend);
-        return legend;
-      },
-      removeIndicatorLegend: (legend): void => {
-        this._studyLegends.delete(legend);
-        this.removePrimitive(legend);
-        this._restackLegends();
-      },
-      legendRowsOn: (paneIndex): number => this._legends.filter((l) => l.paneIndex === paneIndex).length,
-      primarySeries: (): SeriesApi | null => this.primarySeries(),
-      setIndicatorSeriesType: (series, type) => this._setSeriesType(series, type as SeriesType, false),
-      addIndicatorSeries: (type, paneIndex, style, priceScaleId, priceFormat): SeriesApi =>
-        this._createSeries(
-          type as SeriesType,
-          {
-            paneIndex,
-            style: style as SeriesStyle | undefined,
-            priceScaleId: priceScaleId as PriceScaleId | undefined,
-            priceFormat,
-          },
-          false,
-          preservedFormats,
-        ),
-      addIndicatorLevel: (l, paneIndex): PriceLine => {
-        // The instance resolves `lineStyle` before calling the host, a
-        // descriptor's `dashed` boolean included, so the line needs nothing
-        // else to pick its dash.
-        const opts: PriceLineOptions = {
-          price: l.price, color: l.color, lineWidth: l.lineWidth,
-          lineStyle: l.lineStyle, leftLabel: l.label, id: l.id,
-        };
-        return this.addPriceLine(opts, paneIndex);
-      },
-      removeIndicatorLevel: (line): void => this.removePrimitive(line),
-      addIndicatorFill: (fill, paneIndex): void => this._addPrimitive(paneIndex, fill),
-      removeIndicatorFill: (fill): void => this.removePrimitive(fill),
-      removeIndicatorMarkers: (markers): void => this.removePrimitive(markers),
-      addIndicatorPrimitive: (p, paneIndex): void => this._addPrimitive(paneIndex, p),
-      removeIndicatorPrimitive: (p): void => this.removePrimitive(p),
-      addIndicatorTable: (paneIndex): ChartTable => {
-        const t = new ChartTable();
-        this._addPrimitive(paneIndex, t);
-        return t;
-      },
-      removeIndicatorTable: (table): void => this.removePrimitive(table),
-      sourceBars: (): readonly Bar[] =>
-        this._firstDataId.value === null ? [] : this._dataLayer.seriesBars(this._firstDataId.value),
-      sourceState: () => {
-        const state = this._seriesProvenance.get(this._firstDataId.value ?? -1)?.snapshot();
-        const replay = replayWindow(this);
-        return state && replay ? {
-          ...state, provenance: 'replay', confirmation: replay.forming ? 'forming' : 'confirmed', confirmationSource: 'replay',
-        } : state;
-      },
-      nextPaneIndex: (): number => this._panes.length,
-      // Read at every call, never kept: a study resolves its price-pane plots,
-      // bands, tables and marks against wherever the price pane sits now.
-      primaryPaneIndex: (): number => this._primaryIndex(),
-      // The calendar a session anchor resets on and the calendar the axis is
-      // labelled in have to be the same one, or a VWAP restarts in the middle
-      // of the afternoon the axis is showing.
-      timezone: (): string => this._timezone,
-      // The same clock the countdown row reads, so an indicator that decides
-      // whether the last bar is still forming agrees with the axis about it.
-      // Instrument identity exists only when a host explicitly supplies it.
-      now: (): number => this._wallClock(),
-      symbol: (): string | undefined => this._dataContext?.symbol,
-      interval: (): string | undefined => this._dataContext?.interval,
-      dataContext: () => this._dataContext,
-      // Answered at call time rather than at host build time, so a provider
-      // registered after the indicator was added still serves it.
-      requestBars: (request) => {
-        const provider = this._barsProvider;
-        if (provider === null) {
-          return Promise.reject(new Error('openalgo-charts: this chart has no bars provider; call chart.setBarsProvider(...) to serve other instruments'));
-        }
-        return runAbortable(signal => typeof provider === 'function'
-          ? provider({ ...request, signal }) : provider.requestBars({ ...request, signal }),
-        [request.signal, this._barsRequests.signal]);
-      },
-      requestSnapshot: request => {
-        const provider = this._barsProvider;
-        return runAbortable(signal => {
-          if (typeof provider !== 'object' || provider?.requestSnapshot === undefined) throw new Error('Requested snapshots are unsupported by this provider');
-          const replay = replayWindow(this);
-          if (replay && replay.asOf === undefined) throw new Error('Requested snapshots require an availability clock during replay');
-          if (request.asOf !== undefined && !Number.isFinite(request.asOf)) throw new RangeError('Requested availability time must be finite');
-          const asOf = replay?.asOf === undefined ? request.asOf : Math.min(request.asOf ?? Infinity, replay.asOf);
-          return provider.requestSnapshot({ ...request, ...(asOf === undefined ? {} : { asOf }), signal });
-        }, [request.signal, this._barsRequests.signal]);
-      },
-      requestState: () => ({
-        source: this._seriesProvenance.get(this._firstDataId.value ?? -1)?.snapshot(),
-        providerRevision: this._barsProviderRevision, dataRevision: this._requestedDataRevision,
-        supportsSnapshots: this.hasSnapshotProvider(),
-        replay: replayWindow(this),
-      }),
-      subscribeRequestChanges: listener => {
-        const subscriptions = ['data:context', 'data:range', 'data:requests'].map(event => this.on(event, listener));
-        subscriptions.push(observeReplayWindow(this, listener));
-        return () => { for (const unsubscribe of subscriptions) unsubscribe(); };
-      },
-      subscribeDataChanges: listener => {
-        const context = this.on('data:context', () => listener('context'));
-        const range = this.on('data:range', () => listener('range'));
-        return () => { context(); range(); };
-      },
-      // The tick size the price scale is already formatting and snapping to.
-      // Unlike symbol and interval, the chart genuinely knows this one, so an
-      // indicator sizing a range in ticks does not have to be told twice.
-      //
-      // Answered per pane, so a pane that does not quote the instrument says
-      // undefined (see `_scalePatchFor`). That is what the legend beside that
-      // axis wants; an indicator's `calc` wants the instrument's own tick, and
-      // asks the price pane for it.
-      tickSize: (paneIndex: number): number | undefined => {
-        const pane = this._panes[paneIndex] ?? this._primaryPane;
-        const min = pane?.priceScale.options.minMove ?? 0;
-        // 0 is the scale's "infer from the visible range" sentinel, not a tick.
-        return min > 0 ? min : undefined;
-      },
-      setBarColors: (colors, owner): void => this._setBarColors(colors, owner),
-      // Indicator alerts land on the same bus as every other chart event, so a
-      // host wires one listener rather than a second subscription mechanism.
-      emit: (event, payload): void => this.emit(event, payload),
-      setPaneRange: (paneIndex, range): void => {
-        const pane = this._panes[paneIndex];
-        if (pane === undefined) return;
-        // Declared, not measured: the scale remembers the band so a later
-        // auto-fit request comes back to it instead of re-measuring an
-        // oscillator against its own values (see `PriceScale.setFixedRange`).
-        const shared = pane === this._primaryPane || this._indicators.filter(item => item.paneIndex === paneIndex).length > 1;
-        pane.priceScale.setFixedRange(shared ? null : range);
-        if (range === null) pane.priceScale.setAutoScale(true);
-      },
+      get _panes() { return chart._panes; },
+      get _primaryPane() { return chart._primaryPane; },
+      get _indicators() { return chart._indicators; },
+      get _indicatorRanges() { return chart._indicatorRanges; },
+      get _ownedScaleRanges() { return chart._ownedScaleRanges; },
+      get _indicatorRefreshes() { return chart._indicatorRefreshes; },
+      get _indicatorReservedIds() { return chart._indicatorReservedIds; },
+      get _seriesRecords() { return chart._seriesRecords; },
+      get _seriesOwners() { return chart._seriesOwners; },
+      get _seriesProvenance() { return chart._seriesProvenance; },
+      get _firstDataId() { return chart._firstDataId; },
+      get _dataLayer() { return chart._dataLayer; },
+      get _loop() { return chart._loop; },
+      get _legends() { return chart._legends; },
+      get _legendActions() { return chart._legendActions; },
+      get _studyLegends() { return chart._studyLegends; },
+      get _timeNav() { return chart._timeNav; },
+      get _anchored() { return chart._anchored; },
+      get _timezone() { return chart._timezone; },
+      get _dataContext() { return chart._dataContext; },
+      get _barsProvider() { return chart._barsProvider; },
+      get _barsRequests() { return chart._barsRequests; },
+      get _barsProviderRevision() { return chart._barsProviderRevision; },
+      get _requestedDataRevision() { return chart._requestedDataRevision; },
+      get _destroyed() { return chart._destroyed; },
+      get isDestroyed() { return chart.isDestroyed; },
+      get _indicatorsDirty() { return chart._indicatorsDirty; },
+      set _indicatorsDirty(value) { chart._indicatorsDirty = value; },
+      get _scaleMutationDepth() { return chart._scaleMutationDepth; },
+      set _scaleMutationDepth(value) { chart._scaleMutationDepth = value; },
+      _wallClock: () => this._wallClock(),
+      _primaryIndex: () => this._primaryIndex(),
+      _readoutIndex: () => this._readoutIndex(),
+      _validPriceScaleId: (value): value is PriceScaleId => this._validPriceScaleId(value),
+      _policyAllows: (study, flag, options) => this._policyAllows(study, flag, options),
+      seriesType: series => this.seriesType(series),
+      primarySeries: () => this.primarySeries(),
+      hasSnapshotProvider: () => this.hasSnapshotProvider(),
+      _createSeries: (type, options, claimPrimary, preservedFormats) => this._createSeries(type, options, claimPrimary, preservedFormats),
+      _setSeriesType: (series, type, notify) => this._setSeriesType(series, type, notify),
+      _applySeriesPriceFormat: (scale, pf) => this._applySeriesPriceFormat(scale, pf),
+      _applyPrecision: (scale, precision) => this._applyPrecision(scale, precision),
+      addPriceLine: (opts, paneIndex) => this.addPriceLine(opts, paneIndex),
+      _addPrimitive: (paneIndex, primitive) => this._addPrimitive(paneIndex, primitive),
+      removePrimitive: primitive => this.removePrimitive(primitive),
+      _ensurePane: index => this._ensurePane(index),
+      removePane: index => this.removePane(index),
+      _placeSource: () => this._placeSource(),
+      _reanchorSource: () => this._reanchorSource(),
+      _syncLegendPanes: () => this._syncLegendPanes(),
+      _restackLegends: () => this._restackLegends(),
+      _recomputeAxisColumns: () => this._recomputeAxisColumns(),
+      _relayout: () => this._relayout(),
+      invalidate: build => this.invalidate(build),
+      on: (event, cb) => this.on(event, cb),
+      emit: (event, payload) => this.emit(event, payload),
     };
   }
 
   private _validPriceScaleId(value: unknown): value is PriceScaleId {
     return typeof value === 'string' && (value === 'right' || value === 'left' || value === '' || value.startsWith('overlay:'));
-  }
-
-  private _assignIndicatorScale(id: string,
-    series: readonly { api: SeriesApi; scaleId: PriceScaleId }[],
-    primitives: readonly { primitive: IPrimitive; scaleId: PriceScaleId }[], commit: () => void): boolean {
-    if (this._destroyed || !this._indicators.some(instance => instance.id === id)) return false;
-    for (const item of series) if (!this._validPriceScaleId(item.scaleId) || this.seriesType(item.api) === null) return false;
-    for (const item of primitives) if (!this._validPriceScaleId(item.scaleId) || !this._panes.some(pane => pane.hasPrimitive(item.primitive))) return false;
-    this._scaleMutationDepth++;
-    try {
-      for (const { api, scaleId } of series) {
-        const record = this._seriesRecords.get(api)!, owner = this._seriesOwners.get(api)!;
-        const target = owner.pane.scaleFor(scaleId);
-        record.scaleId = scaleId;
-        this._applySeriesPriceFormat(target, owner.priceFormat);
-        if (record.style.precision !== undefined) this._applyPrecision(target, record.style.precision);
-      }
-      for (const { primitive, scaleId } of primitives) this._panes.find(pane => pane.hasPrimitive(primitive))!.bindPrimitiveScale(primitive, scaleId);
-      commit();
-      this._recomputeAxisColumns();
-    } finally {
-      this._scaleMutationDepth--;
-      this.invalidate(mask => mask.invalidateGlobal(InvalidationLevel.Full));
-    }
-    this.emit('objects:change', {});
-    return true;
-  }
-
-  private _reconcileIndicatorRanges(): void {
-    const selected = new Map<PriceScale, { token: object; range: { min: number; max: number } }>();
-    for (const claim of this._indicatorRanges.values()) {
-      if (!this._panes.includes(claim.pane)) continue;
-      const scale = claim.pane.scaleFor(claim.scaleId);
-      if (selected.has(scale)) continue;
-      const peers = [...this._indicatorRanges.values()].filter(peer => peer.pane === claim.pane && peer.scaleId === claim.scaleId
-        && peer.range.min === claim.range.min && peer.range.max === claim.range.max);
-      const records = new Set(peers.flatMap(peer => peer.series.flatMap(api => {
-        const record = this._seriesRecords.get(api); return record ? [record] : [];
-      })));
-      if (claim.pane.series().some(record => record.scaleId === claim.scaleId && !records.has(record))) continue;
-      selected.set(scale, claim);
-    }
-    for (const [scale, token] of this._ownedScaleRanges) {
-      if (!selected.has(scale)) {
-        scale.clearOwnedFixedRange(token);
-        this._ownedScaleRanges.delete(scale);
-      }
-    }
-    for (const [scale, claim] of selected) {
-      const token = this._ownedScaleRanges.get(scale) ?? claim.token;
-      if (scale.setOwnedFixedRange(token, claim.range)) this._ownedScaleRanges.set(scale, token);
-      else if (!scale.ownsFixedRange(token)) this._ownedScaleRanges.delete(scale);
-    }
-  }
-
-  /**
-   * Take (or withdraw) the price bars' colour overlay on behalf of one
-   * indicator instance.
-   *
-   * Only one overlay can be on the candles, so this is last writer wins. That is
-   * deterministic rather than arbitrary: publishers run inside
-   * `_flushIndicators`, in `addIndicator` order, so the same instance wins
-   * every frame. Withdrawal is gated on ownership, or the first publisher's
-   * teardown would wipe the second one's colours. If the *winner* is removed
-   * while another publisher is still live, the bars go back to their own colours
-   * until that publisher's next recompute.
-   */
-  private _setBarColors(colors: readonly (string | null)[] | null, owner: string): void {
-    if (colors === null) {
-      if (this._barColorOwner !== owner) return;
-      this._barColorOwner = null;
-    } else {
-      this._barColorOwner = owner;
-    }
-    this._barColors = colors;
-    this._applyBarColors();
-  }
-
-  /**
-   * Republish the primary series with the overlay applied.
-   *
-   * The bars in the data layer are the **caller's own objects** (`setData` keeps
-   * the references), so painting a colour onto them in place would reach back
-   * into the host's array and outlive the indicator. Cloning the ones that
-   * change is what keeps that from happening; unchanged bars are passed through,
-   * and a pass where nothing changed writes nothing at all, which is the common
-   * case on a live tick.
-   */
-  private _applyBarColors(): void {
-    const dataId = this._firstDataId.value;
-    if (dataId === null) return;
-    const bars = this._dataLayer.seriesBars(dataId);
-    const n = bars.length;
-    const base = this._barColorBase;
-    // Anything that replaces history (a symbol change, a page of older bars)
-    // invalidates the snapshot, since index i is no longer the same bar.
-    if (n < base.length || (base.length > 0 && bars[0].time !== this._barColorAnchor)) base.length = 0;
-    if (base.length === 0) this._barColorAnchor = n > 0 ? bars[0].time : 0;
-    for (let i = base.length; i < n; i++) base[i] = bars[i].color;
-    const colors = this._barColors;
-    const out = new Array<Bar>(n);
-    let changed = false;
-    for (let i = 0; i < n; i++) {
-      const bar = bars[i];
-      const color = colors?.[i] ?? base[i];
-      if (color === bar.color) { out[i] = bar; continue; }
-      out[i] = { ...bar, color };
-      changed = true;
-    }
-    if (!changed) return;
-    // Straight to the data layer, not through `_setData`: the time points are
-    // untouched, so nothing about the axis or the base index moves, and routing
-    // it through the data path would recompute every indicator mid-recompute.
-    this._dataLayer.setSeriesData(dataId, out);
-    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Light));
-  }
-
-  /**
-   * Mark every indicator stale after a source-data change, to be recomputed
-   * once before the next paint.
-   *
-   * Recomputing straight from the data update instead costs a full pass over
-   * every bar, for every indicator, for every tick. A busy symbol delivers ticks
-   * in bursts far faster than the display refreshes, so most of those passes are
-   * thrown away unseen: 50 ticks between two frames cost 50 recomputes per
-   * indicator and blocked the main thread for over half a second on a ten
-   * indicator chart. Deferring to the frame makes that one recompute, because
-   * only the last one could ever have been shown.
-   *
-   * `flushIndicators` therefore has to run before anything that can observe a
-   * value, which is the frame and the public `indicators()` accessor.
-   */
-  private _invalidateIndicators(): void {
-    this.emit('data:range', {});
-    if (this._indicators.length === 0) return;
-    this._indicatorsDirty = true;
-    this._loop.requestFrame();
-  }
-
-  /**
-   * Recompute every stale indicator. Reentrant-guarded: an indicator writes its
-   * plots with `series.setData`, which re-enters the same data-mutation path
-   * that marked us dirty.
-   */
-  private _flushIndicators(): void {
-    if (!this._indicatorsDirty && this._indicatorRefreshes.size === 0) return;
-    if (this._recomputing) return;
-    if (this._indicators.length === 0) {
-      this._indicatorsDirty = false;
-      this._indicatorRefreshes.clear();
-      return;
-    }
-    const all = this._indicatorsDirty;
-    const order = planIndicatorDependencies(this._indicators.map(item => item.dependencyNode())).order;
-    const work = new Map(this._indicatorRefreshes);
-    this._indicatorRefreshes.clear();
-    if (all) for (const id of order) if (!work.has(id)) work.set(id, false);
-    this._indicatorsDirty = false;
-    this._recomputing = true;
-    this._indicatorWork = work;
-    this._indicatorProcessed = new Set();
-    try {
-      for (const id of order) {
-        if (!work.has(id) || this._indicatorProcessed.has(id)) continue;
-        const indicator = this._indicators.find(item => item.id === id);
-        if (!indicator) continue;
-        this._indicatorProcessed.add(id);
-        indicator.recompute(work.get(id));
-      }
-      for (const indicator of this._indicators) indicator.republishBarColors();
-    } finally {
-      this._indicatorWork = null;
-      this._indicatorProcessed = null;
-      this._recomputing = false;
-    }
-  }
-
-  private _queueIndicatorDependents(id: string, refresh: boolean): void {
-    const plan = planIndicatorDependencies(this._indicators.map(item => item.dependencyNode()));
-    const pending = [id];
-    const visited = new Set(pending);
-    for (let i = 0; i < pending.length; i++) {
-      for (const [consumer, edges] of plan.dependencies) {
-        if (visited.has(consumer) || !edges.some(edge => edge.source.instanceId === pending[i])) continue;
-        visited.add(consumer);
-        pending.push(consumer);
-        this._indicators.find(item => item.id === consumer)?.invalidateStudyOutput();
-        const target = this._indicatorWork && !this._indicatorProcessed?.has(consumer)
-          ? this._indicatorWork : this._indicatorRefreshes;
-        target.set(consumer, refresh || target.get(consumer) === true);
-      }
-    }
-    if (this._indicatorRefreshes.size > 0) this._loop.requestFrame();
   }
 
   /** Subscribe to clicks on hit-testable primitives (markers, events, lines). */
@@ -2893,7 +2392,7 @@ export class Chart {
     // The same order as a frame: indicator recomputes land before anything is
     // measured, so a study whose inputs changed this tick exports as it will
     // next paint, not as it last did.
-    this._flushIndicators();
+    this._studies._flushIndicators();
     const liveWidth = this._width;
     const liveHeight = this._height;
     const liveRatio = this._layoutRatio;
@@ -3144,7 +2643,7 @@ export class Chart {
     if (kind === 'append' && !wasAtRight) {
       this._mutateTimeScale(() => this._timeScale.setRightOffset(this._timeScale.rightOffset - 1));
     }
-    if (dataId === this._firstDataId.value) this._invalidateIndicators();
+    if (dataId === this._firstDataId.value) this._studies._invalidateIndicators();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._updateAccessibleSummary();
     if (dataId === this._firstDataId.value) this.emit('data:update', { kind: 'update', time: bar.time });
@@ -3190,8 +2689,8 @@ export class Chart {
     // the base index is already right with the indicator a bar behind, and a
     // burst of ticks between two frames still costs one recompute.
     if (dataId === this._firstDataId.value) {
-      this._invalidateIndicators();
-      this._flushIndicators();
+      this._studies._invalidateIndicators();
+      this._studies._flushIndicators();
     }
     this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
     if (!this._hasFitContent && this._dataLayer.length > 0) {
@@ -3211,7 +2710,7 @@ export class Chart {
     // baseIndex shifts up by the inserted count; updating it keeps the same
     // bars on screen because (rightEdge − index) is invariant.
     this._timeScale.setBaseIndex(this._dataLayer.baseIndex);
-    if (dataId === this._firstDataId.value) this._invalidateIndicators();
+    if (dataId === this._firstDataId.value) this._studies._invalidateIndicators();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._updateAccessibleSummary();
     if (dataId === this._firstDataId.value) this.emit('data:update', { kind: 'prepend' });
@@ -3341,7 +2840,7 @@ export class Chart {
     // Not only a relabelling: a session-anchored indicator (VWAP, CPR, TWAP,
     // seasonality) resets on the chart's calendar, so moving the calendar
     // changes the numbers and not just the axis under them.
-    this._invalidateIndicators();
+    this._studies._invalidateIndicators();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this.emit('timezone:changed', { timezone: next });
   }
@@ -3544,7 +3043,7 @@ export class Chart {
       _relayout: () => this._relayout(),
       _rehomeAnchored: () => this._rehomeAnchored(),
       _indicatorHost: preservedFormats => this._indicatorHost(preservedFormats),
-      _reorderIndicatorResources: () => this._reorderIndicatorResources(),
+      _reorderIndicatorResources: () => this._studies._reorderIndicatorResources(),
       _scalePatchFor: (pane, patch) => this._scalePatchFor(pane, patch),
       removePane: index => this.removePane(index),
       _recomputeAxisColumns: () => this._recomputeAxisColumns(),
@@ -4364,7 +3863,7 @@ export class Chart {
     // Before the mask is taken, not after: recomputing writes plot data, which
     // invalidates, and that invalidation has to land in this frame's mask
     // rather than in the next frame's.
-    this._flushIndicators();
+    this._studies._flushIndicators();
 
     const mask = this._pending;
     this._pending = null;
