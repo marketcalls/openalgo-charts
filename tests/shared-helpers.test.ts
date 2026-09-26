@@ -3,9 +3,11 @@
  * alignment and the Smoothing block in the indicator tier, and the luminance
  * arithmetic shared by the canvas helpers and the widget's tokens.
  *
- * Merging copies is only safe if no output moves, so every comparison here is
- * bitwise (`Object.is`, which also tells 0 from -0 and NaN from NaN), and the
- * oracles are the copies as they were written before the merge.
+ * Merging copies is only safe if no output moves, so every comparison between
+ * the helpers and their oracles is bitwise (`Object.is`, which also tells 0
+ * from -0 and NaN from NaN), and the oracles are the copies as they were
+ * written before the merge. Constants recorded on one machine are the one
+ * exception; see the luminance block.
  */
 import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
@@ -274,15 +276,22 @@ describe('relative luminance', () => {
   });
 
   it('keeps the values recorded before the merge', () => {
-    expect(canvasLuminance('#26a69a')).toBe(0.3001759930139451);
-    expect(tokenLuminance('#26a69a')).toBe(0.3001759930139451);
-    expect(canvasLuminance('#131722')).toBe(0.008667326325538549);
-    expect(canvasLuminance('#abc')).toBe(0.4844632879252147);
+    // Recorded on Windows. The sRGB curve goes through Math.pow, whose last bit
+    // differs between platforms (Linux CI reads 0.30017599301394504 for the
+    // first one), so a recorded constant is held to a few units in the last
+    // place. The test above still holds both modules to one kernel bitwise.
+    const recorded = (actual: number, expected: number): void => {
+      expect(Math.abs(actual - expected)).toBeLessThanOrEqual(4 * Number.EPSILON * Math.abs(expected));
+    };
+    recorded(canvasLuminance('#26a69a'), 0.3001759930139451);
+    recorded(tokenLuminance('#26a69a'), 0.3001759930139451);
+    recorded(canvasLuminance('#131722'), 0.008667326325538549);
+    recorded(canvasLuminance('#abc'), 0.4844632879252147);
     // A fractional channel between the two published sRGB thresholds: the
     // curve branch taken here is the one this arithmetic has always used.
-    expect(canvasLuminance('rgb(10.1,0,0)')).toBe(0.0006516021323610484);
-    expect(tokenLuminance('rgb(10.1,0,0)')).toBe(0.0006516021323610484);
-    expect(canvasLuminance('rgba(300, 1, 2.5, 2)')).toBe(0.3084310154143921);
+    recorded(canvasLuminance('rgb(10.1,0,0)'), 0.0006516021323610484);
+    recorded(tokenLuminance('rgb(10.1,0,0)'), 0.0006516021323610484);
+    recorded(canvasLuminance('rgba(300, 1, 2.5, 2)'), 0.3084310154143921);
   });
 
   it('still answers from each parser where the two parsers disagree', () => {
