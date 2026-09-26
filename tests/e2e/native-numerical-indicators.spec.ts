@@ -718,3 +718,40 @@ test('NVI and its average paint on through a bar with no close', async ({ page }
   expect(errors).toEqual([]);
   await page.screenshot({ path: info.outputPath('nvi-missing-close.png') });
 });
+
+test('Ichimoku draws its spans from a fractional period instead of failing its calculation', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await numericalFixture(page);
+  const fractional = await page.evaluate(async () => {
+    const { chart, source, paint, ink } = window.__numeric;
+    // A unit ramp: close = 100 + i, each bar one either side of it.
+    source.setData(Array.from({ length: 90 }, (_, i) => ({
+      time: 1700000000 + i * 60, open: 100 + i, high: 101 + i, low: 99 + i, close: 100 + i, volume: 0,
+    })));
+    // 9.4 is what a settings blob can carry; it used to index bar 8.4 and throw.
+    const study = chart.addIndicator('ichimoku', { conversionPeriod: 9.4, spanAColor: '#ff9900' });
+    window.__numeric.study = study;
+    const spanA = study.series('spanA')!;
+    spanA.applyOptions({ lineWidth: 3 });
+    // Wide enough to hold the stretch where both spans, and so the cloud, print.
+    chart.setVisibleLogicalRange({ from: 45, to: 92 });
+    await paint();
+    const values = study.values();
+    return { values, painted: ink(spanA, study.paneIndex, 60, values.spanA[60] ?? NaN) };
+  });
+  await page.screenshot({ path: info.outputPath('ichimoku-fractional-period.png') });
+  const whole = await page.evaluate(async () => {
+    const { study, paint } = window.__numeric;
+    study!.setSettings({ conversionPeriod: 9 });
+    await paint();
+    return study!.values();
+  });
+  // Span A is (conversion + base) / 2 drawn 26 bars forward: at bar 25 that is
+  // ((126 + 116) / 2 + (126 + 99) / 2) / 2, landing on index 51.
+  expect(fractional.values.spanA[50]).toBeNull();
+  expect(fractional.values.spanA[51]).toBeCloseTo(116.75, 9);
+  expect(fractional.values).toEqual(whole);
+  expect(fractional.painted).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+});

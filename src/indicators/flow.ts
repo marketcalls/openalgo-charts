@@ -10,7 +10,10 @@
  * disagree for the first `length` bars of every plot that touches them.
  */
 import type { Bar, IndicatorDescriptor } from 'openalgo-charts';
-import { change, cumulative, nulls, smaSeededEma, rollingSum, sma } from './calc';
+import { change, cumulative, nulls, rollingSum, sma } from './calc';
+// A `change` series has no value on bar 0, so its smoothing starts later too:
+// the shared gapped EMA aligns it with the first finite input.
+import { emaOfGapped } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -36,21 +39,6 @@ function moneyFlow(bars: readonly Bar[]): number[] {
     const degenerate = (b.close === b.high && b.close === b.low) || b.high === b.low;
     out[i] = degenerate ? 0 : ((2 * b.close - b.low - b.high) / (b.high - b.low)) * vol(b);
   }
-  return out;
-}
-
-/**
- * Align an SMA-seeded EMA with the first finite input. A `change` series has
- * no value on bar 0, so its smoothing warmup starts later too. Slicing and
- * padding preserve that bar alignment; `smaSeededEma` handles finite-window
- * seeding and subsequent gaps.
- */
-function emaFromFirstFinite(values: readonly number[], period: number): number[] {
-  const out = new Array<number>(values.length).fill(NaN);
-  const start = values.findIndex((v) => Number.isFinite(v));
-  if (start < 0) return out;
-  const tail = smaSeededEma(values.slice(start), period);
-  for (let i = 0; i < tail.length; i++) out[start + i] = tail[i];
   return out;
 }
 
@@ -104,8 +92,8 @@ export const CHAIKIN_OSCILLATOR: IndicatorDescriptor = {
   plots: [{ key: 'osc', type: 'line', title: 'Chaikin Oscillator', colorKey: 'color', style: { lineWidth: 1.5 } }],
   calc: (bars, s) => {
     const accdist = cumulative(moneyFlow(bars));
-    const fast = emaFromFirstFinite(accdist, num(s, 'short', 3));
-    const slow = emaFromFirstFinite(accdist, num(s, 'long', 10));
+    const fast = emaOfGapped(accdist, num(s, 'short', 3));
+    const slow = emaOfGapped(accdist, num(s, 'long', 10));
     const out = new Array<number>(bars.length);
     for (let i = 0; i < bars.length; i++) out[i] = fast[i] - slow[i];
     return { osc: nulls(out) };
@@ -164,7 +152,7 @@ export const ELDER_FORCE_INDEX: IndicatorDescriptor = {
     const moved = change(bars.map((b) => b.close));
     const force = new Array<number>(bars.length);
     for (let i = 0; i < bars.length; i++) force[i] = moved[i] * vol(bars[i]);
-    return { efi: nulls(emaFromFirstFinite(force, num(s, 'length', 13))) };
+    return { efi: nulls(emaOfGapped(force, num(s, 'length', 13))) };
   },
   levels: () => [{ price: 0, color: '#787b86', title: 'Zero', dashed: true }],
 };

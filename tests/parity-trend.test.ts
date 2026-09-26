@@ -236,3 +236,46 @@ describe('warmup and vanishing denominators', () => {
     expect(out.lagging[89 - 25]).toBeNull();
   });
 });
+
+describe('Ichimoku reads its periods and displacement as whole bars', () => {
+  // A settings blob carries whatever a UI or a saved layout wrote. The other
+  // built-ins round a window length to the nearest whole bar, at least one.
+  // Ichimoku used the raw value as a bar index, so a conversion period of 9.4
+  // read bar 8.4, which does not exist, and the whole calc threw a TypeError;
+  // a displacement of 25.6 found no bar to copy and blanked the cloud.
+  const data = ramp(90);
+  const defaults = indicatorDefaults(ICHIMOKU);
+  const whole = ICHIMOKU.calc(data, defaults, {});
+
+  it('rounds a fractional conversion, base or lagging-span period instead of throwing', () => {
+    const cases = [
+      ['conversionPeriod', 9.4], ['conversionPeriod', 8.6],
+      ['basePeriod', 26.4], ['basePeriod', 25.5],
+      ['laggingSpanPeriod', 52.4], ['laggingSpanPeriod', 51.6],
+    ] as const;
+    for (const [key, value] of cases) {
+      const label = `${key} ${value}`;
+      expect(() => ICHIMOKU.calc(data, { ...defaults, [key]: value }, {}), label).not.toThrow();
+      expect(ICHIMOKU.calc(data, { ...defaults, [key]: value }, {}), label).toEqual(whole);
+    }
+  });
+
+  it('reads a period below one as the one-bar window, as the declared minimum says', () => {
+    const one = ICHIMOKU.calc(data, { ...defaults, conversionPeriod: 1 }, {});
+    // A one-bar midpoint is the bar's own (high + low) / 2, from bar 0.
+    expect(one.conversion[0]).toBeCloseTo((101 + 99) / 2, 12);
+    for (const value of [0.4, 0, -3]) {
+      expect(ICHIMOKU.calc(data, { ...defaults, conversionPeriod: value }, {}), String(value)).toEqual(one);
+    }
+  });
+
+  it('rounds a fractional displacement rather than blanking the cloud', () => {
+    for (const value of [25.6, 26.4]) {
+      expect(ICHIMOKU.calc(data, { ...defaults, displacement: value }, {}), String(value)).toEqual(whole);
+    }
+    // A whole displacement, negative included, is used as given.
+    const back = ICHIMOKU.calc(data, { ...defaults, displacement: -2 }, {});
+    expect(back.lagging[2]).toBeCloseTo(100, 12);
+    expect(back.lagging[1]).toBeNull();
+  });
+});

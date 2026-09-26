@@ -14,6 +14,12 @@
  * touches an element, and it only writes `style.setProperty`.
  */
 import type { ChartTheme } from 'openalgo-charts';
+// A pure helper, so importing it by path inlines the one function and nothing
+// else. It reads the canvas module's `Rgba`, which the widget's own `Rgba` below
+// matches field for field. The widget keeps its own declaration because it is
+// published: re-exporting the canvas one would move the reference page and hand
+// the type the pill module's header as its doc comment.
+import { srgbLuminance } from '../render/pill';
 
 /** Every custom property carries this prefix, so a host stylesheet cannot collide with one. */
 export const TOKEN_PREFIX = '--oac-';
@@ -69,15 +75,14 @@ export function formatColor(c: Rgba): string {
   return `rgba(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)},${Math.round(c.a * 1000) / 1000})`;
 }
 
-/** Relative luminance, 0 (black) to 1 (white), on the sRGB curve. */
+/**
+ * Relative luminance, 0 (black) to 1 (white), on the sRGB curve. The canvas
+ * helpers' arithmetic read through this module's parser, so a colour only the
+ * widget can parse (space-separated `rgb()`) still gets a real reading.
+ */
 export function luminance(color: string): number {
   const c = parseColor(color);
-  if (c === null) return 0.5;
-  const lin = (v: number): number => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  return c === null ? 0.5 : srgbLuminance(c);
 }
 
 /** Which of the two modes a theme is, judged from its background. */
@@ -99,7 +104,12 @@ export function mix(a: string, b: string, t: number): string {
   });
 }
 
-/** The colour with its alpha replaced. */
+/**
+ * The colour with its alpha replaced, written as a token value: `#rrggbb` when
+ * opaque, otherwise `rgba()` with the alpha clamped and rounded. Deliberately
+ * not the base package's `withAlpha`, which feeds canvas and always writes
+ * `rgba()` with the alpha as given; callers of each rely on its output.
+ */
 export function withAlpha(color: string, alpha: number): string {
   const c = parseColor(color);
   if (c === null) return color;

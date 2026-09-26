@@ -2,6 +2,62 @@
 
 All notable changes to OpenAlgo Charts.
 
+## Unreleased
+
+### Fixed
+
+- Ichimoku Cloud reads its three periods and its displacement as whole bars,
+  the way the other built-in studies read a length. A fractional period (a
+  conversion period of 9.4, say, from a saved layout or a host's own settings
+  UI) made the calculation throw a TypeError, and a fractional displacement
+  blanked both spans and the lagging span. Each is now rounded to the nearest
+  whole bar, and a period below one reads as one, the declared minimum, where
+  it used to print nothing. Whole values compute exactly as before.
+
+### Internal
+
+- The indicator tier's warmup-gap alignment and its Smoothing block are
+  written once, in an internal module the tier does not export, instead of as
+  private copies spread across the study modules: five of the gapped EMA, four
+  of the Smoothing kernel switch (the moving-average ribbon's among them), four
+  of the first-value alignment (one written inline in ADX) and three of the
+  Smoothing option list. The canvas
+  colour helpers and the widget's tokens share one luminance calculation, each
+  still reading colours through its own parser, because the two parsers
+  disagree on malformed input and merging them would move a colour. The
+  widget still declares its own `Rgba`, so its declaration and reference page
+  are unchanged. The merge moved no output: all 105 built-in studies over 16
+  synthetic datasets and 31,312 setting combinations, their declared inputs
+  and options, and 12,037 colour probes across both parsers give bit-identical
+  results before and after it, from source and from the built bundles (the
+  Ichimoku fix above is the only change in study output).
+  `tests/shared-helpers.test.ts` checks the merged helpers bitwise against
+  independent copies of the ones they replaced, and fails if a private copy
+  comes back, by name or as the alignment pattern under another name.
+- The two public `withAlpha` functions share a name, not a behaviour, and stay
+  separate on purpose; their declarations now say so. The base package's
+  writes `rgba()` with the alpha as given, for canvas, and the widget's writes
+  `#rrggbb` for an opaque colour and clamps and rounds the alpha, for a token
+  value.
+
+### Sizes
+
+Measured on this change against 2.5.5, Brotli bytes: base engine 119,149 to
+119,085, base + trade 135,788 to 135,772, indicator tier 36,345 to 36,312, draw
+tier 44,870 to 44,835, widget tier 82,302 to 82,220, widget terminal 282,666 to
+282,452, everything 335,150 to 334,984. The transform, profile, WebGL2 and
+workspace rows did not move, and the chart-only import (`npm run shake`) fell
+from 76,874 to 76,850. Each budget that moved follows its row down to the
+smallest two-decimal value that passes: base 119.09 kB, base + trade 135.78 kB,
+indicators 36.32 kB, draw 44.84 kB, widget 82.22 kB, terminal 282.46 kB,
+everything 334.99 kB and the chart-only import 75.05 KiB. The trade tier file
+on its own, which no budget row measures, grew from 16,639 to 16,687 (4 raw
+bytes): it carries its own copy of the canvas colour helpers, and the shape of
+the shared luminance calculation that shrinks the base, draw and chart-only
+builds costs it 48 bytes. Of about a hundred shapes measured, the only ones
+that shrink the trade file grow the base engine by 129 bytes and the chart-only
+import by 43.
+
 ## 2.5.5
 
 2026-09-26

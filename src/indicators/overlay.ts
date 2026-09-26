@@ -15,6 +15,7 @@
 import { atr, sourceValues } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
 import { sma, wma, highest, lowest, nulls, smaSeededEma, alma, linreg } from './calc';
+import { emaOfGapped } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -32,23 +33,6 @@ const src = (s: Readonly<Record<string, unknown>>, k = 'source'): IndicatorSourc
 
 const highs = (bars: readonly { high: number }[]): number[] => bars.map((b) => b.high);
 const lows = (bars: readonly { low: number }[]): number[] => bars.map((b) => b.low);
-
-/**
- * Align a chained SMA-seeded EMA with its input's leading warmup gap.
- * Smoothing starts at the first finite value and the result is padded back to
- * the original bar positions. `smaSeededEma` supplies finite-window seeding and
- * subsequent gap behavior; the wrapper keeps the composition's alignment explicit.
- */
-function emaOfGapped(values: readonly number[], period: number): number[] {
-  const n = values.length;
-  const out = new Array<number>(n).fill(NaN);
-  let start = 0;
-  while (start < n && !Number.isFinite(values[start])) start += 1;
-  if (start >= n) return out;
-  const tail = smaSeededEma(values.slice(start), period);
-  for (let i = 0; i < tail.length; i++) out[start + i] = tail[i];
-  return out;
-}
 
 /**
  * A rolling extreme that refuses any window containing a warmup gap. `highest` /

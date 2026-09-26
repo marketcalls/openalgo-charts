@@ -37,6 +37,7 @@ import {
   smaSeededEma, nulls, pivotHigh, pivotLow, barsSince, valueWhen,
 } from './calc';
 import { windowMean } from './window-mean';
+import { fromFirstValue } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -64,28 +65,6 @@ const constant = (n: number, value: number): (number | null)[] =>
 
 /** The same colour at 60 percent opacity, for the dimmer hidden-divergence plates. */
 const dim = (hex: string): string => (/^#[0-9a-f]{6}$/i.test(hex) ? `${hex}99` : hex);
-
-/**
- * Smooth the tail that begins at the series' first real value, then pad the
- * answer back to full length.
- *
- * Each stage retains the original bar positions while its smoother starts
- * from the first available input. Later gaps and seed availability remain the
- * supplied smoother's responsibility; this wrapper does not compact them.
- */
-function fromFirstValue(
-  values: readonly number[],
-  smooth: (tail: readonly number[]) => number[],
-): number[] {
-  const n = values.length;
-  const out = new Array<number>(n).fill(NaN);
-  let start = 0;
-  while (start < n && !Number.isFinite(values[start])) start += 1;
-  if (start >= n) return out;
-  const tail = smooth(values.slice(start));
-  for (let i = 0; i < tail.length && start + i < n; i++) out[start + i] = tail[i];
-  return out;
-}
 
 /** The reading `k` bars back, with no value before the series starts. */
 function shift(values: readonly number[], k: number): number[] {
