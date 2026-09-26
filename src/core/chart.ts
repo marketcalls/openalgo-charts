@@ -50,7 +50,7 @@ import { runAbortable } from '../model/abortable-request';
 import { cloneIndicatorSettings, planIndicatorDependencies } from '../model/indicator-dependencies';
 import { getChartType, type SeriesType } from '../model/chart-type-registry';
 import {
-  getIndicator, hasIndicator, plotStyleKeys,
+  getIndicator, plotStyleKeys,
   type IndicatorBarsProvider, type IndicatorBarsProviderAccess, type IndicatorDescriptor, type IndicatorSettings,
 } from '../model/indicator-registry';
 
@@ -72,13 +72,6 @@ function leadActions(actions: readonly PaneLegendAction[] = [], lead: boolean): 
   return own;
 }
 
-interface PreparedIndicatorRestore {
-  specs: IndicatorState[];
-  order: readonly string[];
-  descriptors: ReadonlyMap<string, IndicatorDescriptor>;
-}
-type PreservedScaleFormats = ReadonlyMap<Pane, ReadonlySet<PriceScaleId>>;
-
 /**
  * How fast a drag's remembered velocity fades while the pointer is still down,
  * in ms. Short enough that a deliberate pause before releasing kills the fling,
@@ -95,17 +88,7 @@ import { parseIndicatorPolicy, type IndicatorEditOptions, type IndicatorPolicy }
 import type { AlertsDocument } from '../alerts/types';
 import { copyAlert, parseAlertsDocument, validateAlert } from '../alerts/document';
 import type { ChartDataContext } from '../model/indicator-registry';
-import {
-  CHART_STATE_VERSION,
-  parsePaneState,
-  type ChartState,
-  type PaneState,
-  type PriceScaleState,
-  type SeriesState,
-  type RestoreReport,
-  type ChartRestoreOptions,
-  type IndicatorState,
-} from '../model/chart-state';
+import type { ChartState, RestoreReport, ChartRestoreOptions } from '../model/chart-state';
 import type { SeriesStyle } from '../render/series-style';
 import type { Bar, SeriesDataItem } from '../model/bar';
 import { toBar } from '../model/bar';
@@ -132,6 +115,8 @@ import { TextWatermark } from '../primitives/text-watermark';
 import type { TickSchedule } from '../feed/tick-schedule';
 import { DEFAULT_TIMEZONE, isValidTimezone } from '../feed/time';
 import { clamp, roundToTick } from '../helpers/math';
+// Last, so the runtime modules imported above still load in the order they did.
+import { ChartPersistence, type PersistenceHost, type PreservedScaleFormats } from './chart-state';
 
 /** A zone name the runtime recognises, or a readable failure at the call site. */
 function checkedTimezone(zone: string): string {
@@ -399,7 +384,8 @@ export class Chart {
    * list was set by the host since, and that list becomes its own.
    */
   private readonly _legendActions = new WeakMap<PaneLegend, [own: readonly PaneLegendAction[], shown: readonly PaneLegendAction[] | undefined]>();
-  private _restoreGeneration = 0;
+  /** Saving and restoring the chart state; see chart-state.ts. */
+  private readonly _persistence = new ChartPersistence(this._persistenceHost());
   private readonly _indicatorRanges = new Map<string, {
     pane: Pane; scaleId: PriceScaleId; range: { min: number; max: number };
     series: readonly SeriesApi[]; token: object;
@@ -3469,87 +3455,7 @@ export class Chart {
    * rebuilds its own series can re-apply their styling and placement.
    */
   public getState(): ChartState & ChartSettingsState & { timezone: string } {
-    const studyInputs = planIndicatorDependencies(this._indicators.map(item => item.dependencyNode())).dependencies;
-    const panes: PaneState[] = this._panes.map((pane) => {
-      const states = pane.scaleStates();
-      for (const [instanceId, claim] of this._indicatorRanges) {
-        if (claim.pane !== pane) continue;
-        const scale = pane.scaleFor(claim.scaleId), token = this._ownedScaleRanges.get(scale);
-        const ownership = token ? scale.ownedFixedRangeState(token) : null;
-        if (ownership && states[claim.scaleId] && !states[claim.scaleId]!.indicatorRange) states[claim.scaleId]!.indicatorRange = { instanceId, manual: ownership.manual };
-      }
-      const { right, ...scales } = states;
-      const state: PaneState = {
-        weight: pane.weight,
-        priceScale: right!,
-      };
-      if (Object.keys(scales).length) state.scales = scales;
-      if (this._collapsed.has(pane)) state.collapsed = true;
-      return state;
-    });
-
-    const series: SeriesState[] = [];
-    this._panes.forEach((pane, paneIndex) => {
-      for (const record of pane.series()) {
-        const style = Object.fromEntries(Object.entries(record.style).filter(([, value]) => value !== undefined));
-        series.push({ type: record.type, style, paneIndex, priceScaleId: record.scaleId });
-      }
-    });
-
-    const primary = this._primaryIndex();
-    const state: ChartState & ChartSettingsState & { timezone: string } = {
-      // Version 2 only when the price pane has moved. Every pane index in a
-      // state is a visual slot, and a reader older than `primaryPane` would
-      // put the price pane's scales, studies and drawings on whatever pane
-      // holds slot 0; refusing the newer version is the right answer for it.
-      // A layout with the price pane in place is written exactly as it always
-      // was, so every existing reader still opens it.
-      version: primary > 0 ? CHART_STATE_VERSION : 1,
-      // Saved unconditionally, including the default: a layout restored after
-      // the default itself changes should still read the hours it was saved with.
-      timezone: this._timezone,
-      viewport: { ...this.getVisibleLogicalRange() },
-      barSpacing: this._timeScale.barSpacing,
-      navigation: this.navigationOptions(),
-      grid: this.gridOptions(),
-      // The settings dialog's own slice. It lives beside `grid` rather than
-      // inside it because these are chart-wide overrides, and it is declared by
-      // the settings module so `ChartState` stays the shape of the core.
-      canvas: this.canvasOptions(),
-      statusLine: this.statusLineOptions(),
-      watermark: this.watermarkOptions(),
-      trading: { ...this._tradingSettings },
-      // The two switches, never the clock function: a callback does not survive
-      // JSON, and the host that supplied one supplies it again on the way back.
-      axisChrome: {
-        sessionClock: this._axisChrome.sessionClock,
-        barCountdown: this._axisChrome.barCountdown,
-      },
-      events: this.eventOptions(),
-      crosshairMode: this._crosshairMode,
-      crosshairSnapToBar: this._crosshairSnapToBar,
-      priceOnlyAutoScale: this._priceOnlyAutoScale,
-      indicatorLegendCollapsed: this._indicatorLegendCollapsed,
-      panes,
-      ...(primary > 0 ? { primaryPane: primary } : {}),
-      series,
-      indicators: this._indicators.map((i) => ({
-        indicatorId: i.indicatorId,
-        instanceId: i.id,
-        settings: i.settings(),
-        paneIndex: i.paneIndex,
-        visible: i.visible(),
-        ...(studyInputs.get(i.id)?.length ? { studyInputs: studyInputs.get(i.id)!.map(edge => edge.inputKey) } : {}),
-        ...(i.priceScaleId() === null ? {} : { priceScaleId: i.priceScaleId()! }),
-        ...(Object.keys(i.plotPriceScaleIds()).length ? { plotPriceScaleIds: i.plotPriceScaleIds() } : {}),
-        // Restrictions only: an unrestricted study saves what it always did.
-        ...(Object.keys(i.policy()).length ? { policy: { ...i.policy() } } : {}),
-      })),
-      ...(typeof this._sourceAbove === 'string' ? { sourceAbove: this._sourceAbove } : {}),
-    };
-    if (this._drawingState !== undefined) state.drawings = this._drawingState;
-    if (this._alertState !== undefined) state.alerts = parseAlertsDocument(this._alertState);
-    return state;
+    return this._persistence.getState();
   }
 
   /**
@@ -3567,320 +3473,82 @@ export class Chart {
    * (or `setVisibleLogicalRange`) once the series are populated.
    */
   public restoreState(state: unknown, options: ChartRestoreOptions = {}): RestoreReport {
-    const s = state as (ChartState & ChartSettingsState & { timezone?: unknown }) | null;
-    if (s === null || typeof s !== 'object' || typeof s.version !== 'number') {
-      return { applied: false, series: [], indicators: 0, reason: 'not a chart state object' };
-    }
-    if (s.version > CHART_STATE_VERSION) {
-      return { applied: false, series: [], indicators: 0, reason: `state version ${s.version} is newer than ${CHART_STATE_VERSION}` };
-    }
-
-    let alerts: AlertsDocument | undefined;
-    let panes: PaneState[] | undefined;
-    let primaryPane: number | undefined;
-    let studies: PreparedIndicatorRestore | undefined;
-    const preservedFormats = new Map<Pane, Set<PriceScaleId>>();
-    const reservedIds = new Set<string>();
-    try {
-      const priceOnly = Object.getOwnPropertyDescriptor(s, 'priceOnlyAutoScale');
-      if (priceOnly && (!('value' in priceOnly) || (priceOnly.value !== undefined && typeof priceOnly.value !== 'boolean'))) {
-        throw new Error('Invalid price-only autoscale preference');
-      }
-      const collapsed = Object.getOwnPropertyDescriptor(s, 'indicatorLegendCollapsed');
-      if (collapsed && (!('value' in collapsed) || (collapsed.value !== undefined && typeof collapsed.value !== 'boolean'))) {
-        throw new Error('Invalid indicator legend preference');
-      }
-      const plain = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object'
-        && [Object.prototype, null].includes(Object.getPrototypeOf(value))
-        && Object.values(Object.getOwnPropertyDescriptors(value)).every(property => 'value' in property);
-      if (!plain(options)) throw new Error('Invalid chart restore options');
-      if (options.preserveScaleFormats !== undefined) {
-        const selectors = options.preserveScaleFormats;
-        if (!Array.isArray(selectors)) throw new Error('Invalid preserved scale formats');
-        const properties = Object.getOwnPropertyDescriptors(selectors);
-        if (Reflect.ownKeys(properties).some(key => key !== 'length' && (typeof key !== 'string'
-          || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= selectors.length
-          || !('value' in properties[key])))) throw new Error('Invalid preserved scale formats');
-        for (let index = 0; index < selectors.length; index++) {
-          const selector = properties[index]?.value as unknown;
-          if (!plain(selector) || typeof selector.paneIndex !== 'number' || !Number.isInteger(selector.paneIndex) || selector.paneIndex < 0
-            || !this._validPriceScaleId(selector.scaleId)) throw new Error('Invalid preserved scale selector');
-          const pane = this._panes[selector.paneIndex];
-          if (!pane || !Object.prototype.hasOwnProperty.call(pane.scaleStates(), selector.scaleId)) {
-            throw new Error('Preserved scale must already exist');
-          }
-          const ids = preservedFormats.get(pane) ?? new Set<PriceScaleId>();
-          ids.add(selector.scaleId);
-          preservedFormats.set(pane, ids);
-        }
-      }
-      if (s.panes !== undefined) {
-        if (!Array.isArray(s.panes)) throw new Error('Invalid pane list');
-        panes = s.panes.map(pane => parsePaneState(pane, true));
-      }
-      // Checked with the rest, before anything is applied: a slot that names no
-      // saved pane would put the price pane's scales on a study pane.
-      const slot = Object.getOwnPropertyDescriptor(s, 'primaryPane');
-      if (slot && (!('value' in slot) || slot.value !== undefined)) {
-        const at: unknown = slot.value;
-        if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || !(at < (panes?.length ?? 0))) throw new Error('Invalid primary pane slot');
-        // The same rule a workspace document enforces: a version 1 reader
-        // trusts the version and would lay the price pane's scales on slot 0.
-        if (s.version < 2) throw new Error('A moved price pane needs chart version 2');
-        // The one switch: a chart that did not opt in keeps its price pane on
-        // top, and a layout that moved it would put every slot on the wrong pane.
-        if (at > 0 && !this._movablePrimaryPane) throw new Error('A moved price pane needs movablePrimaryPane');
-        primaryPane = at;
-      }
-      if (s.alerts !== undefined) alerts = parseAlertsDocument(s.alerts);
-      if (s.sourceAbove !== undefined && (typeof s.sourceAbove !== 'string' || !s.sourceAbove.trim())) throw new Error('Invalid source placement');
-      if (s.indicators !== undefined) {
-        if (!Array.isArray(s.indicators)) throw new Error('Invalid indicator list');
-        for (const spec of s.indicators) {
-          if ('plotPriceScaleIds' in spec) {
-            const property = Object.getOwnPropertyDescriptor(spec, 'plotPriceScaleIds');
-            if (!property?.enumerable || !('value' in property)) throw new Error('Invalid indicator plot price scale map field');
-          }
-          if (spec.priceScaleId !== undefined && !this._validPriceScaleId(spec.priceScaleId)) throw new Error('Invalid indicator price scale');
-          if (spec.instanceId === undefined) continue;
-          if (typeof spec.instanceId !== 'string' || !spec.instanceId.trim() || reservedIds.has(spec.instanceId)) {
-            throw new Error('Invalid or duplicate indicator instance id');
-          }
-          reservedIds.add(spec.instanceId);
-        }
-        this._reserveAlertStudyIds(alerts, reservedIds);
-        const used = new Set([...reservedIds, ...this._indicatorReservedIds, ...this._indicators.map(item => item.id)]);
-        const specs = s.indicators.map(spec => ({ ...spec, settings: cloneIndicatorSettings(spec.settings ?? {}),
-          ...(spec.policy === undefined ? {} : { policy: parseIndicatorPolicy(spec.policy) }) }));
-        // Missing producers remain reserved even when no descriptor can recreate them.
-        for (const spec of specs) for (const value of Object.values(spec.settings)) {
-          if (value && typeof value === 'object' && 'kind' in value && value.kind === 'indicator'
-            && 'instanceId' in value && typeof value.instanceId === 'string') {
-            used.add(value.instanceId);
-            reservedIds.add(value.instanceId);
-          }
-        }
-        let generated = 0;
-        for (const spec of specs) {
-          if (spec.instanceId === undefined) {
-            do { spec.instanceId = `restored-study-${++generated}`; } while (used.has(spec.instanceId));
-            used.add(spec.instanceId);
-          }
-          reservedIds.add(spec.instanceId);
-        }
-        const descriptors = new Map(specs.filter(spec => hasIndicator(spec.indicatorId))
-          .map(spec => [spec.instanceId!, getIndicator(spec.indicatorId)]));
-        const nodes = specs.flatMap(spec => {
-          const descriptor = descriptors.get(spec.instanceId!);
-          if (descriptor && spec.plotPriceScaleIds !== undefined) {
-            spec.plotPriceScaleIds = parseIndicatorPlotPriceScales(descriptor, spec.plotPriceScaleIds);
-          }
-          if (descriptor) {
-            validateIndicatorInputs(descriptor.inputs, spec.settings);
-            // Against the slot the price pane will hold once the layout lands:
-            // an old layout puts it at the top, a partial one leaves it be.
-            validateIndicatorScaleAssignment(descriptor, spec.priceScaleId, spec.plotPriceScaleIds, spec.paneIndex,
-              panes === undefined ? this._primaryIndex() : primaryPane ?? 0);
-          }
-          return descriptor ? [{ id: spec.instanceId!, descriptor, settings: spec.settings }] : [];
-        });
-        studies = { specs, order: planIndicatorDependencies(nodes).order, descriptors };
-      }
-    } catch (error) {
-      return { applied: false, series: [], indicators: 0, reason: error instanceof Error ? error.message : 'Invalid saved alerts or identities' };
-    }
-    // Restore callbacks may add studies before the saved layout is applied.
-    this._reserveAlertStudyIds(alerts, reservedIds);
-    for (const id of reservedIds) this._indicatorReservedIds.add(id);
-    const generation = ++this._restoreGeneration;
-    const previousPriceOnly = this._priceOnlyAutoScale;
-    const previousLegendCollapsed = this._indicatorLegendCollapsed;
-    this.emit('state:restore:start', {});
-    const before = this._timeScale.visibleRange();
-    try {
-      // A start listener can synchronously install a newer layout on this chart.
-      if (generation !== this._restoreGeneration) {
-        return { applied: false, series: [], indicators: 0, reason: 'superseded by a newer chart restore' };
-      }
-      // The layout setters a restore calls are the restore, which the start
-      // and end events announce; they do not each fire `layout:change`.
-      const report = this._withinLayoutChange(() =>
-        this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats)));
-      if (report.applied && generation === this._restoreGeneration && (previousPriceOnly !== this._priceOnlyAutoScale
-        || previousLegendCollapsed !== this._indicatorLegendCollapsed)) {
-        this.emit('objects:change', {});
-      }
-      return report;
-    }
-    finally {
-      preservedFormats.clear();
-      // Restore listeners can replace the viewport after its last internal paint.
-      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
-      this._emitViewportIfMoved(before);
-      this.emit('state:restore:end', {});
-    }
+    return this._persistence.restoreState(state, options);
   }
 
-  private _restoreState(s: ChartState & ChartSettingsState & { timezone?: unknown }, alerts: AlertsDocument | undefined,
-    reservedIds: Set<string>, panes: PaneState[] | undefined, primaryPane: number, studies: PreparedIndicatorRestore | undefined,
-    preservedFormats: PreservedScaleFormats): RestoreReport {
-
-    // Old locks describe the outgoing ranges, not the settings about to be restored.
-    if (panes) for (const pane of this._panes) pane.clearRatioLocks();
-
-    if (s.grid) this.setGridOptions(s.grid);
-    // Canvas before the panes: its margins are chart-wide, and a pane's own
-    // saved marginTop/marginBottom is the more specific answer, so it must land
-    // last and win.
-    if (s.canvas) this.setCanvasOptions(s.canvas);
-    if (s.statusLine) this.setStatusLineOptions(s.statusLine);
-    if (s.watermark) this.setWatermarkOptions(s.watermark);
-    if (s.trading) this.setTradingSettings(s.trading);
-    if (s.axisChrome) this.setAxisChromeOptions(s.axisChrome);
-    if (s.navigation && typeof s.navigation === 'object') this._patchNavigation(s.navigation);
-    if (s.events) this.setEventOptions(s.events);
-    if (s.crosshairMode) this._crosshairMode = s.crosshairMode;
-    if (typeof s.crosshairSnapToBar === 'boolean') this._crosshairSnapToBar = s.crosshairSnapToBar;
-    const priceOnly = Object.getOwnPropertyDescriptor(s, 'priceOnlyAutoScale');
-    if (priceOnly && typeof priceOnly.value === 'boolean') this._priceOnlyAutoScale = priceOnly.value;
-    const collapsed = Object.getOwnPropertyDescriptor(s, 'indicatorLegendCollapsed');
-    if (collapsed && typeof collapsed.value === 'boolean') this._indicatorLegendCollapsed = collapsed.value;
-    this._restackLegends();
-    // A saved zone is data of unknown provenance, so an unrecognised name is
-    // skipped rather than thrown: the rest of the layout is still restorable,
-    // and a whole saved workspace should not be lost to one stale zone name.
-    if (typeof s.timezone === 'string' && isValidTimezone(s.timezone)) this.setTimezone(s.timezone);
-
-    // The panes themselves first: the indicators below are placed by index, so
-    // the panes have to exist and be weighted before they are rebuilt. Their
-    // price scales are *not* set here, see below. The price pane goes to its
-    // saved slot before anything is applied by index, and a layout that names
-    // no slot is one from before the price pane could move: its slot is 0.
-    if (panes) {
-      for (let i = 0; i < panes.length; i++) this._ensurePane(i);
-      this.setPrimaryPaneIndex(primaryPane);
-      panes.forEach((ps, i) => { this._panes[i].weight = ps.weight; });
-    }
-    if (panes || studies) {
-      // A layout that does not fold a pane opens it, and the price pane never
-      // folds, in whatever slot. That covers a pane it does not list at all:
-      // rebuilt studies land on the existing panes and would otherwise open
-      // inside a stale strip.
-      this._panes.forEach((pane, i) => {
-        if (pane !== this._primaryPane && panes?.[i]?.collapsed) this._collapsed.add(pane);
-        else this._collapsed.delete(pane);
-      });
-      this._relayout();
-      this._rehomeAnchored();
-    }
-
-    // Indicators are fully derivable from the source data, so they *can* be
-    // recreated. Replace rather than append, so restore is idempotent.
-    let indicators = 0;
-    if (studies) {
-      this._indicatorRefreshes.clear();
-      // A restore is the host's act: it replaces a protected study as well.
-      for (const instance of this._indicators.splice(0)) instance.remove({ force: true });
-      const byId = new Map(studies.specs.map(spec => [spec.instanceId!, spec]));
-      for (const id of studies.order) {
-        const spec = byId.get(id)!;
-        const descriptor = studies.descriptors.get(id)!;
-        const instance = new IndicatorInstance(
-          this._indicatorHost(preservedFormats), descriptor, spec.settings, spec.paneIndex,
-          spec.instanceId, reservedIds, spec.priceScaleId, spec.plotPriceScaleIds, spec.policy,
-        );
-        reservedIds.add(instance.id);
-        this._indicators.push(instance);
-        if (spec.visible === false) instance.setVisible(false);
-        indicators += 1;
-      }
-      const display = new Map(studies.specs.map((spec, index) => [spec.instanceId!, index]));
-      this._indicators.sort((a, b) => display.get(a.id)! - display.get(b.id)!);
-      // With the studies it is read with: a layout from before the source could
-      // move says nothing, and the source stays behind the studies just made.
-      this._sourceAbove = s.sourceAbove;
-      this._reorderIndicatorResources();
-    }
-
-    // Price scales last of all, for the same reason the canvas block goes
-    // first: this is the most specific answer for each pane, and everything
-    // above moves ranges around. Rebuilding an indicator in particular takes a
-    // pane's axis with it, so a scale restored before that step is a scale the
-    // restore then throws away.
-    const ratioLocks: { pane: Pane; id: PriceScaleId; reference: NonNullable<PriceScaleState['ratioLock']> }[] = [];
-    if (panes) {
-      panes.forEach((ps, i) => {
-        const pane = this._panes[i];
-        if (pane === undefined) return;
-        const entries = [['right', ps.priceScale], ...Object.entries(ps.scales ?? {})] as [PriceScaleId, PriceScaleState][];
-        pane.restoreAxisPlacements(new Map(entries.flatMap(([id, saved]) => saved.placement ? [[id, saved.placement] as const] : [])));
-        for (const [id, saved] of entries) {
-          const scale = pane.scaleFor(id);
-          const options: Partial<PriceScaleOptions> = {
-            marginTop: saved.marginTop, marginBottom: saved.marginBottom, minMove: saved.minMove,
-            mode: saved.mode, inverted: saved.inverted,
-          };
-          if (saved.minPrecision !== undefined) options.minPrecision = saved.minPrecision;
-          // Legacy snapshots may carry an instrument tick broadcast into an oscillator.
-          // New snapshots explicitly preserve the precision configured on each scale.
-          scale.setOptions(id === 'right' && saved.minPrecision === undefined ? this._scalePatchFor(pane, options) : options);
-          const claim = saved.indicatorRange ? this._indicatorRanges.get(saved.indicatorRange.instanceId) : undefined;
-          const ownDefault = claim && claim.pane === pane && claim.scaleId === id
-            && saved.fixedRange?.min === claim.range.min && saved.fixedRange?.max === claim.range.max;
-          if (ownDefault) {
-            if (!scale.ownsFixedRange(claim.token)) {
-              scale.setFixedRange(null);
-              scale.setAutoScale(true);
-              scale.setOwnedFixedRange(claim.token, claim.range);
-              this._ownedScaleRanges.set(scale, claim.token);
-            }
-            scale.setAutoScale(true);
-            if (saved.indicatorRange!.manual) {
-              scale.setAutoScale(false);
-              if (saved.range) scale.setPriceRange(saved.range);
-            }
-          } else {
-            if (saved.fixedRange !== undefined) scale.setFixedRange(saved.fixedRange);
-            scale.setAutoScale(saved.autoScale);
-            if (!saved.autoScale && saved.range) scale.setPriceRange(saved.range);
-          }
-          if (saved.ratioLock) ratioLocks.push({ pane, id, reference: saved.ratioLock });
-        }
-      });
-    }
-
-    // Drawings name panes by slot, in the layout the state describes, which is
-    // the one standing now. They go on before the pruning below, so a pane the
-    // restore then empties and removes shifts them with every other pane
-    // (`paneRemoved`) instead of leaving them on slots that have moved. The
-    // case that needs it: a host that swaps studies keeps its drawings, and a
-    // study pane above the price pane empties, which moves the price pane up.
-    this._drawingState = s.drawings;
-    this.emit('drawings:restore', s.drawings ?? []);
-
-    // Unavailable studies leave empty panes, but a live study can have no plot
-    // series. Keep its pane and host primitives; chart furniture alone does not
-    // occupy a pane. Walk backwards so removal keeps the remaining indices valid.
-    // A study pane above the price pane is as prunable as one below it.
-    for (let i = this._panes.length - 1; i >= 0; i--) {
-      const pane = this._panes[i];
-      if (pane !== this._primaryPane && pane.series().length === 0 && !this._indicators.some(study => study.paneIndex === i)
-        && pane.primitives().every(primitive => primitive === this._timeNav || this._anchored.some(entry => entry.primitive === primitive))) this.removePane(i);
-    }
-
-    this._alertState = alerts;
-    this._recomputeAxisColumns();
-    if (s.barSpacing !== undefined) this._timeScale.setBarSpacing(s.barSpacing);
-    if (s.viewport && this._dataLayer.length > 0) this.setVisibleLogicalRange(s.viewport);
-    // Lock references belong to the saved geometry. Applying them after pane pruning
-    // and viewport restoration prevents intermediate layouts from scaling the range twice.
-    for (const { pane, id, reference } of ratioLocks) {
-      if (this._panes.includes(pane)) pane.setRatioLock(id, true, reference.barSpacing, reference.height);
-    }
-    this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
-    this.emit('alerts:restore', alerts ?? { version: 1, alerts: [] });
-    this.emit('objects:change', {});
-    return { applied: true, series: s.series ?? [], indicators };
+  /** What a state capture and a restore read, write and drive; see `PersistenceHost`. */
+  private _persistenceHost(): PersistenceHost {
+    // A getter's own `this` is the host literal, so the live fields are read
+    // and written through the chart.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const chart = this;
+    return {
+      get _panes() { return chart._panes; },
+      get _indicators() { return chart._indicators; },
+      get _indicatorRanges() { return chart._indicatorRanges; },
+      get _ownedScaleRanges() { return chart._ownedScaleRanges; },
+      get _collapsed() { return chart._collapsed; },
+      get _timezone() { return chart._timezone; },
+      get _timeScale() { return chart._timeScale; },
+      get _dataLayer() { return chart._dataLayer; },
+      get _tradingSettings() { return chart._tradingSettings; },
+      get _axisChrome() { return chart._axisChrome; },
+      get _movablePrimaryPane() { return chart._movablePrimaryPane; },
+      get _indicatorReservedIds() { return chart._indicatorReservedIds; },
+      get _indicatorRefreshes() { return chart._indicatorRefreshes; },
+      get _primaryPane() { return chart._primaryPane; },
+      get _timeNav() { return chart._timeNav; },
+      get _anchored() { return chart._anchored; },
+      get _crosshairMode() { return chart._crosshairMode; },
+      set _crosshairMode(value) { chart._crosshairMode = value; },
+      get _crosshairSnapToBar() { return chart._crosshairSnapToBar; },
+      set _crosshairSnapToBar(value) { chart._crosshairSnapToBar = value; },
+      get _priceOnlyAutoScale() { return chart._priceOnlyAutoScale; },
+      set _priceOnlyAutoScale(value) { chart._priceOnlyAutoScale = value; },
+      get _indicatorLegendCollapsed() { return chart._indicatorLegendCollapsed; },
+      set _indicatorLegendCollapsed(value) { chart._indicatorLegendCollapsed = value; },
+      get _sourceAbove() { return chart._sourceAbove; },
+      set _sourceAbove(value) { chart._sourceAbove = value; },
+      get _drawingState() { return chart._drawingState; },
+      set _drawingState(value) { chart._drawingState = value; },
+      get _alertState() { return chart._alertState; },
+      set _alertState(value) { chart._alertState = value; },
+      _primaryIndex: () => this._primaryIndex(),
+      getVisibleLogicalRange: () => this.getVisibleLogicalRange(),
+      setVisibleLogicalRange: range => this.setVisibleLogicalRange(range),
+      navigationOptions: () => this.navigationOptions(),
+      _patchNavigation: patch => this._patchNavigation(patch),
+      gridOptions: () => this.gridOptions(),
+      setGridOptions: opts => this.setGridOptions(opts),
+      canvasOptions: () => this.canvasOptions(),
+      setCanvasOptions: patch => this.setCanvasOptions(patch),
+      statusLineOptions: () => this.statusLineOptions(),
+      setStatusLineOptions: patch => this.setStatusLineOptions(patch),
+      watermarkOptions: () => this.watermarkOptions(),
+      setWatermarkOptions: options => this.setWatermarkOptions(options),
+      setTradingSettings: patch => this.setTradingSettings(patch),
+      setAxisChromeOptions: patch => this.setAxisChromeOptions(patch),
+      eventOptions: () => this.eventOptions(),
+      setEventOptions: patch => this.setEventOptions(patch),
+      setTimezone: zone => this.setTimezone(zone),
+      _validPriceScaleId: (value): value is PriceScaleId => this._validPriceScaleId(value),
+      _reserveAlertStudyIds: (document, reserved) => this._reserveAlertStudyIds(document, reserved),
+      emit: (event, payload) => this.emit(event, payload),
+      _withinLayoutChange: <T>(fn: () => T): T => this._withinLayoutChange(fn),
+      _mutateTimeScale: <T>(apply: () => T): T => this._mutateTimeScale(apply),
+      invalidate: build => this.invalidate(build),
+      _emitViewportIfMoved: before => this._emitViewportIfMoved(before),
+      _restackLegends: () => this._restackLegends(),
+      _ensurePane: index => this._ensurePane(index),
+      setPrimaryPaneIndex: index => this.setPrimaryPaneIndex(index),
+      _relayout: () => this._relayout(),
+      _rehomeAnchored: () => this._rehomeAnchored(),
+      _indicatorHost: preservedFormats => this._indicatorHost(preservedFormats),
+      _reorderIndicatorResources: () => this._reorderIndicatorResources(),
+      _scalePatchFor: (pane, patch) => this._scalePatchFor(pane, patch),
+      removePane: index => this.removePane(index),
+      _recomputeAxisColumns: () => this._recomputeAxisColumns(),
+    };
   }
 
   /**
