@@ -72,7 +72,9 @@ describe('rich timeline markers', () => {
   it('clips all canvas output and excludes hits outside the plot', () => {
     const markers = new EventMarkers();
     const rc = context(30, 2);
-    markers.setEvents([{ ...earnings, time: 640 }]);
+    // 0.47 bars past the last bar at the median spacing of 100 seconds, which
+    // centres the badge on the plot's right edge so it straddles the clip.
+    markers.setEvents([{ ...earnings, time: 547 }]);
     const { ctx, rec } = makeCtx();
     markers.draw(ctx, rc);
     expect(rec.ops.some(op => op.type === 'rect' && op.args.join() === '0,0,600,400')).toBe(true);

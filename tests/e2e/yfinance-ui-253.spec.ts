@@ -69,7 +69,12 @@ test('symbol results preserve an explicit venue and direct interval entry owns t
   const input = page.getByPlaceholder('Symbol or expression');
   await input.fill('reliance');
   await page.getByRole('option', { name: /NSE:RELIANCE\.NS/ }).click();
-  await page.waitForFunction(() => (window as any).__oac?.app?.req?.symbol === 'RELIANCE.NS');
+  // The request names the symbol as the load starts, and the host ignores
+  // direct entry until that load has finished, so wait for both.
+  await page.waitForFunction(() => {
+    const app = (window as any).__oac?.app;
+    return app?.req?.symbol === 'RELIANCE.NS' && !app.loading && app.currentBars.length > 0;
+  });
   await page.locator('#chart').focus();
   await page.keyboard.press('1');
   const interval = page.locator('.oac-quick-entry__input');

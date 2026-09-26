@@ -167,7 +167,14 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // Sharing one luminance calculation between the canvas helpers and the widget
 // tokens took the import from 76874 to 76850 bytes (75.05 KiB); the budget
 // follows it down to 75.05 KiB.
-const LIMIT_BYTES = 75.05 * 1024;
+// Times past the last bar belong to every chart: drawing placement, study
+// shapes and linked viewports all read them. Replacing the last-gap
+// extrapolation with the median spacing and a lazily generated, bounded
+// session-calendar plan measures 76874 to 77551 bytes (75.07 to 75.73 KiB,
+// 0.66 KiB). Reading each session window's bar offset rather than one for all
+// brings it to 77575 bytes (75.76 KiB); allow 75.76 KiB. SessionCalendar
+// itself only rides in by type.
+const LIMIT_BYTES = 75.76 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

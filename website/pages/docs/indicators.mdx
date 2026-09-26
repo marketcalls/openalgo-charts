@@ -681,7 +681,8 @@ What the layer does with what you return:
 - Shapes entirely off-pane are culled before any path work, so a descriptor that marks
   every pivot in 50k bars pays for the visible ones.
 - A time that falls **between** two bars lands between them rather than snapping to the
-  nearer one, and a time past the last bar extrapolates at the last interval's spacing.
+  nearer one, and a time past the last bar lands on the chart's future bar times: the
+  session calendar's when the host set one, otherwise the median recent bar interval.
   That is what lets a projection reach into the empty space on the right, to a time no bar
   occupies yet.
 - The layer is created lazily, on the first non-empty list, so a descriptor without the

@@ -243,6 +243,13 @@ changed. Anchors map through `DataLayer.timeToIndexFloat`, which also resolves p
 *between* bars (inside a collapsed gap) and *past the last bar*, where trend projections and
 forecasts live.
 
+The bar times past the last bar follow the chart's session calendar when the host set one,
+with `SessionCalendar.applyTo`, `Instrument.applyTo` or `chart.dataLayer.setSessionCalendar`: on an intraday chart an
+endpoint drawn two bars past Friday's last candle lands on Monday's second bar, not on Friday
+night. Without a calendar they continue at the median recent bar interval, never at the gap
+between the last two bars, which is so often a night or a weekend. See
+[times past the last bar](/docs/instruments#times-past-the-last-bar).
+
 A note, a box or a table can instead be pinned to the screen. Its anchors are then fractions
 of its pane's plot, kept in a field of their own; see [Pinned to the screen](#pinned-to-the-screen).
 
@@ -361,7 +368,9 @@ those for its own order lines without the two fighting over one channel.
 - **Draw beyond the candles**: move into the blank space after the latest candle or
   before the first loaded bar. Previews and freehand strokes remain active there.
   Leave room by panning the chart or adjusting the visible logical range.
-  Drawing times use the existing edge-spacing projection; they do not add market data.
+  Drawing times there come from the chart's future bar times (the session calendar's, or
+  the median recent bar interval) and, before the first bar, the first bar spacing; they
+  do not add market data.
 - **Select**: click a drawing; click empty space to deselect.
 - **Move**: drag the body to translate every anchor, or drag a handle to move one.
 - **Magnet**: `{ magnet: 'strong' }` (or `true`) snaps new anchors to the nearest O/H/L/C

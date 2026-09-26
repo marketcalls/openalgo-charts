@@ -128,6 +128,62 @@ import by 43.
   wording needs a record that measures the GPU backend, the canvas count, the
   overlay contents, the SVG tiers and the shared index must match the code, and
   the repaint scope a document states must match what the chart does.
+- Times past the last bar no longer take their spacing from the gap between
+  the last two bars. That gap is the one most likely to be a night or a
+  weekend: on a five-minute chart whose last candle was Monday's 09:15 open,
+  every bar of empty space to its right stood for almost three days, so a
+  trend line drawn three bars past it ended more than eight days later.
+  `DataLayer.indexToTimeFloat` and `timeToIndexFloat` (and so
+  `chart.coordinateToTime`, `chart.timeToCoordinate`, drawing placement, study
+  shapes past the last bar and linked viewports) now continue at the median of
+  the last 64 bar intervals. Left of the first bar nothing changes. Evenly
+  spaced data maps exactly as before, and stored drawings keep their times: an
+  anchor saved at a future time is simply drawn where that time now falls.
+- With a session calendar the space past the last bar follows the venue's
+  hours. The bar after Friday's 15:25 candle is Monday's 09:15, so a saved
+  anchor at Monday 09:30 is drawn four bars past the last candle rather than
+  about 800 five-minute bars off screen in the night and weekend. A date the
+  calendar closes is skipped, a shortened day ends early and a lunch break is
+  stepped over. Each window keeps the offset the feed's bars keep from its
+  opening, read from the bars in windows opening at the same time: hourly bars
+  stamped on the clock stay on the clock both at a 09:00 morning opening and
+  at 12:00 before a 12:30 afternoon one, and a feed that stamps its first
+  hourly bar 09:00 against a 09:15 open keeps doing so. Daily bars step through
+  trading dates. Positions between two future bar times interpolate across the
+  closed hours and convert back exactly. A calendar the recent bars do not sit
+  in (regular hours against extended-hours data) is ignored in favour of the
+  median, and a calendar that throws never stops a chart painting. Generation
+  is bounded: past 4096 future bars or 512 calendar reads the axis continues
+  at the average pace already generated.
+
+### Added
+
+- `chart.dataLayer.setSessionCalendar(calendar)` and the `sessionCalendar`
+  getter set and read the hours the time axis follows past the last bar;
+  `null` clears them. Any object with `sessionFrom(utcSeconds)` qualifies
+  (`SessionCalendarSource`). The setter moves times without asking for a
+  frame, so on an idle chart use one of the `applyTo` calls below, which
+  repaint. `Instrument.applyTo` now sets the instrument itself, so a host that
+  applies instrument metadata gets the fix with no other change. Another
+  instrument replaces its hours, and a data context moved to another symbol or
+  exchange drops them, so a symbol the host holds no instrument for is not laid
+  out in the last one's sessions.
+- `SessionCalendar`, trading hours without price or quantity rules: built from
+  `{ timezone, sessions, exceptions }` (`SessionCalendarSpec`), validated,
+  detached and frozen by the same rules as an instrument's calendar, with
+  errors reading `Invalid session calendar: ...`. It reads with the same
+  `sessionAt`, and `applyTo(chart)` sets it as the chart's calendar and
+  repaints, so drawings already past the last bar move to the times they now
+  mean.
+- `sessionFrom(utcSeconds)` on `Instrument` and `SessionCalendar` returns the
+  window active at an instant, or else the next one to open, looking about a
+  year ahead, and null when nothing opens in that time. An overnight window
+  still running is returned on its opening date.
+- The reference host lays the empty space right of the last candle out in the
+  venue's regular hours (NSE and BSE 09:15 to 15:30 IST, US 09:30 to 16:00 New
+  York, weekdays), on both charts of the split view, and in the host
+  instrument's own calendar for a symbol it holds metadata for. Crypto and
+  venues without hours keep the median spacing.
 
 ## 2.5.5
 
