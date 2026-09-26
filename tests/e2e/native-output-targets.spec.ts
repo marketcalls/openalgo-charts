@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import type { Chart, IndicatorApi } from '../../src/index';
 import type * as Charts from '../../src/index';
@@ -5,6 +6,7 @@ import type * as Charts from '../../src/index';
 declare global {
   interface Window {
     __outputTargets: { chart: Chart; study: IndicatorApi; clicks: string[] };
+    __shadingExample: { chart: Chart; lib: typeof Charts };
   }
 }
 
@@ -498,5 +500,97 @@ test('shading from two studies stacks in study order on the candles, also when t
   expect(await colourAt(page, x[1], y)).toBe('51,34,170');
   expect(await colourAt(page, x[2], y)).toBe('51,34,170');
   await page.screenshot({ path: info.outputPath('shading-targets-stacked.png') });
+  expect(errors).toEqual([]);
+});
+
+/**
+ * The live example on the website, run from its source at a desktop and a phone width. Each
+ * shading layer is switched off and on again by itself, so every pixel that changes is that
+ * layer's: on the candles a green tint where momentum is up and red where it is down, and in
+ * the study pane a blue tint only at the strongest readings. Read at each bar's centre column.
+ */
+for (const width of [900, 390]) test(`the documented background targets example shades the candles and its pane at ${width}px`, async ({ page }, info) => {
+  const errors: string[] = [];
+  const dialogs: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('dialog', dialog => { dialogs.push(dialog.message()); void dialog.dismiss(); });
+  const response = await page.request.get('/website/pages/examples.mdx');
+  expect(response.ok()).toBe(true);
+  const section = (await response.text()).split('### Shading the candles from a study pane')[1];
+  expect(section).toBeDefined();
+  const code = section.split('code={`')[1].split('`} />')[0];
+  await page.setViewportSize({ width, height: 600 });
+  await page.route('**/shading-example.html', route => route.fulfill({ contentType: 'text/html', body:
+    `<!doctype html><html><head><style>html,body{margin:0;background:#101010}#example{width:${width}px;height:420px}</style></head><body><div id="example"></div></body></html>` }));
+  await page.goto('/shading-example.html');
+  await page.evaluate(async source => {
+    const url = '/dist/openalgo-charts.all.mjs', lib = await import(url) as typeof Charts;
+    // The site hands every example a chart in its own theme; dark is its default.
+    const themed = { ...lib, createChart: (host: HTMLElement, options?: Charts.ChartOptions) => lib.createChart(host, { theme: lib.darkTheme, ...options }) };
+    window.__shadingExample = { chart: new Function('el', 'lib', source)(document.getElementById('example'), themed) as Chart, lib };
+  }, code);
+  await painted(page);
+  await page.locator('#example').screenshot({ path: info.outputPath(`shading-example-${width}.png`) });
+
+  const result = await page.evaluate(async () => {
+    const { chart, lib } = window.__shadingExample;
+    const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const study = chart.indicators()[0];
+    const momentum = study.values().momentum;
+    const peak = Math.max(...momentum.map(value => Math.abs(value ?? 0)));
+    const layers = chart.panes().map(pane => pane.primitives().filter(primitive => primitive instanceof lib.IndicatorBackground) as InstanceType<typeof lib.IndicatorBackground>[]);
+    const snap = (index: number) => {
+      const { element, ctx } = chart.panes()[index].base;
+      return { data: ctx.getImageData(0, 0, element.width, element.height).data, width: element.width, height: element.height,
+        ratio: element.width / element.getBoundingClientRect().width };
+    };
+    /** Per bar: pixels in its centre column that the layer changed, and how many of them lean the wrong way. */
+    const compare = async (index: number, expected: (value: number | null) => 'up' | 'down' | 'blue' | null) => {
+      const shown = snap(index);
+      for (const layer of layers[index]) layer.setVisible(false);
+      await frame();
+      const plain = snap(index);
+      for (const layer of layers[index]) layer.setVisible(true);
+      await frame();
+      const left = chart.priceAxisLayout(index).filter(slot => slot.side === 'left').reduce((sum, slot) => sum + slot.width, 0);
+      const verdicts = { right: 0, wrong: [] as string[], shaded: 0, unshaded: 0 };
+      momentum.forEach((value, i) => {
+        const want = expected(value);
+        const x = Math.floor((left + chart.timeScale.indexToX(i)) * shown.ratio);
+        let changed = 0, wrong = 0;
+        for (let y = 0; y < shown.height; y++) {
+          const at = (y * shown.width + x) * 4;
+          const [dr, dg, db] = [0, 1, 2].map(k => shown.data[at + k] - plain.data[at + k]);
+          if (dr === 0 && dg === 0 && db === 0) continue;
+          changed++;
+          const leans = want === 'up' ? dg > dr : want === 'down' ? dr > dg : want === 'blue' ? db > dr && db > dg : false;
+          if (!leans) wrong++;
+        }
+        if (want === null) { if (changed > 0) verdicts.wrong.push(`bar ${i} changed ${changed} with no shade`); else verdicts.unshaded++; return; }
+        verdicts.shaded++;
+        if (wrong > 0) verdicts.wrong.push(`bar ${i} ${wrong} of ${changed} lean away from ${want}`);
+        else if (changed > 0) verdicts.right++;
+      });
+      return verdicts;
+    };
+    const candles = await compare(0, value => (value === null || value === 0 ? null : value > 0 ? 'up' : 'down'));
+    const own = await compare(study.paneIndex, value => (value !== null && Math.abs(value) > peak * 0.6 ? 'blue' : null));
+    return { panes: chart.panes().length, pane: study.paneIndex, layers: layers.map(list => list.length), candles, own };
+  });
+  const verdicts = info.outputPath(`shading-example-${width}.json`);
+  await writeFile(verdicts, JSON.stringify(result, null, 1));
+  await info.attach(`shading-example-${width}.json`, { path: verdicts, contentType: 'application/json' });
+  expect(result.panes).toBe(2);
+  expect(result.pane).toBe(1);
+  // One layer on the candles, sent there by the study, and the study's own in its pane.
+  expect(result.layers).toEqual([1, 1]);
+  expect(result.candles.wrong).toEqual([]);
+  expect(result.candles.shaded).toBeGreaterThan(100);
+  expect(result.candles.right).toBeGreaterThan(result.candles.shaded * 0.9);
+  expect(result.own.wrong).toEqual([]);
+  expect(result.own.shaded).toBeGreaterThan(3);
+  expect(result.own.right).toBeGreaterThan(result.own.shaded * 0.9);
+  expect(result.own.unshaded).toBeGreaterThan(100);
+  expect(dialogs).toEqual([]);
   expect(errors).toEqual([]);
 });
