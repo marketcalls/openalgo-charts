@@ -23,6 +23,7 @@ import type { IndicatorFillSpec, IndicatorPlot } from './indicator-registry';
 import { IndicatorFill as IndicatorFillPrimitive } from '../primitives/indicator-fill';
 import { IndicatorDrawings } from '../primitives/indicator-draws';
 import { IndicatorBackground } from '../primitives/indicator-background';
+import { PlotWrites } from './indicator-plot-writes';
 
 import { isInvisible, withAlpha } from '../render/pill';
 import { DEFAULT_TIMEZONE } from '../feed/time';
@@ -449,6 +450,8 @@ export class IndicatorInstance implements IndicatorApi {
   /** Signature of the level list the price lines were built from. */
   private _levelSig = '';
   private _values: IndicatorValues = {};
+  /** What each plot series holds, so a tick writes the points that moved. */
+  private readonly _writes = new PlotWrites();
   private _barCount = 0;
   /**
    * First and last bar times behind `_values`. `_barCount` alone cannot tell a
@@ -1569,7 +1572,7 @@ export class IndicatorInstance implements IndicatorApi {
     this._values = Object.fromEntries([...keys].map(key => [key, new Array<null>(bars.length).fill(null)]));
     this._barCount = 0;
     this._outputHistoryRevision++;
-    for (const series of this._series.values()) series.setData([]);
+    for (const series of this._series.values()) this._writes.clear(series);
     for (const fill of this._fills) fill.setPoints([]);
     this._markers?.setMarkers([]);
     for (const [layer] of this._markerLayers.values()) layer.setMarkers([]);
@@ -1765,35 +1768,12 @@ export class IndicatorInstance implements IndicatorApi {
       this._sourceLastTime = bars[n - 1]?.time;
     }
 
+    this._writes.begin(bars);
     for (const plot of this._d.plots) {
       const series = this._series.get(plot.key);
       if (series === undefined) continue;
-      if (plot.ohlc !== undefined) {
-        series.setData(this._ohlcPoints(plot, plot.ohlc, values, bars, settings));
-        continue;
-      }
-      const col = values[plot.key];
-      if (col === undefined) {
-        series.setData([]);
-        continue;
-      }
-      const colorBy = plot.colorBy;
-      const colorParts = plot.colorParts;
-      const out = new Array<{ time: number; value: number; color?: string }>(n);
-      for (let i = 0; i < n; i++) {
-        const v = col[i];
-        const value = v === null || v === undefined ? NaN : v;
-        const point: { time: number; value: number; color?: string } = { time: bars[i].time, value };
-        if (Number.isFinite(value)) {
-          // A value column has only a body to paint; the split form's wick and
-          // border are for the candle plot, see `_ohlcPoints`.
-          const body = colorParts?.({ value, index: i, values, settings })?.body
-            ?? colorBy?.({ value, index: i, values, settings });
-          if (body !== undefined) point.color = body;
-        }
-        out[i] = point;
-      }
-      series.setData(out);
+      if (plot.ohlc !== undefined) this._writes.writeCandles(series, plot, plot.ohlc, bars, values, settings, this.indicatorId);
+      else this._writes.writeValues(series, plot, values[plot.key], bars, values, settings);
     }
     this._syncFills(bars);
     this._syncMarkers(bars);
@@ -1809,58 +1789,6 @@ export class IndicatorInstance implements IndicatorApi {
     } else this._syncAlerts(bars, settings, tailOnly, ctx, refresh, current);
     if (!current()) return;
     this.updateLegendValues(this._host.legendIndex?.());
-  }
-
-  /**
-   * Bar-shaped points for a plot that names four columns. Validated here rather
-   * than at registration: a descriptor declares column *names*, and whether
-   * `calc` actually returns them is only knowable once it has run, which is
-   * inside the constructor, so a wrong name still throws out of `addIndicator`
-   * instead of drawing an empty pane.
-   */
-  private _ohlcPoints(
-    plot: IndicatorPlot,
-    ohlc: NonNullable<IndicatorPlot['ohlc']>,
-    values: IndicatorValues,
-    bars: readonly Bar[],
-    settings: Readonly<IndicatorSettings>,
-  ): Bar[] {
-    const n = bars.length;
-    const cols = [ohlc.open, ohlc.high, ohlc.low, ohlc.close].map((key) => {
-      const col = values[key];
-      if (col === undefined || col.length !== n) {
-        throw new Error(
-          `openalgo-charts: ${this.indicatorId} plot "${plot.key}" ohlc column "${key}" must be ${n} values`,
-        );
-      }
-      return col;
-    });
-    const colorBy = plot.colorBy;
-    const colorParts = plot.colorParts;
-    const out = new Array<Bar>(n);
-    for (let i = 0; i < n; i++) {
-      const close = cols[3][i];
-      const value = close === null ? NaN : close;
-      const bar: Bar = {
-        time: bars[i].time,
-        open: cols[0][i] ?? NaN,
-        high: cols[1][i] ?? NaN,
-        low: cols[2][i] ?? NaN,
-        close: value,
-      };
-      if (Number.isFinite(value)) {
-        const c = colorBy?.({ value, index: i, values, settings });
-        if (c !== undefined) bar.color = c;
-        const parts = colorParts?.({ value, index: i, values, settings });
-        if (parts !== undefined) {
-          if (parts.body !== undefined) bar.color = parts.body;
-          if (parts.wick !== undefined) bar.wickColor = parts.wick;
-          if (parts.border !== undefined) bar.borderColor = parts.border;
-        }
-      }
-      out[i] = bar;
-    }
-    return out;
   }
 
   /**
