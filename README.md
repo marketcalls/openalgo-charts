@@ -499,14 +499,14 @@ Enforced in CI by [`size-limit`](./.size-limit.json). Nothing is excluded, becau
 | Base engine | 119.15 kB | 119.15 kB |
 | Base + trade | 135.79 kB | 135.79 kB |
 | Indicators tier | 36.35 kB | 36.34 kB |
-| Draw tier | 44.87 kB | 44.87 kB |
+| Draw tier | 45.25 kB | 45.24 kB |
 | Transform tier | 6 kB | 4.50 kB |
 | Profile tier | 15 kB | 14.96 kB |
 | WebGL2 tier | 7 kB | 6.39 kB |
-| Widget tier | 82.31 kB | 82.30 kB |
-| Widget terminal (base + draw + indicators + widget) | 282.67 kB | 282.67 kB |
+| Widget tier | 82.31 kB | 82.25 kB |
+| Widget terminal (base + draw + indicators + widget) | 282.99 kB | 282.99 kB |
 | Workspace tier | 9.99 kB | 9.99 kB |
-| **Everything** | 335.15 kB | 335.15 kB |
+| **Everything** | 335.48 kB | 335.47 kB |
 
 ## Documentation
 
