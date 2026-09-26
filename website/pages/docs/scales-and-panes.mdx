@@ -154,6 +154,14 @@ const p = chart.coordinateToPrice(y);        // px → price
 wants. A menu raised on one axis strip is the other case: it names a pane and a scale, and
 everything it offers has to be readable back so its own ticks are honest.
 
+The two leave different traces. `chart.priceScaleDefaults()` reads the chart-wide defaults
+that `setPriceScaleOptions` (and the `priceScale` option and the canvas margins) set, which a
+pane added later starts from; `chart.priceScaleOptions()` reads the price pane's own scale.
+A change made to one axis from its menu moves the second and not the first, so comparing
+them tells a chart-wide change from a one-axis one, which an undo history needs to put the
+right one back. Every one of these setters is followed by a `layout:change` event naming it
+(see [Events](/docs/events)).
+
 ```ts
 const s = chart.priceAxisState(0, 'right');   // PriceAxisState | null
 // { paneIndex, scaleId, side, active, autoFit, inverted, mode, scaled, lockRatio, movable }

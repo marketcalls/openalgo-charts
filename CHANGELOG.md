@@ -236,6 +236,24 @@ import by 43.
   York, weekdays), on both charts of the split view, and in the host
   instrument's own calendar for a symbol it holds metadata for. Crypto and
   venues without hours keep the median spacing.
+- A `layout:change` event (`LayoutChangeEvent`, naming a `LayoutSetter`)
+  after the setters that change what `getState` saves and had no event of
+  their own: `setPaneWeight`, `setPriceAxisOptions`, `setPriceAxisAutoFit`,
+  `setPriceAxisLockRatio`, `setPriceScaleOptions`, `setAutoScale`,
+  `setGridOptions`, `setCanvasOptions`, `setStatusLineOptions`,
+  `setWatermarkOptions`, `setTradingSettings`, `setAxisChromeOptions`,
+  `setEventOptions` and `applyOptions`. It fires once per outermost call,
+  after the change is applied, so the canvas block setting the grid on its way
+  is one `setCanvasOptions` event; a call naming no pane the chart has fires
+  nothing, and a restore fires none, since it announces itself. A host that
+  saves its layout, or an undo history, now hears these changes when they
+  happen. The reference host autosaves on it, which now covers a grid toggled
+  with the chart's own Alt+V and Alt+H keys.
+- `chart.priceScaleDefaults()` reads the chart-wide price-scale defaults that
+  `setPriceScaleOptions`, the `priceScale` option and the canvas margins set,
+  and that a pane added later starts from. `priceScaleOptions()` reads the
+  price pane's own scale, which a change made to that one axis moves and the
+  defaults do not, so the two tell a chart-wide change from a one-axis one.
 ### Added
 
 - Accent registries for the icon sets: `DRAWING_TOOL_ACCENTS` /

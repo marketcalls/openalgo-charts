@@ -704,6 +704,29 @@ export interface PriceAxisState {
   movable: boolean;
 }
 
+/**
+ * The setters that change what `getState` saves without an event of their
+ * own, and so announce it with `layout:change`.
+ */
+export type LayoutSetter =
+  | 'setPaneWeight' | 'setPriceAxisOptions' | 'setPriceAxisAutoFit' | 'setPriceAxisLockRatio'
+  | 'setPriceScaleOptions' | 'setAutoScale' | 'setGridOptions' | 'setCanvasOptions' | 'setStatusLineOptions'
+  | 'setWatermarkOptions' | 'setTradingSettings' | 'setAxisChromeOptions' | 'setEventOptions' | 'applyOptions';
+
+/**
+ * Payload of the `layout:change` event (`chart.on('layout:change', ...)`):
+ * a setter in {@link LayoutSetter} has run and the saved layout may differ.
+ * It fires once per outermost call, after the change is applied: the canvas
+ * block setting the grid on its way is one event, named `setCanvasOptions`.
+ * A call that names no pane or scale the chart has changes nothing and fires
+ * nothing, and neither does a restore, which announces itself with
+ * `state:restore:start` and `state:restore:end`. Compare what you read back
+ * if a no-op matters: setting a value to what it already was still fires.
+ */
+export interface LayoutChangeEvent {
+  setter: LayoutSetter;
+}
+
 /** Payload of the `contextmenu` event (`chart.on('contextmenu', ...)`). */
 export interface ContextMenuEvent {
   paneIndex: number;
@@ -800,6 +823,8 @@ export class Chart {
   private _width = 0;
   private _height = 0;
   private _hasFitContent = false;
+  /** Layout setters running inside another one, or inside a restore: only the outermost announces. */
+  private _layoutDepth = 0;
 
   // interaction state
   private _crosshairMode: CrosshairMode;
@@ -1383,6 +1408,22 @@ export class Chart {
   public setTradingSettings(patch: TradingSettings): void {
     Object.assign(this._tradingSettings, patch);
     this._trading?.setSettings(patch);
+    this._layoutChanged('setTradingSettings');
+  }
+
+  /**
+   * Announce that a setter changed the saved layout, unless it ran inside
+   * another one or inside a restore: the outer call is the one announced.
+   */
+  private _layoutChanged(setter: LayoutSetter): void {
+    if (this._layoutDepth > 0 || this._destroyed) return;
+    this.emit('layout:change', { setter } satisfies LayoutChangeEvent);
+  }
+
+  /** Run `fn` with the layout setters it calls counted as part of the caller's change. */
+  private _withinLayoutChange<T>(fn: () => T): T {
+    this._layoutDepth++;
+    try { return fn(); } finally { this._layoutDepth--; }
   }
 
   /** Add a series and return its data handle. */
@@ -1683,6 +1724,7 @@ export class Chart {
   public setEventOptions(patch: ChartEventOptions): void {
     Object.assign(this._eventVisible, patch);
     this._syncEvents();
+    this._layoutChanged('setEventOptions');
   }
 
   public eventOptions(): ChartEventOptions {
@@ -2187,6 +2229,7 @@ export class Chart {
     if (typeof patch.fontSize === 'number' && Number.isFinite(patch.fontSize)) o.fontSize = Math.max(10, Math.min(200, patch.fontSize));
     if (patch.zOrder === 'bottom' || patch.zOrder === 'normal' || patch.zOrder === 'top') o.zOrder = patch.zOrder;
     this._syncWatermark();
+    this._layoutChanged('setWatermarkOptions');
   }
 
   /** JSON-safe preferences. Automatic text remains blank in this snapshot. */
@@ -2910,6 +2953,7 @@ export class Chart {
     if (opts.horzLines !== undefined) this._gridHorz = opts.horzLines;
     this._canvas.grid = { ...this._canvas.grid, ...opts };
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setGridOptions');
   }
 
   /** Current grid options, visibility first (it is the one field always set). */
@@ -2923,16 +2967,19 @@ export class Chart {
    * rest of the grid alone.
    */
   public setCanvasOptions(patch: CanvasOptions): void {
-    if (patch.grid) this.setGridOptions(patch.grid); // keeps the visibility pair in step
-    if (patch.crosshair) this._canvas.crosshair = { ...this._canvas.crosshair, ...patch.crosshair };
-    if (patch.scales) this._canvas.scales = { ...this._canvas.scales, ...patch.scales };
-    if (patch.margins) {
-      this._canvas.margins = { ...this._canvas.margins, ...patch.margins };
-      // No second margin state: the price scale already owns marginTop/Bottom
-      // as fractions, and this only converts the dialog's percentages.
-      this.setPriceScaleOptions(resolvePlotMargins(this._canvas.margins), 'axes');
-    }
+    this._withinLayoutChange(() => {
+      if (patch.grid) this.setGridOptions(patch.grid); // keeps the visibility pair in step
+      if (patch.crosshair) this._canvas.crosshair = { ...this._canvas.crosshair, ...patch.crosshair };
+      if (patch.scales) this._canvas.scales = { ...this._canvas.scales, ...patch.scales };
+      if (patch.margins) {
+        this._canvas.margins = { ...this._canvas.margins, ...patch.margins };
+        // No second margin state: the price scale already owns marginTop/Bottom
+        // as fractions, and this only converts the dialog's percentages.
+        this.setPriceScaleOptions(resolvePlotMargins(this._canvas.margins), 'axes');
+      }
+    });
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setCanvasOptions');
   }
 
   /** The Canvas option block as it stands (theme fallbacks are not folded in). */
@@ -2968,6 +3015,20 @@ export class Chart {
       for (const scale of scales) scale.setOptions(forPane);
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceScaleOptions');
+  }
+
+  /**
+   * The chart-wide price-scale defaults: every field `setPriceScaleOptions`,
+   * the `priceScale` construction option and the canvas margins have set, and
+   * what a pane added later starts from. `priceScaleOptions()` reads the price
+   * pane's own scale instead, which a change made to that one axis moves and
+   * this does not, so the two together tell a chart-wide change from a
+   * one-axis one. `minMove` here reaches only the panes that quote the
+   * instrument. A detached copy; empty when nothing was ever set.
+   */
+  public priceScaleDefaults(): Partial<PriceScaleOptions> {
+    return { ...this._priceScaleOptions };
   }
 
   /**
@@ -3040,6 +3101,7 @@ export class Chart {
       }
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setAutoScale');
   }
 
   /** Whether only the primary series contributes to autoscale on its current scale. */
@@ -3127,6 +3189,7 @@ export class Chart {
     if (pane === undefined) return;
     pane.scaleFor(scaleId).setOptions(patch);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisOptions');
   }
 
   /**
@@ -3140,6 +3203,7 @@ export class Chart {
     if (on) pane.setRatioLock(scaleId, false, 0, 0);
     pane.scaleFor(scaleId).setAutoScale(on);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisAutoFit');
   }
 
   /**
@@ -3158,6 +3222,7 @@ export class Chart {
     if (on) this._ensureScaledFor(paneIndex, scaleId);
     const ok = pane.setRatioLock(scaleId, on, this._timeScale.barSpacing, pane.scaleFor(scaleId).height);
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPriceAxisLockRatio');
     return ok;
   }
 
@@ -3229,6 +3294,7 @@ export class Chart {
     Object.assign(this._statusLine, patch);
     for (const entry of this._legends) entry.legend.setOptions({ statusLine: this._statusLine });
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setStatusLineOptions');
   }
 
   public statusLineOptions(): LegendStatusLineOptions {
@@ -3290,6 +3356,7 @@ export class Chart {
       this._wallClock = patch.clock;
     }
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setAxisChromeOptions');
   }
 
   /** The axis-chrome switches as they stand. */
@@ -3898,20 +3965,23 @@ export class Chart {
     crosshairMode?: CrosshairMode;
     crosshairSnapToBar?: boolean;
   }): void {
-    if (opts.theme) this.setTheme(opts.theme);
-    if (opts.grid) this.setGridOptions(opts.grid);
-    if (opts.canvas) this.setCanvasOptions(opts.canvas);
-    if (opts.statusLine) this.setStatusLineOptions(opts.statusLine);
-    if (opts.legendIconSize !== undefined) this.setLegendIconSize(opts.legendIconSize);
-    if (opts.priceScale) this.setPriceScaleOptions(opts.priceScale);
-    if (opts.priceFormatter !== undefined) this.setPriceFormatter(opts.priceFormatter);
-    if ('timeFormatter' in opts) this.setTimeFormatter(opts.timeFormatter);
-    if (opts.timezone !== undefined) this.setTimezone(opts.timezone);
-    if (opts.crosshairMode) this._crosshairMode = opts.crosshairMode;
-    if (typeof opts.crosshairSnapToBar === 'boolean') {
-      this._crosshairSnapToBar = opts.crosshairSnapToBar;
-      this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
-    }
+    this._withinLayoutChange(() => {
+      if (opts.theme) this.setTheme(opts.theme);
+      if (opts.grid) this.setGridOptions(opts.grid);
+      if (opts.canvas) this.setCanvasOptions(opts.canvas);
+      if (opts.statusLine) this.setStatusLineOptions(opts.statusLine);
+      if (opts.legendIconSize !== undefined) this.setLegendIconSize(opts.legendIconSize);
+      if (opts.priceScale) this.setPriceScaleOptions(opts.priceScale);
+      if (opts.priceFormatter !== undefined) this.setPriceFormatter(opts.priceFormatter);
+      if ('timeFormatter' in opts) this.setTimeFormatter(opts.timeFormatter);
+      if (opts.timezone !== undefined) this.setTimezone(opts.timezone);
+      if (opts.crosshairMode) this._crosshairMode = opts.crosshairMode;
+      if (typeof opts.crosshairSnapToBar === 'boolean') {
+        this._crosshairSnapToBar = opts.crosshairSnapToBar;
+        this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
+      }
+    });
+    this._layoutChanged('applyOptions');
   }
 
   public panes(): readonly Pane[] {
@@ -4161,7 +4231,10 @@ export class Chart {
       if (generation !== this._restoreGeneration) {
         return { applied: false, series: [], indicators: 0, reason: 'superseded by a newer chart restore' };
       }
-      const report = this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats));
+      // The layout setters a restore calls are the restore, which the start
+      // and end events announce; they do not each fire `layout:change`.
+      const report = this._withinLayoutChange(() =>
+        this._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats)));
       if (report.applied && generation === this._restoreGeneration && (previousPriceOnly !== this._priceOnlyAutoScale
         || previousLegendCollapsed !== this._indicatorLegendCollapsed)) {
         this.emit('objects:change', {});
@@ -4632,6 +4705,7 @@ export class Chart {
     pane.weight = Math.max(0.05, weight);
     this._relayout();
     this.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._layoutChanged('setPaneWeight');
   }
 
   public paneWeight(index: number): number {

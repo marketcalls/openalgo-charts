@@ -116,4 +116,12 @@ describe('the controller the host attaches', () => {
     expect($('status').textContent).toBe('');
     clearSessionMarks(app.draw, 'AAPL');
   });
+
+  it('saves the layout when a setter with no event of its own changes it', async () => {
+    const { autosave } = await import('../src/persist.js');
+    autosave.mockClear();
+    // A grid toggled from the keyboard, say: the chart names the setter.
+    app.chart.emit('layout:change', { setter: 'setGridOptions' });
+    expect(autosave).toHaveBeenCalledTimes(1);
+  });
 });
