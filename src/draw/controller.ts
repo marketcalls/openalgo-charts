@@ -431,6 +431,9 @@ export class DrawingController {
   private _undo: DrawingHistoryEntry[] = [];
   private _redo: DrawingHistoryEntry[] = [];
   private _pendingHistory: DrawingHistoryEntry | null = null;
+  /** Depth of `untracked` runs, and the drawings as they were before the host's edit in progress. */
+  private _untracked = 0;
+  private _hostEdit: string | null = null;
   /** The host's patches the recorded steps have yet to take, merged per drawing. */
   private readonly _hostPatches = new Map<string, DrawingPatch>();
   /**
@@ -1091,6 +1094,7 @@ export class DrawingController {
       recorded.after = this._historyText();
       this._pendingHistory = null;
     }
+    this._takeInHostEdit();
     const change: DrawingChangeEvent = { ids: ids.slice(), kind };
     // A trim can push the step out of the branch while it is being recorded,
     // and a step nothing holds is not one to report.
@@ -1512,6 +1516,47 @@ export class DrawingController {
   public historySteps(): { undo: number[]; redo: number[] } {
     const closed = (entry: DrawingHistoryEntry): boolean => entry !== this._pendingHistory;
     return { undo: this._undo.filter(closed).map(entry => entry.step), redo: this._redo.map(entry => entry.step) };
+  }
+
+  /**
+   * Run `fn` as the host's own act. An edit it makes records no undo step and
+   * leaves both branches as they are, and every step already recorded takes
+   * it in, the way a forced call does, so no later undo or redo reverses it.
+   * Unlike `force` it reaches no read-only drawing, and `undo` or `redo`
+   * inside it still moves along the branches. For a host keeping one timeline
+   * across drawings and its own changes, whose own changes are never steps.
+   */
+  public untracked<T>(fn: () => T): T {
+    this._untracked++;
+    try { return fn(); }
+    finally {
+      // An edit a throw cut short is still the host's, and must not join the next one.
+      if (--this._untracked === 0) this._takeInHostEdit();
+    }
+  }
+
+  /** Give every recorded step the host's edit, drawing by drawing and group by group. */
+  private _takeInHostEdit(): void {
+    const from = this._hostEdit;
+    if (from === null) return;
+    this._hostEdit = null;
+    const was = migrateDrawings(JSON.parse(from));
+    const now = this._document(this._drawings);
+    const take = <T extends { id: string }>(list: T[], before: readonly T[], after: readonly T[]): T[] => {
+      const left = new Map(before.map(item => [item.id, JSON.stringify(item)]));
+      const right = new Map(after.map(item => [item.id, item]));
+      const changed = new Set([...left.keys(), ...right.keys()]
+        .filter(id => left.get(id) !== (right.has(id) ? JSON.stringify(right.get(id)) : undefined)));
+      // Changed where a step has it, gone everywhere, and made everywhere: a
+      // drawing the host changed is not put into a step from before it existed.
+      const out = list.filter(item => !changed.has(item.id) || right.has(item.id)).map(item => (changed.has(item.id) ? right.get(item.id)! : item));
+      for (const id of changed) if (!left.has(id) && !out.some(item => item.id === id)) out.push(right.get(id)!);
+      return out;
+    };
+    this._rebase(document => {
+      document.drawings = take(document.drawings, was.drawings, now.drawings);
+      document.groups = take(document.groups ?? [], was.groups ?? [], now.groups ?? []);
+    });
   }
 
   /**
@@ -2474,6 +2519,9 @@ export class DrawingController {
   private _pushUndo(): void {
     this._onDragEnd();
     const before = this._historyText();
+    // The host's own act: no step, both branches kept, and the recorded
+    // steps take the change in once it is made.
+    if (this._untracked > 0) { this._hostEdit ??= before; return; }
     this._pendingHistory = { before, after: before, step: nextStep++ };
     this._undo.push(this._pendingHistory);
     if (this._undo.length > this._opts.historyLimit) this._undo.shift();

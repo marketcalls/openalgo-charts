@@ -114,6 +114,54 @@ describe('drawing history steps', () => {
     expect(first.historySteps().undo[0]).not.toBe(second.historySteps().undo[0]);
   });
 
+  it('records no step for an edit made untracked, keeps both branches, and lets every recorded step take it in', () => {
+    const chart = makeChart();
+    const draw = new DrawingController(chart);
+    const seen = changes(chart);
+    const a = draw.add(line(101));
+    const b = draw.add(line(102));
+    draw.undo();
+    const branches = draw.historySteps();
+    const count = seen.length;
+    let host = '';
+    const out = draw.untracked(() => {
+      host = draw.add(line(103)).id;
+      draw.update(a.id, { style: { color: '#00aa00' } });
+      return 7;
+    });
+    expect(out).toBe(7);
+    expect(seen.slice(count).map(change => change.step)).toEqual([undefined, undefined]);
+    // Nothing was recorded, so nothing cleared the redo branch either.
+    expect(draw.historySteps()).toEqual(branches);
+    expect(draw.redo()).toBe(true);
+    expect(draw.get(b.id)).toBeDefined();
+    draw.undo();
+    draw.undo();
+    expect(draw.get(a.id)).toBeUndefined();
+    // No step takes back what the host did, and a step brings a drawing back as the host left it.
+    expect(draw.get(host)).toBeDefined();
+    draw.redo();
+    expect(draw.get(a.id)?.style.color).toBe('#00aa00');
+  });
+
+  it('still moves along the branches inside an untracked run, and closes the host act a throw interrupts', () => {
+    const chart = makeChart();
+    const draw = new DrawingController(chart);
+    const a = draw.add(line(101));
+    draw.untracked(() => draw.undo());
+    expect(draw.get(a.id)).toBeUndefined();
+    expect(draw.historySteps().redo).toHaveLength(1);
+    draw.redo();
+    // An unknown tool throws after the edit has opened.
+    expect(() => draw.untracked(() => draw.add({ ...line(104), tool: 'no-such-tool' }))).toThrow(/no-such-tool/);
+    // The next user edit is a step of its own, and holds only itself.
+    const b = draw.add(line(105));
+    expect(draw.historySteps().undo).toHaveLength(2);
+    expect(draw.undo()).toBe(true);
+    expect(draw.get(b.id)).toBeUndefined();
+    expect(draw.get(a.id)).toBeDefined();
+  });
+
   it('drops the step a trim pushes out of the undo branch', () => {
     const chart = makeChart();
     const draw = new DrawingController(chart, { historyLimit: 2 });
