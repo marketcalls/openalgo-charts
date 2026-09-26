@@ -12,8 +12,9 @@
  *                        device pixels, never of the bar count.
  *
  *   B. allocation        heap bytes allocated per frame while panning 50,000
- *                        bars, at two zooms, with the price scales held still
- *                        and autoscaling. What the frame allocates for its
+ *                        candles, their volume and two line studies over them,
+ *                        at two zooms, with the price scales held still and
+ *                        autoscaling. What the frame allocates for its
  *                        axes and labels is bounded by the chart's size; what
  *                        it allocates per bar in view is the waste, so the
  *                        budget is on the slope between the two zooms (bytes
@@ -254,6 +255,15 @@ function panAllocation(build, bars, spacing, frames, fixed) {
   chart.addSeries('histogram', { paneIndex: 1 }).setData(
     bars.map((b) => ({ time: b.time, open: 0, high: b.volume, low: 0, close: b.volume })),
   );
+  // Two studies' worth of lines over the candles, the way a chart carries its
+  // averages: every indicator plot is drawn by the line renderers, so they
+  // are in the pass as much as the candles are.
+  for (const [type, shift] of [['line', -4], ['area', 6]]) {
+    chart.addSeries(type).setData(bars.map((b) => {
+      const v = b.close + shift;
+      return { time: b.time, open: v, high: v, low: v, close: v };
+    }));
+  }
   chart.timeScale.setBarSpacing(spacing);
   chart.timeScale.setRightOffset(-20_000);
   flush();
@@ -406,19 +416,21 @@ const slope = (pan) => {
 //     candle is at most a wick and a body, its volume two columns), plus a
 //     fixed allowance for the grid, axes and labels. Every bar drawn is
 //     400,000 marks.
-//  B: bytes per visible bar per frame. With the price scales held still the
-//     frame is the series pass and the renderers; autoscaled, it is that plus
-//     the autoscale walk. What is left per bar is outside the pane: numbers
-//     the price scale returns boxed, and each series type's `extents` object
-//     (210 to 290 and about 430 bytes when this was written, on a loaded
-//     machine, against 840 to 890 and 1,090 to 1,170 for the pass that built
-//     two objects per bar per series). The budgets sit under half the old
-//     figures; tests/pane-draw-items.test.ts pins the reuse itself.
+//  B: bytes per visible bar per frame, for the four series together. With
+//     the price scales held still the frame is the series pass and the
+//     renderers; autoscaled, it is that plus the autoscale walk. What is left
+//     per bar is outside the pane and the renderers: numbers the price scale
+//     returns boxed, and each series type's `extents` object in the autoscale
+//     walk. When this was written, on a loaded machine: 240 to 300 and 600 to
+//     660 bytes; 1,710 and 2,220 for the pass that built two objects per bar
+//     per series and a point object per bar in the line renderers; 620 and 950
+//     with only the first of those gone. The budgets sit between the last
+//     figures and these; tests/pane-draw-items.test.ts pins the reuse itself.
 //  C: a hover move asks fewer than ten of the 500 bounded primitives.
 const LOD_PER_COLUMN = 4;
 const LOD_CHROME = 600;
 const BYTES_PER_BAR_FIXED = 400;
-const BYTES_PER_BAR = 600;
+const BYTES_PER_BAR = 800;
 const TESTS_PER_MOVE = 10;
 
 const results = [await measure(DIST)];

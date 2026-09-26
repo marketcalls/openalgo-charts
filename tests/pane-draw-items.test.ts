@@ -22,6 +22,8 @@ import type { Bar } from '../src/model/bar';
 import { isNewIstDayCount } from '../src/render/axis';
 import { isNewIstDay } from '../src/feed/time';
 import { fakeDocument } from './helpers/fake-dom';
+import { makeCtx } from './helpers/fake-ctx';
+import { drawArea, drawBaseline, drawHlcArea, drawLine, stepPoints, valuePoints, type Pt } from '../src/render/line';
 
 /** The 2D backend, holding on to exactly what each series pass was handed. */
 class Holder implements IRenderBackend {
@@ -198,5 +200,74 @@ describe('the time axis day test', () => {
       cases.push([a, a + Math.floor(rnd() * 200_000)]);
     }
     for (const [a, b] of cases) expect(isNewIstDayCount(a, b), `${a} -> ${b}`).toBe(isNewIstDay(a, b));
+  });
+});
+
+/**
+ * The line-family renderers write their points into buffers they keep rather
+ * than a `{ x, y }` per bar per frame (src/render/line.ts). What they draw has
+ * to stay the polyline `valuePoints` and `stepPoints` describe, and one call's
+ * points must never leak into the next: a long line then a short one, and an
+ * HLC area, which strokes its edges and then draws its close line.
+ */
+describe('the line renderers\' point buffers', () => {
+  const toY = (v: number): number => 400 - v * 1.7;
+  const line = (count: number, gapAt = -1): { x: number; bar: Bar }[] => Array.from({ length: count }, (_, i) => {
+    const v = i === gapAt ? NaN : 100 + Math.sin(i / 3) * 20;
+    return { x: 5 + i * 2.5, bar: { time: i, open: v, high: v + 3, low: v - 3, close: v } };
+  });
+  /** The path ops a context received, as `[type, x, y]`. */
+  const path = (ops: readonly { type: string; args: number[] }[]): [string, number, number][] =>
+    ops.filter((op) => op.type === 'moveTo' || op.type === 'lineTo').map((op) => [op.type, op.args[0], op.args[1]]);
+  /** What `strokePolyline` draws for `pts`: a move after every gap, a line to each point after it. */
+  const expected = (pts: readonly Pt[], dpr: number): [string, number, number][] => {
+    const out: [string, number, number][] = [];
+    let open = false;
+    for (const p of pts) {
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) { open = false; continue; }
+      out.push([open ? 'lineTo' : 'moveTo', p.x * dpr, p.y * dpr]);
+      open = true;
+    }
+    return out;
+  };
+
+  it('draw the polyline the point helpers describe, call after call', () => {
+    for (const [count, gap, dpr, step] of [[5000, 40, 1, false], [3, -1, 2, true], [700, 5, 1.25, true], [1, -1, 1, false], [0, -1, 1, true]] as const) {
+      const items = line(count, gap);
+      const { ctx, rec } = makeCtx();
+      drawLine(ctx, items, toY, dpr, { step });
+      const base = valuePoints(items, toY);
+      expect(path(rec.ops), `${count} points`).toEqual(expected(step ? stepPoints(base) : base, dpr));
+    }
+  });
+
+  it('keep an HLC area\'s edges and its close line apart', () => {
+    const items = line(300, 120);
+    const { ctx, rec } = makeCtx();
+    drawHlcArea(ctx, items, toY, 2, { highColor: '#111111', lowColor: '#222222' });
+    const highs = valuePoints(items, toY, (b) => b.high);
+    const lows = valuePoints(items, toY, (b) => b.low);
+    const closes = valuePoints(items, toY);
+    // The band's fill, then each edge, then the close line, in that order.
+    const fill: [string, number, number][] = [['moveTo', highs[0].x * 2, highs[0].y * 2],
+      ...highs.map((p): [string, number, number] => ['lineTo', p.x * 2, p.y * 2]),
+      ...[...lows].reverse().map((p): [string, number, number] => ['lineTo', p.x * 2, p.y * 2])];
+    expect(path(rec.ops)).toEqual([...fill, ...expected(highs, 2), ...expected(lows, 2), ...expected(closes, 2)]);
+  });
+
+  it('fill an area and a baseline from the bars they were given', () => {
+    drawLine(makeCtx().ctx, line(4000), toY, 1, {});
+    const items = line(12);
+    const area = makeCtx();
+    drawArea(area.ctx, items, toY, 1, 300, {});
+    const pts = valuePoints(items, toY);
+    const lineTos = path(area.rec.ops).filter(([type]) => type === 'lineTo');
+    // The fill's twelve points and its two closing corners, then the outline's eleven segments.
+    expect(lineTos).toHaveLength(12 + 1 + 11);
+    expect(lineTos.slice(0, 12)).toEqual(pts.map((p): [string, number, number] => ['lineTo', p.x, p.y]));
+    const baseline = makeCtx();
+    drawBaseline(baseline.ctx, items, toY, 1, { baseValue: 100 });
+    // Two fills of twelve points and two corners each, then eleven split segments.
+    expect(path(baseline.rec.ops).filter(([type]) => type === 'lineTo')).toHaveLength(2 * 13 + 11);
   });
 });
