@@ -11,21 +11,26 @@ All notable changes to OpenAlgo Charts.
   the other settings: `{ key, is }`, `{ key, isNot }` with one value or a list,
   and `{ all }` or `{ any }` to combine them. A hidden input leaves the form and
   the tab order; an inactive one stays readable, disabled, with a reason naming
-  what it depends on. Rules cascade through an input a condition reads. They are
-  presentation only: `calc` receives every setting, and a hidden value is kept.
+  what it depends on. Rules cascade through an input a condition reads, and a
+  colour pair's switch and colours count as the pair. They are presentation
+  only: `calc` receives every setting, and a hidden value is kept.
 - Inline rows: consecutive inputs with the same `inline` id share one row, the
-  first one's label leading it, each member with its own label.
+  first one's label leading it, each member with its own label. A multi-line
+  input and a colour pair always take a row of their own.
 - The widget's generated forms and the reference host's form re-read the rules
   after every edit and every sync, announce what was shown, hidden, made
   available or unavailable in a polite live region, and move focus off a control
   that just left. A hidden or disabled draft never blocks OK or Apply: a valid
   one is kept and saved, an invalid one is not written. Defaults resets hidden
   inputs too, and Cancel restores the rows the original settings show. A pick
-  or search beside a disabled field is disabled with it.
+  or search beside a disabled field is disabled with it. Both forms read an
+  edit once it is committed, so they answer alike: the reference host's number
+  box now commits the way the widget's does, clamped to its bounds, with a
+  blank box getting its last value back.
 - `inputStates(inputs, values)`, `inputConditionMet(condition, values)` and the
   `InputState` type in `openalgo-charts/widget`, for a host that renders its own
   form; `FormOptions.unavailable` is now asked again after every edit and sync.
-- The widget tier grows by 1.47 kB Brotli (82.30 to 83.77 kB); the base engine
+- The widget tier grows by 1.48 kB Brotli (82.30 to 83.78 kB); the base engine
   and the chart-only import are unchanged.
 
 ## 2.5.5

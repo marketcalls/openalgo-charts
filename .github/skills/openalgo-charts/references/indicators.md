@@ -390,15 +390,17 @@ it. `ChartSettingsColorPairInput` carries the same field.
 
 ## Conditional inputs and inline rows (unreleased)
 
-Every `IndicatorInput` variant (and `ChartSettingsColorPairInput`) also takes the
-`IndicatorInputPresentation` fields. They are data a settings form reads; `calc`
-never sees them and always receives every setting, hidden or not.
+Every `IndicatorInput` variant also takes the `IndicatorInputPresentation`
+fields, and `ChartSettingsColorPairInput` takes `visibleWhen` and `activeWhen`
+(not `inline`: a pair already holds a switch and two swatches, so it is always a
+row of its own). They are data a settings form reads; `calc` never sees them and
+always receives every setting, hidden or not.
 
 | Field | Type | Form behaviour |
 | --- | --- | --- |
 | `visibleWhen` | `IndicatorInputCondition` | Shown only while it holds. A hidden input leaves the form and the tab order; its draft is kept for when it returns. |
 | `activeWhen` | `IndicatorInputCondition` | Editable only while it holds. Otherwise disabled, value readable, reason "Depends on {labels}". |
-| `inline` | string | Consecutive inputs with the same id share one row, led by the first one's label. A `multiline` input, a new `group`, or a different id starts a new row. |
+| `inline` | string | Consecutive inputs with the same id share one row, led by the first one's label. A `multiline` input, a colour pair, a new `group`, or a different id starts a new row. |
 
 `IndicatorInputCondition` is `{ key, is }`, `{ key, isNot }`, `{ all: [...] }` or
 `{ any: [...] }`. `is` and `isNot` take one `IndicatorInputConditionValue`
@@ -420,13 +422,17 @@ inputs: [
 ```
 
 Rules cascade: an input whose `visibleWhen` reads a hidden input is hidden, and
-one whose `activeWhen` reads a hidden or inactive input is inactive. A key with no
-input in the list (another tab) is decided by its value, and a cycle ends.
+one whose `activeWhen` reads a hidden or inactive input is inactive. A condition
+that reads a colour pair's switch or either of its colours reads the pair. A key
+with no input in the list (another tab) is decided by its value, and a cycle ends.
 
 The widget's generated forms (`renderForm`, so `mountIndicatorSettings` and the
 chart settings dialog) and the reference host re-read the rules on every edit and
 every sync, announce what was shown, hidden, made available or unavailable in a
-polite live region, and move focus off a control that just left. A hidden or
+polite live region, and move focus off a control that just left. Both read an edit
+once it is committed, not at every keystroke: a number is clamped to its bounds, a
+blank number box gets its last value back, and a typed draft the form refuses
+leaves the last accepted value deciding, so the two forms answer alike. A hidden or
 disabled draft never blocks OK or Apply: an invalid one is not written and the
 stored value stands, a valid one is kept. Defaults resets hidden inputs too, and
 Cancel restores the settings and so the rows they show. A host with its own form

@@ -217,7 +217,7 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 | `controlsFromInputs(inputs)` | function | `ChartSettingsInput[]` (the engine's settings schema) to `FormControl[]`. |
 | `controlsFromFields(fields)` | function | A drawing tool's `SettingsField[]` to `FormControl[]`. |
 | `mountIndicatorInputControls(ctx, options)` | function | Adds symbol lookup and chart picking to an existing indicator form. Returns `IndicatorInputControlsHandle` with `cancelPick`, `refresh` and `destroy`. An action beside a disabled field is disabled with the field's reason; call `refresh()` after the form re-reads its conditions. |
-| `inputStates(inputs, values)` | function | (unreleased) `Map<key, InputState>` of `{ visible, active, dependsOn }` from each input's `visibleWhen` and `activeWhen`, cascading through inputs a condition reads. For a host that renders its own form. |
+| `inputStates(inputs, values)` | function | (unreleased) `Map<key, InputState>` of `{ visible, active, dependsOn }` from each input's `visibleWhen` and `activeWhen`, cascading through inputs a condition reads. A colour pair's `enabled`, `up` and `down` keys, on the input or under a form control's `pair`, count as the pair. For a host that renders its own form. |
 | `inputConditionMet(condition, values)` | function | (unreleased) Whether one `IndicatorInputCondition` holds for a settings bag. Reads own keys only; a malformed condition counts as met. |
 | `InputState` | type | (unreleased) One input's `visible`, `active` and the `dependsOn` keys its `activeWhen` reads. |
 | `IndicatorInputControlsOptions`, `IndicatorInputControlsHandle` | types | Native typed-field host actions. |
