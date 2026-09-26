@@ -345,6 +345,63 @@ describe('every reader sees what a whole rewrite gives it', () => {
     }
   });
 
+  it('a feed that starts on an empty chart: one bar, then ticks and appends, rebuild nothing once the plots exist', () => {
+    registerIndicator(coloured);
+    const { chart, series, flush } = setup([]);
+    const studies = [...STUDIES, coloured.id].map((id) => chart.addIndicator(id));
+    flush();
+    expectWholeWriteContent(chart, series, studies);
+    const feed = makeBars(6);
+    series.update(feed[0]);
+    flush();
+    // One bar: every plot holds its single point.
+    expect(series.getData()).toHaveLength(1);
+    expectWholeWriteContent(chart, series, studies);
+    const seen = watch(studies);
+    let last = feed[0];
+    for (const bar of feed.slice(1)) {
+      last = { ...last, close: last.close + 1.5, high: last.high + 1.5 };
+      series.update(last);
+      flush();
+      expectWholeWriteContent(chart, series, studies);
+      last = bar;
+      series.update(last);
+      flush();
+      expectWholeWriteContent(chart, series, studies);
+    }
+    expect(series.getData()).toHaveLength(6);
+    expect(seen.rebuilds()).toBe(0);
+    expect(seen.wholes()).toBe(0);
+  });
+
+  it('a chart destroyed from inside a plot write stops the frame cleanly', () => {
+    let destroy: (() => void) | null = null;
+    registerIndicator({
+      ...coloured, id: 'plot-writes-destroys',
+      plots: [{ ...coloured.plots[0], colorBy: ({ value, index }) => {
+        if (destroy !== null && index === 60) { const run = destroy; destroy = null; run(); }
+        return value >= 0 ? '#26a69a' : '#ef5350';
+      } }, coloured.plots[1]],
+    });
+    const { chart, series, flush } = setup(makeBars(120));
+    const study = chart.addIndicator('plot-writes-destroys');
+    chart.addIndicator('ema');
+    flush();
+    const last = series.getData()[119];
+    series.update({ ...last, close: last.close + 3 });
+    const states: string[] = [];
+    study.subscribeDataStatus((status) => states.push(status.state));
+    destroy = () => chart.destroy();
+    // The write in flight lands on a series the teardown already removed; the
+    // study is gone by then, so the failure is dropped rather than thrown out
+    // of the frame or reported as a study error.
+    expect(() => flush()).not.toThrow();
+    expect(destroy).toBeNull();
+    expect(chart.isDestroyed).toBe(true);
+    expect(study.series('diff')).toBeUndefined();
+    expect(states).not.toContain('error');
+  });
+
   it('a pass that throws part way leaves the next pass to write the plot whole', () => {
     let fail = false;
     registerIndicator({
