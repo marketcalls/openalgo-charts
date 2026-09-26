@@ -674,8 +674,8 @@ export class ChartStudies {
 
   /**
    * Recompute every stale indicator. Reentrant-guarded: an indicator writes its
-   * plots with `series.setData`, which re-enters the same data-mutation path
-   * that marked us dirty.
+   * plots with `series.setData`, or on a live tick with `series.update`, and
+   * either re-enters the same data-mutation path that marked us dirty.
    */
   public _flushIndicators(): void {
     if (!this._host._indicatorsDirty && this._host._indicatorRefreshes.size === 0) return;

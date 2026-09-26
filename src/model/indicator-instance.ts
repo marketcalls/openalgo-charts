@@ -180,6 +180,11 @@ export interface IndicatorHost {
   legendRowsOn(paneIndex: number): number;
   /** The instrument's own series, for a descriptor anchoring marks to price. */
   primarySeries?(): SeriesApi | null;
+  /**
+   * A series for one plot. The study writes it with `setData` for a whole pass
+   * and, from 2.5.8, with `update` for the points a live tick moved (older
+   * points included), so a host's own series must implement both as documented.
+   */
   addIndicatorSeries(
     type: string,
     paneIndex: number,

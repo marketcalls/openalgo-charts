@@ -490,8 +490,10 @@ lower the floor to show long histories whole.
 Each stick is **OHLC-preserving**: open comes from the first bar in the column,
 close from the last, high and low from the extremes, volume is summed, and the
 stick takes the colours of the bar that closed it. Line series keep each
-column's first, lowest, highest and last values, and histograms its lowest and
-highest bar, which cover the pixels every bar would have. A custom chart type is
+column's first, lowest, highest and last values, an HLC area adds each run's
+highest high and lowest low so its band and gaps match the full frame, and
+histograms keep their lowest and highest bar, which cover the pixels every bar
+would have. A custom chart type is
 always drawn in full, even one registered under a built-in name. The step is transparent to your data layer: indicators,
 autoscale and the crosshair see every bar.
 

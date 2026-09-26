@@ -57,8 +57,11 @@ in CI holds frame budgets per bar count.
   the first bar, close of the last, the column's high and low, volume summed,
   the last open interest and the colours of the bar that closed the column.
   Line, step, area and baseline series keep each column's first, lowest,
-  highest and last bar, with a gap kept as a gap, and columns and histograms
-  keep the lowest and highest bar, so they cover the pixels every bar would. At
+  highest and last bar, with a gap kept as a gap; the HLC area keeps those
+  plus each run's highest high and lowest low, so its close line, band edges
+  and gaps match the full frame; and columns and histograms keep the lowest and
+  highest bar, so they cover the pixels every bar would. A merged stick sits in
+  the column that holds its middle pixel, at every pixel ratio. At
   or above one bar per stick nothing changes, and the default
   `timeScale.minBarSpacing: 1` never zooms out that far, so a chart that keeps
   the floor paints as before: render parity against 2.5.7 is zero differing

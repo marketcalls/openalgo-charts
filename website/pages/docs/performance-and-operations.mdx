@@ -82,8 +82,8 @@ an explicit upper bound.
 Each indicator holds output aligned with its source bars. A deep retained range
 therefore costs more in a chart with several indicators or multi-plot studies
 than in a bare price chart. `calcTail` can reduce the calculation work for a
-forming bar in a custom study (no built-in implements it yet), but it is not a
-data-retention policy: output arrays still follow
+forming bar (sixteen built-ins implement it from 2.5.8, and a custom study
+can), but it is not a data-retention policy: output arrays still follow
 the length of the retained source history.
 
 Keep the live layout purposeful. Remove hidden studies that are no longer
@@ -230,8 +230,9 @@ for extended workloads and interpretation.
 
 ## Current runtime tradeoff
 
-Live updates are coalesced to animation frames, but a source-bar update currently
-invalidates the base rendering work across active panes. The visible-range data
+Live updates are coalesced to animation frames, and from 2.5.8 a source-bar update
+or a study recompute repaints only the panes it changed (plus the panes that show
+the corner clock or a bar countdown, so those keep moving). The visible-range data
 path keeps drawing bounded by what is on screen, while retained history and the
 number of indicator outputs still determine calculation and allocation cost.
 
