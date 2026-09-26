@@ -65,13 +65,13 @@ const BAR_SPACING = 6;
  * Browser flags per renderer. Headless Chromium has no GPU, so it runs WebGL
  * and the accelerated 2D canvas on its software GL device, a CPU emulation of
  * one; the device is pinned so a desktop and a CI runner emulate the same one.
- * Left accelerated, a 2D canvas is rasterized by that emulation at many times
- * the cost of the browser's own software rasterizer (ten thousand thin rects
- * took about 94 ms against 5 ms on the reference machine), and the 2D rows
- * would time the emulator rather than the chart. They rasterize in software
- * instead, a real configuration: a device without GPU raster. The WebGL rows
- * keep the accelerated 2D canvas their GPU surface is composited into, as on a
- * device with a GPU.
+ * Left accelerated, a 2D canvas is rasterized by that emulation at roughly
+ * ten to twenty times the cost of the browser's own software rasterizer (ten thousand
+ * thin rects took 50 to 95 ms against 5 to 6 ms on the reference machine), and
+ * the 2D rows would time the emulator rather than the chart. They rasterize in
+ * software instead, a real configuration: a device without GPU raster. The
+ * WebGL rows keep the accelerated 2D canvas their GPU surface is composited
+ * into, as on a device with a GPU.
  */
 const BROWSER_ARGS: Record<Renderer, string[]> = {
   canvas2d: ['--use-angle=swiftshader', '--disable-accelerated-2d-canvas'],

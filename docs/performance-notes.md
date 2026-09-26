@@ -36,16 +36,21 @@ canvas into a one-pixel probe and reads the probe back, which cannot finish
 before the canvases are rasterized. Waiting for the display instead would round
 every cost up to a whole number of 16.7 ms frames and hide any change smaller
 than a frame. The probe is read rather than the chart canvases because a canvas
-that is read back repeatedly can be moved off the GPU by the browser. Each
-report also gives the script share of the p95 (up to the end of the frame,
-before the raster wait), which is not budgeted but says where a regression is.
+that is read back repeatedly can be moved off the GPU by the browser. With
+nothing changed, the probe itself costs about 0.1 ms on `canvas2d` and 0.5 ms
+on `webgl2`, and on `webgl2` a probe kept on the GPU, which reads no chart
+canvas back, gives the same step times, so a step's time is the chart's. Each
+report also gives a script p95, over the same steps timed only to the end of the
+frame (before the raster wait), which is not budgeted but says where a
+regression is.
 
 Headless Chromium has no graphics device of its own: WebGL, and GPU raster of a
 2D canvas, both run on the browser's software GL device, a CPU emulation of one,
 and the bench pins that device so a desktop and a CI runner emulate the same
-one. Rasterizing a 2D canvas through that emulation costs many times what the
-browser's own software rasterizer does (ten thousand thin rectangles: about
-94 ms against 5 ms on the reference machine).
+one. Rasterizing a 2D canvas through that emulation costs roughly ten to twenty
+times what the browser's own software rasterizer does: ten thousand thin
+rectangles took 50 to 95 ms against 5 to 6 ms on the reference machine,
+depending on their layout.
 
 The `canvas2d` rows therefore run with `--disable-accelerated-2d-canvas`, a real
 configuration: a device that rasterizes 2D in software.
@@ -97,7 +102,14 @@ older cores, shares them with other tenants, and gives the software GL device
 and the collector fewer threads to work with. Four times the reference leaves
 room for a runner core half as quick and a busy run on top of that, and still
 fails a change that makes a path several times costlier, which is the
-regression this exists to catch.
+regression this exists to catch. One check of the thread count, though not of
+core speed: a full run with the browser held to four logical processors of the
+reference machine, as many as a hosted Linux runner gives a public repository,
+stayed inside every budget. Its tightest row, the 200,000-bar `canvas2d` tick,
+came to 15.4 s of 22.4 s while other work loaded the machine. In CI a failed row
+is retried once, like every Playwright test there (`retries` in
+`playwright.config.ts`), so runner noise has to strike twice to fail a change,
+and a real regression fails both attempts.
 
 **Floor.** One frame at 60 Hz, 17 ms. A frame that costs less is on time
 whatever it costs, so a budget under that line would police timer and collector
@@ -146,6 +158,9 @@ is the tighter and more honest budget.
   from, so `tests/e2e/render-parity.spec.ts` compares pixels with that release on
   every push instead of skipping. A change meant to move pixels sets
   `PARITY_BASELINE_REF` in `.github/workflows/ci.yml` and says so in its commit.
+  The ref must stay reachable from `master` once the change merges (a squashed
+  pull request's own commits do not), and the release that ships the change
+  clears it, since its tag then carries the new pixels.
 - `.github/workflows/nightly.yml` runs `scripts/soak.mjs` for a 6.25-hour
   session (90,000 ticks, 1,000 create and destroy cycles), the thirty-minute
   [browser endurance](browser-endurance.md) workload and the render bench, and
