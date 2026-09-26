@@ -347,7 +347,11 @@ export interface IndicatorLevel {
   price: number;
   color?: string;
   title?: string;
-  /** Legacy two-state dash switch. `lineStyle` wins when both are given. */
+  /**
+   * Two-state shorthand for `lineStyle`. `lineStyle` wins when both are given,
+   * and with neither a level draws dashed. A retained form rather than a
+   * deprecated one (COMPATIBILITY.md lists why).
+   */
   dashed?: boolean;
   lineWidth?: number;
   lineStyle?: IndicatorLineStyle;

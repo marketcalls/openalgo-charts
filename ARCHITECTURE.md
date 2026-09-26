@@ -54,11 +54,11 @@ We are writing our own engine from scratch, with no external charting dependency
 
 | Principle we adopt | Why |
 |---|---|
-| **Base + top canvas per pane** (no SVG, no DOM-per-bar), price/time axes as separate widgets | The single biggest size + perf lever. The two-canvas split (data vs cursor/overlay) is what makes crosshair cheap. See §3.1. |
+| **Base + top canvas per pane** (no SVG, no DOM-per-bar); the price and time axes paint on the pane's base canvas | The two-canvas split (data vs cursor/overlay) lets a crosshair move repaint the overlay canvas alone. See §3.1. |
 | **Shared data/time layer** merging all series by time to logical indices | Keeps price + volume + indicator panes perfectly aligned on one x-axis. See §4. |
-| **Indexed plot rows with cached visible range** | O(log n) visible-range lookup; redraw cost scales with *visible* bars, not total bars. |
+| **Indexed plot rows with cached visible range** | O(log n) visible-range lookup, so the series pass walks the *visible* bars. A study recompute still walks its full history once per frame that carries a tick; §1 records what that costs. |
 | **Bitmap vs media coordinates** | Draw in device pixels so 1px lines stay crisp on HiDPI/retina without blur. |
-| **Per-pane invalidation mask** (global level + per-pane + time-scale ops) | Crosshair move must NOT trigger a full data redraw; one indicator pane recomputing must not repaint the others. See §3.2. |
+| **Per-pane invalidation mask** (global level + per-pane + time-scale ops) | A crosshair move repaints the overlay canvas only. The mask can also target one pane, but in 2.5.5 a study recompute and a live tick still repaint every pane. See §3.2. |
 | **Renderers are pure functions of draw-data** | Renderer takes a plain data object + canvas context, draws, returns. No state, easy to test, tree-shakeable. |
 | **Primitive/plugin extension API** with views + lifecycle + z-order + hit-test | The trade layer (order lines, DOM ladder) and markers/events are *primitives*, not hardcoded, keeps core lean. See §8. |
 
@@ -84,7 +84,7 @@ Net: Apache-2.0 keeps the project permissive *and* lets us incorporate a hard al
 - Smooth pan, wheel-zoom, pinch-zoom, kinetic flick scrolling, double-click to reset.
 - Crosshair with synced price-axis & time-axis labels; OHLC legend.
 - Autoscale price (linear / log / percentage), fixed scale, fit-content.
-- Live updates: append/replace the last bar at tick speed (60 fps) without GC churn.
+- Live updates: append or replace the last bar as ticks arrive; updates that land before one animation frame paint once.
 - **Chart trading**: drag-to-place order lines, position marker with live P&L, SL/TP bracket lines, one-click buy/sell, DOM ladder, OCO visualization.
 - Indicator overlays (EMA/VWAP/Bollinger as line/band primitives) and sub-pane indicators (RSI/MACD).
 
@@ -92,7 +92,7 @@ Net: Apache-2.0 keeps the project permissive *and* lets us incorporate a hard al
 - **< 50 KB Brotli** total (engine + trade overlay). Stretch: < 30 KB Brotli engine-only. *(All size numbers in this doc are Brotli. These are estimates until the Phase 1 prototype is measured, see §11.)*
 - Zero runtime dependencies. We write our own HiDPI canvas sizing (~30 lines) rather than pulling a separate canvas-sizing helper package, so nothing is excluded from the size measurement.
 - TypeScript source, ESM output, tree-shakeable, framework-agnostic (works in plain JS, React wrapper optional).
-- 60 fps with 50k bars loaded, 1.5k visible.
+- Design goal: 60 fps with 50k bars loaded, 1.5k visible. **Not met in 2.5.5.** The live workload of `scripts/browser-endurance.mjs` (two charts, 150 bars in view, ten forming-bar replacements per second per chart, five studies each, Canvas2D, DPR 1, 1440 by 900) measured a frame-interval p95 of 17 ms at 2,000 bars per chart, 134 ms at 10,000 and 717 ms at 50,000, on the 2.5.5 build in headless Chromium 149 on an 8-core desktop CPU, 2026-09-26. The same 150 bars are in view in all three runs, so the growth is work over the whole history, such as the study recompute (no built-in implements `calcTail` yet); no profile has attributed it further. The commands, conditions and the rest of each report are in `docs/browser-endurance.md`. A 1.5k-bar view and a zoomed-out view have not been measured; per-size render budgets arrive with the render benchmark.
 - Works in OpenAlgo's existing frontend (it can be dropped into any page; React/HTMX/vanilla all fine).
 
 ### Size accounting rule
@@ -102,7 +102,7 @@ We measure **Brotli** bytes via `size-limit` in CI. Every PR that grows the Brot
 
 ## 2. Module map & size budget
 
-Directory layout under `openalgo-charts/src/`:
+Directory layout under `openalgo-charts/src/`, as first planned. The tree has grown and been reorganised since (for example `input/` now holds `kinetic.ts`, `wheel.ts`, `touch.ts`, `pick.ts`, `zoom-glide.ts`, `crosshair.ts` and `shortcuts.ts`, and hit testing lives in `core/pane.ts`), so read `src/` for the current modules:
 
 ```
 src/
@@ -219,20 +219,19 @@ The current package has **nine loadable tiers**, selected through separate entry
 
 ### 3.1 DOM & canvas layout model (`core/canvas.ts`, `core/pane.ts`)
 
-**Explicit layout.** The chart is a grid of rows (panes) × columns (left axis | pane cell | right axis). **Each pane cell holds *two* stacked canvases**, and each price-axis cell and the shared time-axis row hold their own canvas:
+**Explicit layout.** The chart is a column of panes. **Each pane holds exactly *two* stacked canvases** spanning its full width, and the axes have none of their own: the price-axis strips (left and right) are painted on the pane's own base canvas, and the bottom pane paints the time axis along its lower edge. The WebGL backend adds no canvas to the pane (§3.4).
 
 ```
-chart container (CSS grid)
-├── pane row 0 (price)     [ left-axis canvas | pane: base + top canvas | right-axis canvas ]
+chart container
+├── pane 0 (price)     [ base canvas: left axis | plot | right axis ] + top canvas over it
 ├── pane separator (drag to resize)
-├── pane row 1 (volume)    [ left-axis canvas | pane: base + top canvas | right-axis canvas ]
-├── pane row 2 (RSI)       [ left-axis canvas | pane: base + top canvas | right-axis canvas ]
-└── time-axis row          [   (corner)       | time-axis canvas        | (corner)          ]
+├── pane 1 (volume)    [ base canvas: left axis | plot | right axis ] + top canvas over it
+└── pane 2 (RSI)       [ base canvas: left axis | plot | right axis, time axis below ] + top canvas
 ```
 
-- **base canvas**: grid, series, indicator lines, static primitives. Repainted only on `Light`/`Full`.
-- **top canvas**: crosshair, hover highlights, primitives being dragged (order lines), magnet. Repainted on `Cursor` (cheap).
-- **price-axis widgets** (left/right) and the **time-axis widget** are separate canvases with their own draw passes, so an axis-label change doesn't force a pane repaint and vice-versa.
+- **base canvas**: background, grid, series, indicator lines, the bottom- and normal-layer primitives, and the axis strips with their tags. Repainted on `Light`/`Full`. The order and position lines are `PriceLine`s on the normal layer, so every step of an order-line drag repaints its pane's base canvas at `Light` (§9.3), and so does a hover change on a primitive of this canvas.
+- **top canvas**: the crosshair with its price and time tags, and the top-layer primitives: drawings over the series and any drawing lifted for a drag, with their hover rings, handles and magnet ring, and the pane legends, tables, buy and sell buttons, trade markers and time navigator. Repainted on `Cursor`, without touching the base canvas.
+- **The axes share the base canvas.** An axis-label change repaints the pane's base canvas, and every base repaint redraws the axes. Separate axis canvases were the original plan and remain unbuilt (§13a).
 
 Each canvas has two coordinate systems:
 - **media size** = CSS pixels (what you reason about: "draw at x=100").
@@ -268,58 +267,54 @@ A single `ResizeObserver` on the container drives `resize()`. We inline the ~30 
 The central trick for performance: **never redraw more than necessary.** A single global level is too coarse for multi-pane indicators and trade overlays (review point 2). The mask is a **global level + a per-pane map + a queue of time-scale operations.**
 
 ```ts
-const enum Level { None = 0, Cursor = 1, Light = 2, Full = 3 }
+const InvalidationLevel = { None: 0, Cursor: 1, Light: 2, Full: 3 }
 
-interface PaneInvalidation { level: Level; autoScale?: boolean }   // per-pane, merges by max + OR
+interface PaneInvalidation { level: InvalidationLevel; autoScale: boolean }   // per-pane, merges by max + OR
 
-type TimeScaleOp =                       // queued, applied before paint
+type TimeScaleOp =                       // declared, not yet queued by anything
   | { type: 'fitContent' }
-  | { type: 'applyRange'; range: LogicalRange }
   | { type: 'applyBarSpacing'; value: number }
   | { type: 'applyRightOffset'; value: number }
   | { type: 'reset' }
-  | { type: 'animationStart'; anim: ITimeScaleAnimation }   // smooth scroll/zoom
-  | { type: 'animationStop' }
 
 class InvalidateMask {
-  globalLevel: Level
+  globalLevel: InvalidationLevel
   panes: Map<paneIndex, PaneInvalidation>   // a pane can be invalidated without touching others
   timeScaleOps: TimeScaleOp[]
   merge(other): void                         // coalesce multiple invalidations in one frame
 }
 ```
 
-Semantics:
-- **Per-pane invalidation**: recomputing the RSI pane raises *its* entry only; the price and volume panes keep their cached draw-data and aren't repainted. An indicator finishing a calc, or one pane's autoscale changing, is local.
-- **`autoScale` flag per pane**: separates "rescale this pane's price axis" from "repaint at current scale," so a new data point that doesn't change the range skips the autoscale pass.
-- **Time-scale ops are a queue, not a level**: fit-content, apply-range, bar-spacing, right-offset, reset, and **animations** (kinetic scroll, smooth zoom) are discrete operations applied to the shared time scale before painting. Animations re-arm the next frame until `finished()`.
+What 2.5.5 does with it:
+- **Cursor work stays on the overlay.** A crosshair move, and a hover change between top-layer primitives, raise `Cursor`: every pane repaints its top canvas and no base canvas is touched.
+- **Per-pane invalidation is used by primitives.** A primitive's `requestUpdate` raises its own pane only, at `Cursor` for a top-layer primitive and `Light` otherwise; attaching or removing a primitive and dragging a price axis are pane-local too.
+- **Data changes are still global.** Writing series data raises a global `Full`, and a study's plots are series, so an indicator recompute repaints every pane, not only the study's own. The source-bar update path does the same, so a live tick repaints every pane. Repainting only the panes whose data or scale moved is planned work, not current behaviour.
+- **`autoScale` flag per pane**: separates "rescale this pane's price axis" from "repaint at current scale". A `Full` level autoscales every pane regardless.
+- **The time-scale queue is declared but unused.** `addTimeScaleOp` has no caller in 2.5.5 and the frame never reads the queue. Fit, bar spacing, right offset and scroll-to-realtime change the time scale directly, and the repaint goes through the ordinary invalidation. Kinetic scroll and eased wheel zoom each schedule their own animation frames (`input/kinetic.ts`, `input/zoom-glide.ts` drive the maths) and invalidate on every step, so the paint follows one frame behind the step.
 - `chart.invalidate(mask)` merges into the pending mask and schedules one rAF; multiple calls per frame coalesce.
 
 ```
-function frame(now) {
-  applyTimeScaleOps(mask.timeScaleOps, now)         // incl. stepping animations
-  if (mask.globalLevel >= Full) recomputeAllScalesAndTicks()
-  for (const [p, inv] of mask.panes) {
-    if (inv.autoScale) recomputePaneAutoscale(p)
-    if (inv.level >= Light) paintPaneBase(p)        // grid, series, indicators
-    if (inv.level >= Cursor) paintPaneTop(p)        // crosshair, dragging primitives
+function frame(now) {                                // Chart._onFrame
+  flushIndicators()                                  // coalesced recompute, before the mask is taken
+  const mask = takePendingMask()
+  for (const [i, pane] of panes) {
+    const level = max(mask.globalLevel, mask.pane(i)?.level)
+    if (level >= Full || mask.pane(i)?.autoScale || easing) autoscale(pane)
+    if (level >= Light) pane.paintBase()             // grid, series, primitives, axes
+    if (level >= Cursor) pane.paintTop()             // crosshair, hover, dragged primitives
   }
-  paintAxes(dirtyAxes)
-  if (anyAnimationActive) scheduleNextFrame()
-  mask = empty
+  if (autoscaleStillEasing) invalidate(Light)        // re-arms the next frame
 }
 ```
 
-The mask supports independent cursor and per-pane work, and repeated invalidations still
-coalesce into one animation frame. The current source-bar update path raises a global Full
-invalidation, so a live tick repaints base content across active panes. Visible-range reads
-keep drawing bounded by the viewport, while retained history and indicator count remain the
-main sustained-session budgets.
+Repeated invalidations coalesce into one animation frame. Visible-range reads keep the
+series pass bounded by the viewport, but the recompute that runs before it walks full history,
+so retained history and indicator count remain the main sustained-session budgets (§1).
 
 ### 3.3 Chart & Pane orchestration: panes stay in sync
 
 - `Chart` owns: the **single shared time scale** + shared `DataLayer` (§4), an ordered list of `Pane`s, the input manager, the invalidate mask, and the primitive list.
-- `Pane` owns: its own price scale(s), its series, its base+top canvases, its axis widgets, and a height (resizable via pane separators).
+- `Pane` owns: its own price scale(s), its series, its base+top canvases (the axis strips paint on the base one, §3.1), and a height (resizable via pane separators).
 - **Top (price) pane and bottom (volume/indicator) panes are always x-synced.** This is structural, not bookkeeping: every series across every pane writes into the *one* `DataLayer`, which assigns a single set of **logical indices** shared by all of them. The shared time scale maps that one index space to x. Therefore:
   - Pan/zoom changes the shared time scale once, and every pane's x-axis moves together, bar-for-bar aligned, by construction.
   - The crosshair's vertical line and time label are computed from the shared time scale, so hovering bar *i* highlights bar *i* in **all** panes simultaneously.
@@ -329,11 +324,11 @@ There is no "sync the panes" code path that could drift, alignment falls out of 
 
 ### 3.4 The render backend port (`render/backend.ts`)
 
-The series pass in `Pane.paintBase` goes through an `IRenderBackend`: `beginFrame` clears the base bitmap, `drawSeries` is called once per series with the same arguments `RendererEntry.draw` takes minus the context, and `endFrame` flushes whatever the backend batched, still inside the plot clip and before the normal-layer primitives so batched series land under the price lines and markers rather than over them. Everything else on the base canvas (background, grid, axes, primitives) the pane draws itself on the 2D context `overlay2d()` returns. The port is that narrow on purpose: the per-frame series pass is the one hot path a GPU can take over, and text, dashed lines, gradients and the drawing tools are things the 2D context already does well.
+The series pass in `Pane.paintBase` goes through an `IRenderBackend`: `beginFrame` clears the base bitmap, `drawSeries` is called once per series with the same arguments `RendererEntry.draw` takes minus the context, and `endFrame` flushes whatever the backend batched, still inside the plot clip and before the normal-layer primitives so batched series land under the price lines and markers rather than over them. Everything else on the base canvas (background, grid, axes, primitives) the pane draws itself on the 2D context `overlay2d()` returns. The port is that narrow on purpose: the per-frame series pass is the one part of a frame that maps onto a batch of GPU geometry, and text, dashed lines, gradients and the drawing tools are things the 2D context already does well. How the two backends compare in frame time has not been measured.
 
-`Canvas2dBackend` is the shipped backend and the reference the others are held to. It is handed the pane's existing 2D context at `mount` (the base `CanvasLayer` already owns one, and a second `getContext` would split a frame across two op streams) and calls each renderer on it as is, so its op stream is the one every chart drew before the port existed; `tests/e2e/render-parity.spec.ts` diffs it against a frozen pre-port build at zero differing pixels. Which backend a chart gets is decided once, at construction, from the `renderer` option (`'canvas2d'`, `'webgl2'`, or `'auto'`) or an injected `renderBackend` factory, one instance per pane. A factory may decline at run time (no WebGL2 on this device) and the 2D backend stands in, which is why `chart.rendererKind` (and `chart.renderer`, the same value under its first name) reports the kind in use rather than the kind asked for. The vector export bypasses the port and calls the renderers directly on the serialising context: a document has no pixels to take from a GPU.
+`Canvas2dBackend` is the shipped backend and the reference the others are held to. It is handed the pane's existing 2D context at `mount` (the base `CanvasLayer` already owns one, and a second `getContext` would split a frame across two op streams) and calls each renderer on it as is, so its op stream is the one every chart drew before the port existed; `tests/e2e/render-parity.spec.ts` diffs it against a frozen pre-port build at zero differing pixels. Which backend a chart gets is decided once, at construction, from the `renderer` option (`'canvas2d'`, `'webgl2'`, or `'auto'`) or an injected `renderBackend` factory, one instance per pane. A factory may decline at run time (no WebGL2 on this device) and the 2D backend stands in, which is why `chart.rendererKind` (and the deprecated `chart.renderer`, the same value under its first name) reports the kind in use rather than the kind asked for. The vector export bypasses the port and calls the renderers directly on the serialising context: a document has no pixels to take from a GPU.
 
-`WebGL2Backend` (`render/webgl/`, shipped as the `openalgo-charts/webgl` tier, which does nothing but call `registerRenderBackend('webgl2', ...)` on import) is the second backend. It does not put a WebGL canvas in the pane. The pane keeps its base canvas and 2D context, and the backend draws the series into one page-wide offscreen WebGL2 surface shared by every pane of every chart, then blits that surface into the base canvas at `endFrame` with a single `drawImage`, under the pane's transform and plot clip. Two reasons. A browser allows around sixteen live WebGL contexts, so one per pane would fail a dashboard of a few multi-pane charts; and a blit into the canvas the pane already owns leaves the pile, `takeScreenshot`, the context-menu snapshot and the parity spec's canvas count untouched, with no `preserveDrawingBuffer` because the copy is synchronous in the same task as the draw. Every Family-A type is emitted natively into one vertex batch (one program, one draw call per flush, in submission order so a wick stays under its body and a fill under its line) with analytic anti-aliasing in the shader: coverage is `0.5 - d` in device pixels, which gives an integer-aligned rect exact coverage and is why the rect-based types land on the very same pixels as the 2D renderers, both reading `candleGeometry`, `barGeometry` and `valuePoints`. A type the batch cannot express (kagi, point and figure, a custom renderer) flushes the batch and draws on the 2D context, so z-order between series is exact. A lost context takes that 2D fallback for the whole frame, and the chart polls `pane.backendDegradation` after each frame: on `'context-lost'` or `'unavailable'` it swaps its factory to `canvas2d` for the rest of the session, moves every pane (later panes match), and emits `'renderer:fallback'` once. Session-long rather than per-frame because a device that has dropped a context once tends to do it again, and a chart that flickers between backends is worse than one that settles on the slower path.
+`WebGL2Backend` (`render/webgl/`, shipped as the `openalgo-charts/webgl` tier, which does nothing but call `registerRenderBackend('webgl2', ...)` on import) is the second backend. It does not put a WebGL canvas in the pane. The pane keeps its base canvas and 2D context, and the backend draws the series into one page-wide offscreen WebGL2 surface shared by every pane of every chart, then blits that surface into the base canvas at `endFrame` with a single `drawImage`, under the pane's transform and plot clip. Two reasons. A browser allows around sixteen live WebGL contexts, so one per pane would fail a dashboard of a few multi-pane charts; and a blit into the canvas the pane already owns leaves the pile, `takeScreenshot`, the context-menu snapshot and the parity spec's canvas count untouched, with no `preserveDrawingBuffer` because the copy is synchronous in the same task as the draw. Every Family-A type is emitted natively into one vertex batch (one program, one draw call per flush, in submission order so a wick stays under its body and a fill under its line) with analytic anti-aliasing in the shader: coverage is `0.5 - d` in device pixels, which gives an integer-aligned rect exact coverage and is why the rect-based types land on the very same pixels as the 2D renderers, both reading `candleGeometry`, `barGeometry` and `valuePoints`. A type the batch cannot express (kagi, point and figure, a custom renderer) flushes the batch and draws on the 2D context, so z-order between series is exact. A lost context takes that 2D fallback for the whole frame, and the chart polls `pane.backendDegradation` after each frame: on `'context-lost'` or `'unavailable'` it swaps its factory to `canvas2d` for the rest of the session, moves every pane (later panes match), and emits `'renderer:fallback'` once. Session-long rather than per-frame because a device that has dropped a context once tends to do it again, and a chart that flickers between backends is worse than one that settles on the 2D path.
 
 ### 3.5 Vector export (`render/svg-export.ts`)
 
@@ -391,12 +386,14 @@ class DataLayer {
 }
 ```
 
+**As shipped** (`model/data-layer.ts`): each series keeps its bars in one time-sorted array, and one shared `_sortedTimes` array with an `_indexByTime` map is the index space over all of them; there is no `PlotRow` type. `setSeriesData`, `addBars` (history paging and backfill) and an out-of-order insert rebuild that shared index across every series. Replacing the last bar leaves it as it is, and appending past the right edge adds one time at its end without a rebuild.
+
 Key responsibilities:
 - **Merge by time, assign logical indices.** Each distinct timestamp across all series gets one logical index; every series maps its data onto that shared index. Adding an indicator that only has values for some bars uses **whitespace** for the rest, so it stays aligned without inventing bars.
 - **`baseIndex`** tracks the latest real bar so "scroll to realtime," right-offset, and the last-price line all reference one anchor.
 - Per-series `PlotRow[]` are the index-addressable arrays the renderers actually read (the old "indexed OHLC store" idea, now *derived from* the shared layer rather than owned per series).
 
-Why index-based throughout: the time scale maps **logical index to x** linearly. Pan/zoom is O(1) per bar, and non-trading gaps (weekends/holidays/lunch) collapse because absent times simply have no logical index (§5.3).
+Why index-based throughout: the time scale maps **logical index to x** linearly, so pan and zoom change two numbers (bar spacing and right offset) rather than any bar data, and non-trading gaps (weekends/holidays/lunch) collapse because absent times simply have no logical index (§5.3).
 
 ### 4.2 Data mutation API (review point 4: prepend / merge / out-of-order)
 
@@ -405,9 +402,9 @@ Why index-based throughout: the time scale maps **logical index to x** linearly.
 | Method | Use | Semantics |
 |---|---|---|
 | `setData(series, bars)` | Initial/bulk load, full replace | Re-merge time points; recompute logical indices; autoscale + fit. |
-| `update(series, bar)` | Live tick (hot path) | `time == lastTime`: **mutate last row in place** (no alloc). `time > lastTime`: **append**, advance `baseIndex`, maybe auto-scroll. `time < lastTime`: **out-of-order correction** (see below). |
-| `prependData(series, older)` | Lazy history paging on left-pan | Insert older bars **before** index 0; **shift all logical indices** by the inserted count; **preserve the viewport** by adjusting `rightOffset`/range so the screen doesn't jump. Re-merge time points with existing series. |
-| `mergeRange(series, bars)` | Backfill / replace an arbitrary window | Upsert by time within `[from,to]`; reconcile indices; used for gap-fill after reconnect. |
+| `update(series, bar)` | Live tick (hot path) | `time == lastTime`: **replace the stored last bar**, leaving the shared index alone. `time > lastTime`: **append**, advance `baseIndex`, maybe auto-scroll. `time < lastTime`: **out-of-order correction** (see below). |
+| `prependData(series, older)` | Lazy history paging on left-pan | Upsert the bars by time, wherever they fall; **shift all logical indices** by the inserted count; **preserve the viewport** by adjusting `rightOffset`/range so the screen doesn't jump. Re-merge time points with existing series. |
+| `mergeRange(series, bars)` | Backfill / replace an arbitrary window | **Not implemented.** Planned as a range-bounded replace; `prependData` upserts by time at any position, which covers a backfill that only adds or corrects bars. |
 
 **Out-of-order / late ticks & corrections:** a tick whose time is older than the last bar (late print, exchange correction, reconnect replay) is **upserted by time** into the correct bucket, not appended. The candle builder (§10.2) defines the *policy* (accept within the current bar, reject older than a threshold, or fold into the matching historical bar). The DataLayer just guarantees the merge stays sorted and indices stay consistent. After any prepend/merge, primitives and the trade layer re-anchor to *time*, not to a frozen index, so order/position lines don't drift when indices shift.
 
@@ -417,12 +414,11 @@ A series is `{ rows: PlotRow[] (in DataLayer), style, kind, priceScaleId, paneIn
 
 ### 4.4 Conflation / downsampling (optional layer): review point 7
 
-When zoomed far out, many bars map to **sub-pixel** widths; drawing all of them is wasted work. We add an **optional, OHLC-preserving** conflation layer so 50k+ bars (and future larger datasets) stay 60 fps:
+When zoomed far out, many bars map to **sub-pixel** widths; drawing all of them is wasted work. An **optional, OHLC-preserving** conflation step (`conflate: true`) merges them so the series pass draws fewer, wider bars. Its effect on frame time has not been measured; a zoomed-out view is not part of the recorded workloads (§1).
 
-- **Trigger**: when effective bar width < ~0.5 px (scaled by a `conflationFactor`, e.g. 1.0 to 8.0, where higher = more aggressive smoothing).
-- **OHLC-preserving merge**: each conflated bucket keeps `open` = first, `close` = last, `high` = max, `low` = min, `volume` = sum. The candle/bar shape is preserved, just at coarser granularity, never a lossy average.
-- **Lives in `model/conflation/`**, built *over* the DataLayer rows; the renderer reads the conflated view when active, the raw rows otherwise. Off by default; turning it on changes nothing visible until you're zoomed out past the threshold.
-- Family B (Renko/Range/etc.) and profiles opt out, they have their own aggregation semantics.
+- **Trigger**: when a bar is narrower than 0.5 device px, times `conflationFactor` when that is above 1 (higher = more aggressive smoothing).
+- **OHLC-preserving merge**: each conflated bucket keeps `open` = first, `close` = last, `high` = max, `low` = min, `volume` = sum and the last open interest. The candle/bar shape is preserved, just at coarser granularity, never a lossy average.
+- **Lives in `model/conflation.ts`**, and `Pane.paintBase` applies it each frame to the visible draw items of every series in the pane, study plots and host-prepared transform bars included, since the renderer sees only bars. Off by default; turning it on changes nothing visible until you're zoomed out past the threshold. Profile primitives are not series and are unaffected.
 
 ---
 
@@ -433,8 +429,8 @@ When zoomed far out, many bars map to **sub-pixel** widths; drawing all of them 
 State: `barSpacing` (px per bar), `rightOffset` (how many bars of empty space on the right). Mapping:
 
 ```
-indexToX(i)  = round((i - rightVisibleIndex) * barSpacing + width)   // bitmap-snapped
-xToIndex(px) = rightVisibleIndex + (px - width) / barSpacing
+indexToX(i)  = width - (rightVisibleIndex - i) * barSpacing   // media px; renderers snap to device px
+xToIndex(px) = rightVisibleIndex - (width - px) / barSpacing
 ```
 
 - **Pan** = change `rightOffset` by `dx / barSpacing`.
@@ -468,9 +464,9 @@ These directly affect Indian instruments, options, MCX, label correctness, and o
 
 ### 5.4 Time-scale features & edge cases
 
-- **`fitContent` / `setVisibleRange` / `setVisibleLogicalRange` / `scrollToRealtime`** as explicit time-scale ops (queued via the invalidate mask, §3.2).
+- **`fitContent` / `setVisibleRange` / `setVisibleLogicalRange` / `scrollToRealtime`** change the time scale directly; the time-scale op queue in the mask is not used for them (§3.2).
 - **Right offset** (empty bars after the last) and **bar-spacing clamp** `[min,max]`.
-- **Animations**: kinetic scroll decay and smooth zoom/scrollToPosition run as time-scale animations stepped each frame.
+- **Animations**: kinetic scroll decay and eased wheel zoom each run their own animation-frame loop and invalidate the chart on every step (§3.2), rather than being stepped by the render frame.
 - **Whitespace handling**: times that exist for alignment but carry no value for a series don't break tick generation.
 
 ### 5.3 Non-trading gaps: gapless by default (locked decision)
@@ -490,7 +486,7 @@ Consequences to honor in the implementation:
 
 Each renderer is a pure-ish function: `(ctx, drawData, scope) => void`. No internal state beyond style caches. This keeps them independently tree-shakeable (importing only `LineSeries` shouldn't pull candle code).
 
-- **candles.ts**: compute `barWidth = optimalBarWidth(barSpacing, dpr)` (odd/even parity matched to crosshair for symmetry, a subtle but important parity trick); draw body rect + high/low wick; up/down/doji colors; hollow option. Batches same-color bars to minimize `fillStyle` changes.
+- **candles.ts**: compute `barWidth = optimalBarWidth(barSpacing, dpr)` (odd/even parity matched to crosshair for symmetry, a subtle but important parity trick); draw body rect + high/low wick; up/down/doji colors; hollow option. Colours are set bar by bar (a per-bar colour can override any candle), and a body that would repaint its own wick at the `wick` width tier is skipped.
 - **line.ts**: walk-line algorithm, single `ctx.beginPath()` over the visible range, `lineTo` each point, one `stroke()`. Optional area fill with a cached vertical gradient. Step/curved/straight modes.
 - **histogram.ts**: volume bars in the volume pane; per-bar color (up/down). Base value configurable.
 - **crosshair.ts**: vertical + horizontal dashed lines on the overlay canvas. Default 'normal' mode tracks the pointer exactly; opt-in 'magnet' mode snaps the horizontal line to the nearest OHLC value (price pane only). Drives the axis labels.
@@ -671,7 +667,7 @@ const markers = createSeriesMarkers(series, [...])   // add/update/remove later
 
 Behavior:
 - A **BUY signal** = `{ shape:'arrowUp', position:'belowBar', color:'#26a69a', text:'BUY' }`; a **SELL** = `{ shape:'arrowDown', position:'aboveBar', color:'#ef5350', text:'SELL' }`.
-- Markers are kept **sorted by index** and only the visible range is drawn (binary search, same as bars), so thousands of signals stay 60 fps.
+- Markers outside the visible range are skipped before drawing (a marker with styled text is still laid out). The skip is a test per marker, not a binary search, and each paint maps bar times over the series' whole history, so the cost grows with the marker count and the history rather than with the view. It has not been measured; `docs/performance-notes.md` records it for the render benchmark.
 - Multiple markers on one bar **stack** (vertical offset accumulates) so they never overlap.
 - `aboveBar`/`belowBar` offset from the bar's high/low; `inBar` sits at the body; `atPrice` pins to an exact price-y.
 - Hit-test enabled: hover highlights, click fires `onMarkerClick(id)`.
@@ -730,7 +726,7 @@ The level palette (`levels.ts`) is the one statement of the conventional colour 
 
 **Interaction feel (2.0).** The second half of the rebuild is about how a drawing behaves under the hand, and each piece was placed where it was for a cost reason:
 
-- **Hover is a controller fact, painted by the layer.** The chart already emits `hover` at state-change rate; the controller keeps the id (`hovered()`, `drawing:hover`) and hands it to the layer, which paints that drawing's handles faintly. Both drawing layers are `'top'` primitives, so a hover change between them raises `Cursor` rather than `Light`, and the base and the series never repaint for a pointer that merely passes over a line.
+- **Hover is a controller fact, painted by the layer.** The chart already emits `hover` at state-change rate; the controller keeps the id (`hovered()`, `drawing:hover`) and hands it to the layer, which paints that drawing's handles faintly. Both drawing layers report their hits at `'top'`, whichever band they paint in, so a hover change between drawings raises `Cursor` rather than `Light`, and the base and the series never repaint for a pointer that merely passes over a line.
 - **Freehand reads the crosshair, not the drag.** Placement mode swallows the pan path and never arms a drag, so the coalesced `samples` a fast stroke needs ride on `crosshair:move` while `pressed` (and on `drag` for a primitive being moved). The chart projects the batch through one `getBoundingClientRect` and one pane layout per move event rather than per sample, because that is the pointer path. On release the trail is thinned (`rdpSimplify`) and painted as a spline (`catmullRom`) by `freehand.ts`, which is pure and exported; a pen's pressure is stored per anchor and kept by the clipboard and the migration, and the thinning is why a straight stroke persists as two anchors.
 - **The magnet lands on the bar, not on the price alone.** A snapped anchor takes the hovered bar's time as well as its O/H/L/C, so it sits on the bar centre where the ring is drawn; `'weak'` needs `priceToCoordinate` to judge "within a few pixels" and does not pull without it. Shift's angle lock projects the pointer onto the nearest 45 degree ray (it does not rotate), so a level line ends under the pointer's x, and it bypasses the magnet, ring included.
 - **An under-series drawing is lifted for the length of a drag.** Moving something that paints below the candles would otherwise repaint the base tier every frame. The bottom layer re-lists on the first drag frame and on release (one `Light` each) and the drag itself is `Cursor` only, the same cost as dragging an over-series drawing.
@@ -795,10 +791,10 @@ on WS position update / poll position_book:
 on WS depth (get_market_depth):
   update DomLadder bid/ask sizes
 on every LTP tick:
-  recompute P&L, breakeven, R:R; invalidate(Cursor)  // overlay only
+  recompute P&L, breakeven, R:R; the position line asks for a repaint
 ```
 
-Because P&L updates hit only the overlay canvas (`Invalidate.Cursor`), live tick-by-tick P&L animation costs almost nothing.
+The position and order lines are `PriceLine`s, which paint on the normal layer of the base canvas, so a P&L update (`updatePositionPnl`) raises `Light` on the line's own pane, not `Cursor`. A tick that also moves the price series repaints every pane anyway (§3.2). The cost of either has not been measured.
 
 ### 9.4 Variable market depth (5 / 20 / 30 / 50 / 200 levels)
 
@@ -813,7 +809,7 @@ interface MarketDepth {
 ```
 
 Rendering rules that scale from 5 to 200:
-- **Viewport virtualization**: the ladder draws only the price rows currently visible in its strip (a window centered on the LTP), not all 200. Scroll/recenters on LTP. With 5 levels this is a no-op; with 200 it's what keeps it 60 fps and readable. (Same culling discipline as the bar renderer.)
+- **Viewport virtualization**: the ladder draws only the price rows currently visible in its strip (a window centered on the LTP), not all 200 (`visibleRows`, capped at `maxRows` nearest the centre). Scroll/recenters on LTP. With 5 levels this is a no-op; with 200 it bounds the rows drawn to what fits. Its frame cost has not been measured. (Same culling discipline as the bar renderer.)
 - **Price-bucket aggregation**: optional: group every N ticks into one row when the book is deep, so a 200-level book can be shown compactly (configurable tick grouping / price-step).
 - **Size heatmap**: per-row background opacity ∝ qty / maxVisibleQty, so large resting liquidity stands out. With deep books this is the basis of an optional **depth-heatmap over time** (liquidity as a 2D color field), a natural future feature *enabled* by 20 to 200 level data, parked in the `profile/` tier.
 - **Auto-detect**: on subscribe, request the broker's max available depth; the component sizes its row pool to `max(bids.length, asks.length)` from the first message and adapts if it changes.
@@ -935,8 +931,9 @@ interface TradeFeed {
 ## 11. Build, tooling, size enforcement & testing
 
 - **Language**: TypeScript, `const enum` for zero-cost enums, strict mode.
-- **Bundler**: Rollup + `@rollup/plugin-terser`. Output: ESM (primary) + IIFE standalone (for `<script>` drop-in / CDN). Separate entry points per tier (`index`, `/trade`, `/transform`, `/profile`) so they tree-shake and lazy-load independently.
-- **Size CI**: `size-limit` with **Brotli** targets per tier. Since we have zero runtime dependencies, nothing is excluded from the measurement. Hard ceilings: **engine 30 KB Brotli, base+trade 50 KB Brotli**, per-tier sub-limits. PRs exceeding a limit fail CI. **Wiring `size-limit` is the first task of Phase 1 so every estimate in this doc gets replaced by a measured number early.**
+- **Bundler**: Rollup + `@rollup/plugin-terser`. Output: ESM (primary) + IIFE standalone (for `<script>` drop-in / CDN). One entry point per tier, nine in all (§2), so they tree-shake and lazy-load independently. The IIFE standalone build carries the base tier only.
+- **Size CI**: `size-limit` with **Brotli** targets per tier. Since we have zero runtime dependencies, nothing is excluded from the measurement. PRs exceeding a limit fail CI. The planned hard ceilings of 30 KB Brotli for the engine and 50 KB for base + trade were pre-implementation targets and were never enforced; the enforced ceilings are the per-tier rows in `.size-limit.json`, quoted in the README size budget.
+- **Performance is measured, not budgeted, today.** `scripts/browser-endurance.mjs` records frame, pointer, memory and teardown gates for a declared Chromium workload (§1, `docs/browser-endurance.md`), and `npm run bench` holds indicator calculation to CI budgets. No render benchmark fails the build on frame time yet.
 - **No dependencies**: HiDPI sizing, resize observation, and event handling are hand-rolled (~50 lines total).
 
 ### 11.1 Testing: starts in Phase 2, not "once stable" (review point 14)
@@ -957,7 +954,7 @@ Charts are visual and interaction-heavy; deferring tests guarantees regressions.
 Build in vertical slices so there's always a runnable chart. **Testing infra (size-limit + unit + pixel + fake feed) lands in Phase 1 to 2 and grows with each phase (§11.1).**
 
 0. **Project + measurement harness**: repo, Rollup tiers, `size-limit` (Brotli) wired, fake `DataFeed`/`TradeFeed` stub, pixel-diff harness skeleton. *(so every later phase is measured, not guessed)*
-1. **Skeleton**: DOM/canvas layout (base+top per pane, axis widgets), render loop + per-pane invalidate mask + resize. Hardcoded grid. *(proves HiDPI + loop)* + first `size-limit` numbers replace the estimates.
+1. **Skeleton**: DOM/canvas layout (base+top per pane, axis strips on the base canvas), render loop + per-pane invalidate mask + resize. Hardcoded grid. *(proves HiDPI + loop)* + first `size-limit` numbers replace the estimates.
 2. **Static candles**: shared DataLayer + time/price scales (incl. tick-size formatting) + candle renderer + axes. Load history (`setData`) via the REST adapter. *(proves core math)* + unit + pixel + timezone/session tests.
 3. **Interaction**: pan, wheel-zoom, crosshair, autoscale, fit-content, kinetic, lazy history paging (`prependData` + viewport preserve). *(this is "a chart")* + interaction + HiDPI tests; assert pane x-sync.
 4. **Live**: WS to candle builder (§10.2, volume-delta + late-tick + session reset) to `series.update`; last-price line, auto-scroll, volume pane. *(historical + live parity)* + fake-feed tick/out-of-order tests.
@@ -1023,7 +1020,7 @@ reader of that version sees. Three rules fell out of getting this wrong:
 - **Optimistic UI**: show the order line immediately on `PENDING_PLACE`, reconcile/rollback on the book's confirm/reject (§9.5), otherwise chart trading feels laggy. But never show a *filled* position optimistically.
 - **Confirm gating**: default to explicit confirm; offer "armed" mode for experienced users. This is a safety + trust decision, not just UX.
 - **Time-axis labels**: gaps collapse automatically (§5.3), but tick-label logic must know the instrument's session (from `/market/timings`) to label day/session boundaries and seed the candle builder's session reset correctly.
-- **50k-bar live perf**: validate the `series.update` hot path allocates nothing (reuse bar objects) and that DataLayer index-shift on `prependData` stays O(n), before committing to the row shape. Enable conflation (§4.4) for the zoomed-out case.
+- **Live performance at 50k bars**: still open. The live workload in `docs/browser-endurance.md` misses its own frame gates at 10,000 and 50,000 bars per chart (§1), with only 150 bars in view, so the cost is in work over the whole history rather than in drawing. Conflation (§4.4) addresses the zoomed-out draw, not this.
 - **`originalTime` round-trip**: every callback/marker/event must echo the caller's original time value, not the internal UTC-seconds, verify in unit tests (§11.1) to avoid format drift.
 
 ---
@@ -1036,6 +1033,16 @@ The current implementation keeps these boundaries in 2.5.5:
 
 - **Separate price/time axis-widget canvases** - axes draw within the pane
   canvas by design (small-engine simplification).
+- **Repainting only what changed** - the mask can target one pane, but data
+  writes raise a global `Full`, so a study recompute or a live tick repaints
+  every pane (§3.2).
+- **The time-scale operation queue and one animation loop** - the queue is
+  declared in `InvalidateMask` with no caller, and kinetic scroll and eased
+  zoom run their own animation-frame loops (§3.2).
+- **Render budgets** - frame time is recorded by the endurance harness, not
+  enforced; 10,000 and 50,000 bars per chart miss its gates today (§1,
+  `docs/browser-endurance.md`). What the render benchmark should look at
+  first is in `docs/performance-notes.md`.
 - **Primitive price/time axis *views*** - primitives draw in the pane + hit-test
   + autoscale + lifecycle; dedicated fixed axis-label views are future work.
 - **OpenAlgo adapter conformance**: injectable transports and offline fixtures
@@ -1049,7 +1056,8 @@ The current implementation keeps these boundaries in 2.5.5:
   dark-tuned defaults and need explicit colours on a light theme.
 - **The WebGL2 backend covers the standard chart types.** Kagi, point-and-figure
   and custom types, drawings, text and every primitive stay on the 2D context;
-  the backend is a speed-up for the series pass, not a second renderer.
+  the backend moves the series pass of the standard types to the GPU and is not
+  a second renderer. Its frame time against Canvas2D has not been measured.
 
 Shipped since the first draft (were previously deferred): the `percentage` and
 `indexed-to-100` price-scale modes, a Playwright/Chromium E2E suite
@@ -1068,14 +1076,14 @@ Point-by-point mapping of the implementation review to where each is now address
 
 | # | Review point | Resolution | Section |
 |---|---|---|---|
-| 1 | Canvas/layout underspecified ("one canvas") | Explicit base+top canvas per pane + separate price/time axis widgets; grid layout diagram | §0 table, **§3.1** |
-| 2 | Invalidation too simple (global only) | Global level **+ per-pane map (+autoScale flag) + time-scale op queue + animations** | **§3.2** |
+| 1 | Canvas/layout underspecified ("one canvas") | Explicit base+top canvas per pane; the axes paint on the base canvas (separate axis canvases deferred, §13a); layout diagram | §0 table, **§3.1** |
+| 2 | Invalidation too simple (global only) | Global level **+ per-pane map (+autoScale flag)**; the per-pane map serves primitives while data writes stay global, and the time-scale op queue is declared but unused (§13a) | **§3.2** |
 | 3 | Shared time/data layer missing | Single `DataLayer` merges all series by time to shared logical indices, whitespace, `baseIndex`; per-series rows derive from it | **§4.1**, §3.3 |
-| 4 | History prepend/update semantics | Full mutation API: `setData` / `update` / **`prependData` (index-shift + viewport preserve)** / `mergeRange`; out-of-order upsert | **§4.2** |
+| 4 | History prepend/update semantics | Mutation API: `setData` / `update` / **`prependData` (index-shift + viewport preserve)**; out-of-order upsert; `mergeRange` not implemented | **§4.2** |
 | 5 | Live candle aggregation missing | `candle-builder.ts`: bucketing, **session reset, volume-delta (cumulative-day vs ltq), late-tick policy, tz** | **§10.2** |
 | 6 | Time model not explicit | Internal **UTC seconds + `originalTime`**; IST-string (REST) and epoch-ms (WS) convert at edges; display tz separate | **§4.0** |
 | 7 | No conflation/downsampling | Optional **OHLC-preserving** conflation layer (sub-0.5px) | **§4.4** |
-| 8 | Primitive API too small | Full API: lifecycle (`attached`/`detached`/`updateAllViews`), `requestUpdate`, **pane + price/time axis pane views, fixed axis views, z-order, hit-test w/ distance+priority, autoscaleInfo(start,end)** | **§8** |
+| 8 | Primitive API too small | Lifecycle (`attached`/`detached`/`updateAllViews`), `requestUpdate`, **z-order, hit-test w/ distance+priority, autoscaleInfo(start,end)**; the price/time axis views are designed in §8 and deferred (§13a) | **§8** |
 | 9 | Price-scale edge cases | tick size/`minMove`, formatters, inverted, indexed-to-100, custom range, overlay scales, margins, edge padding, label collision | **§5.2.1**, §5.4 |
 | 10 | Size claims (gzip vs brotli; area/baseline contradiction) | All numbers in **Brotli** w/ methodology + "measure in Phase 1"; **kept** line/area/baseline/HLC (correction noted); zero-dependency so nothing excluded from measurement | header, §0, **§2**, §11 |
 | 11 | Adapter names ≠ real endpoints | Adapter-method / **REST `/api/v1/*` & `/market/*`** / MCP / Python mapping table; chart depends only on adapter | **§10.0** |

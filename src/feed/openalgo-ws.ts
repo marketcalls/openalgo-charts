@@ -206,7 +206,9 @@ export function parseOrderUpdate(raw: unknown): OrderUpdateEvent | null {
  * The wire key the proxy reads is `depth`; 1.x sent `depth_level`, which the
  * proxy never read, so every request above the default was silently served
  * at five levels. Both keys go out: `depth` for the proxy, `depth_level` for
- * any consumer that learned the old name from this library.
+ * any consumer that learned the old name from this library. A wire key has no
+ * declaration to tag, so COMPATIBILITY.md lists `depth_level` as deprecated:
+ * 3.0.0 stops sending it.
  */
 export function formatSubscribe(mode: WsMode, symbol: string, exchange: string, depthLevel?: number): string {
   const msg: Record<string, unknown> = { action: 'subscribe', symbol, exchange, mode: MODE_NUMBER[mode] };

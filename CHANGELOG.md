@@ -57,6 +57,77 @@ the shared luminance calculation that shrinks the base, draw and chart-only
 builds costs it 48 bytes. Of about a hundred shapes measured, the only ones
 that shrink the trade file grow the base engine by 129 bytes and the chart-only
 import by 43.
+### Deprecated
+
+- `mapOrder` is deprecated in favour of `decodeOrder`, which returns the reason a
+  row could not be read, or `OpenAlgoTradeFeed.getOrderBook()`, which sets such
+  rows aside as `quarantined`. It keeps working until 3.0.0.
+- The `dashed` field that an `IndicatorHost` receives in `addIndicatorLevel` is
+  deprecated: read `lineStyle`, which the study always resolves and which also
+  carries `'dotted'`. It is still sent until 3.0.0. The `dashed` shorthand a
+  descriptor's `levels()` or `addPriceLine` accepts is unchanged and not
+  deprecated.
+- Depth subscribe frames stop sending the `depth_level` key beside `depth` in
+  3.0.0, and the widget message key "Enter a valid expiry date and time in UTC",
+  which the widget no longer shows, is removed then. Neither has a declaration
+  to tag, so COMPATIBILITY.md lists both.
+- The flat `shiftKey`, `ctrlKey` and `metaKey` on a `click` event are
+  deprecated: read `modifiers`, which carries the same state and `alt` besides.
+  `chart.renderer` is deprecated in favour of `chart.rendererKind`, the same
+  value. Both keep working until 3.0.0; their declaration tags follow in a later
+  change to the chart module.
+- COMPATIBILITY.md now has a table of every deprecated API with its
+  replacement, the release that replacement arrived in and the release that
+  removes the old form, and a list of older forms that are kept on purpose (the
+  `dashed` and `magnet: true` shorthands, the IST helpers, a study `levels` hook
+  written against the settings-only form, the `topic` field on an inbound
+  market-data frame, and the readers of older saved documents). The one-id
+  `draw:*` events beside `drawing:select` and `drawing:change` are listed as not
+  decided yet; they are settled with a typed event map.
+
+### Changed
+
+- `npm run lint` enforces the deprecation policy: a `@deprecated` tag in `src`
+  must name the release that removes the API ("removed in X.Y.Z"), that release
+  must be a later major than the package version, and the tag must sit in a doc
+  block. Once the package reaches the named release, the tag fails the lint.
+  The rule asks the compiler which tags a comment carries, so a tag
+  in the middle of a line counts, exactly as it does for the editor's
+  strike-through, and a tag's text ends at the next tag on the same line.
+- The draw tier reads a click's additive gesture (Shift, Ctrl or Cmd) from
+  `modifiers` first, so it keeps working when the deprecated flat flags go.
+
+### Documentation
+
+- README and ARCHITECTURE.md now describe the engine as it is: two canvases per
+  pane with the axes painted on the base canvas, a data write (a study
+  recompute or a live tick) repainting every pane, a time-scale operation queue
+  that nothing fills, kinetic scroll and eased zoom on their own frame loops,
+  conflation applied to every series in a pane, per-bar candle colours, a
+  marker pass that walks every marker, and `mergeRange` not implemented.
+- The unmeasured "60 fps" and "50k+ bars" claims are replaced by a recorded
+  measurement from `scripts/browser-endurance.mjs` at 2,000, 10,000 and 50,000
+  bars per chart (frame-interval p95 17 ms, 134 ms and 717 ms on the recorded
+  machine), with its workload and machine in `docs/browser-endurance.md`. The
+  README states the large-history cost as a known limit.
+- The README limitation that a pane had one shared comparison scale is removed:
+  each comparison has had a scale of its own since independent comparison
+  scales shipped.
+- ARCHITECTURE.md places order and position lines on the base canvas, where a
+  drag repaints them, and lists what the overlay canvas really carries. The
+  README says the same, and names the widget tier among the places that build
+  SVG icon markup.
+- No document calls the WebGL2 backend faster than Canvas2D any more: that has
+  not been measured. The documents say what the backend does instead.
+- `docs/performance-notes.md` records two findings for the render benchmark:
+  markers map the whole history on every paint, and the endurance harness's
+  painted-chart hash includes the price-axis strip.
+- `tests/docs-claims.test.ts` ties these statements to the code: a frame rate,
+  percentile, duration or bar-count workload in README or ARCHITECTURE.md must
+  cite its measurement record (a frame figure, the browser harness), GPU speed
+  wording needs a record that measures the GPU backend, the canvas count, the
+  overlay contents, the SVG tiers and the shared index must match the code, and
+  the repaint scope a document states must match what the chart does.
 
 ## 2.5.5
 

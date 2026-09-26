@@ -13,7 +13,7 @@ or freeze limits when available. See [instrument metadata](../../../../docs/inst
 
 Source of truth: every file in `src/trade/`, plus `src/feed/openalgo-trade.ts` (the `OrderFeed` adapter) and `src/feed/types.ts` (`MarketDepth`). Tests: `tests/trade.test.ts`, `tests/order-engine.test.ts`, `tests/dom-ladder.test.ts`. Demos: `examples/phase8-trade.html`, `examples/phase9-chart-trading.html`, `examples/phase10-dom.html`.
 
-Separate bundle entry: `import { OrderEngine } from 'openalgo-charts/trade'` -> `dist/openalgo-charts.trade.mjs`. `OpenAlgoTradeFeed`, `mapOrder`, `mapPosition` are in the **base** package, not this one.
+Separate bundle entry: `import { OrderEngine } from 'openalgo-charts/trade'` -> `dist/openalgo-charts.trade.mjs`. `OpenAlgoTradeFeed`, `decodeOrder`, `mapPosition` (and the deprecated `mapOrder`, removed in 3.0.0) are in the **base** package, not this one.
 
 ## Which tier
 

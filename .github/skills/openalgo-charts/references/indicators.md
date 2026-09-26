@@ -1045,6 +1045,12 @@ not equate these revisions or script executions with provider tick counts.
 Older custom `IndicatorHost` implementations may omit `sourceState` and execution
 metadata; they retain the prior timestamp heuristic and sticky realtime flag.
 
+In `addIndicatorLevel(level, paneIndex)`, read `level.lineStyle`. The instance
+always resolves it (a level with neither field draws dashed), and it carries
+`'dotted'`. `level.dashed` is deprecated, still sent until 3.0.0, and equals
+`lineStyle === 'dashed'`. A descriptor's own `levels()` may keep writing the
+`dashed` shorthand: that input form is not deprecated.
+
 ## Alerts (1.8.1)
 
 A crossover of an indicator's own columns is something only that indicator can name, so the condition is declared as data and the runtime watches it.

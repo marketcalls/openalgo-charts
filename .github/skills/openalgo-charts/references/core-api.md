@@ -608,7 +608,7 @@ The effective level per pane is `max(globalLevel, paneLevel)`. Crosshair moves r
 
 ## Render backends
 
-The per-frame series pass on each pane goes through an `IRenderBackend` (`src/render/backend.ts`). The pane paints everything else (background, grid, axes, primitives) on the 2D context the backend hands back from `overlay2d()`, so a backend only has to own the one pass a GPU can speed up. `Canvas2dBackend` ships in the base tier, registers itself under `'canvas2d'`, and draws through the very same 2D context the pane already holds, so its op stream is byte for byte the one every chart drew before the port existed (`tests/e2e/render-parity.spec.ts` holds it to zero differing pixels).
+The per-frame series pass on each pane goes through an `IRenderBackend` (`src/render/backend.ts`). The pane paints everything else (background, grid, axes, primitives) on the 2D context the backend hands back from `overlay2d()`, so a backend only has to own the one pass that maps onto a batch of GPU geometry. How the two backends compare in frame time has not been measured. `Canvas2dBackend` ships in the base tier, registers itself under `'canvas2d'`, and draws through the very same 2D context the pane already holds, so its op stream is byte for byte the one every chart drew before the port existed (`tests/e2e/render-parity.spec.ts` holds it to zero differing pixels).
 
 ```ts
 interface IRenderBackend {

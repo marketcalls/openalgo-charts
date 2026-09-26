@@ -171,7 +171,9 @@ export type WidgetBuiltinMessage =
   | "Enable"
   | "Enable {name}"
   | "Enabled"
-  // Retained so existing host translation catalogs remain type compatible.
+  // Retained so existing host translation catalogs remain type compatible. The
+  // widget no longer shows it; a union member takes no doc tag, so
+  // COMPATIBILITY.md lists it as deprecated, and 3.0.0 drops it.
   | "Enter a valid expiry date and time in UTC"
   | "Enter an expiry date and time in UTC"
   | "Enter an expiry date and time"
