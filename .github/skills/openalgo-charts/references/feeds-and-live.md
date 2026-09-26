@@ -499,7 +499,7 @@ shows no price.
 Types: `InstrumentKey`, `QuoteSnapshot`, `QuoteRequest`, `QuoteStreamStatus`,
 `QuoteStreamHandlers`, `QuoteFeed`, `NewsRequest`, `NewsItem`, `NewsPage`, `NewsFeed`.
 
-## Data variants: session, adjustment, currency, unit (unreleased)
+## Data variants: session, adjustment, currency, unit (2.5.6)
 
 Base exports: `normalizeDataVariant`, `dataVariantKey`, `unsupportedDataVariant`,
 `dataVariantError`, `publishDataContext`, and the types `DataVariant`, `DataSession`,

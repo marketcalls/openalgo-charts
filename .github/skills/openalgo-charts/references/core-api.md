@@ -704,8 +704,8 @@ the rules in [primitives-and-plugins](./primitives-and-plugins.md).
   callback returns each frame, given that frame's `PrimitiveRenderContext`, instead
   of the pane's binding for the layer.
 - `IndicatorBackground` - the primitive behind a descriptor's `background` hook, one
-  per shading target (the study's own pane, and, unreleased, the price pane or a named plot's pane:
-  see [background targets](indicators.md#background-targets-unreleased)).
+  per shading target (the study's own pane, and, since 2.5.6, the price pane or a named plot's pane:
+  see [background targets](indicators.md#background-targets-256)).
   Full-height per-bar columns in the bottom layer, behind every series.
 
 **Calendar boundaries, zone-aware.** The `zone` argument defaults to

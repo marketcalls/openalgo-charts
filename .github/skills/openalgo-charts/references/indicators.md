@@ -389,7 +389,7 @@ focusable, so the help is reachable without a pointer. An empty string draws
 nothing, which is the difference between no help and a mark with nothing behind
 it. `ChartSettingsColorPairInput` carries the same field.
 
-## Conditional inputs and inline rows (unreleased)
+## Conditional inputs and inline rows (2.5.6)
 
 Every `IndicatorInput` variant also takes the `IndicatorInputPresentation`
 fields, and `ChartSettingsColorPairInput` takes `visibleWhen` and `activeWhen`
@@ -868,7 +868,7 @@ registerIndicator({
 chart.addIndicator('my-momentum', { length: 14 });
 ```
 
-Optional descriptor members: `fills`, `markers`, `markerAnchor` / `hasSource` (2.4.6), `levels`, `range`, `attach`, `calcTail`, `table`, `tables`, `draws` (1.7.1), and `background` / `barColors` / `alerts` (1.7.1), plus `colorBy` (per-bar colour), `priceScaleId` / `overlay`, and `ohlc` (1.8.1) on an individual plot. Returned drawings and markers, and the columns of `background`'s list form (`IndicatorBackgroundSpec`), can carry `overlay` / `plot` output targets (see the markers and drawings sections, and [background targets](#background-targets-unreleased) for shading).
+Optional descriptor members: `fills`, `markers`, `markerAnchor` / `hasSource` (2.4.6), `levels`, `range`, `attach`, `calcTail`, `table`, `tables`, `draws` (1.7.1), and `background` / `barColors` / `alerts` (1.7.1), plus `colorBy` (per-bar colour), `priceScaleId` / `overlay`, and `ohlc` (1.8.1) on an individual plot. Returned drawings and markers, and the columns of `background`'s list form (`IndicatorBackgroundSpec`), can carry `overlay` / `plot` output targets (see the markers and drawings sections, and [background targets](#background-targets-256) for shading).
 
 ### Assigning scales to study plots
 
@@ -1234,7 +1234,7 @@ barColors: ({ values }) => values.bias.map((v) =>
 - Contributes nothing to autoscale, is anchored to the first bar's **time** (so a page of history does not slide it off its bars), coalesces adjacent same-colour bars into one fill, and culls everything outside the visible range. Return `[]` to clear the layer.
 - `IndicatorBackground` is exported and works as a plain primitive: `new IndicatorBackground()`, `chart.addPrimitive(p, paneIndex)`, `setColors(colors, bars)`, `setVisible(on)`.
 
-### Background targets (unreleased)
+### Background targets (2.5.6)
 
 `background` may instead return a list of `IndicatorBackgroundSpec` columns: `{ colors, overlay?, plot? }`, `colors` being the plain form's one entry per bar. The runtime tells the forms apart by their entries (the plain form holds only colours and gaps).
 
@@ -1601,7 +1601,7 @@ an availability clock report unsupported and clear values. Removal and chart
 destruction cancel requests and prevent stale publication. This helper adds no
 transport, page merging or live subscription; the host announces external changes.
 
-**Data variants (unreleased).** A request that names no `variant` is sent in the
+**Data variants (2.5.6).** A request that names no `variant` is sent in the
 chart's session and adjustment: `inheritedDataVariant(dataContext.variant)` from
 `openalgo-charts/indicators`, so a benchmark lines up with extended-hours bars bar for
 bar. The currency and unit stay behind, since they belong to the instrument asked

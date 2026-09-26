@@ -114,7 +114,7 @@ Everything `src/widget/index.ts` exports at runtime. The shell (`createWidget` a
 | `focusable(n)`, `focusables(root)` | functions | Focus-trap helpers. |
 | `placeBeside(anchor, size, bounds, gap?, pad?)`, `placeBelow(...)`, `placeTip(...)` | functions | Pure placement maths in root coordinates, flipping when there is no room. |
 | `boxIn(root, el)` | function | An element's box in the widget root's coordinate space. |
-| `historyPress(ctx, 'undo' \| 'redo')`, `historyReady(ctx, 'undo' \| 'redo')` | functions | One undo or redo press through `ctx.history`, and whether it would do anything; a custom context without a history falls back to `ctx.draw`. Every widget undo control calls these. (unreleased) |
+| `historyPress(ctx, 'undo' \| 'redo')`, `historyReady(ctx, 'undo' \| 'redo')` | functions | One undo or redo press through `ctx.history`, and whether it would do anything; a custom context without a history falls back to `ctx.draw`. Every widget undo control calls these. (2.5.6) |
 | `WidgetContext`, `WidgetBusEvents`, `BusHandler`, `StorageLike`, `DialogMount`, `DialogHandle`, `WidgetDialogName`, `OverlayOptions`, `OverlayStack`, `TipSpec`, `TipSource`, `TipSide`, `TipController`, `Box`, `Size` | types | |
 
 ### The keymap (`keymap.ts`)
@@ -218,9 +218,9 @@ Every mount takes the context and an optional anchor element (so it satisfies `D
 | `controlsFromInputs(inputs)` | function | `ChartSettingsInput[]` (the engine's settings schema) to `FormControl[]`. |
 | `controlsFromFields(fields)` | function | A drawing tool's `SettingsField[]` to `FormControl[]`. |
 | `mountIndicatorInputControls(ctx, options)` | function | Adds symbol lookup and chart picking to an existing indicator form. Returns `IndicatorInputControlsHandle` with `cancelPick`, `refresh` and `destroy`. An action beside a disabled field is disabled with the field's reason; call `refresh()` after the form re-reads its conditions. |
-| `inputStates(inputs, values)` | function | (unreleased) `Map<key, InputState>` of `{ visible, active, dependsOn }` from each input's `visibleWhen` and `activeWhen`, cascading through inputs a condition reads. A colour pair's `enabled`, `up` and `down` keys, on the input or under a form control's `pair`, count as the pair. For a host that renders its own form. |
-| `inputConditionMet(condition, values)` | function | (unreleased) Whether one `IndicatorInputCondition` holds for a settings bag. Reads own keys only; a malformed condition counts as met. |
-| `InputState` | type | (unreleased) One input's `visible`, `active` and the `dependsOn` keys its `activeWhen` reads. |
+| `inputStates(inputs, values)` | function | (2.5.6) `Map<key, InputState>` of `{ visible, active, dependsOn }` from each input's `visibleWhen` and `activeWhen`, cascading through inputs a condition reads. A colour pair's `enabled`, `up` and `down` keys, on the input or under a form control's `pair`, count as the pair. For a host that renders its own form. |
+| `inputConditionMet(condition, values)` | function | (2.5.6) Whether one `IndicatorInputCondition` holds for a settings bag. Reads own keys only; a malformed condition counts as met. |
+| `InputState` | type | (2.5.6) One input's `visible`, `active` and the `dependsOn` keys its `activeWhen` reads. |
 | `IndicatorInputControlsOptions`, `IndicatorInputControlsHandle` | types | Native typed-field host actions. |
 | `SettingsDialogOptions`, `IndicatorPickerOptions`, `IndicatorSettingsOptions`, `IndicatorSettingsTab`, `DrawingPropertiesOptions`, `LevelEditorOptions`, `TextEditorOptions`, `TextEditorHandle`, `ContextMenuHooks`, `ContextMenuOptions`, `MenuEntry`, `MenuItem`, `OrderRequest`, `PanelHandle`, `FormControl`, `FormKind`, `FormOptions`, `FormHandle` | types | |
 
@@ -232,7 +232,7 @@ field error without committing invalid settings. Prices and timestamps preserve
 their numeric value; timestamps are absolute UTC seconds, including fractions.
 An ordinary `time` field retains its existing clock-string contract.
 
-(Unreleased) `FormControl` carries an input's `activeWhen`, `visibleWhen` and
+From 2.5.6, `FormControl` carries an input's `activeWhen`, `visibleWhen` and
 `inline`; `controlsFromInputs` threads them. `renderForm` re-reads them, and
 `FormOptions.unavailable`, after every edit and every `sync(values)`, so the host
 callback can depend on values too; its reason wins over "Depends on ...". A
@@ -350,7 +350,7 @@ widget.root;                         // the .oac-widget element
 widget.context;                      // the WidgetContext every mounted piece was handed
 widget.objects;                      // the owned base-tier ChartObjects inventory
 widget.alerts;                       // the owned AlertController, including drawing anchors
-widget.history;                      // the ChartHistory every undo control walks (unreleased)
+widget.history;                      // the ChartHistory every undo control walks (2.5.6)
 widget.series;                       // the primary SeriesApi, retained by setChartType
 widget.symbol(); widget.exchange(); widget.interval(); widget.chartType(); widget.theme();
 widget.variant();                    // the DataVariant in use, undefined for the feed's default series
@@ -846,7 +846,7 @@ widget.openNews();
   `{ change, percent }` or null without a positive `previousClose`.
 - `WATCHLIST_PANEL_CSS` and `NEWS_PANEL_CSS` are part of `WIDGET_COMPONENT_CSS`.
 
-## Chart-wide undo and redo (unreleased)
+## Chart-wide undo and redo (2.5.6)
 
 `ChartHistory` (widget tier, DOM-free) is one timeline for a chart: a study added or
 removed (with its settings, visibility, pane, stacking row and scale), study settings,

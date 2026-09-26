@@ -117,7 +117,7 @@ the rest. `planIndicatorTemplate` and `planIndicatorTemplateState` in `replace` 
 every current host study (not `removable` or not `listed`), with its identity and policy,
 and give the template's pane groups the free slots around its pane, so a replace neither
 copies nor removes one.
-## Data variants in workspaces (unreleased)
+## Data variants in workspaces (2.5.6)
 
 `WorkspacePane.variant?: DataVariant` names the provider series a chart showed (extended
 hours, raw prices, a currency or a unit). The parser keeps a pane's variant as the

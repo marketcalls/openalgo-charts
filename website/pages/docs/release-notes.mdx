@@ -8,6 +8,68 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.5.6
+
+2026-09-26
+
+### Added
+
+- **One undo timeline for the whole chart.** The widget's `ChartHistory`
+  (`widget.history`) records studies added, removed or edited, scale, pane and
+  chart settings changes and drawings in the order they were made. Ctrl+Z,
+  Ctrl+Y, the rail and the mobile sheets walk it. A step is taken back through
+  the chart's public calls and never past a study's policy.
+- **Study policies.** `IndicatorPolicy` (`removable`, `configurable`, `movable`,
+  `listed`) keeps a study the host places from the user's delete, settings or
+  reorder, the way a drawing's policy does. The legend, the Objects panel and
+  the widget's menus follow it, and the chart state saves only the restrictions.
+- **One draw order per pane.** Sources, studies, drawings and primitives paint in
+  bands, and `chart.moveInSeriesStack`, `draw.placeInStack` and the Objects
+  panel move them. A drawing can sit between two studies, and the pointer takes
+  what is painted on top.
+- **Data variants.** Regular and extended hours, adjusted and raw prices, and a
+  quote currency or unit are each their own provider series
+  (`BarsRequest.variant`, `DataFeed.dataVariants`), with their own cache keys,
+  requests and alert scopes. Nothing is converted locally: an undeclared
+  variant is reported. The widget gains a `variant` option and
+  `widget.setDataVariant`.
+- **Session calendar for the future.** `chart.setSessionCalendar` and
+  `SessionCalendar` lay the space past the last bar out in the venue's hours,
+  and `Instrument.applyTo` sets it. Without one, future times continue at the
+  median of the last 64 bar intervals instead of the last gap.
+- **Study inputs.** A `price` input can pair with a `timestamp` input
+  (`timeKey`) so one pick sets both, with an optional anchor to drag on the
+  pane. Inputs can be shown or enabled by other settings (`visibleWhen`,
+  `activeWhen`) and share a row (`inline`). A study's background shading can
+  target the price pane or a plot's pane.
+- `chart.plotRect`, `chart.priceScaleDefaults`, the `layout:change` event,
+  `chart.setTickSchedule`, and accent registries for the drawing and chrome
+  icon sets.
+
+### Changed
+
+- Chrome icons draw a 2px line, and 19 drawing tool glyphs were redrawn so no
+  two tools share a picture.
+- Pane boundaries land on whole device pixels. At a whole-number pixel ratio a
+  chart whose pane heights are whole pixels paints exactly as before; at 1.25
+  or 1.5 the separator is one device pixel. The chart follows a change of pixel
+  ratio and paints in the same frame as a resize.
+- The OpenAlgo adapters refuse a non-default variant with
+  `DataVariantUnsupportedError`.
+
+### Deprecated
+
+- `mapOrder` (use `decodeOrder`), the `dashed` field of a study level (read
+  `lineStyle`), the flat `shiftKey`, `ctrlKey` and `metaKey` on `click` (read
+  `modifiers`), `chart.movePriceAxis` (use `setPriceAxisPlacement`) and the
+  `depth_level` key in depth frames. All keep working until 3.0.0;
+  COMPATIBILITY.md lists each with its replacement.
+
+Saved layouts, drawings and workspace documents from 2.5.5 load unchanged. No
+runtime dependencies or package tiers were added.
+
+See [Upgrading to 2.5.6](/docs/upgrading) and the [widget guide](/docs/widget).
+
 ## 2.5.5
 
 2026-09-26

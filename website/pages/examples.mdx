@@ -282,7 +282,7 @@ return chart;`} />
 Open the study inputs and change the mode, the smoothing and the signal switch.
 The band width appears only in Bands mode and keeps its value while it is
 hidden, the smoothing length is editable only with a smoothing chosen, and the
-signal's length and colour share its row and follow its switch. Unreleased: see
+signal's length and colour share its row and follow its switch. From 2.5.6, see
 [conditional inputs](/docs/indicators#conditional-inputs-and-inline-rows).
 
 <ConditionalInputsDemo />
@@ -1078,7 +1078,7 @@ The momentum histogram sits in its own pane, and the regime it measures shades t
 candles: that shading column names the price pane with `overlay: true`, so the up and
 down stretches read against the bars themselves, behind them. A second column names no
 target and marks the strongest readings behind the histogram, exactly as a plain
-`background` would. See [background targets](/docs/indicators#background-targets-unreleased) (unreleased).
+`background` would. See [background targets](/docs/indicators#background-targets-256) (2.5.6).
 
 <RunnableExample height={420} code={`lib.registerIndicator({
   id: 'demo-routed-shading', name: 'Routed shading', category: 'Custom',

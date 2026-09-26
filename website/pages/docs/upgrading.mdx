@@ -1,12 +1,64 @@
 ---
-title: Upgrading to 2.5.5
-description: Adopt workspace, open-interest, alert and host contracts while preserving existing integrations.
+title: Upgrading to 2.5.6
+description: Adopt study policies, the chart-wide undo timeline, data variants and the session calendar while preserving existing integrations.
 ---
 
-# Upgrading to 2.5.5
+# Upgrading to 2.5.6
 
-Version 2.5.5 needs no migration. Saved layouts, drawings and workspace
-documents from 2.5.4 load unchanged, and every new contract is optional.
+Version 2.5.6 needs no migration. Saved layouts, drawings and workspace
+documents from 2.5.5 load unchanged, and every new contract is optional.
+
+Check these points in your host:
+
+- Times past the last bar now continue at the median of the last 64 bar
+  intervals, or follow a session calendar when you set one, instead of the gap
+  between the last two bars. Stored drawings keep their times; one anchored in
+  the future is drawn where that time now falls. Evenly spaced data maps
+  exactly as before.
+- Pane boundaries round to whole device pixels. At a ratio of 1 a pane's height
+  can differ from its exact share by up to one pixel, and at a fractional ratio
+  the separator is a one device pixel box over the lower pane instead of a CSS
+  border. Screenshot baselines of multi-pane charts at 1.25 or 1.5 need
+  refreshing; at whole-number ratios a chart whose pane heights are whole
+  pixels paints exactly as before.
+- Chrome icons draw a 2px line and 19 drawing tool glyphs changed. Update any
+  snapshot of the icon markup.
+- `indicator.setSettings` and `indicator.remove` return a boolean, false when a
+  study policy refuses the call. User-facing controls you build should call
+  them without `{ force: true }`, so a policy the host set is respected.
+- The OpenAlgo adapters and `FakeDataFeed` refuse a non-default data variant
+  with `DataVariantUnsupportedError`. A feed without `dataVariants` serves only
+  its default series.
+- A variant-only change through `publishDataContext` emits `data:context` twice,
+  a passing context with the interval cleared and then the real one. A host
+  listener that fetches on `data:context` should skip a context without an
+  interval.
+- The widget's Undo and Redo now walk `widget.history`, not only the drawing
+  history. A host with its own undo stack can read `DrawingController.historySteps()`
+  and the `step` on `drawing:change`, or hand input anchor steps over with
+  `delegateInputAnchorSteps`.
+- A host that types a complete translation dictionary as
+  `Record<WidgetBuiltinMessage, string>` must add the new messages for
+  conditional inputs, point picks, data variants, protected studies and undo
+  failures; a translator that returns `undefined` keeps the English text.
+- Deprecated, working until 3.0.0: `mapOrder`, a study level's `dashed`, the
+  flat modifier flags on `click`, `chart.movePriceAxis` and the `depth_level`
+  key in depth frames. See the [compatibility policy](/docs/compatibility).
+
+New and optional: `IndicatorPolicy` on `addIndicator`, the series stack
+(`seriesStack`, `moveInSeriesStack`, `placeInStack`), `ChartHistory`, data
+variants (`BarsRequest.variant`, `DataFeed.dataVariants`, the widget's
+`variant` option), `SessionCalendar` and `chart.setSessionCalendar`, paired
+`timeKey` inputs with `chart.beginPick('point')`, `visibleWhen`, `activeWhen`
+and `inline` on inputs, and background targets. See
+[Indicators](/docs/indicators), [Data variants](/docs/data-variants),
+[Instruments](/docs/instruments), [Scales and panes](/docs/scales-and-panes) and
+[Widget controls](/docs/widget).
+
+## Earlier upgrades
+
+Version 2.5.5 needed no migration. Saved layouts, drawings and workspace
+documents from 2.5.4 loaded unchanged, and every new contract was optional.
 
 Check these points in your host:
 
@@ -32,15 +84,13 @@ Check these points in your host:
   move and drawing anchor messages; a translator that returns `undefined` keeps
   the English text.
 
-New and optional: named watchlists (`WatchlistRepository`) with `QuoteFeed`
+Also new then: named watchlists (`WatchlistRepository`) with `QuoteFeed`
 rows and a `NewsFeed` reader in the widget dock, account state and native
 position commands for brokers that declare them (`AccountManager`,
 `TradingFeatures`, `previewOrder`, `closePosition`, `reversePosition`),
 price-dependent `TickSchedule` bands, and drawings pinned to the viewport
 (`space: 'viewport'`). See [Widget controls](/docs/widget), [Trading](/docs/trading),
 [Instruments](/docs/instruments) and [Drawing tools](/docs/drawing-tools).
-
-## Earlier upgrades
 
 Version 2.5.4 needed no migration. Saved layouts, drawing documents and workspace
 documents from 2.5.3 load unchanged; pane `collapsed`, drawing `policy` and a

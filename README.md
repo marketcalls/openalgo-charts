@@ -12,7 +12,7 @@ with no runtime dependencies.
 [![npm version](https://img.shields.io/npm/v/openalgo-charts.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/openalgo-charts)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![npm downloads](https://img.shields.io/npm/dm/openalgo-charts.svg?color=0ea5e9&label=npm%20downloads)](https://www.npmjs.com/package/openalgo-charts)
-[![tests](https://img.shields.io/badge/engine%20tests-8699%20passing-brightgreen.svg)](#develop)
+[![tests](https://img.shields.io/badge/engine%20tests-9245%20passing-brightgreen.svg)](#develop)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](#principles)
 
 [**Documentation**](https://marketcalls.github.io/openalgo-charts/) &nbsp;·&nbsp; [**Live examples**](https://marketcalls.github.io/openalgo-charts/examples) &nbsp;·&nbsp; [**Getting started**](./docs/getting-started.md) &nbsp;·&nbsp; [**Migrating to 2.0**](./docs/migrating-to-2.md) &nbsp;·&nbsp; [**Architecture**](./ARCHITECTURE.md)
@@ -25,7 +25,7 @@ with no runtime dependencies.
 npm install openalgo-charts
 ```
 
-Current version: **2.5.5**. Watchlists, news and account panels, a movable price pane, drawings pinned to the screen, price tick bands, and studies that recover after a missing bar.
+Current version: **2.5.6**. One undo timeline for the whole chart, study policies, one draw order for studies and drawings, extended hours and adjusted prices as their own series, study inputs that follow other settings, and the space past the last bar laid out in the venue's hours.
 See the [changelog](./CHANGELOG.md) for release notes.
 
 ## Quick start
@@ -56,7 +56,7 @@ for live data, or [the widget example](#the-whole-terminal-in-one-call) for char
 
 ## Architecture
 
-<a href="docs/architecture-diagram.svg"><img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts 2.5.5 architecture: host responsibilities, the base data-to-rendering pipeline with alerts and shared replay, and eight optional tiers including workspace storage, trading tools and the widget" width="920" /></a>
+<a href="docs/architecture-diagram.svg"><img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts 2.5.6 architecture: host responsibilities, the base data-to-rendering pipeline with alerts and shared replay, and eight optional tiers including workspace storage, trading tools and the widget" width="920" /></a>
 
 How data reaches the chart, what your app owns, and which features you can import.
 [Open the full-size diagram](docs/architecture-diagram.svg).
@@ -107,7 +107,7 @@ You can also load the library from a CDN in a plain HTML page:
 ```html
 <div id="chart" style="width:100vw;height:100vh"></div>
 <script type="module">
-  import { createChart, generateBars } from 'https://unpkg.com/openalgo-charts@2.5.5/dist/openalgo-charts.mjs';
+  import { createChart, generateBars } from 'https://unpkg.com/openalgo-charts@2.5.6/dist/openalgo-charts.mjs';
   const chart = createChart(document.getElementById('chart'), { timezone: 'Asia/Kolkata' });
   chart.addSeries('candlestick').setData(generateBars(1700000000, 200, 3600));
   chart.fitContent();
@@ -148,6 +148,9 @@ jumps to a date or a range, loading older history first (`widget.goTo`), and
 linked charts and portable workspace documents. The panel dock also holds named
 **Watchlists** with live quote rows and a **News** reader when the host supplies a
 quote or news feed, and an account summary when its broker declares accounts.
+Undo and Redo walk one timeline for the whole chart (`widget.history`): studies
+added, removed or edited, scale and pane changes, chart settings and drawings, in
+the order they were made.
 
 The widget uses the same public API as a custom interface. Your app supplies the
 data feed and handles order requests; the widget does not choose a broker or send
@@ -162,17 +165,17 @@ Unused optional tiers stay out of the base chart download.
 
 | Import | Contents | Brotli |
 |---|---|---|
-| `openalgo-charts` | Engine, 13 chart types, panes and scales, custom indicator registry, primitives, alerts, replay, comparisons, chart linking, state, feeds, bar cache, trading overlays, CSV and SVG export | 119.98 kB |
-| `openalgo-charts/indicators` | 105 built-in indicators, calculation helpers and helpers for studies that use external data | 36.63 kB |
-| `openalgo-charts/draw` | 87 drawing tools + a headless drawing controller, clipboard, settings schema, level palette, freehand geometry and SVG icons | 44.87 kB |
+| `openalgo-charts` | Engine, 13 chart types, panes and scales, custom indicator registry, primitives, alerts, replay, comparisons, chart linking, state, feeds, bar cache, trading overlays, CSV and SVG export | 125.39 kB |
+| `openalgo-charts/indicators` | 105 built-in indicators, calculation helpers and helpers for studies that use external data | 36.44 kB |
+| `openalgo-charts/draw` | 87 drawing tools + a headless drawing controller, clipboard, settings schema, level palette, freehand geometry and SVG icons | 48.42 kB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point &amp; Figure, Kagi, and symbol arithmetic (`AAPL/MSFT`) | 4.50 kB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO) with compact pixel letters, Footprint, order flow | 14.96 kB |
-| `openalgo-charts/trade` | Order, position and bracket tools, account state, order preview and position commands, plus a depth-of-market ladder | 16.64 kB |
+| `openalgo-charts/trade` | Order, position and bracket tools, account state, order preview and position commands, plus a depth-of-market ladder | 16.69 kB |
 | `openalgo-charts/webgl` | GPU drawing for supported series, with Canvas 2D fallback | 6.39 kB |
-| `openalgo-charts/widget` | `createWidget`: toolbar, Data, Objects, Watchlist and News dock, account summary, symbol search, dialogs, mobile controls, shortcuts and optional layout persistence | 82.66 kB |
-| `openalgo-charts/workspace` | Validated workspace and indicator-template documents, named watchlists, named catalogs with revision checks, asynchronous storage and an IndexedDB adapter; no DOM | 10.04 kB |
+| `openalgo-charts/widget` | `createWidget`: toolbar, Data, Objects, Watchlist and News dock, account summary, symbol search, dialogs, mobile controls, shortcuts and optional layout persistence | 92.72 kB |
+| `openalgo-charts/workspace` | Validated workspace and indicator-template documents, named watchlists, named catalogs with revision checks, asynchronous storage and an IndexedDB adapter; no DOM | 10.47 kB |
 
-Everything together is **336.67 kB Brotli**; a widget terminal with built-in indicators (base + draw + indicators + widget) is 284.14 kB. Figures are measured from the current build (unreleased changes after 2.5.5). The trade tier is 16.64 kB on its own; base + trade costs 136.62 kB. Sizes use decimal kB.
+Everything together is **355.97 kB Brotli**; a widget terminal with built-in indicators (base + draw + indicators + widget) is 302.96 kB. Figures are measured from the 2.5.6 release build. The trade tier is 16.69 kB on its own; base + trade costs 142.07 kB. Sizes use decimal kB.
 
 ## What's built
 
@@ -194,6 +197,8 @@ macd.setSettings({ 'macd:width': 2, 'macd:lineStyle': 'dashed' });
 Since 2.4.0 a study can fold the chart's own bars up to a higher timeframe with `securitySeries` (as the bucket stood at each bar, or the last completed one, or with lookahead when reproducing a source that repaints), paint a plot displaced by a number of bars, colour a candle's wick and border apart from its body, pin a marker to the pane edge, put a tooltip on a drawn zone, compute an alert message from the bar that fired, and ask the host for another instrument's bars through `chart.setBarsProvider`. A calculation that throws once it is on the chart is reported on that study's data status rather than thrown into the render loop.
 
 Every built-in is measured against its standard definition bar by bar, at several parameter sets, and each one's warmup (the first bar it can honestly produce a value for) is part of that check rather than an afterthought. A study draws nothing until it has the history it needs.
+
+Since 2.5.6 a study carries a policy the way a drawing does (`IndicatorPolicy`: `removable`, `configurable`, `movable`, `listed`), so a study the host places can be kept from the user's delete, settings or reorder. Its background shading can name the price pane or one plot's pane (`IndicatorBackgroundSpec`). A `price` input can pair with a `timestamp` input (`timeKey`), so one pick on the chart sets both and an anchor on the pane drags them together. An input can be shown or enabled by another setting (`visibleWhen`, `activeWhen`) and share a row with its neighbours (`inline`); the generated forms follow the rules, and `calc` still receives every setting.
 
 The chart owns the whole lifecycle: series, pane placement, reference levels, fixed ranges (RSI 0..100), recompute on data change, teardown. Every plot gets colour, opacity, thickness, and line style for free, generated from the descriptor. Write your own with `registerIndicator`, or use the **Tier-2 contract** for indicators whose data arrives independently of the chart's bars (CVD or an external feed).
 
@@ -230,7 +235,7 @@ draw.setTool('trend-line');   // the next two clicks place it
 
 87 tools. Lines, channels and four pitchfork variants. Fibonacci levels, time projections, fans, circles, arcs, wedges and spirals. Gann fans, boxes and squares. Harmonic patterns, Elliott waves and Head and Shoulders. Geometric wavefronts and tessellation. Shapes, paths, forecasts, positions, measurements, text, tables and freehand brushes. Every tool appears in the [editable drawing gallery](https://marketcalls.github.io/openalgo-charts/demos/drawings/index.html), with simulated NIFTY prices near 23800 and desktop or touch controls.
 
-Headless by design: no toolbar, no dialogs. Placement with live preview, selection, whole-shape and per-anchor dragging, magnet snap to O/H/L/C, undo/redo (a drag is one step), and persistence. A drawing can be pinned to the screen (`space: 'viewport'`), so pan and zoom leave it where it is. A drawing's `policy` makes it read-only, unselectable, transient or unlisted, for levels the host places and the user should not move. Anchors are `{ time, price }`, never pixels, so they survive zoom and resolve inside collapsed session gaps and past the last bar.
+Headless by design: no toolbar, no dialogs. Placement with live preview, selection, whole-shape and per-anchor dragging, magnet snap to O/H/L/C, undo/redo (a drag is one step), and persistence. A drawing can be pinned to the screen (`space: 'viewport'`), so pan and zoom leave it where it is. A drawing's `policy` makes it read-only, unselectable, transient or unlisted, for levels the host places and the user should not move. Studies and drawings share one draw order per pane (`chart.seriesStack`, `chart.moveInSeriesStack`, `draw.placeInStack`), so a drawing can sit between two studies and the pointer takes what is painted on top. Anchors are `{ time, price }`, never pixels, so they survive zoom and resolve inside collapsed session gaps and past the last bar.
 
 `draw.copy()`, `draw.cut()` and `draw.paste()` move drawings through the OS clipboard, including between two charts on the page. The payload is JSON under one namespaced key, so foreign text pastes nothing instead of throwing at your Ctrl+V handler, and every field is validated before it reaches the model. A refused clipboard permission does not lose the copy: every write also lands in a shared in-memory clipboard, and a cut deletes only after the write succeeds. A paste is one undo step of fresh objects, nudged two bars and 16 px so it is visibly a second shape. The key bindings stay yours; the engine installs no listeners.
 
@@ -488,7 +493,7 @@ chart.on('renderer:fallback', ({ from, to, reason }) => log(reason));
 The series pass on each pane goes through a render backend port. The shipped Canvas2D backend was pixel-identical to 1.9.2 when the port landed in 2.0.0, and the render-parity spec holds later changes to zero differing pixels against a baseline build from `npm run baseline` (it skips when no baseline is present). The `openalgo-charts/webgl` tier registers a WebGL2 backend that batches every standard chart type into one shared offscreen surface per page with analytic anti-aliasing and composites it into the pane's own canvas, so screenshots, the SVG export and the DOM are unchanged and a dashboard of panes never opens more than one GL context. `'webgl2'` throws until the tier is imported and falls back to the 2D path with one warning on a device without WebGL2; `'auto'` is the silent form. A lost context moves the chart to `canvas2d` for the session and emits `renderer:fallback`. Text, dashed lines, gradients, drawings and custom types stay on the 2D context, which already does them well.
 
 ### Data
-OpenAlgo REST history + WebSocket ticks with auto-reconnect and resubscribe, live candle aggregation, tick/volume bars, a unified `chart.on(...)` event bus, markers and signals, earnings/dividend/expiry event markers, an IANA chart timezone, and custom price/time formatters.
+OpenAlgo REST history + WebSocket ticks with auto-reconnect and resubscribe, live candle aggregation, tick/volume bars, a unified `chart.on(...)` event bus, markers and signals, earnings/dividend/expiry event markers, an IANA chart timezone, and custom price/time formatters. Regular and extended hours, adjusted and raw prices, and a quote currency or unit are each their own provider series (`BarsRequest.variant`, `DataFeed.dataVariants`): nothing is converted locally, and a variant the feed does not declare is reported rather than made up. A session calendar (`chart.setSessionCalendar`, `Instrument.applyTo`) lays the space past the last bar out in the venue's hours, so a drawing placed there lands on a real session time.
 
 ## Size budget
 
@@ -496,17 +501,17 @@ Enforced in CI by [`size-limit`](./.size-limit.json). Nothing is excluded, becau
 
 | Bundle | Limit | Actual |
 |---|---|---|
-| Base engine | 119.15 kB | 119.15 kB |
-| Base + trade | 135.79 kB | 135.79 kB |
-| Indicators tier | 36.35 kB | 36.34 kB |
-| Draw tier | 45.25 kB | 45.24 kB |
+| Base engine | 125.39 kB | 125.39 kB |
+| Base + trade | 142.08 kB | 142.07 kB |
+| Indicators tier | 36.44 kB | 36.44 kB |
+| Draw tier | 48.42 kB | 48.42 kB |
 | Transform tier | 6 kB | 4.50 kB |
 | Profile tier | 15 kB | 14.96 kB |
 | WebGL2 tier | 7 kB | 6.39 kB |
-| Widget tier | 82.31 kB | 82.25 kB |
-| Widget terminal (base + draw + indicators + widget) | 282.99 kB | 282.99 kB |
-| Workspace tier | 9.99 kB | 9.99 kB |
-| **Everything** | 335.48 kB | 335.47 kB |
+| Widget tier | 92.72 kB | 92.72 kB |
+| Widget terminal (base + draw + indicators + widget) | 302.97 kB | 302.96 kB |
+| Workspace tier | 10.47 kB | 10.47 kB |
+| **Everything** | 355.98 kB | 355.97 kB |
 
 ## Documentation
 
@@ -551,8 +556,8 @@ See [Contributing](./CONTRIBUTING.md) for setup, targeted checks, documentation 
 ```bash
 npm install        # install dev toolchain
 npm run typecheck  # strict TypeScript check
-npm test           # engine unit tests (Vitest): 8699 across 383 files
-npm run test:demo  # reference-host tests: 589 across 56 files
+npm test           # engine unit tests (Vitest): 9245 across 408 files
+npm run test:demo  # reference-host tests: 653 across 62 files
 npm run test:endurance # node endurance-harness tests: 7 cases
 npm run build      # Rollup -> dist/ (minified ESM per tier + types)
 npm run size       # size-limit (Brotli) against the budget
@@ -570,7 +575,7 @@ npm run verify     # lint + types + unit + endurance harness + build + demo + dt
 
 ## Status &amp; limitations
 
-Version **2.5.5**. All engine build phases are implemented. Upgrading a 1.9.x host: [Migrating to 2.0](./docs/migrating-to-2.md).
+Version **2.5.6**. All engine build phases are implemented. Upgrading a 1.9.x host: [Migrating to 2.0](./docs/migrating-to-2.md).
 
 Known gaps, stated plainly:
 

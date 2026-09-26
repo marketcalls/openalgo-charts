@@ -4,12 +4,14 @@
 > Historical pre-implementation target: **< 50 KB Brotli** for the full package (engine + trade overlay), no runtime dependencies. *(Brotli is the size metric we hold the budget against - see §11. Gzip runs ~10-15% larger.)*
 > Goal: professional-grade interactive financial-chart rendering + advanced on-chart trading & trade management.
 
-> **Current release: 2.5.5.** Nine independently loadable tiers. The engine gains an opt-in movable price pane (`movablePrimaryPane`), an identity rather than slot 0, and indicator gap recovery, so a missing bar costs a running study only the bars it covers. The draw tier pins drawings to the viewport. The trade tier gains account state, order preview, durations, native close, reverse and bracket commands, and price-dependent tick schedules that validation, dragging and the ladder follow. The workspace tier keeps named watchlists, and the widget adds Watchlist, News and account panels over optional quote, news and account contracts. The 2.5.5 build measures **119.15 kB** base, **135.79 kB** base + trade and **335.15 kB** for all tiers (decimal Brotli sizes). Current measurements are in the README size budget; historical estimates and release measurements below remain labeled as such.
+> **Current release: 2.5.6.** Nine independently loadable tiers. Studies carry policies the way drawings do, and sources, studies, drawings and primitives share one draw order per pane that the pointer follows. A `price` input can pair with a `timestamp` input and be picked or dragged as one point, a study's background shading can target the price pane or a plot's pane, and inputs can be shown or enabled by other settings. Data variants (regular or extended hours, adjusted or raw prices, a quote currency or unit) are separate provider series, never converted locally. A session calendar lays the space past the last bar out in the venue's hours. Pane boundaries land on whole device pixels, the chart follows a change of pixel ratio and repaints in the same frame as a resize. The widget walks one undo timeline for the whole chart (`ChartHistory`). The 2.5.6 build measures **125.39 kB** base, **142.07 kB** base + trade and **355.97 kB** for all tiers (decimal Brotli sizes).
+>
+> **2.5.5.** The engine gains an opt-in movable price pane (`movablePrimaryPane`), an identity rather than slot 0, and indicator gap recovery, so a missing bar costs a running study only the bars it covers. The draw tier pins drawings to the viewport. The trade tier gains account state, order preview, durations, native close, reverse and bracket commands, and price-dependent tick schedules that validation, dragging and the ladder follow. The workspace tier keeps named watchlists, and the widget adds Watchlist, News and account panels over optional quote, news and account contracts. The 2.5.5 build measured **119.15 kB** base, **135.79 kB** base + trade and **335.15 kB** for all tiers. Current measurements are in the README size budget; historical estimates and release measurements below remain labeled as such.
 >
 > **Earlier implementation history.** Version 2.2.0 expands the drawing registry to 85 tools, adds native curve geometry and guided multi-point placement, and tightens label, volume-window and hit-test work. Version 2.1.9 adds chart-owned vector branding, optional persisted text watermarks and guarded logo gestures.  Version 2.1.8 normalizes trackpad and wheel input, routes gestures by axis, eases automatic price projections and adds dedicated mobile widget controls. Version 2.1.7 adds shared object management, a searchable Objects panel and dialogs sized to their host. Version 2.1.6 adds shared history ownership, request scheduling, resilient cache snapshots, managed external-study context and visible widget retry states. The design below includes the footprint styles, configurable statistics table and quantity/lot display. Version 2.1.4 restores two-axis mouse and pen panning by default, while retaining horizontal-only panning as an explicit preference. Version 2.1.3 added saved navigation preferences and a reset control. Version 2.1.2 isolates external-study data contexts, strengthens history/live recovery, accepts current OpenAlgo protocol frames and adds optional widget stylesheet nonces. The pre-implementation size estimates in this document have been superseded by measured `size-limit` (Brotli) figures, which live in the README size budget and are re-measured on every release: on the 2.2.0 build the base engine is **76.22 KB**, base + trade **83.83 KB**, and everything (all eight tiers) **212.52 KB**. The original "under 50 KB" target below is kept as history; the budgets that are enforced are the per-tier rows in `.size-limit.json`. See the *Revision log* for the point-by-point mapping and §13a for the honest deferred list.
 
 <p align="center">
-  <img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts 2.5.5: host boundary, base engine data flow and controllers, and eight optional capability tiers" width="900" />
+  <img src="docs/architecture-diagram.svg" alt="OpenAlgo Charts 2.5.6: host boundary, base engine data flow and controllers, and eight optional capability tiers" width="900" />
 </p>
 
 The diagram separates host orchestration from the base engine and its eight optional
@@ -22,7 +24,7 @@ notifications. Pipeline arrows show data flow, not package dependencies.
 
 ## Current integration map
 
-For 2.5.5 integrations, start with these current guides and implementation
+For 2.5.6 integrations, start with these current guides and implementation
 boundaries. The numbered design sections below retain historical plans and
 explicitly labeled estimates; use the current API types for implementation.
 
@@ -44,6 +46,12 @@ explicitly labeled estimates; use the current API types for implementation.
 | Accounts and position commands | Trade-tier `AccountManager`, `TradingFeatures`, `previewOrder`, durations and native close, reverse and brackets, each declared by the broker and never simulated | [Trading](https://marketcalls.github.io/openalgo-charts/docs/trading/) |
 | Tick schedules | `TickSchedule` bands as instrument metadata, followed by validation, dragging and the ladder; one constant tick by default | [Instruments](https://marketcalls.github.io/openalgo-charts/docs/instruments/) |
 | Viewport drawings | Draw-tier `space: 'viewport'` anchors as fractions of the pane's plot; never linked across charts | [Drawing tools](https://marketcalls.github.io/openalgo-charts/docs/drawing-tools/) |
+| Study policies | Base `IndicatorPolicy` (`removable`, `configurable`, `movable`, `listed`); user controls are refused, `{ force: true }` and restores are the host's act; saved only as restrictions | [Indicators](https://marketcalls.github.io/openalgo-charts/docs/indicators/) |
+| Draw order | Base series stack per pane (`seriesStack`, `moveInSeriesStack`, `setPrimitiveStackAbove`) and draw-tier `stackAbove` / `placeInStack`; hit testing follows paint order | [Scales and panes](https://marketcalls.github.io/openalgo-charts/docs/scales-and-panes/) |
+| Chart-wide undo | Widget-tier `ChartHistory`: studies, settings, scales, panes, chart settings and drawings on one timeline, replayed through public calls and never past a policy | [Widget](docs/widget.md) |
+| Data variants | `BarsRequest.variant` and `DataFeed.dataVariants`; each variant its own cache key, request and alert scope; an undeclared variant is reported, never derived | [Data variants](https://marketcalls.github.io/openalgo-charts/docs/data-variants/) |
+| Session calendar | `SessionCalendar` or an `Instrument` set with `chart.setSessionCalendar`; times past the last bar follow the venue's hours | [Instruments](https://marketcalls.github.io/openalgo-charts/docs/instruments/) |
+| Study inputs | `visibleWhen`, `activeWhen` and `inline` on `IndicatorInput`; paired `timeKey` point inputs with an optional on-pane anchor; presentation only, `calc` sees every setting | [Indicators](https://marketcalls.github.io/openalgo-charts/docs/indicators/) |
 | Chart export | Loaded or revealed bars, study values and comparison closes; host delivers the CSV | [Chart data](docs/chart-data-export.md) |
 | Custom studies | Descriptor registry in base; optional built-ins and external-data helpers | [Indicators](https://marketcalls.github.io/openalgo-charts/docs/indicators/) |
 | Host interface | Canvas containers in base; toolbar, Data/Objects dock, rich symbol search, dialogs and translated controls in the widget | [Widget](docs/widget.md) |
@@ -58,7 +66,7 @@ We are writing our own engine from scratch, with no external charting dependency
 | **Shared data/time layer** merging all series by time to logical indices | Keeps price + volume + indicator panes perfectly aligned on one x-axis. See §4. |
 | **Indexed plot rows with cached visible range** | O(log n) visible-range lookup, so the series pass walks the *visible* bars. A study recompute still walks its full history once per frame that carries a tick; §1 records what that costs. |
 | **Bitmap vs media coordinates** | Draw in device pixels so 1px lines stay crisp on HiDPI/retina without blur. |
-| **Per-pane invalidation mask** (global level + per-pane + time-scale ops) | A crosshair move repaints the overlay canvas only. The mask can also target one pane, but in 2.5.5 a study recompute and a live tick still repaint every pane. See §3.2. |
+| **Per-pane invalidation mask** (global level + per-pane + time-scale ops) | A crosshair move repaints the overlay canvas only. The mask can also target one pane, but in 2.5.6 a study recompute and a live tick still repaint every pane. See §3.2. |
 | **Renderers are pure functions of draw-data** | Renderer takes a plain data object + canvas context, draws, returns. No state, easy to test, tree-shakeable. |
 | **Primitive/plugin extension API** with views + lifecycle + z-order + hit-test | The trade layer (order lines, DOM ladder) and markers/events are *primitives*, not hardcoded, keeps core lean. See §8. |
 
@@ -92,7 +100,7 @@ Net: Apache-2.0 keeps the project permissive *and* lets us incorporate a hard al
 - **< 50 KB Brotli** total (engine + trade overlay). Stretch: < 30 KB Brotli engine-only. *(All size numbers in this doc are Brotli. These are estimates until the Phase 1 prototype is measured, see §11.)*
 - Zero runtime dependencies. We write our own HiDPI canvas sizing (~30 lines) rather than pulling a separate canvas-sizing helper package, so nothing is excluded from the size measurement.
 - TypeScript source, ESM output, tree-shakeable, framework-agnostic (works in plain JS, React wrapper optional).
-- Design goal: 60 fps with 50k bars loaded, 1.5k visible. **Not met in 2.5.5.** The live workload of `scripts/browser-endurance.mjs` (two charts, 150 bars in view, ten forming-bar replacements per second per chart, five studies each, Canvas2D, DPR 1, 1440 by 900) measured a frame-interval p95 of 17 ms at 2,000 bars per chart, 134 ms at 10,000 and 717 ms at 50,000, on the 2.5.5 build in headless Chromium 149 on an 8-core desktop CPU, 2026-09-26. The same 150 bars are in view in all three runs, so the growth is work over the whole history, such as the study recompute (no built-in implements `calcTail` yet); no profile has attributed it further. The commands, conditions and the rest of each report are in `docs/browser-endurance.md`. A 1.5k-bar view and a zoomed-out view have not been measured; per-size render budgets arrive with the render benchmark.
+- Design goal: 60 fps with 50k bars loaded, 1.5k visible. **Not met in 2.5.6.** The live workload of `scripts/browser-endurance.mjs` (two charts, 150 bars in view, ten forming-bar replacements per second per chart, five studies each, Canvas2D, DPR 1, 1440 by 900) measured a frame-interval p95 of 17 ms at 2,000 bars per chart, 134 ms at 10,000 and 717 ms at 50,000, on the 2.5.5 build in headless Chromium 149 on an 8-core desktop CPU, 2026-09-26. The same 150 bars are in view in all three runs, so the growth is work over the whole history, such as the study recompute (no built-in implements `calcTail` yet); no profile has attributed it further. The commands, conditions and the rest of each report are in `docs/browser-endurance.md`. A 1.5k-bar view and a zoomed-out view have not been measured; per-size render budgets arrive with the render benchmark.
 - Works in OpenAlgo's existing frontend (it can be dropped into any page; React/HTMX/vanilla all fine).
 
 ### Size accounting rule
@@ -292,12 +300,12 @@ class InvalidateMask {
 }
 ```
 
-What 2.5.5 does with it:
+What 2.5.6 does with it:
 - **Cursor work stays on the overlay.** A crosshair move, and a hover change between top-layer primitives, raise `Cursor`: every pane repaints its top canvas and no base canvas is touched.
 - **Per-pane invalidation is used by primitives.** A primitive's `requestUpdate` raises its own pane only, at `Cursor` for a top-layer primitive and `Light` otherwise; attaching or removing a primitive and dragging a price axis are pane-local too.
 - **Data changes are still global.** Writing series data raises a global `Full`, and a study's plots are series, so an indicator recompute repaints every pane, not only the study's own. The source-bar update path does the same, so a live tick repaints every pane. Repainting only the panes whose data or scale moved is planned work, not current behaviour.
 - **`autoScale` flag per pane**: separates "rescale this pane's price axis" from "repaint at current scale". A `Full` level autoscales every pane regardless.
-- **The time-scale queue is declared but unused.** `addTimeScaleOp` has no caller in 2.5.5 and the frame never reads the queue. Fit, bar spacing, right offset and scroll-to-realtime change the time scale directly, and the repaint goes through the ordinary invalidation. Kinetic scroll and eased wheel zoom each schedule their own animation frames (`input/kinetic.ts`, `input/zoom-glide.ts` drive the maths) and invalidate on every step, so the paint follows one frame behind the step.
+- **The time-scale queue is declared but unused.** `addTimeScaleOp` has no caller in 2.5.6 and the frame never reads the queue. Fit, bar spacing, right offset and scroll-to-realtime change the time scale directly, and the repaint goes through the ordinary invalidation. Kinetic scroll and eased wheel zoom each schedule their own animation frames (`input/kinetic.ts`, `input/zoom-glide.ts` drive the maths) and invalidate on every step, so the paint follows one frame behind the step.
 - `chart.invalidate(mask)` merges into the pending mask and schedules one rAF; multiple calls per frame coalesce.
 
 ```
@@ -1036,7 +1044,7 @@ reader of that version sees. Three rules fell out of getting this wrong:
 
 ## 13a. Deferred / not-yet-implemented (honest status)
 
-The current implementation keeps these boundaries in 2.5.5:
+The current implementation keeps these boundaries in 2.5.6:
 
 - **Separate price/time axis-widget canvases** - axes draw within the pane
   canvas by design (small-engine simplification).
