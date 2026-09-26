@@ -234,7 +234,10 @@ interface ClickPayload extends PointerFacts {
   point: { x: number; y: number };
   /** Set on the release half of a press-drag-release gesture. */
   viaDrag?: boolean;
-  /** Modifier state at the click; any of them makes a selection additive. */
+  /**
+   * The flat copy of `modifiers` the chart still sends on a click. It goes in
+   * 3.0.0 with the matching `ChartClickEvent` fields, so `modifiers` is read first.
+   */
   shiftKey?: boolean;
   ctrlKey?: boolean;
   metaKey?: boolean;
@@ -331,9 +334,14 @@ function magnetModeOf(value: boolean | MagnetMode | undefined): MagnetMode {
   return 'off';
 }
 
-/** Whether Shift is held, from either form the payload carries it in. */
-const shiftOf = (p: PointerFacts & { shiftKey?: boolean }): boolean =>
-  p.modifiers?.shift === true || p.shiftKey === true;
+/**
+ * Whether a key is held, from either form the payload carries it in. The flat
+ * flags on a click are deprecated (removed in 3.0.0): `modifiers` is read
+ * first so nothing here depends on them, and they are still read so that a
+ * synthetic payload carrying only them behaves the same until then.
+ */
+const held = (p: PointerFacts & { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean },
+  key: 'shift' | 'ctrl' | 'meta'): boolean => p.modifiers?.[key] === true || p[`${key}Key` as const] === true;
 
 /** `v` held to `0..size`: a pixel on a plot of that size. */
 const within = (v: number, size: number): number => (v < 0 ? 0 : v > size ? size : v);
@@ -1549,7 +1557,7 @@ export class DrawingController {
       ? null : { time, price, paneIndex };
     const bar = p.bar ?? null;
     this._lastBar = bar === null || barTime === null ? null : { time: barTime, ...bar };
-    this._shift = shiftOf(p);
+    this._shift = held(p, 'shift');
     this._notePointer(p);
     // The pointer left the plot: nothing is under it any more.
     if (time === null && price === null) this._setHovered(null);
@@ -1840,11 +1848,12 @@ export class DrawingController {
       // Reject an unmappable click outright: a NaN anchor serialises as null
       // and produces a drawing that can never be rendered or hit-tested.
       if (p.price === null || !Number.isFinite(p.price) || !Number.isFinite(p.time)) return;
-      this._shift = shiftOf(p);
+      this._shift = held(p, 'shift');
       this._placePoint(this._aimPoint({ time: p.time, price: p.price }, p.paneIndex), p.paneIndex);
       return;
     }
-    const additive = p.shiftKey === true || p.ctrlKey === true || p.metaKey === true;
+    // Shift, Ctrl or Cmd adds to the selection.
+    const additive = (['shift', 'ctrl', 'meta'] as const).some(key => held(p, key));
     if (p.id !== null && p.id.startsWith('draw:')) {
       this.select(p.id.slice('draw:'.length).split('#')[0], additive);
       return;
@@ -1937,7 +1946,7 @@ export class DrawingController {
     const handle = handleStr === undefined ? null : Number(handleStr);
 
     this._notePointer(p);
-    this._shift = shiftOf(p);
+    this._shift = held(p, 'shift');
     if (this._dragStart === null || this._dragStart.id !== rawId || this._dragStart.handle !== handle) {
       // Grabbing the body of an unselected shape selects it first, on its own:
       // the selection is what moves, and a drag that moved something other than

@@ -153,6 +153,27 @@ describe('clicking', () => {
     expect(draw.selection()).toEqual([b.id]);
   });
 
+  it('reads the additive gesture from `modifiers`, which outlives the flat flags', () => {
+    // The flat shiftKey, ctrlKey and metaKey on a click are deprecated for
+    // removal in the next major; the draw tier must not depend on them.
+    const chart = makeChart();
+    const draw = new DrawingController(chart);
+    const a = line(draw);
+    const b = line(draw);
+    const c = line(draw);
+    const modified = (id: string, modifiers: Record<string, boolean>): void =>
+      chart.emit('click', { id, time: 1, price: 1, paneIndex: 0, point: { x: 1, y: 1 }, modifiers });
+    click(chart, `draw:${a.id}`);
+    modified(`draw:${b.id}`, { shift: true });
+    modified(`draw:${c.id}`, { ctrl: true });
+    expect(draw.selection()).toEqual([a.id, b.id, c.id]);
+    modified(`draw:${b.id}`, { meta: true });
+    expect(draw.selection()).toEqual([a.id, c.id]);
+    draw.select(a.id);
+    chart.emit('click', { id: null, time: 1, price: 1, paneIndex: 0, point: { x: 1, y: 1 }, modifiers: { shift: true } });
+    expect(draw.selection()).toEqual([a.id]);
+  });
+
   it('a click on empty space clears, unless it is the additive gesture', () => {
     const chart = makeChart();
     const draw = new DrawingController(chart);
