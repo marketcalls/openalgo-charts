@@ -401,7 +401,7 @@ class DataLayer {
 }
 ```
 
-**As shipped** (`model/data-layer.ts`): each series keeps its bars in one time-sorted array, and one shared `_sortedTimes` array with an `_indexByTime` map is the index space over all of them; there is no `PlotRow` type. `setSeriesData`, `addBars` (history paging and backfill) and an out-of-order insert rebuild that shared index across every series. Replacing the last bar leaves it as it is, and appending past the right edge adds one time at its end without a rebuild.
+**As shipped** (`model/data-layer.ts`): each series keeps its bars in one time-sorted array, and one shared `_sortedTimes` array with an `_indexByTime` map is the index space over all of them; there is no `PlotRow` type. A count of how many series hold each time keeps that index in step: `setSeriesData`, `addBars` (history paging and backfill), an out-of-order insert and `removeSeries` touch only the bars that differ from the series' previous data, past the prefix the two share, and the shared index changes only where a time enters or leaves the union, reindexing from the first position that moved. Re-sending a series over the same times leaves it as it is, and so do replacing the last bar and an indicator re-merging its plots; appending past the right edge adds one time at its end without a rebuild.
 
 Key responsibilities:
 - **Merge by time, assign logical indices.** Each distinct timestamp across all series gets one logical index; every series maps its data onto that shared index. Adding an indicator that only has values for some bars uses **whitespace** for the rest, so it stays aligned without inventing bars.

@@ -216,8 +216,10 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // undo history's reconciliation on top of them, again in the draw and widget
 // tiers, leaves it there; allow 79.27 KiB. Keeping a canvas's reported device
 // size only while its new box can snap to it moves it to 81148 bytes
-// (79.25 KiB); the budget follows it down to 79.25 KiB.
-const LIMIT_BYTES = 79.25 * 1024;
+// (79.25 KiB); the budget follows it down to 79.25 KiB. Counting how many
+// series hold each time, so a bulk load that brings the same times back leaves
+// the shared axis alone, moves it to 81303 bytes (79.40 KiB); allow 79.41 KiB.
+const LIMIT_BYTES = 79.41 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

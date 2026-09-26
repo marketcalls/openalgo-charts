@@ -185,8 +185,8 @@ const EMPTY_BARS: readonly Bar[] = [];
  * Sort ascending by time and collapse repeated times, keeping the **last**
  * occurrence.
  *
- * One bar per time is an invariant every reader relies on: `_rebuild` maps times
- * onto logical indices through a Set, so two bars sharing a time both resolve to
+ * One bar per time is an invariant every reader relies on: the axis holds each
+ * time once and maps it to one logical index, so two bars sharing a time both resolve to
  * the same index and get projected to the same x — two candles drawn on top of
  * each other, each with its own colour. A live feed whose candle builder starts
  * unseeded produces exactly that: it opens a fresh bar for the bucket the
@@ -210,6 +210,8 @@ export class DataLayer {
   private readonly _series = new Map<SeriesId, SeriesEntry>();
   private _sortedTimes: number[] = [];
   private readonly _indexByTime = new Map<number, number>();
+  /** How many series hold each time on the axis; a time leaves the axis at zero. */
+  private readonly _timeRefs = new Map<number, number>();
   private _nextId: SeriesId = 1;
   /** Bumped whenever the time axis changes, so the future plan knows to look again. */
   private _version = 0;
@@ -249,8 +251,10 @@ export class DataLayer {
   }
 
   public removeSeries(id: SeriesId): void {
+    const entry = this._series.get(id);
+    if (entry === undefined) return;
+    this._replaceBars(entry, []);
     this._series.delete(id);
-    this._rebuild();
   }
 
   /**
@@ -260,8 +264,7 @@ export class DataLayer {
   public setSeriesData(id: SeriesId, bars: readonly Bar[]): void {
     const entry = this._series.get(id);
     if (entry === undefined) throw new Error(`openalgo-charts: unknown series ${id}`);
-    entry.bars = sortedUniqueByTime(bars);
-    this._rebuild();
+    this._replaceBars(entry, sortedUniqueByTime(bars));
   }
 
   /**
@@ -280,8 +283,7 @@ export class DataLayer {
     const byTime = new Map<number, Bar>();
     for (const b of entry.bars) byTime.set(b.time, b);
     for (const b of bars) byTime.set(b.time, b);
-    entry.bars = Array.from(byTime.values()).sort((a, b) => a.time - b.time);
-    this._rebuild();
+    this._replaceBars(entry, Array.from(byTime.values()).sort((a, b) => a.time - b.time));
   }
 
   /**
@@ -301,6 +303,7 @@ export class DataLayer {
       bars.push(bar);
       const n = this._sortedTimes.length;
       const globalLast = n > 0 ? this._sortedTimes[n - 1] : undefined;
+      const isNew = this._retain(bar.time);
       if (globalLast === undefined || bar.time > globalLast) {
         this._appendTime(bar.time); // genuine global right-edge append
         return 'append';
@@ -308,8 +311,8 @@ export class DataLayer {
       // Series-local append but NOT the global newest: the time belongs mid-axis.
       // If it already exists globally (another series has it) no new index is
       // added; otherwise reindex so _sortedTimes stays ordered.
-      if (this._indexByTime.has(bar.time)) return 'replace';
-      this._rebuild();
+      if (!isNew) return 'replace';
+      this._reindex([bar.time], false);
       return 'insert';
     }
     if (bar.time === last.time) {
@@ -492,16 +495,61 @@ export class DataLayer {
     return index === undefined ? null : { index, bar };
   }
 
-  private _rebuild(): void {
-    const times = new Set<number>();
-    for (const entry of this._series.values()) {
-      for (const bar of entry.bars) times.add(bar.time);
+  /** Count one more series holding `time`; true when no series held it before. */
+  private _retain(time: number): boolean {
+    const n = this._timeRefs.get(time) ?? 0;
+    this._timeRefs.set(time, n + 1);
+    return n === 0;
+  }
+
+  /**
+   * Swap a series' bars and bring the time axis along. Replacing a series with
+   * data over the same times, the common case for a host re-sending a series
+   * and for an indicator re-merging its plots, leaves the axis untouched: the
+   * cost is the series' own length, not every series the chart holds.
+   */
+  private _replaceBars(entry: SeriesEntry, next: Bar[]): void {
+    const prev = entry.bars;
+    entry.bars = next;
+    // Both are sorted, so the times they share from the start are the same set
+    // and their counts stand. A refresh, or a refresh with a bar appended,
+    // leaves nothing or one bar past it.
+    let p = 0;
+    while (p < prev.length && p < next.length && prev[p].time === next[p].time) p++;
+    // Count the new bars before releasing the old, so a time both hold never
+    // passes through zero. `next` is sorted, so `added` comes out sorted.
+    let added: number[] | null = null;
+    for (let i = p; i < next.length; i++) if (this._retain(next[i].time)) (added ??= []).push(next[i].time);
+    let removed = false;
+    for (let i = p; i < prev.length; i++) {
+      const t = prev[i].time, n = this._timeRefs.get(t) ?? 0;
+      if (n <= 1) { this._timeRefs.delete(t); removed = true; } else this._timeRefs.set(t, n - 1);
     }
-    this._sortedTimes = Array.from(times).sort((a, b) => a - b);
+    if (added !== null || removed) this._reindex(added ?? [], removed);
+  }
+
+  /**
+   * Merge `added` (sorted, new to the axis) into it and drop times no series
+   * holds any longer. Indices before the first change keep their value, so an
+   * append or a change near the right edge reindexes only what moved.
+   */
+  private _reindex(added: readonly number[], removed: boolean): void {
+    const old = this._sortedTimes;
+    const merged: number[] = [];
+    let i = 0, j = 0;
+    while (i < old.length || j < added.length) {
+      if (j >= added.length || (i < old.length && old[i] < added[j])) {
+        const t = old[i++];
+        if (!removed || this._timeRefs.has(t)) merged.push(t);
+        else this._indexByTime.delete(t);
+      } else {
+        merged.push(added[j++]);
+      }
+    }
+    let first = 0;
+    while (first < merged.length && first < old.length && merged[first] === old[first]) first++;
+    for (let k = first; k < merged.length; k++) this._indexByTime.set(merged[k], k);
+    this._sortedTimes = merged;
     this._version++;
-    this._indexByTime.clear();
-    for (let i = 0; i < this._sortedTimes.length; i++) {
-      this._indexByTime.set(this._sortedTimes[i], i);
-    }
   }
 }

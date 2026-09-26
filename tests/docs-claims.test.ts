@@ -194,7 +194,7 @@ describe('the shared index', () => {
     const id = layer.createSeries();
     const bars: Bar[] = Array.from({ length: 3 }, (_, i) => ({ time: 1_700_000_000 + i * 60, open: 1, high: 2, low: 0, close: 1 }));
     layer.setSeriesData(id, bars);
-    const rebuild = vi.spyOn(layer as unknown as { _rebuild(): void }, '_rebuild');
+    const rebuild = vi.spyOn(layer as unknown as { _reindex(): void }, '_reindex');
     layer.update(id, { ...bars[2], close: 1.5 });
     const afterReplace = layer.length;
     layer.update(id, { ...bars[2], time: bars[2].time + 60 });
