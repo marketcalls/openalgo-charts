@@ -207,15 +207,7 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // upkeep. Measured 76874 to 77082 bytes (75.07 to 75.28 KiB). Holding the last
 // good bar colours through the restack after a failed settings pass takes it to
 // 77119 bytes (75.31 KiB); allow 75.32 KiB.
-// Merged together those streams measure 80041 bytes (78.17 KiB), over the
-// 77.08 KiB each had measured against 2.5.5 on its own. A chart that stays
-// sharp and whole through a resize or a new pixel ratio belongs to every
-// host: the resolution query and window resize that follow the ratio, the
-// device-pixel observer, pane boundaries rounded onto device pixels, the
-// separator rule, the paint inside the resize callback, plus `layout:change`,
-// `priceScaleDefaults` and `setSessionCalendar`. Measured 80041 to 80977
-// bytes (78.17 to 79.08 KiB, 0.91 KiB); allow 79.08 KiB.
-const LIMIT_BYTES = 79.08 * 1024;
+const LIMIT_BYTES = 77.08 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

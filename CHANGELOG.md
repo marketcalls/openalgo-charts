@@ -108,17 +108,13 @@ that shrink the trade file grow the base engine by 129 bytes and the chart-only
 import by 43.
 
 The device-pixel and resize work, `layout:change`, `priceScaleDefaults` and
-`setSessionCalendar` add 933 Brotli bytes to every row that carries the base
+`setSessionCalendar` add 1,125 Brotli bytes to every row that carries the base
 engine, measured on the merged build before and after: base engine 124,123 to
-125,056, base + trade 140,810 to 141,743, widget terminal 299,952 to 300,885,
-everything 352,964 to 353,897; the chart-only import grows from 80,041 to
-80,977 bytes. No other tier moved. The merged build already measured over
-several budgets that each stream had set on its own (base engine 121.97 kB,
-draw 47.47 kB against 48,058 bytes, widget 88.27 kB against 91,334, workspace
-10.41 kB against 10,470, chart-only 77.08 KiB), so every row over its budget
-now carries the smallest two-decimal value that passes: base 125.06 kB, base +
-trade 141.75 kB, draw 48.06 kB, widget 91.34 kB, terminal 300.89 kB, workspace
-10.47 kB, everything 353.90 kB and the chart-only import 79.08 KiB.
+125,248, base + trade 140,810 to 141,935, widget terminal 299,952 to 301,077,
+everything 352,964 to 354,089; the chart-only import grows from 80,041 to
+81,172 bytes. No other tier moved. The budgets are set once for the merged
+build, which already measured over several of them before this change.
+
 ### Deprecated
 
 - `mapOrder` is deprecated in favour of `decodeOrder`, which returns the reason a

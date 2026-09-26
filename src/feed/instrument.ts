@@ -129,8 +129,8 @@ function metadata(input: unknown): InstrumentMetadata {
     priceTick, pricePrecision: precision, quantityStep: positive(raw.quantityStep, 'quantity step'),
     intervals: Object.freeze(intervals),
     calendar: Object.freeze({ sessions: sessions(calendar.sessions, fail), exceptions }),
-    // Checked to be a boolean above; stated again for the website's build, which
-    // compiles this file without strict null checks and so narrows nothing there.
+    // A boolean by the check above; said again for a checker without strict
+    // null checks (the docs site's), which does not carry that narrowing here.
     ...(raw.hasOpenInterest === undefined ? {} : { hasOpenInterest: raw.hasOpenInterest as boolean }),
     ...(bands ? { tickBands: bands.bands } : {}),
   });
