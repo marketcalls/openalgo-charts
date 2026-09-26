@@ -84,5 +84,19 @@ export default defineConfig({
       testMatch: /yfinance-(?:ui-253|mobile|templates|indicator-source|grid|routed-study|pane-reorder|tick-schedule|viewport|watchlist-news|account|study-policies|history|session)\.spec\.ts/,
       use: { browserName, baseURL: DEMO_URL },
     })),
+    // The render bench times frames, so it must not share the machine with
+    // the rest of the suite: it is a project only when OAC_RENDER_BENCH is set
+    // (`npm run bench:render` and the CI bench job set it), its file is not a
+    // .spec.ts that another project would collect, and it runs one test at a
+    // time. It launches Chromium itself, with flags per renderer.
+    ...(process.env.OAC_RENDER_BENCH
+      ? [{
+          name: 'render-bench',
+          testMatch: /render-bench\.perf\.ts/,
+          workers: 1,
+          fullyParallel: false,
+          use: { baseURL: ENGINE_URL },
+        }]
+      : []),
   ],
 });

@@ -107,13 +107,16 @@ display latency, nor prove that every animation callback painted a new chart.
 Long-task counts and durations are included as diagnostic evidence.
 
 Initial and final price canvases must contain candle-colored pixels, and the
-pixel hash of each live chart's price-pane base canvas must change. That canvas
-also carries the price-axis strip, so a moving last-price tag alone could change
-the hash; the candle-pixel count is what shows candles were painted. The
-crosshair is on the separate overlay canvas and is not hashed. `start.png`
-and `end.png` preserve full rendered charts for visual inspection. Inspect both
-images before citing a report as release evidence. The run finally destroys the
-live charts and requires zero remaining canvas elements.
+pixel hash of each live chart's price plot must change. Both are read from the
+plot rectangle of the price-pane base canvas only. That canvas also carries the
+price-axis strip, whose last-price tag moves with every tick in the candle
+colours, so a probe over the whole canvas could pass both gates on the axis
+alone; reports produced before the probe was narrowed to the plot stand for
+their screenshots, not for those two gates. The crosshair is on the separate
+overlay canvas and is not read. `start.png` and `end.png` preserve full
+rendered charts for visual inspection. Inspect both images before citing a report
+as release evidence. The run finally destroys the live charts and requires zero
+remaining canvas elements.
 
 ## Gates
 
@@ -187,10 +190,27 @@ update-delivery gates failed; at 50,000 the pointer-latency and frame-count gate
 failed as well. The memory, teardown, painted-candle and browser-error gates
 passed in all three, and the screenshots show both charts drawn. The view
 is the same 150 bars throughout, so the growth is work over the whole history
-rather than drawing. Until a render benchmark sets budgets per bar count, treat
-these as the recorded state of 2.5.5 on this machine, not as a guarantee for
-another device. [Performance notes](performance-notes.md) records what these runs
-do not isolate yet, including a weakness in the painted-chart gate.
+rather than drawing. Treat these as the recorded state of 2.5.5 on this machine,
+not as a guarantee for another device. Frame budgets per bar count belong to the
+render bench, which times the pan, zoom-out and tick paths directly;
+[performance notes](performance-notes.md) records its measurements and budgets.
+
+## Nightly run
+
+`.github/workflows/nightly.yml` runs the thirty-minute workload every night on
+the day's `master`, on a hosted Linux runner, with the defaults above:
+
+```sh
+node scripts/browser-endurance.mjs --duration-seconds 1800 --sample-seconds 30 --output "$RUNNER_TEMP/p3-nightly-endurance"
+```
+
+A failed gate fails the run, and the output directory is uploaded as the
+`browser-endurance` artifact whether it passed or not, screenshots included. The
+same workflow runs `scripts/soak.mjs` with `SOAK_TICKS=90000` (a 6.25-hour
+session at four ticks a second) and `SOAK_CYCLES=1000`, and the render bench.
+A nightly result is evidence for that runner: a shared virtual machine with a
+software GL device, not the reference desktop the recorded results above came
+from.
 
 ## Artifacts and completion
 

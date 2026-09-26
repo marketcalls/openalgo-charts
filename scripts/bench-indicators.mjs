@@ -16,7 +16,11 @@
  *
  * Budgets are deliberately loose. This exists to catch a tenfold regression, not
  * to police normal variation between machines, so a failure means something
- * structural changed. Run with --json for a machine-readable dump.
+ * structural changed. The tick path is not a budget but a count, and an exact
+ * one: a burst between two frames costs every indicator one pass, never more
+ * (recompute has gone back to running per tick) and never fewer (the harness
+ * is no longer driving the chart, and every number it prints is fiction).
+ * Run with --json for a machine-readable dump.
  *
  *   npm run bench
  */
@@ -151,17 +155,28 @@ function tickPath(ids, n, ticks) {
   const series = chart.addSeries('candlestick');
   series.setData(data);
 
-  let calls = 0;
+  // Passes per indicator, counted through wrappers rather than by
+  // instrumenting the engine. A `calcTail` that answers is a pass; one that
+  // declines falls through to `calc`, which is then the pass, so an indicator
+  // that gains a tail path still counts one per recompute.
+  const passes = new Map(ids.map((id) => [id, 0]));
+  const pass = (id) => passes.set(id, passes.get(id) + 1);
   for (const id of ids) {
     const d = byId.get(id);
-    // Count through a wrapper rather than instrumenting the engine.
-    const counted = { ...d, calc: (...a) => { calls++; return d.calc(...a); } };
+    const counted = { ...d, calc: (...a) => { pass(id); return d.calc(...a); } };
+    if (typeof d.calcTail === 'function') {
+      counted.calcTail = (...a) => {
+        const out = d.calcTail(...a);
+        if (out !== null) pass(id);
+        return out;
+      };
+    }
     base.registerIndicator(counted);
     chart.addIndicator(id);
   }
   for (let g = 0; g < 12 && flushFrames(); g++);
 
-  calls = 0;
+  for (const id of ids) passes.set(id, 0);
   const last = data[data.length - 1];
   const t0 = performance.now();
   for (let i = 0; i < ticks; i++) {
@@ -173,7 +188,8 @@ function tickPath(ids, n, ticks) {
   chart.remove?.();
   // Restore the real descriptors so a later benchmark is not measuring wrappers.
   for (const id of ids) base.registerIndicator(byId.get(id));
-  return { calls, ms, perIndicator: calls / ids.length, ticks };
+  const calls = [...passes.values()].reduce((a, b) => a + b, 0);
+  return { calls, ms, perIndicator: calls / ids.length, passes: Object.fromEntries(passes), ticks };
 }
 
 // ── run ─────────────────────────────────────────────────────────────────────
@@ -193,15 +209,24 @@ for (const [label, ids] of [['typical', TYPICAL], ['heavy', HEAVY]]) {
 
 // Budgets: a tenfold guard, not a tight bound.
 const BUDGET_MS = { 'typical:7500': 12, 'heavy:7500': 60 };
-// A burst of ticks between frames should not cost one recompute per tick per
-// indicator. Anything at or above the tick count means recompute is running
-// straight off the data update.
+// A burst of ticks between two frames costs each indicator exactly one pass.
+// At the tick count, recompute is running straight off the data update; above
+// one, some ticks escaped the frame; at zero, the frame never recomputed.
 const TICKS_IN_BURST = 50;
+const PASSES_PER_FRAME = 1;
 
 const failures = [];
 for (const r of results.calc) {
   const limit = BUDGET_MS[`${r.set}:${r.bars}`];
   if (limit && r.ms > limit) failures.push(`calc ${r.set} @ ${r.bars} bars: ${r.ms} ms exceeds ${limit} ms`);
+}
+for (const r of results.tick) {
+  for (const [id, n] of Object.entries(r.passes)) {
+    if (n === PASSES_PER_FRAME) continue;
+    failures.push(n > PASSES_PER_FRAME
+      ? `tick ${r.set}: ${id} recomputed ${n} times for ${r.ticks} ticks in one frame; recompute is not coalesced to the frame`
+      : `tick ${r.set}: ${id} never recomputed for ${r.ticks} ticks; the frame did not run its studies, so the harness proves nothing`);
+  }
 }
 
 if (JSON_OUT) {
@@ -218,14 +243,16 @@ if (JSON_OUT) {
     console.log(`   ${r.set.padEnd(8)} | ${String(r.perIndicator).padStart(20)} | ${r.ms.toFixed(2).padStart(8)}`);
   }
   console.log(
-    `\n   ${results.tick[0].perIndicator >= TICKS_IN_BURST
+    `\n   ${results.tick.some((r) => r.perIndicator >= TICKS_IN_BURST)
       ? 'recompute runs per tick: a burst costs one full pass per tick per indicator'
-      : 'recompute is coalesced: a burst costs one pass per frame'}`,
+      : results.tick.every((r) => r.perIndicator === PASSES_PER_FRAME)
+        ? 'recompute is coalesced: a burst costs one pass per frame'
+        : 'recompute is not one pass per indicator per frame'}`,
   );
 }
 
 if (failures.length) {
-  console.error('\nBUDGET EXCEEDED');
+  console.error('\nBENCH FAILED');
   for (const f of failures) console.error('  ' + f);
   process.exitCode = 1;
 }

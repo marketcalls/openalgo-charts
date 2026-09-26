@@ -111,11 +111,17 @@
     }, { capture: true });
 
     function paintProbe() {
-      return entries.map(({ host }) => {
+      return entries.map(({ host, chart }) => {
+        // The first canvas is the price pane's base canvas, and the price-axis
+        // strip is painted on it too. Its last-price tag moves with every tick
+        // and wears the candle colours, so a hash or a candle count taken over
+        // the whole canvas could pass on the axis alone over a frozen plot.
+        // Both read the plot only: the time scale's width, from the left edge
+        // (these charts have no left scale).
         const canvas = host.querySelector('canvas');
         const context = canvas.getContext('2d');
-        // The first canvas is already the price plot; the axis has its own canvas.
-        const width = canvas.width;
+        const scale = canvas.width / canvas.getBoundingClientRect().width;
+        const width = Math.max(1, Math.min(canvas.width, Math.floor(chart.timeScale.width * scale)));
         const height = canvas.height;
         const pixels = context.getImageData(0, 0, width, height).data;
         let candlePixels = 0;

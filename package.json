@@ -103,6 +103,7 @@
     "lint": "eslint .",
     "size": "size-limit",
     "bench": "node scripts/bench-indicators.mjs",
+    "bench:render": "node scripts/render-bench.mjs",
     "soak": "node --expose-gc scripts/soak.mjs",
     "endurance:browser": "node scripts/browser-endurance.mjs",
     "test:endurance": "node --test scripts/browser-endurance.test.mjs",
