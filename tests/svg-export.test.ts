@@ -36,10 +36,10 @@ const bars = (n: number): Bar[] =>
  * A chart that paints synchronously: the recorder canvases hold a full frame
  * by the time a call returns, and the export sees measured scales.
  */
-function makeChart(): Chart {
+function makeChart(ratio = 1): Chart {
   const chart = new Chart(fakeDocument().createElement('div'), {
     document: fakeDocument(),
-    pixelRatio: () => 1,
+    pixelRatio: () => ratio,
     shortcuts: false,
     raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} },
   });
@@ -52,8 +52,8 @@ function makeChart(): Chart {
  * area (the one series that fills with a gradient), a dashed price line and a
  * rectangle drawing. Between them they touch every op the export has to carry.
  */
-function loaded(): { chart: Chart; data: Bar[] } {
-  const chart = makeChart();
+function loaded(ratio = 1): { chart: Chart; data: Bar[] } {
+  const chart = makeChart(ratio);
   const data = bars(120);
   chart.addSeries('candlestick').setData(data);
   chart.addSeries('histogram', { paneIndex: 1 }).setData(data.map((b) => ({ time: b.time, open: 0, high: b.volume ?? 0, low: 0, close: b.volume ?? 0 })));
@@ -166,21 +166,37 @@ describe('chart.exportSVG', () => {
     const { chart } = loaded();
     const [p0, p1] = chart.panes();
     const total = p0.weight + p1.weight;
-    // The boundary between the panes sits on a whole pixel, as it does on screen.
+    // The boundary between the panes sits on a whole pixel, as it does on
+    // screen at ratio 1, the ratio the document is at.
     const h0 = Math.round((H * p0.weight) / total);
     const h1 = H - h0;
     const svg = chart.exportSVG();
     expect(count(svg, /<g data-pane="/g)).toBe(2);
-    // Each pane fills its own box, the second starting where the first ends,
-    // and the separator is laid over the second pane's first row after it,
-    // the way the DOM lays its rule over that pane's canvases.
+    // The first pane sits at the top; the second is one row down, behind the
+    // separator the DOM draws as its border at ratio 1, and one row shorter for it.
     expect(svg).toContain(`<g data-pane="0" transform="translate(0 0)" clip-path="url(#`);
-    expect(svg).toContain(`<g data-pane="1" transform="translate(0 ${h0})" clip-path="url(#`);
+    expect(svg).toContain(`<g data-pane="1" transform="translate(0 ${h0 + 1})" clip-path="url(#`);
     const clips = svg.match(/<clipPath id="c\d+"><rect x="0" y="0" width="800" height="([\d.]+)"\/><\/clipPath>/g) ?? [];
-    expect(clips.map((c) => /height="([\d.]+)"/.exec(c)?.[1])).toEqual([String(h0), String(h1)]);
-    const rule = `<rect x="0" y="${h0}" width="800" height="1" fill="${chart.theme().paneSeparator}"/>`;
-    expect(svg).toContain(rule);
-    expect(svg.indexOf(rule)).toBeGreaterThan(svg.indexOf('<g data-pane="1"'));
+    expect(clips.map((c) => /height="([\d.]+)"/.exec(c)?.[1])).toEqual([String(h0), String(h1 - 1)]);
+    expect(svg).toContain(`<rect x="0" y="${h0}" width="800" height="1" fill="${chart.theme().paneSeparator}"/>`);
+  });
+
+  it('is the same document at every screen pixel ratio', () => {
+    // Three panes whose boundaries round differently at 1, 1.5 and 2.
+    const exports = [1, 1.5, 2].map((ratio) => {
+      const { chart } = loaded(ratio);
+      chart.addSeries('line', { paneIndex: 2 }).setData(bars(120).map((b) => ({ time: b.time, value: b.close })));
+      chart.applySize(W, 517);
+      const screen = (): unknown => chart.panes().map((pane, i) => [pane.priceScale.height, chart.priceToCoordinate(100, i)]);
+      const before = screen();
+      const svg = chart.exportSVG();
+      // And the screen's own layout is put back afterwards.
+      expect(screen()).toEqual(before);
+      return svg;
+    });
+    expect(exports[0]).toMatch(/<g data-pane="2" transform="translate\(0 \d+\)"/);
+    expect(exports[1]).toBe(exports[0]);
+    expect(exports[2]).toBe(exports[0]);
   });
 
   it('keeps the axis labels as text', () => {

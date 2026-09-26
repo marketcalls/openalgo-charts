@@ -121,6 +121,34 @@ describe('a canvas sized from the device-pixel box the browser reports', () => {
     expect([canvas.element.width, canvas.element.height]).toEqual([450, 300]);
   });
 
+  it('keeps the reported box through a resize that leaves it the same, which the browser does not report again', () => {
+    // A box half a pixel in: 560.5 px covers 560 device pixels, reported once.
+    const canvas = layer();
+    canvas.resize(560.5, 340, 1);
+    canvas.setDeviceSize(560, 340);
+    // A tenth of a pixel wider still covers the same 560: the browser says
+    // nothing, so the store must not fall back to 561 and be stretched.
+    canvas.resize(560.6, 340, 1);
+    expect([canvas.element.width, canvas.element.height]).toEqual([560, 340]);
+    canvas.resize(560.5, 340, 1);
+    expect([canvas.element.width, canvas.element.height]).toEqual([560, 340]);
+    // A change the box cannot have absorbed is estimated until the browser reports it.
+    canvas.resize(700.4, 340, 1);
+    expect([canvas.element.width, canvas.element.height]).toEqual([700, 340]);
+    canvas.setDeviceSize(701, 340);
+    expect(canvas.element.width).toBe(701);
+  });
+
+  it('stops trusting the box once a report is refused, and estimates again', () => {
+    const canvas = layer();
+    canvas.resize(560.5, 340, 1);
+    canvas.setDeviceSize(560, 340);
+    // A report at another scale, the way an emulated device ratio reports it.
+    expect(canvas.setDeviceSize(1121, 680)).toBe(false);
+    canvas.resize(560.6, 340, 1);
+    expect(canvas.element.width).toBe(561);
+  });
+
   it('refuses sizes that are not whole pixels or are empty', () => {
     const canvas = layer();
     canvas.resize(100, 100, 1);

@@ -34,10 +34,6 @@ function makeChart(): { chart: Chart; el: FakeElement } {
   return { chart, el };
 }
 
-/** The rule over a pane's top edge: the element the pane lays over its canvases. */
-const separatorOf = (pane: ReturnType<Chart['panes']>[number]): Record<string, string> =>
-  (pane as unknown as { _separator: { style: Record<string, string> } })._separator.style;
-
 /** Cumulative pane tops, mirroring the chart's own weighted layout. */
 function paneTops(chart: Chart): number[] {
   const total = chart.panes().reduce((s, p) => s + p.weight, 0);
@@ -342,7 +338,7 @@ describe('pane removal, ordering, and maximize', () => {
     expect(chart.panes()[1].element.style.display).toBe('');
     expect(chart.panes()[1].element.style.flex).toBe(`0 0 ${H}px`);
     // The maximized pane is now against the top edge, so it wears no separator.
-    expect(separatorOf(chart.panes()[1]).display).toBe('none');
+    expect(chart.panes()[1].element.style.borderTopWidth).toBe('0px');
     // Stored weights are never disturbed, so nothing can be stranded.
     expect(chart.panes().map((p) => p.weight)).toEqual(before);
 
@@ -351,8 +347,8 @@ describe('pane removal, ordering, and maximize', () => {
     expect(chart.panes().map((p) => p.weight)).toEqual(before);
     expect(chart.panes()[0].element.style.display).toBe('');
     // Restored, the study pane sits under the price pane again and wears the rule.
-    expect(separatorOf(chart.panes()[1]).display).toBe('');
-    expect(separatorOf(chart.panes()[0]).display).toBe('none');
+    expect(chart.panes()[1].element.style.borderTopWidth).toBe('1px');
+    expect(chart.panes()[0].element.style.borderTopWidth).toBe('0px');
   });
 
   it('hands the time axis to the maximized pane', () => {

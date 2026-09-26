@@ -10,7 +10,8 @@
  *   that is made again for each new ratio, or through the window's `resize`;
  * - a resize observed after the frame's animation callbacks, and the one
  *   re-measure after construction, paint before the browser shows the frame
- *   rather than leaving it the cleared canvases for one.
+ *   rather than leaving it the cleared canvases for one, unless the host
+ *   injected its own frame scheduler, which then owns those frames too.
  *
  * The browser half, a real device scale change and real frames during a
  * resize, is in tests/e2e/device-pixels.spec.ts and resize-frames.spec.ts.
@@ -63,13 +64,32 @@ function manualFrames() {
   };
 }
 
-function chartIn(opts: { ratio?: () => number; view?: object; width?: number; height?: number } = {}) {
+/**
+ * The frames as the browser's own `requestAnimationFrame`, the scheduler a
+ * chart uses when the host injects none, still run by hand.
+ */
+function browserFrames(): ReturnType<typeof manualFrames> {
+  const frames = manualFrames();
+  vi.stubGlobal('requestAnimationFrame', frames.raf.schedule);
+  vi.stubGlobal('cancelAnimationFrame', frames.raf.cancel);
+  return frames;
+}
+
+afterEach(() => { vi.unstubAllGlobals(); });
+
+/**
+ * A chart on the browser's frame scheduler, or on one the host injects
+ * through the `raf` option with `injected`.
+ */
+function chartIn(opts: { ratio?: () => number; view?: object; width?: number; height?: number; injected?: boolean } = {}) {
   const doc = Object.assign(fakeDocument(), opts.view ? { defaultView: opts.view } : {});
   const el = doc.createElement('div') as unknown as HTMLElement & { clientWidth: number; clientHeight: number };
   el.clientWidth = opts.width ?? 800;
   el.clientHeight = opts.height ?? 600;
-  const frames = manualFrames();
-  const chart = new Chart(el, { document: doc, pixelRatio: opts.ratio ?? (() => 1), shortcuts: false, raf: frames.raf });
+  const frames = opts.injected ? manualFrames() : browserFrames();
+  const chart = new Chart(el, {
+    document: doc, pixelRatio: opts.ratio ?? (() => 1), shortcuts: false, ...(opts.injected ? { raf: frames.raf } : {}),
+  });
   frames.run();
   return { chart, el, frames };
 }
@@ -108,15 +128,77 @@ describe('panes on device pixels', () => {
     expect(chart.coordinateToPrice(y, 0)).toBeCloseTo(100, 6);
   });
 
+  it('keeps coordinates on the boxes the DOM shows when the ratio moves with nothing to say so', () => {
+    let ratio = 1.5;
+    const { chart, frames } = chartIn({ ratio: () => ratio, height: 344 });
+    chart.addSeries('candlestick').setData(bars(80));
+    chart.addIndicator('rsi');
+    chart.addIndicator('macd');
+    frames.run();
+    const h = heights(chart);
+    const tops = h.map((_, i) => h.slice(0, i).reduce((a, b) => a + b, 0));
+    // Rounded at 1.5 the last boundary is at 276.67 px; at 1 it would be 277.
+    expect(tops[2]).toBeCloseTo(415 / 1.5, 9);
+    // A scale-only emulation, or a browser with neither signal: the ratio
+    // moves and nothing fires, so the boxes stay where they were laid out.
+    ratio = 1;
+    chart.panes().forEach((pane, i) => {
+      const price = pane.yToPrice(10);
+      expect(chart.priceToCoordinate(price, i), `pane ${i}`).toBeCloseTo(tops[i] + 10, 9);
+      expect(chart.coordinateToPrice(tops[i] + 10, i), `pane ${i}`).toBeCloseTo(price, 9);
+    });
+  });
+
   it('recolours the rule with the theme, which a frame alone never did', () => {
-    const { chart, frames } = chartIn();
-    chart.setTheme(darkTheme);
+    // At a whole ratio the rule is the pane's border; between them, the box over it.
+    for (const [ratio, colour] of [[1, (c: Chart) => c.panes()[1].element.style.borderTopColor], [1.5, (c: Chart) => separator(c, 1).background]] as const) {
+      const { chart, frames } = chartIn({ ratio: () => ratio });
+      chart.setTheme(darkTheme);
+      chart.addSeries('candlestick').setData(bars(40));
+      chart.addIndicator('rsi');
+      frames.run();
+      expect(colour(chart), `at ${ratio}`).toBe(darkTheme.paneSeparator);
+      chart.setTheme(lightTheme);
+      expect(colour(chart), `at ${ratio}`).toBe(lightTheme.paneSeparator);
+    }
+  });
+
+  it('is the 1 px border at a whole ratio and one device pixel laid over the pane between them', () => {
+    const { chart, frames } = chartIn({ ratio: () => 1, height: 344 });
     chart.addSeries('candlestick').setData(bars(40));
     chart.addIndicator('rsi');
     frames.run();
-    expect(separator(chart, 1).background).toBe(darkTheme.paneSeparator);
-    chart.setTheme(lightTheme);
-    expect(separator(chart, 1).background).toBe(lightTheme.paneSeparator);
+    const pane = chart.panes()[1];
+    expect([pane.element.style.borderTopWidth, pane.element.style.borderTopColor]).toEqual(['1px', lightTheme.paneSeparator]);
+    expect(separator(chart, 1).display).toBe('none');
+    // The same chart at 1.25: no border, the canvases at the pane's top, the rule over them.
+    const at = chartIn({ ratio: () => 1.25, height: 344 });
+    at.chart.addSeries('candlestick').setData(bars(40));
+    at.chart.addIndicator('rsi');
+    at.frames.run();
+    const lower = at.chart.panes()[1];
+    expect(lower.element.style.borderTopWidth).toBe('0px');
+    expect(separator(at.chart, 1).display).toBe('');
+    expect(parseFloat(separator(at.chart, 1).height)).toBeCloseTo(0.8, 9);
+    // The price pane, against the chart's top, wears neither.
+    expect(at.chart.panes()[0].element.style.borderTopWidth).toBe('0px');
+    expect(separator(at.chart, 0).display).toBe('none');
+  });
+
+  it('changes form with the ratio', () => {
+    let ratio = 1;
+    const w = fakeView(1);
+    const { chart, frames } = chartIn({ view: w.view, ratio: () => ratio });
+    chart.addSeries('candlestick').setData(bars(40));
+    chart.addIndicator('rsi');
+    frames.run();
+    const pane = chart.panes()[1];
+    ratio = 1.5;
+    w.change(1.5);
+    expect([pane.element.style.borderTopWidth, separator(chart, 1).display]).toEqual(['0px', '']);
+    ratio = 2;
+    w.change(2);
+    expect([pane.element.style.borderTopWidth, separator(chart, 1).display]).toEqual(['1px', 'none']);
   });
 });
 
@@ -218,8 +300,8 @@ describe('sizes observed before the browser paints', () => {
     const el = doc.createElement('div') as unknown as HTMLElement & { clientWidth: number; clientHeight: number };
     el.clientWidth = 800;
     el.clientHeight = 600;
-    const f = manualFrames();
-    const chart = new Chart(el, { document: doc, pixelRatio: () => 1, shortcuts: false, raf: f.raf });
+    const f = browserFrames();
+    const chart = new Chart(el, { document: doc, pixelRatio: () => 1, shortcuts: false });
     // Queued by the constructor: its first frame, then the re-measure.
     expect(f.queue).toHaveLength(2);
     f.queue.shift()!();
@@ -228,6 +310,47 @@ describe('sizes observed before the browser paints', () => {
     const paint = vi.spyOn(chart.panes()[0], 'paintBase');
     f.queue.shift()!();
     expect(chart.panes()[0].base.element.width).toBe(900);
+    expect(paint).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the frames after a resize and a new ratio to a scheduler the host injected', () => {
+    stubObservers(false);
+    const w = fakeView(1);
+    const { chart, frames } = chartIn({ injected: true, view: w.view, ratio: () => w.view.devicePixelRatio });
+    chart.addSeries('candlestick').setData(bars(60));
+    frames.run();
+    const pane = chart.panes()[0];
+    const paint = vi.spyOn(pane, 'paintBase');
+    // A resize: the canvas is cleared now and painted on the host's next frame.
+    observers[0].cb([{ contentRect: { width: 700, height: 500 } }]);
+    expect(pane.base.element.width).toBe(700);
+    expect(paint).not.toHaveBeenCalled();
+    expect(frames.queue).toHaveLength(1);
+    frames.run();
+    expect(paint).toHaveBeenCalledTimes(1);
+    // A new ratio, the same.
+    w.change(2);
+    expect(pane.base.element.width).toBe(1400);
+    expect(paint).toHaveBeenCalledTimes(1);
+    frames.run();
+    expect(paint).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves the re-measure after construction to the next frame of an injected scheduler too', () => {
+    stubObservers(false);
+    const doc = fakeDocument();
+    const el = doc.createElement('div') as unknown as HTMLElement & { clientWidth: number; clientHeight: number };
+    el.clientWidth = 800;
+    el.clientHeight = 600;
+    const f = manualFrames();
+    const chart = new Chart(el, { document: doc, pixelRatio: () => 1, shortcuts: false, raf: f.raf });
+    f.queue.shift()!();
+    el.clientWidth = 900;
+    const paint = vi.spyOn(chart.panes()[0], 'paintBase');
+    f.queue.shift()!();
+    expect(chart.panes()[0].base.element.width).toBe(900);
+    expect(paint).not.toHaveBeenCalled();
+    f.run();
     expect(paint).toHaveBeenCalledTimes(1);
   });
 
@@ -255,6 +378,14 @@ describe('sizes observed before the browser paints', () => {
     device.cb([entry(pane.base.element, [800, 600], [799, 600])]);
     expect(pane.base.element.width).toBe(799);
     expect(paint).toHaveBeenCalledTimes(1);
+    // Kept through a resize the browser does not report, the box being the same.
+    chart.applySize(799.8, 600);
+    expect(pane.base.element.width).toBe(799);
+    // A report for a box the canvas no longer has leaves nothing to trust:
+    // the next resize estimates until the browser reports again.
+    device.cb([entry(pane.base.element, [700, 600], [700, 600])]);
+    chart.applySize(799.6, 600);
+    expect(pane.base.element.width).toBe(800);
   });
 
   it('follows the panes: a new one is watched, a removed one let go, and all of them on destroy', () => {

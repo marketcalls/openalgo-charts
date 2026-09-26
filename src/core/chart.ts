@@ -7,7 +7,7 @@
 import { InvalidateMask, InvalidationLevel } from './invalidate-mask';
 import { RenderLoop, type RafScheduler, type RafCanceller } from './render-loop';
 import { Pane, type PaneRenderContext } from './pane';
-import { alignToDevicePixels, hairlineHeight, type CanvasLayer } from './canvas';
+import { alignToDevicePixels, type CanvasLayer } from './canvas';
 import type { PriceAxisPlacement, PriceAxisSide, PriceAxisSlot } from '../model/price-axis-layout';
 import { type ChartTheme, DEFAULT_THEME } from '../theme';
 import { TimeScale, type TimeScaleOptions } from '../scale/time-scale';
@@ -239,6 +239,12 @@ export interface ChartNavigationOptions {
 export interface ChartOptions {
   document?: Document;
   pixelRatio?: () => number;
+  /**
+   * The frame scheduler, for deterministic tests. Supplied, it runs every
+   * frame the chart paints, the one after a resize or a new pixel ratio
+   * included; with the default one the chart paints those inside the
+   * callback that reports them, so a resize never shows a cleared canvas.
+   */
   raf?: { schedule: RafScheduler; cancel?: RafCanceller };
   /** Full palette; pass `lightTheme` (the default), `darkTheme`, or a custom ChartTheme. */
   theme?: ChartTheme;
@@ -803,6 +809,8 @@ export class Chart {
   private readonly _loop: RenderLoop;
   /** The frame scheduler, kept for the one-shot re-measure after construction. */
   private readonly _raf: { schedule: RafScheduler; cancel: RafCanceller };
+  /** Whether the host supplied `raf`, and so owns every frame, the resize ones included. */
+  private readonly _rafInjected: boolean;
   private _remeasureHandle: number | null = null;
   private readonly _dataLayer = new DataLayer();
   private readonly _timeScale: TimeScale;
@@ -1167,6 +1175,7 @@ export class Chart {
     this._liveRegion = live;
 
     this._raf = resolveRaf(options.raf);
+    this._rafInjected = options.raf !== undefined;
     this._loop = new RenderLoop(() => this._onFrame(), this._raf.schedule, this._raf.cancel);
 
     this._addPane();
@@ -3450,8 +3459,13 @@ export class Chart {
     this._flushIndicators();
     const liveWidth = this._width;
     const liveHeight = this._height;
-    const resized = width !== liveWidth || height !== liveHeight;
-    if (resized) {
+    const liveRatio = this._layoutRatio;
+    // The document is at ratio 1 on every screen, so its panes are laid out at
+    // 1 too: laid out at the screen's ratio, the same chart would export other
+    // pane boundaries on a 1.5x laptop than on a 1x or 2x monitor.
+    const relaid = width !== liveWidth || height !== liveHeight || this._ratioForLayout() !== 1;
+    this._layoutRatio = 1;
+    if (relaid) {
       this._width = width;
       this._height = height;
       this._relayout(true);
@@ -3470,26 +3484,30 @@ export class Chart {
           ...this._renderContext(i),
           dpr: 1, hoverId: null, hoverKey: null, dragId: null, paintBackground: background,
         };
-        // The DOM starts each canvas at its pane box's top and lays the
-        // separator over the first row, so the export paints the pane in that
-        // same box and the rule over it, or the second pane would sit a pixel
-        // away from where it is on screen.
+        // At ratio 1 the DOM draws the separator as a 1px border on the pane
+        // box and lets the canvas start below it, its last row hidden by the
+        // overflow clip. The export reproduces that box exactly, or the second
+        // pane would sit one pixel higher than it does on screen.
+        const first = i === topPane;
+        const top = layout[i].top + (first ? 0 : 1);
+        const paneHeight = layout[i].height - (first ? 0 : 1);
+        if (!first) {
+          svg.fillStyle = this._theme.paneSeparator;
+          svg.fillRect(0, layout[i].top, width, 1);
+        }
         svg.pushGroup(
           { 'data-pane': i },
-          { translate: { x: 0, y: layout[i].top }, clip: { x: 0, y: 0, width, height: layout[i].height } },
+          { translate: { x: 0, y: top }, clip: { x: 0, y: 0, width, height: paneHeight } },
         );
         // A Full frame's sequence for one pane, minus the crosshair.
         pane.autoscale(ctx);
         pane.paintBase(ctx, g);
         pane.paintTop(null, ctx, g);
         svg.popGroup();
-        if (i !== topPane) {
-          svg.fillStyle = this._theme.paneSeparator;
-          svg.fillRect(0, layout[i].top, width, hairlineHeight(1));
-        }
       }
     } finally {
-      if (resized) {
+      this._layoutRatio = liveRatio;
+      if (relaid) {
         this._width = liveWidth;
         this._height = liveHeight;
         this._relayout(true);
@@ -4595,14 +4613,26 @@ export class Chart {
   }
 
   /**
-   * A hairline between stacked panes: over every pane but the one against the
-   * chart's top, a whole number of device pixels tall. It sits on the DOM box,
+   * A hairline between stacked panes: on every pane but the one against the
+   * chart's top, whole device pixels tall, in the form `Pane.setSeparator`
+   * picks for the ratio the panes were laid out at. It sits on the DOM box,
    * so it is exactly on the boundary the user drags.
    */
   private _syncSeparators(): void {
-    const height = hairlineHeight(this._pixelRatio());
+    const ratio = this._ratioForLayout();
     const topPane = this._topPaneIndex();
-    this._panes.forEach((pane, i) => pane.setSeparator(height, i === topPane ? null : this._theme.paneSeparator));
+    this._panes.forEach((pane, i) => pane.setSeparator(i === topPane ? null : this._theme.paneSeparator, ratio));
+  }
+
+  /**
+   * The device pixel ratio pane boundaries are rounded at: the one the panes
+   * were last laid out at, so hit testing, `priceToCoordinate` and the DOM
+   * boxes agree even when the ratio has moved with no event to say so (a
+   * scale-only emulation, a browser with neither signal) until the next
+   * relayout. Before the first layout, the ratio now.
+   */
+  private _ratioForLayout(): number {
+    return this._layoutRatio > 0 ? this._layoutRatio : this._pixelRatio();
   }
 
   /**
@@ -5026,13 +5056,14 @@ export class Chart {
    * bottom pane, and the open panes share what is left by weight, so folding
    * one never rewrites a stored weight.
    *
-   * Every boundary between panes sits on a device pixel (`alignToDevicePixels`),
-   * so each canvas covers a whole number of device pixels and the separator
-   * gets a row of its own. It is done here rather than where the boxes
-   * are sized, so hit testing agrees with the pixels by construction.
+   * Every boundary between panes sits on a device pixel (`alignToDevicePixels`)
+   * of the ratio the panes are laid out at (`_ratioForLayout`), so each canvas
+   * covers a whole number of device pixels and the separator gets rows of its
+   * own. It is done here rather than where the boxes are sized, so hit testing
+   * reads the same boxes the DOM shows.
    */
   private _paneLayout(): { top: number; height: number }[] {
-    return alignToDevicePixels(this._paneShares(), this._pixelRatio());
+    return alignToDevicePixels(this._paneShares(), this._ratioForLayout());
   }
 
   /** The layout by weight and strip height alone, before device-pixel rounding. */
@@ -5208,8 +5239,12 @@ export class Chart {
       const box = entry.contentBoxSize?.[0];
       if (layer === null || device === undefined || box === undefined) continue;
       // Measured before a relayout in this same frame: the box it describes
-      // is gone, and the entry for the new one follows before the paint.
-      if (Math.abs(box.inlineSize - layer.mediaWidth) > 0.05 || Math.abs(box.blockSize - layer.mediaHeight) > 0.05) continue;
+      // is gone, and the entry for the new one follows before the paint. What
+      // the canvas last heard is no longer known to be its box either.
+      if (Math.abs(box.inlineSize - layer.mediaWidth) > 0.05 || Math.abs(box.blockSize - layer.mediaHeight) > 0.05) {
+        layer.forgetDeviceSize();
+        continue;
+      }
       if (layer.setDeviceSize(device.inlineSize, device.blockSize)) changed = true;
     }
     if (!changed) return;
@@ -5284,8 +5319,13 @@ export class Chart {
    * the callbacks that clear a canvas once this frame's animation callbacks
    * have run: a resize observed before the browser paints, a new pixel ratio.
    * Waiting would show the cleared canvas for a frame.
+   *
+   * Not with a scheduler the host injected (`raf`): that host owns every frame
+   * the chart paints, as with the kinetic glide, so the frame already asked
+   * for runs when the host runs it.
    */
   private _paintNow(): void {
+    if (this._rafInjected) return;
     if (this._destroyed || this._destroying || this._pending === null || this._scaleMutationDepth > 0) return;
     this._loop.stop();
     this._onFrame();

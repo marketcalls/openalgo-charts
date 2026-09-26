@@ -13,37 +13,48 @@ All notable changes to OpenAlgo Charts.
   The chart now watches a `(resolution: Xdppx)` query, made again for each new
   ratio, and the window's `resize` as well, which a zoom fires and which is the
   one signal left in a browser whose query list takes no change listener.
-- Every boundary between panes sits on a device pixel, so each canvas covers a
-  whole number of device pixels and the browser no longer stretches a lower
-  pane by a fraction of a pixel. Three panes in 344 px at 1 : 0.32 : 0.32 were
-  209.76 px and 67.12 px tall, boundaries inside a device pixel at every
-  ratio; they are now rounded where they meet, within half a device pixel of
-  their share, and the outer edge stays where the container puts it. At a
-  ratio of 1 a pane's height can therefore differ from its exact share by up
-  to one pixel; weights are untouched.
-- The separator between panes is a box one device pixel tall (1 px at ratios
-  1, 2 and 3, as before) laid over the top of the lower pane, where it was a
-  1 px CSS border. At 1.25 and 1.5 that border was 1.25 or 1.5 device pixels,
-  so the canvases under it started part way into a pixel and the browser
-  resampled the whole pane and blended the rule into it. The lower pane's
-  canvases now start at the pane's top, one row higher than before, and the
-  rule covers that first row; a pointer maps to the same canvas pixel it is
-  over, where it was one pixel off in every pane but the top one. `setTheme`
-  recolours the rule, which the border kept in the previous theme's colour
-  until the next resize. `exportSVG` draws the same boxes: each pane in its
-  own box and the rule over the lower one's first row.
+- Pane boundaries now land on whole device pixels, at every ratio, so each
+  canvas covers a whole number of device pixels and the browser no longer
+  stretches a lower pane by a fraction of a pixel. Three panes in 344 px at
+  1 : 0.32 : 0.32 were 209.76 px and 67.12 px tall, boundaries inside a device
+  pixel at every ratio; they are now rounded where they meet, within half a
+  device pixel of their share, and the outer edge stays where the container
+  puts it. At a ratio of 1 a pane's height can therefore differ from its exact
+  share by up to one pixel; weights are untouched. A chart whose panes already
+  share the height in whole pixels is laid out and painted exactly as before.
+  Hit testing and `priceToCoordinate` round at the ratio the panes were laid
+  out at, so they stay on the boxes on screen even when the ratio moves with
+  nothing to say so.
+- At a fractional ratio the separator between panes is a box one device pixel
+  tall laid over the top of the lower pane, where it was a 1 px CSS border. At
+  1.25 and 1.5 that border was 1.25 or 1.5 device pixels, so the canvases
+  under it started part way into a pixel and the browser resampled the whole
+  pane and blended the rule into it. There the lower pane's canvases now start
+  at the pane's top and the rule covers their first row, so a pointer maps to
+  the canvas pixel it is over. At a whole-number ratio (1, 2, 3) the separator
+  is the 1 px border it always was, the canvases under it and pane-local
+  coordinates where they were: a border is whole device pixels there. The
+  separator changes form when the ratio does. `setTheme` recolours it, which
+  the border kept in the previous theme's colour until the next resize.
+- `exportSVG` lays its panes out at a ratio of 1, the ratio the document is at,
+  whatever the screen's: the same chart exports the same document on a 1x,
+  1.5x or 2x screen, with the separator as the 1 px border the screen draws at
+  1.
 - Where the browser reports a canvas's device-pixel box
   (`devicePixelContentBoxSize`, Chromium and Firefox), the canvas's backing
   store takes that size, so a chart that starts part way into a pixel is not
   stretched by one. A report more than a pixel away from media times ratio is
-  refused, which is what an emulated device scale reports.
+  refused, which is what an emulated device scale reports. The box is kept
+  through a resize of less than a pixel that leaves it as it was, which the
+  browser does not report again.
 - No blank frame while the chart is resized. Resizing a canvas clears it, and
   the size arrives in a ResizeObserver callback, after the frame's animation
   callbacks and before the browser paints, so the repaint waited a frame and
   every step of a window drag showed one cleared frame. The chart now paints
-  in that callback, and in the one re-measure a frame after construction,
-  which ran inside an animation callback and had the same gap.
-
+  in that callback, on a new ratio, and in the one re-measure a frame after
+  construction, which ran inside an animation callback and had the same gap.
+  A host that supplies its own `raf` scheduler keeps every frame, these
+  included, on it.
 - Ichimoku Cloud reads its three periods and its displacement as whole bars,
   the way the other built-in studies read a length. A fractional period (a
   conversion period of 9.4, say, from a saved layout or a host's own settings

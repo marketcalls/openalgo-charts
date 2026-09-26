@@ -55,9 +55,22 @@ export function alignToDevicePixels(
 }
 
 /**
+ * Pure: whether the rule between stacked panes is drawn as the pane's 1 px top
+ * border, with the pane's canvases starting under it. At a whole-number ratio
+ * 1 px is a whole number of device pixels, so the canvases under the border
+ * still start on a device pixel, and the layout stays the one every release
+ * before this has shown. At a fractional ratio a 1 px border ends part way
+ * into a device pixel, so the rule is laid over the canvases instead
+ * (`hairlineHeight`). A ratio that cannot be used counts as 1.
+ */
+export function separatorIsBorder(dpr: number): boolean {
+  return !(dpr > 0) || !Number.isFinite(dpr) || Number.isInteger(dpr);
+}
+
+/**
  * Pure: the height in CSS px of a rule that covers whole device pixels, at
- * least one. At ratios 1, 2 and 3 that is the 1 px it has always been; at 1.25
- * and 1.5 it is one device pixel, where 1 px would end part way into the next.
+ * least one. At ratios 1, 2 and 3 that is 1 px; at 1.25 and 1.5 it is one
+ * device pixel, where 1 px would end part way into the next.
  */
 export function hairlineHeight(dpr: number): number {
   if (!(dpr > 0) || !Number.isFinite(dpr)) return 1;
@@ -74,6 +87,9 @@ export class CanvasLayer {
   private _mediaWidth = 0;
   private _mediaHeight = 0;
   private _dpr = 1;
+  /** The device-pixel box the browser last reported for this canvas, 0 when none is trusted. */
+  private _deviceWidth = 0;
+  private _deviceHeight = 0;
 
   public constructor(doc: Document, zIndex: number) {
     this.element = doc.createElement('canvas');
@@ -112,8 +128,14 @@ export class CanvasLayer {
     this._mediaHeight = mediaHeight;
     this._dpr = dpr;
     const bmp = bitmapSize(mediaWidth, mediaHeight, dpr);
-    this.element.width = bmp.width;
-    this.element.height = bmp.height;
+    // The browser reports a device-pixel box only when it changes. A resize by
+    // less than a pixel often leaves it as it was, so no report follows, and
+    // the estimate would stretch the store by a pixel for good. The box last
+    // reported is still the box then, and a store within a pixel of the
+    // estimate is kept at it; a box that did change is reported before the
+    // browser paints and replaces it.
+    this.element.width = this._reported(this._deviceWidth, mediaWidth * dpr) ?? bmp.width;
+    this.element.height = this._reported(this._deviceHeight, mediaHeight * dpr) ?? bmp.height;
     this.element.style.width = `${mediaWidth}px`;
     this.element.style.height = `${mediaHeight}px`;
   }
@@ -134,12 +156,32 @@ export class CanvasLayer {
    * Returns true when the bitmap changed, which clears it: the caller repaints.
    */
   public setDeviceSize(width: number, height: number): boolean {
-    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return false;
-    if (Math.abs(width - this._mediaWidth * this._dpr) > 1 || Math.abs(height - this._mediaHeight * this._dpr) > 1) return false;
-    if (this.element.width === width && this.element.height === height) return false;
-    this.element.width = width;
-    this.element.height = height;
+    const w = this._reported(width, this._mediaWidth * this._dpr);
+    const h = this._reported(height, this._mediaHeight * this._dpr);
+    if (w === null || h === null) {
+      this.forgetDeviceSize();
+      return false;
+    }
+    this._deviceWidth = w;
+    this._deviceHeight = h;
+    if (this.element.width === w && this.element.height === h) return false;
+    this.element.width = w;
+    this.element.height = h;
     return true;
+  }
+
+  /**
+   * Drop the reported box, for a report the caller could not match to this
+   * canvas's current size: `resize` then estimates until the next report.
+   */
+  public forgetDeviceSize(): void {
+    this._deviceWidth = 0;
+    this._deviceHeight = 0;
+  }
+
+  /** A reported device size, if it is whole, positive and within a pixel of `estimate`. */
+  private _reported(device: number, estimate: number): number | null {
+    return Number.isInteger(device) && device > 0 && Math.abs(device - estimate) <= 1 ? device : null;
   }
 
   /** Clear the whole bitmap and reset the transform to bitmap (device-px) scope. */
