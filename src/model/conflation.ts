@@ -90,13 +90,13 @@ export function conflateItems<T extends { x: number; bar: Bar }>(items: readonly
  * How the level of detail treats a series type while bars share columns, or
  * null for a type it leaves alone.
  *
- * `ohlc`: the types that draw each bar's range (candles, OHLC and high-low
- * bars, the HLC area). Everything in a column merges into one stick that keeps
- * the column's open, high, low and close, so the range drawn is the range
- * traded.
+ * `ohlc`: the types that draw each bar's range as a stick (candles, OHLC and
+ * high-low bars). Everything in a column merges into one stick that keeps the
+ * column's open, high, low and close, so the range drawn is the range traded.
  *
- * The types that draw one value per bar, its close, keep real bars instead: a
- * merged bar would keep only the last close and lose every peak before it.
+ * The types that draw a line through one value per bar keep real bars instead:
+ * a merged bar would keep only the last close and lose every peak before it,
+ * and a line joined across the whitespace a merge drops would bridge a gap.
  * They also keep their own colours that way.
  *
  * `line`: lines, steps, areas and baselines keep the first, the lowest, the
@@ -104,17 +104,22 @@ export function conflateItems<T extends { x: number; bar: Bar }>(items: readonly
  * those four covers the pixels the line through every bar covers, and enters
  * and leaves the column where it did. A gap survives as one whitespace bar.
  *
+ * `band`: the HLC area is a line through the closes over a band from the highs
+ * to the lows, so it keeps what `line` keeps and the bars with the run's
+ * highest high and lowest low as well, so its close line, both edges of its
+ * band and its gaps reach the pixels they reach with every bar drawn.
+ *
  * `column`: columns and histograms keep a column's lowest and highest bar.
  * Each is drawn from its base, so those two cover every pixel the rest would.
  *
  * Anything else, a host's renderer or the transform tier's, may read fields or
  * neighbours a merge cannot know about, and is drawn in full.
  */
-export type LodKind = 'ohlc' | 'line' | 'column';
+export type LodKind = 'ohlc' | 'line' | 'band' | 'column';
 
 const LOD_KINDS: ReadonlyMap<string, LodKind> = new Map<string, LodKind>([
   ['candlestick', 'ohlc'], ['hollow-candle', 'ohlc'], ['volume-candle', 'ohlc'],
-  ['bar', 'ohlc'], ['high-low', 'ohlc'], ['hlc-area', 'ohlc'],
+  ['bar', 'ohlc'], ['high-low', 'ohlc'], ['hlc-area', 'band'],
   ['line', 'line'], ['line-markers', 'line'], ['step', 'line'], ['area', 'line'], ['baseline', 'line'],
   ['column', 'column'], ['histogram', 'column'],
 ]);
@@ -127,7 +132,7 @@ export function lodKind(type: string): LodKind | null {
  * How wide one mark of `kind` is at this zoom, in device px. A candle's stick
  * and an OHLC bar's range are a wick wide, `floor(dpr)` (one pixel below a
  * ratio of two). A column or histogram bar is one pixel once bars are under a
- * CSS px, and a line has no width to speak of, so both are one.
+ * CSS px, and a line or a band's edge has no width to speak of, so all are one.
  */
 function stickWidth(kind: LodKind, dpr: number): number {
   return kind === 'ohlc' ? Math.max(1, Math.floor(dpr)) : 1;
@@ -186,8 +191,24 @@ export function createLodColumns(emit: (x: number, bar: Bar) => void): LodColumn
   // The open run of values: its first, lowest, highest and last bars with their x.
   let first: Bar | null = null, firstX = 0, last: Bar | null = null, lastX = 0;
   let lowBar: Bar | null = null, lowX = 0, lowAt = 0, highBar: Bar | null = null, highX = 0, highAt = 0, seq = 0;
+  // A band's run also keeps its highest high and lowest low, and where its first and last came.
+  let topBar: Bar | null = null, topX = 0, topAt = 0, bottomBar: Bar | null = null, bottomX = 0, bottomAt = 0;
+  let firstAt = 0, lastAt = 0;
+  /** A band run's kept bars in arrival order, reused from column to column. */
+  const keptAt: number[] = [], keptX: number[] = [], keptBar: Bar[] = [];
+  let kept = 0;
   /** A gap has been emitted and no value has followed it yet. */
   let inGap = false;
+
+  /** Put a bar among the band run's kept ones by arrival, once however many extremes it holds. */
+  const keep = (at: number, x: number, bar: Bar): void => {
+    let i = kept;
+    while (i > 0 && keptAt[i - 1] > at) i--;
+    if (i > 0 && keptAt[i - 1] === at) return;
+    for (let j = kept; j > i; j--) { keptAt[j] = keptAt[j - 1]; keptX[j] = keptX[j - 1]; keptBar[j] = keptBar[j - 1]; }
+    keptAt[i] = at; keptX[i] = x; keptBar[i] = bar;
+    kept++;
+  };
 
   const flushOhlc = (): void => {
     if (!any) return;
@@ -218,12 +239,24 @@ export function createLodColumns(emit: (x: number, bar: Bar) => void): LodColumn
 
   /**
    * Emit the open run in drawing order, each bar once: its first, lowest,
-   * highest and last for a line, its lowest and highest for columns.
+   * highest and last for a line, those and its highest high and lowest low for
+   * a band, its lowest and highest for columns.
    */
   const flushRun = (): void => {
     if (first === null) return;
     const runFirst = first;
     first = null;
+    if (kind === 'band') {
+      kept = 0;
+      keep(firstAt, firstX, runFirst);
+      keep(lowAt, lowX, lowBar as Bar);
+      keep(highAt, highX, highBar as Bar);
+      keep(topAt, topX, topBar as Bar);
+      keep(bottomAt, bottomX, bottomBar as Bar);
+      keep(lastAt, lastX, last as Bar);
+      for (let i = 0; i < kept; i++) emit(keptX[i], keptBar[i]);
+      return;
+    }
     const lowFirst = lowAt <= highAt;
     const a = (lowFirst ? lowBar : highBar) as Bar, ax = lowFirst ? lowX : highX;
     const b = (lowFirst ? highBar : lowBar) as Bar, bx = lowFirst ? highX : lowX;
@@ -285,17 +318,27 @@ export function createLodColumns(emit: (x: number, bar: Bar) => void): LodColumn
     inGap = false;
     const at = seq++;
     if (first === null) {
-      first = bar; firstX = x;
+      first = bar; firstX = x; firstAt = at;
       lowBar = bar; lowX = x; lowAt = at;
       highBar = bar; highX = x; highAt = at;
+      topBar = bar; topX = x; topAt = at;
+      bottomBar = bar; bottomX = x; bottomAt = at;
     } else {
       // Strict comparisons: the earliest of equal extremes stands, so a flat
       // run keeps its first bar and adds nothing.
       if (v < (lowBar as Bar).close) { lowBar = bar; lowX = x; lowAt = at; }
       if (v > (highBar as Bar).close) { highBar = bar; highX = x; highAt = at; }
+      if (kind === 'band') {
+        // A missing high or low is passed over, and one missing on the bar
+        // kept so far gives way to the first that has it.
+        const h = bar.high, l = bar.low;
+        if (h === h && !((topBar as Bar).high >= h)) { topBar = bar; topX = x; topAt = at; }
+        if (l === l && !((bottomBar as Bar).low <= l)) { bottomBar = bar; bottomX = x; bottomAt = at; }
+      }
     }
     last = bar;
     lastX = x;
+    lastAt = at;
   };
 
   return {

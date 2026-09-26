@@ -169,7 +169,7 @@ describe('the level-of-detail threshold', () => {
 
   it('reduces the built-in types it knows and leaves anything else in full', () => {
     const kinds: Record<string, LodKind | null> = {
-      candlestick: 'ohlc', 'hollow-candle': 'ohlc', 'volume-candle': 'ohlc', bar: 'ohlc', 'high-low': 'ohlc', 'hlc-area': 'ohlc',
+      candlestick: 'ohlc', 'hollow-candle': 'ohlc', 'volume-candle': 'ohlc', bar: 'ohlc', 'high-low': 'ohlc', 'hlc-area': 'band',
       line: 'line', 'line-markers': 'line', step: 'line', area: 'line', baseline: 'line',
       column: 'column', histogram: 'column', kagi: null, 'point-figure': null, 'my-custom-style': null,
     };
@@ -269,6 +269,29 @@ describe('createLodColumns', () => {
     expect(out.map((o) => o.bar.time)).toEqual([1, 2, 3, 4, 5, 8]);
     expect(Number.isNaN(out[2].bar.close)).toBe(true);
     expect(Number.isNaN(out[4].bar.close)).toBe(true);
+  });
+
+  it('keeps an HLC band column\'s first and last bars, its closing extremes, its highest high and lowest low, in order, and a gap once', () => {
+    // The close peaks in the middle of the column and the highest high and the
+    // lowest low sit on bars whose closes are neither extreme: all six stay.
+    const out = run('band', 1, 1, [
+      [4.6, bar(1, 10, 11, 9, 10)],
+      [4.7, bar(2, 10, 18, 9, 12)],
+      [4.8, bar(3, 12, 13, 11, 13)],
+      [4.9, bar(4, 13, 13, 2, 11)],
+      [5.0, bar(5, 11, 12, 10, 8)],
+      [5.1, bar(6, 8, 10, 8, 9)],
+      [5.2, bar(7, 9, 10, 8, 9)],
+      [5.3, bar(8, NaN, NaN, NaN, NaN)],
+      [5.4, bar(9, NaN, NaN, NaN, NaN)],
+      [6.0, bar(10, 9, 10, 8, 9)],
+    ]);
+    expect(out.map((o) => o.bar.time)).toEqual([1, 2, 3, 4, 5, 7, 8, 10]);
+    // Real bars at their own x, not a stick on the column.
+    expect(out[2].x).toBe(4.8);
+    expect(Number.isNaN(out[6].bar.close)).toBe(true);
+    // A band column's width is one device pixel at any ratio, like a line's.
+    expect(lodColumnWidth(2, 1, 'band')).toBe(1);
   });
 
   it('keeps a histogram column\'s lowest and highest bars and drops its gaps', () => {
@@ -459,6 +482,68 @@ describe('the level of detail at the edges', () => {
     armed = true;
     expect(() => chart.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full))).not.toThrow();
     expect(armed).toBe(false);
+  });
+});
+
+describe('an HLC area below the threshold', () => {
+  /** The band's fill vertices and the close line's, split out of one series pass. */
+  function hlcOps(ops: readonly Op[]): { band: Op[]; close: Op[] } {
+    const fill = ops.findIndex((op) => op.type === 'fill');
+    return { band: ops.slice(0, fill), close: ops.slice(fill + 1) };
+  }
+
+  /** Per device-pixel column: the lowest and highest y of the vertices that land in it. */
+  function extremes(ops: readonly Op[]): Map<number, [number, number]> {
+    const out = new Map<number, [number, number]>();
+    for (const op of ops) {
+      if (op.type !== 'moveTo' && op.type !== 'lineTo') continue;
+      const [x, y] = op.args;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const c = Math.round(x);
+      const seen = out.get(c);
+      out.set(c, seen === undefined ? [y, y] : [Math.min(seen[0], y), Math.max(seen[1], y)]);
+    }
+    return out;
+  }
+
+  function hlcRig(bars: readonly Bar[], conflate: boolean): { chart: Chart; backend: () => SeriesOnly } {
+    const doc = fakeDocument();
+    const backends: SeriesOnly[] = [];
+    const chart = new Chart(doc.createElement('div'), {
+      document: doc, pixelRatio: () => 1, shortcuts: false, timeNavigator: false, conflate,
+      raf: { schedule: (cb: () => void) => { cb(); return 1; }, cancel: () => {} },
+      timeScale: { minBarSpacing: 0.0005 },
+      renderBackend: () => { const b = new SeriesOnly(); backends.push(b); return b; },
+    });
+    chart.applySize(1000, 600);
+    chart.addSeries('hlc-area').setData(bars as Bar[]);
+    chart.timeScale.setBarSpacing(0.045);
+    chart.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    return { chart, backend: () => backends[0] };
+  }
+
+  it('keeps every closing peak and trough, the band\'s edges, and a break in the close line at a gap', () => {
+    // A stretch with no prices in the middle, as a feed reports a halt.
+    const bars = walk(20_000).map((b, i) => (i >= 9000 && i < 10_000 ? { time: b.time } as Bar : b));
+    const on = hlcRig(bars, true);
+    const off = hlcRig(bars, false);
+    const a = hlcOps(on.backend().series.rec.ops), b = hlcOps(off.backend().series.rec.ops);
+    // Still reduced: at most six bars to a column, against over twenty to a column drawn in full.
+    const columns = on.chart.timeScale.width;
+    expect(off.backend().calls[0].items.length).toBeGreaterThan(20 * columns);
+    expect(on.backend().calls[0].items.length).toBeLessThanOrEqual(6 * (columns + 1) + 1);
+    // The close line reaches the same highest and lowest close in every column
+    // as the line through every bar does.
+    expect(extremes(a.close)).toEqual(extremes(b.close));
+    // The band's top is the column's highest high and its bottom the lowest low.
+    const band = (ops: readonly Op[]): string[] => [...extremes(ops)].map(([c, [top, bottom]]) => `${c}:${top}:${bottom}`);
+    expect(band(a.band)).toEqual(band(b.band));
+    // The close line stops at the gap and starts again after it, as it does in full.
+    const pieces = (ops: readonly Op[]): number => ops.filter((op) => op.type === 'moveTo').length;
+    expect(pieces(b.close)).toBe(2);
+    expect(pieces(a.close)).toBe(pieces(b.close));
+    on.chart.destroy();
+    off.chart.destroy();
   });
 });
 
