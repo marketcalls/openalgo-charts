@@ -1,12 +1,23 @@
 ---
-title: Upgrading to 2.5.6
-description: Adopt study policies, the chart-wide undo timeline, data variants and the session calendar while preserving existing integrations.
+title: Upgrading to 2.5.7
+description: Version 2.5.7 reorganises the chart's internals and changes nothing a host uses.
 ---
 
-# Upgrading to 2.5.6
+# Upgrading to 2.5.7
 
-Version 2.5.6 needs no migration. Saved layouts, drawings and workspace
-documents from 2.5.5 load unchanged, and every new contract is optional.
+Version 2.5.7 needs no migration and no code change. It reorganises the chart's
+internal code; every public method, option, event and type is the same, saved
+layouts, drawings and workspace documents from 2.5.6 load unchanged, and charts
+paint the same pixels. The base engine is 1.52 kB Brotli larger.
+
+If you import from the package entry points, nothing else applies. Code that
+reached into the chart's private members (never supported) will find several of
+them moved to internal collaborators.
+
+## Earlier upgrades
+
+Version 2.5.6 needed no migration. Saved layouts, drawings and workspace
+documents from 2.5.5 loaded unchanged, and every new contract was optional.
 
 Check these points in your host:
 
@@ -54,8 +65,6 @@ and `inline` on inputs, and background targets. See
 [Indicators](/docs/indicators), [Data variants](/docs/data-variants),
 [Instruments](/docs/instruments), [Scales and panes](/docs/scales-and-panes) and
 [Widget controls](/docs/widget).
-
-## Earlier upgrades
 
 Version 2.5.5 needed no migration. Saved layouts, drawings and workspace
 documents from 2.5.4 loaded unchanged, and every new contract was optional.

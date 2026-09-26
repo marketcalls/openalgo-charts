@@ -161,7 +161,7 @@ The pane ranks its primitives' hits by paint band before distance: a hit painted
 
 A primitive answering for others sets `PrimitiveHit.paintedBy` to the primitive that painted the hit (the draw tier's front layer does for the layers under it), and the pane sets it on a hit from a primitive placed in the series band. The band ranking reads it, and for the context menu target the chart compares paint order: where that primitive paints under the series under the pointer, the series is the target. A hit without `paintedBy` keeps the menu, as before.
 
-Routing, from `src/core/chart.ts`:
+Routing, from `src/core/chart-input.ts`:
 
 - **Click**: on pointerup without movement, the pane is hit-tested at the press point. A hit fires `chart.subscribeClick(cb)` with the `externalId`, and the `click` bus event carries `{ id, price, time, paneIndex, point }` with `id: null` on empty plot.
 - **Drag**: on pointerdown, a hit arms a drag when `hit.draggable === true`, or when `hit.cursor === 'ns-resize'` and `subscribeDrag` has a callback. The press emits `drag:start`. Moves fire `subscribeDrag(onDrag)` and a `drag` bus event `{ id, price, time, paneIndex, fromPrice, fromTime }`; release fires `onDragEnd` and `drag:end`. Listen for `drag:cancel` to discard drafts on pointer cancellation or pinch. Set `PrimitiveHit.cancelOnEscape: true` only when the consumer handles cancellation without requiring an end notification; it enables Escape rollback, including with shortcuts disabled. Pointer cancellation retains the legacy end notification after cancellation.

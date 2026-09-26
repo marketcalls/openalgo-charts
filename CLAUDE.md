@@ -275,7 +275,10 @@ close time. Anything that computes off `bars[bars.length - 1]` inherits this rul
 
 When fanning out agents over this repo, **file ownership must be exclusive**, and
 `src/core/chart.ts` and `src/core/pane.ts` need a single writer per run. Working-tree
-corruption here comes from parallel agents, not from any other process.
+corruption here comes from parallel agents, not from any other process. Since 2.5.7 the
+chart's logic lives in `src/core/chart-*.ts` collaborators (ARCHITECTURE.md, Chart
+internals): different agents may own different collaborator files in one run, provided
+only one of them edits `chart.ts` itself, where the host interfaces meet.
 
 ## Timezone
 

@@ -373,9 +373,9 @@ interface Classified {
 const CLASSIFIED: readonly Classified[] = [
   { file: 'src/core/chart.ts', line: /legacy names carry one id/, status: 'undecided', name: '`draw:select`' },
   { file: 'src/core/chart.ts', line: /`rendererKind` shipped under/, status: 'deprecated', name: '`Chart.renderer`' },
-  { file: 'src/core/chart.ts', line: /flat flags predate `modifiers`/, status: 'deprecated', name: '`shiftKey`' },
-  { file: 'src/core/chart.ts', line: /typed against either/, status: 'deprecated', name: '`shiftKey`' },
-  { file: 'src/core/chart.ts', line: /`subscribeClick` stays hit-only/, status: 'internal',
+  { file: 'src/core/chart-input.ts', line: /flat flags predate `modifiers`/, status: 'deprecated', name: '`shiftKey`' },
+  { file: 'src/core/chart-input.ts', line: /typed against either/, status: 'deprecated', name: '`shiftKey`' },
+  { file: 'src/core/chart-input.ts', line: /`subscribeClick` stays hit-only/, status: 'internal',
     name: 'the behaviour of a current helper beside the richer click event, not an older form of anything' },
   { file: 'src/draw/controller.ts', line: /predating `setPlacementMode`/, status: 'internal',
     name: 'a guard for a draw tier loaded beside an older base bundle; nothing public is kept' },

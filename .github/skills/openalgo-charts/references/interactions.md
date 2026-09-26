@@ -2,7 +2,7 @@
 
 *When to read this: wiring or rebinding keyboard shortcuts, changing crosshair behaviour, supporting touch, arming a placement gesture, or making the chart keyboard-accessible.*
 
-Source of truth: `src/core/chart.ts` (`_attachInput` and the pointer/wheel/key handlers), `src/input/wheel.ts`, `src/input/shortcuts.ts`, `src/input/kinetic.ts`, `src/input/touch.ts`, `src/input/crosshair.ts`, `src/primitives/time-navigator.ts`. Tests: `tests/wheel-navigation.test.ts`, `tests/price-scale-transitions.test.ts`, `tests/shortcuts.test.ts`, `tests/interaction.test.ts`, `tests/pointer-button-guard.test.ts`, `tests/placement-mode.test.ts`, `tests/time-navigator.test.ts`.
+Source of truth: `src/core/chart-input.ts` (`_attachInput` and the pointer/wheel/key handlers; `src/core/chart.ts` keeps the listener fields that delegate to it), `src/core/chart-motion.ts` (the eased wheel zoom, the kinetic glide and the autoscale easing), `src/input/wheel.ts`, `src/input/shortcuts.ts`, `src/input/kinetic.ts`, `src/input/touch.ts`, `src/input/crosshair.ts`, `src/primitives/time-navigator.ts`. Tests: `tests/wheel-navigation.test.ts`, `tests/price-scale-transitions.test.ts`, `tests/shortcuts.test.ts`, `tests/interaction.test.ts`, `tests/pointer-button-guard.test.ts`, `tests/placement-mode.test.ts`, `tests/time-navigator.test.ts`.
 
 Everything is built on Pointer Events, so mouse, touch and pen share one code path. Listeners are attached to the container in the constructor and removed in `destroy()`; `keydown` goes on `document` when available, else on the container.
 

@@ -297,7 +297,7 @@ Color swatches stay compact. Theme overrides should target these tokens.
 | `exchange` | `string` | `''` | Passed to the feed with the symbol. |
 | `interval` | `string` | `'1d'` (or the saved one) | Must be a code the interval registry knows; an unknown code throws the engine's `UnknownIntervalError` at the call site. A saved code this build does not know falls back to `'1d'`. |
 | `intervals` | `readonly string[]` | `DEFAULT_INTERVALS` plus every registered code | The pill list. Each is validated the same way. |
-| `variant` | `DataVariant` | the feed's default series (or the saved one) | Which of the feed's series to show: `{ session: 'extended' }`, `{ adjustment: 'raw' }`, a currency or a unit. A malformed one throws a `TypeError` at the call site. The feed must declare it through `dataVariants`, or the data status reads "Not available from this source: ..." with no retry. Unreleased. |
+| `variant` | `DataVariant` | the feed's default series (or the saved one) | Which of the feed's series to show: `{ session: 'extended' }`, `{ adjustment: 'raw' }`, a currency or a unit. A malformed one throws a `TypeError` at the call site. The feed must declare it through `dataVariants`, or the data status reads "Not available from this source: ..." with no retry. Since 2.5.6. |
 | `chartType` | `string` | `'candlestick'` | The primary series type; must be a registered chart type. |
 | `theme` | `'dark' \| 'light' \| ChartTheme` | `'dark'` | Drives the canvas and the chrome tokens. Note the engine's own default is light; the widget's is dark. |
 | `rail` | `boolean \| RailOptions` | on | `false` hides it. `RailOptions.tools` restricts which ids appear (order still follows `RAIL_GROUPS`); `favorites` seeds the pins when nothing is stored. |
