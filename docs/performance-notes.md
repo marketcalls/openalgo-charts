@@ -6,23 +6,6 @@ one was found by reading the code while the 2.5.5 measurements in
 its own yet, so none is quoted as a cost. Read these before setting a budget, and
 remove an entry once a change has dealt with it.
 
-## Markers map the whole history on every paint
-
-`SeriesMarkers.draw` in `src/primitives/markers.ts` builds a map from bar
-time to bar on every paint. It fills the map from `dataLayer.indexedBars(seriesId)`,
-which allocates one object per bar in the series' whole history, and from the
-fallback bars when a marker set has them. It then tests every marker against the
-visible range one at a time. The work therefore grows with the history length and
-the marker count, not with the bars in view, and it repeats on every base repaint
-of the pane, which includes every live tick (ARCHITECTURE.md §3.2).
-
-The endurance workload attaches no markers, so the recorded frame times do not
-include this cost. To see it, add a marker set of realistic size to a benchmark
-workload and compare frame times at 2,000 and 50,000 bars with the view held at
-150 bars. A fix would read only the visible range (`visibleBars`), plus the styled
-markers that are laid out whatever their position, or keep the map until the
-series data changes.
-
 ## The painted-chart gate also hashes the price axis
 
 `paintProbe` in `scripts/fixtures/browser-endurance.html` hashes every pixel of each
