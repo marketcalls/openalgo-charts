@@ -568,7 +568,7 @@ npm run verify     # lint + types + unit + endurance harness + build + demo + dt
 ## Principles
 
 - **Canvas rendering, two canvases per pane**: a base canvas for the chart, its axes and the price lines (order and position lines included), and an overlay canvas for the crosshair, the drawings and the other top-layer primitives, so a crosshair move repaints only the overlay. No SVG and no DOM element per bar; SVG appears only in `exportSVG` output and in the icon markup of the draw and widget tiers. The optional WebGL tier draws on a shared offscreen surface and copies into the base canvas. Frame times are recorded, not promised: see [browser endurance](./docs/browser-endurance.md).
-- **One animation loop**: kinetic scroll and the eased wheel zoom are stepped inside the chart's own animation frame, so each frame paints the step it made.
+- **Repaint what changed, on one loop**: a live tick repaints the price pane and the panes of the studies computed from it, and a study recompute repaints only the panes its output lands on; a write that moves the shared time scale, such as an appended bar, repaints every pane. Kinetic scroll and the eased wheel zoom are stepped inside the chart's own animation frame, so each frame paints the step it made.
 - **Gapless time axis by default**: weekends, holidays, and session breaks collapse.
 - **Registries, not switches**: chart types, indicators, and drawing tools are all descriptors. Adding one is a registration, never a core change.
 - **Zero runtime dependencies**: nothing is excluded from the size budget.

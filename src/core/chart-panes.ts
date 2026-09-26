@@ -120,6 +120,10 @@ export class ChartPanes {
     }
     if (added.length === 0) return;
     this._relayout();
+    // Making room resized every pane's canvases, which clears them, and may
+    // have moved the time axis to another pane: all of them repaint, not only
+    // the pane whatever asked for it goes on to write.
+    this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     // Panes are made lazily, when an indicator asks for one, and that used to be
     // silent: `paneRemoved` existed with no counterpart. A host with chrome at
     // the bottom of the chart had no way to learn the bottom had moved. Emitted

@@ -101,7 +101,7 @@ We are writing our own engine from scratch, with no external charting dependency
 | **Shared data/time layer** merging all series by time to logical indices | Keeps price + volume + indicator panes perfectly aligned on one x-axis. See §4. |
 | **Indexed plot rows with cached visible range** | O(log n) visible-range lookup, so the series pass walks the *visible* bars. A study recompute still walks its full history once per frame that carries a tick; §1 records what that costs. |
 | **Bitmap vs media coordinates** | Draw in device pixels so 1px lines stay crisp on HiDPI/retina without blur. |
-| **Per-pane invalidation mask** (global level + per-pane map) | A crosshair move repaints the overlay canvas only. The mask can also target one pane, but in 2.5.7 a study recompute and a live tick still repaint every pane. See §3.2. |
+| **Per-pane invalidation mask** (global level + per-pane map) | A crosshair move repaints the overlay canvas only. A live tick repaints the price pane and the panes of the studies computed from it, and a study recompute repaints only the panes its output lands on, until a write moves the shared time scale. See §3.2. |
 | **Renderers are pure functions of draw-data** | Renderer takes a plain data object + canvas context, draws, returns. No state, easy to test, tree-shakeable. |
 | **Primitive/plugin extension API** with views + lifecycle + z-order + hit-test | The trade layer (order lines, DOM ladder) and markers/events are *primitives*, not hardcoded, keeps core lean. See §8. |
 
@@ -331,8 +331,9 @@ class InvalidateMask {
 What the chart does with it:
 - **Cursor work stays on the overlay.** A crosshair move, and a hover change between top-layer primitives, raise `Cursor`: every pane repaints its top canvas and no base canvas is touched.
 - **Per-pane invalidation is used by primitives.** A primitive's `requestUpdate` raises its own pane only, at `Cursor` for a top-layer primitive and `Light` otherwise; attaching or removing a primitive and dragging a price axis are pane-local too.
-- **Data changes are still global.** Writing series data raises a global `Full`, and a study's plots are series, so an indicator recompute repaints every pane, not only the study's own. The source-bar update path does the same, so a live tick repaints every pane. Repainting only the panes whose data or scale moved is planned work, not current behaviour.
-- **`autoScale` flag per pane**: separates "rescale this pane's price axis" from "repaint at current scale". A `Full` level autoscales every pane regardless.
+- **A data write repaints the panes whose data or scale moved.** Each write compares what every pane shares, the shared index (its length and the times at either end) and the time scale's window, before and after. A live tick that replaces the forming bar moves neither, so it repaints only its own series' pane, at `Full` so the scale re-measures. The studies computed from that series recompute at the start of the frame that paints the tick, before its mask is taken, and a study recompute repaints only the panes its output lands on: every pane holding one of its plots or primitives, which is its own pane and any pane it targets, such as the price pane for a plot sent to the candles. Legends and the crosshair are on the overlay canvas of the pane they describe and repaint with it. An unrelated pane, and the time axis on the bottom pane, keep their pixels.
+- **A write that moves the shared index or the time scale repaints every pane.** An appended bar grows the index, and with the view at the right edge it scrolls every pane by a bar, so every pane and the time axis repaint. A host's own `setData` and `prependData` repaint every pane as well, and so does a study that opens a pane, because making room resizes every pane's canvases.
+- **`autoScale` flag per pane**: separates "rescale this pane's price axis" from "repaint at current scale". A `Full` level autoscales every pane it reaches, all of them when it is global.
 - **Glides step inside the frame.** Kinetic scroll and the eased wheel zoom schedule no animation frames of their own (`input/kinetic.ts` and `input/zoom-glide.ts` hold the maths). The frame steps them (`ChartMotion._step`) before it takes the mask, so each frame paints the step it made, and a glide asks for one animation frame per frame.
 - **No time-scale operation queue.** Fit, bar spacing, right offset, scroll-to-realtime and both glides change the time scale directly, and the repaint goes through the ordinary invalidation. The public mask keeps `addTimeScaleOp` and `timeScaleOps` for compatibility, but `addTimeScaleOp` has no caller in the chart and the frame never reads the queue.
 - `chart.invalidate(mask)` merges into the pending mask and schedules one rAF; multiple calls per frame coalesce. What the frame's own first steps invalidate, a glide step or a study recompute, lands in that frame's mask and asks for no frame after it.
@@ -840,7 +841,7 @@ on every LTP tick:
   recompute P&L, breakeven, R:R; the position line asks for a repaint
 ```
 
-The position and order lines are `PriceLine`s, which paint on the normal layer of the base canvas, so a P&L update (`updatePositionPnl`) raises `Light` on the line's own pane, not `Cursor`. A tick that also moves the price series repaints every pane anyway (§3.2). The cost of either has not been measured.
+The position and order lines are `PriceLine`s, which paint on the normal layer of the base canvas, so a P&L update (`updatePositionPnl`) raises `Light` on the line's own pane, not `Cursor`. A tick that also moves the price series repaints the price pane at `Full` anyway, and every pane when it appends a bar (§3.2). The cost of either has not been measured.
 
 ### 9.4 Variable market depth (5 / 20 / 30 / 50 / 200 levels)
 
@@ -949,7 +950,7 @@ Rules:
 
 The engine handles both modes through a **simple two-method contract**, so the mental model is consistent:
 - **Historical**: `series.setData(bars)`, bulk-load a fetched range; autoscale + fit-content; this is the static/backtest/replay case.
-- **Live**: `series.update(bar)` applies a same-time bar as the stored last candle and appends a newer-time bar. Updates arriving before one animation frame are coalesced, but the current source-bar path triggers full base work across active panes. Hosts should bound retained history for sustained sessions.
+- **Live**: `series.update(bar)` applies a same-time bar as the stored last candle and appends a newer-time bar. Updates arriving before one animation frame are coalesced into one paint of the price pane and of the panes of the studies computed from it; an appended bar repaints every pane (§3.2). Each such frame still recomputes the studies before it paints, so hosts should bound retained history for sustained sessions.
 
 Standard live behaviors: **auto-scroll to realtime** only when the user is already at the right edge (don't yank the view if they've scrolled into history), a **last-price line + label**, and **lazy history paging**: when the user pans left past the loaded range, fire `getBars(olderRange)` and prepend. Family B transforms and Family C profiles consume the *same* `setData`/`update` stream; the transform/profile pipelines are incremental so live ticks extend Renko bricks / footprint cells correctly without recompute.
 
@@ -1079,9 +1080,6 @@ The current implementation keeps these boundaries in 2.5.7:
 
 - **Separate price/time axis-widget canvases** - axes draw within the pane
   canvas by design (small-engine simplification).
-- **Repainting only what changed** - the mask can target one pane, but data
-  writes raise a global `Full`, so a study recompute or a live tick repaints
-  every pane (§3.2).
 - **The time-scale operation queue** - `InvalidateMask` keeps
   `addTimeScaleOp` for compatibility, and nothing in the chart queues an
   operation or reads the queue; the time scale is changed directly (§3.2).
@@ -1123,7 +1121,7 @@ Point-by-point mapping of the implementation review to where each is now address
 | # | Review point | Resolution | Section |
 |---|---|---|---|
 | 1 | Canvas/layout underspecified ("one canvas") | Explicit base+top canvas per pane; the axes paint on the base canvas (separate axis canvases deferred, §13a); layout diagram | §0 table, **§3.1** |
-| 2 | Invalidation too simple (global only) | Global level **+ per-pane map (+autoScale flag)**; the per-pane map serves primitives while data writes stay global, and nothing in the chart reads the time-scale op queue the public mask keeps (§13a) | **§3.2** |
+| 2 | Invalidation too simple (global only) | Global level **+ per-pane map (+autoScale flag)**; primitives, live ticks and study recomputes repaint the panes they change, and a write that moves the shared time scale repaints every pane | **§3.2** |
 | 3 | Shared time/data layer missing | Single `DataLayer` merges all series by time to shared logical indices, whitespace, `baseIndex`; per-series rows derive from it | **§4.1**, §3.3 |
 | 4 | History prepend/update semantics | Mutation API: `setData` / `update` / **`prependData` (index-shift + viewport preserve)**; out-of-order upsert; `mergeRange` not implemented | **§4.2** |
 | 5 | Live candle aggregation missing | `candle-builder.ts`: bucketing, **session reset, volume-delta (cumulative-day vs ltq), late-tick policy, tz** | **§10.2** |
