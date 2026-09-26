@@ -558,24 +558,58 @@ build, which already measured over several of them before this change.
   host timeline sees a settings write itself.
 - Undo and redo never override a study's policy. A press leaves a study as its
   policy keeps it: not removed while `removable: false`, its settings and scales
-  as they are while `configurable: false`, its pane and its row in the stack
-  while `movable: false`. The rest of the step still applies, and a step left
-  with nothing to do (removing a study the host has protected since) is dropped
-  and the press goes on to the one before, as the drawing history treats a
-  read-only drawing, so `canUndo`, `canRedo` and the peeks say what a press would
-  do, and `subscribe` hears when a policy changes that. A change only the host
-  could make, adding a protected study or a forced write or remove on one, is no
-  step, and a study brought back returns with the restrictions it had.
+  as they are while `configurable: false`, its pane while `movable: false`, and
+  never moved by a call of its own. Other studies still pass one that may not
+  move, as the chart lets them: a user's reorder that moves a free study past a
+  pinned one is a step and is taken back, and a study removed from above a pinned
+  one comes back above it; two pinned studies never trade places. The rest of the
+  step still applies, and a step left with nothing to do (removing a study the
+  host has protected since) is dropped and the press goes on to the one before,
+  as the drawing history treats a read-only drawing, so `canUndo`, `canRedo` and
+  the peeks say what a press would do, and `subscribe` hears when a policy changes
+  that. A change only the host could make, adding a protected study or a forced
+  write or remove on one, is no step.
+- Undo and redo never remove or weaken a policy the host set later. A study a
+  press brings back takes the policy its host holds now, the one it last had on
+  the chart, never an older one the step captured: a restriction added after the
+  step was made is still on the study that comes back. A study that left the
+  chart by the host's hand (inside `ignore`, through a forced remove, or left out
+  of a chart the host rebuilt and passed to `attach`) is the host's to bring
+  back: the part of any step that would re-add it is dropped, and a step with
+  nothing else to do goes with it.
 - A study brought back by an undo or redo takes back the instance id it had, so
-  the studies reading it and the alerts naming it find it again. If a study the
-  host placed under that id since holds it, the one brought back takes a fresh id
-  instead, the later steps and the studies reading it follow it there, and the
-  host's study keeps the id and is never taken for the one a step means.
+  the studies reading it and the alerts naming it find it again. The history
+  tells studies apart by the chart's own object for each, not by id or kind: if
+  a study the host placed under that id since holds it, of the same kind or
+  another, the one brought back takes a fresh id with the settings the step gives
+  it, the later steps and the studies reading it follow it there, and the host's
+  study keeps the id, its pane and its settings and is never taken for the one a
+  step means.
+- `ChartHistory` records a pane height or a scale option set in code outside a
+  transaction (`setPaneWeight`, `setPriceAxisOptions`, `setPriceScaleOptions` and
+  the other setters the chart now announces with `layout:change`) as a step of
+  its own. The chart-wide price scale defaults (`priceScaleDefaults()`: mode,
+  invert and both margins) are a field of each step apart from every pane's
+  axes: a chart-wide change is taken back with them, so a pane added after the
+  undo starts from the old defaults, while a change to one axis from its menu,
+  on a chart with a single pane too, is replayed on that axis alone and never
+  writes the defaults or announces a linked appearance change. The chart
+  settings `scales.mode`, `scales.inverted` and `scales.autoScale` are no longer
+  compared as settings, since the defaults and the axes carry them.
+- A step made of several stretches (a group or a transaction with an `ignore`
+  inside it) reads each stretch against the chart the stretch before it in the
+  press leaves, rather than the chart before the press, so a later stretch whose
+  stacking order the chart held already still puts back the order an earlier one
+  changed. A command pushed inside `ignore` is no step. A pane a host makes for a
+  primitive of its own (`addPrimitive` at a new index) or a drawing it places
+  there is the host's, like one it plots a series in: no `pane-add` step, and no
+  undo or redo makes or removes it.
 
 ### Changed
 
 - The widget's Undo and Redo chords are listed with the widget's shortcuts
   rather than the drawing ones, since they now reach every step on the chart.
+
 ### Added
 
 - Conditional study inputs. Every `IndicatorInput` (and a chart settings colour

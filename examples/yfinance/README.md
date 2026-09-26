@@ -952,7 +952,8 @@ and study settings dialogs (one step per session; Cancel leaves none), a drag of
 study's anchor ring and drawings, in the order they were made. A study brought back
 returns to its pane, height and fold, with the drawings its pane held, and under the
 id it had. The protected VWAP is the host's: adding or removing it from the menu is
-never a step, and no undo or redo removes, reconfigures or moves it.
+never a step, and no undo or redo removes, reconfigures or moves it, though a study
+you move past it in its pane's stack is a step like any other and goes back past it.
 
 Ctrl+Z and Ctrl+Y (and Ctrl+Shift+Z) over a chart and the mobile bar's Undo and Redo
 walk the focused chart's timeline. The rail and the drawing toolbar belong to the main

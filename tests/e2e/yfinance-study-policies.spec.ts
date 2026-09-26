@@ -129,3 +129,54 @@ test('undo and redo leave the protected VWAP to the host, and walk the user\'s o
   await expect(undo).toHaveAttribute('aria-disabled', 'true');
   expect(errors).toEqual([]);
 });
+
+test('a study the user moves past the protected VWAP is a step the rail takes back, and the VWAP never moves by a call of its own', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.evaluate(() => { (window as any).__oac.app.chart.restoreState({ version: 1, indicators: [] }); });
+  await paint(page);
+  const undo = page.locator('#rail button[aria-label="Undo"]'), redo = page.locator('#rail button[aria-label="Redo"]');
+  await menuAt(page, 300, 200);
+  await page.locator('#ctxmenu [data-act="hoststudy"]').click();
+  await expect.poll(() => study(page)).not.toBeNull();
+  const vwap = (await study(page))!.id;
+  const sma = await page.evaluate(() => (window as any).__oac.app.chart.addIndicator('sma').id as string);
+  await paint(page);
+  const order = () => page.evaluate(() => (window as any).__oac.app.chart.indicators().map((item: any) => item.indicatorId as string));
+  expect(await order()).toEqual(['vwap', 'sma']);
+  // Watch every call a press makes on the chart: none may name the VWAP.
+  await page.evaluate((id) => {
+    const chart = (window as any).__oac.app.chart;
+    const calls: string[] = (window as any).__pinnedCalls = [];
+    for (const name of ['reorderIndicator', 'moveIndicator', 'moveInSeriesStack']) {
+      const own = chart[name].bind(chart);
+      chart[name] = (target: string, ...rest: unknown[]) => { if (String(target).endsWith(id)) calls.push(name); return own(target, ...rest); };
+    }
+  }, vwap);
+
+  // The Objects dock steps the user's SMA through the stack, past the VWAP.
+  await page.getByRole('button', { name: 'Chart objects', exact: true }).click();
+  const row = page.locator(`#inspect-layout-1 [data-object-id="indicator:${sma}"]`);
+  await expect(row).toBeVisible();
+  for (let i = 0; i < 3 && (await order())[0] !== 'sma'; i++) {
+    await row.locator('[data-action="earlier"]').click();
+    await paint(page);
+  }
+  expect(await order()).toEqual(['sma', 'vwap']);
+  await expect(undo).toHaveAttribute('aria-disabled', 'false');
+  await page.screenshot({ path: info.outputPath('moved-past-protected.png') });
+  await page.keyboard.press('Escape');
+
+  // Walked back with the rail until the stack is as it was, and forward again
+  // by as many presses: each press the dock made is one step.
+  let presses = 0;
+  for (; presses < 3 && (await order())[0] !== 'vwap'; presses++) { await undo.click(); await paint(page); }
+  expect(await order()).toEqual(['vwap', 'sma']);
+  expect(presses).toBeGreaterThan(0);
+  await page.screenshot({ path: info.outputPath('moved-back.png') });
+  for (let i = 0; i < presses; i++) { await redo.click(); await paint(page); }
+  expect(await order()).toEqual(['sma', 'vwap']);
+  expect((await study(page))!.policy).toEqual({ removable: false, configurable: false, movable: false });
+  expect(await page.evaluate(() => (window as any).__pinnedCalls)).toEqual([]);
+  expect(errors).toEqual([]);
+});
