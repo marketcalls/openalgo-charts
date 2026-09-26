@@ -388,6 +388,53 @@ describe('sizes observed before the browser paints', () => {
     expect(pane.base.element.width).toBe(800);
   });
 
+  /** The browser's report for each canvas of each pane: the box it has now, covering media x ratio device pixels. */
+  const reportAll = (chart: Chart, device: Observer): void => device.cb(chart.panes().flatMap(pane => [pane.base, pane.top].map(layer => ({
+    target: layer.element,
+    contentBoxSize: [{ inlineSize: layer.mediaWidth, blockSize: layer.mediaHeight }],
+    devicePixelContentBoxSize: [{ inlineSize: Math.round(layer.mediaWidth * layer.pixelRatio), blockSize: Math.round(layer.mediaHeight * layer.pixelRatio) }],
+  }))));
+
+  it('paints a one-pixel container step once, the browser report of the new box changing nothing', () => {
+    stubObservers(true);
+    const { chart, frames } = chartIn();
+    chart.addSeries('candlestick').setData(bars(60));
+    frames.run();
+    const [container, device] = observers;
+    reportAll(chart, device);
+    const pane = chart.panes()[0];
+    const paint = vi.spyOn(pane, 'paintBase');
+    container.cb([{ contentRect: { width: 801, height: 600 } }]);
+    expect([pane.base.element.width, pane.top.element.width]).toEqual([801, 801]);
+    expect(paint).toHaveBeenCalledTimes(1);
+    // The browser then reports the box the canvases now have, before it paints.
+    reportAll(chart, device);
+    frames.run();
+    expect(paint).toHaveBeenCalledTimes(1);
+  });
+
+  it('paints each pane once when a boundary between them moves by one pixel', () => {
+    stubObservers(true);
+    const { chart, frames } = chartIn();
+    chart.addSeries('candlestick').setData(bars(60));
+    chart.addIndicator('rsi');
+    chart.setPaneWeight(1, 0.5);
+    frames.run();
+    const device = observers[1];
+    reportAll(chart, device);
+    const before = heights(chart);
+    expect(before).toEqual([400, 200]);
+    const paints = chart.panes().map(pane => vi.spyOn(pane, 'paintBase'));
+    // A weight of 201 / 399 against the price pane's 1 moves the boundary up one pixel.
+    chart.setPaneWeight(1, 201 / 399);
+    expect(heights(chart)).toEqual([399, 201]);
+    frames.run();
+    reportAll(chart, device);
+    frames.run();
+    paints.forEach((paint, i) => expect(paint, `pane ${i}`).toHaveBeenCalledTimes(1));
+    chart.panes().forEach((pane, i) => expect(pane.base.element.height, `pane ${i}`).toBe(Math.round(pane.base.mediaHeight)));
+  });
+
   it('follows the panes: a new one is watched, a removed one let go, and all of them on destroy', () => {
     stubObservers(true);
     const { chart, frames } = chartIn();

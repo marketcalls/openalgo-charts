@@ -314,4 +314,34 @@ test.describe('the device-pixel box the browser reports', () => {
       expect(now.stores, `stores at ${width}`).toEqual(all(now.device));
     }
   });
+
+  test('paints each pane once for a one-pixel step, the report of the new box changing nothing', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', 'WebKit reports no device-pixel content box, so no report can ask for a second paint there');
+    await mount(page);
+    await paint(page);
+    // A step in width moves every pane's box; one in height moves the boundaries.
+    for (const [side, size] of [['width', CONTAINER.width + 1], ['height', CONTAINER.height + 1]] as const) {
+      const result = await page.evaluate(([prop, px]) => new Promise<{ paints: number[]; stores: number[][]; media: number[][] }>(resolve => {
+        const { chart } = window.__dpx;
+        const paints = chart.panes().map(() => 0);
+        const own = chart.panes().map(pane => pane.paintBase);
+        chart.panes().forEach((pane, i) => {
+          pane.paintBase = (...args: Parameters<typeof pane.paintBase>) => { paints[i]++; own[i].apply(pane, args); };
+        });
+        document.getElementById('c')!.style[prop] = `${px}px`;
+        // Three frames: the resize, the box reports the browser sends before
+        // painting it, and one more for any frame a report asked for.
+        requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+          chart.panes().forEach((pane, i) => { pane.paintBase = own[i]; });
+          resolve({
+            paints,
+            stores: chart.panes().map(p => [p.base.element.width, p.base.element.height]),
+            media: chart.panes().map(p => [p.base.mediaWidth, p.base.mediaHeight]),
+          });
+        })));
+      }), [side, size] as const);
+      expect(result.paints, `paints after a step in ${side}`).toEqual([1, 1, 1]);
+      expect(result.stores, `stores after a step in ${side}`).toEqual(result.media.map(([w, h]) => [Math.round(w), Math.round(h)]));
+    }
+  });
 });

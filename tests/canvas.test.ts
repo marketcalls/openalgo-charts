@@ -139,6 +139,26 @@ describe('a canvas sized from the device-pixel box the browser reports', () => {
     expect(canvas.element.width).toBe(701);
   });
 
+  it('drops the reported box on a whole-pixel resize, so the store is the new size at once', () => {
+    // 800 px at ratio 1 covers 800 device pixels, reported once. 801 px can
+    // only cover 801: keeping the 800 would paint into the wrong store and
+    // leave the browser's report of 801 to clear it and paint it all again.
+    const canvas = layer();
+    canvas.resize(800, 600, 1);
+    canvas.setDeviceSize(800, 600);
+    canvas.resize(801, 600, 1);
+    expect([canvas.element.width, canvas.element.height]).toEqual([801, 600]);
+    expect(canvas.setDeviceSize(801, 600)).toBe(false);
+    // The same a pixel down, and on the other axis.
+    canvas.resize(801, 599, 1);
+    expect([canvas.element.width, canvas.element.height]).toEqual([801, 599]);
+    // At ratio 2 a half-pixel step is one device pixel, which no snapped box absorbs.
+    canvas.resize(400, 300, 2);
+    canvas.setDeviceSize(800, 600);
+    canvas.resize(400.5, 300, 2);
+    expect(canvas.element.width).toBe(801);
+  });
+
   it('stops trusting the box once a report is refused, and estimates again', () => {
     const canvas = layer();
     canvas.resize(560.5, 340, 1);

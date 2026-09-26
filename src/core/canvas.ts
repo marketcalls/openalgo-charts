@@ -131,11 +131,13 @@ export class CanvasLayer {
     // The browser reports a device-pixel box only when it changes. A resize by
     // less than a pixel often leaves it as it was, so no report follows, and
     // the estimate would stretch the store by a pixel for good. The box last
-    // reported is still the box then, and a store within a pixel of the
-    // estimate is kept at it; a box that did change is reported before the
-    // browser paints and replaces it.
-    this.element.width = this._reported(this._deviceWidth, mediaWidth * dpr) ?? bmp.width;
-    this.element.height = this._reported(this._deviceHeight, mediaHeight * dpr) ?? bmp.height;
+    // reported is still the box then, and is kept while it is one the new
+    // size can snap to: the whole number of device pixels either side of the
+    // estimate. A step that moves the estimate past it (800 to 801 px at
+    // ratio 1) cannot be that box, and keeping it would paint into a store
+    // the browser's next report clears for a second full paint.
+    this.element.width = this._snapsTo(this._deviceWidth, mediaWidth * dpr) ?? bmp.width;
+    this.element.height = this._snapsTo(this._deviceHeight, mediaHeight * dpr) ?? bmp.height;
     this.element.style.width = `${mediaWidth}px`;
     this.element.style.height = `${mediaHeight}px`;
   }
@@ -182,6 +184,11 @@ export class CanvasLayer {
   /** A reported device size, if it is whole, positive and within a pixel of `estimate`. */
   private _reported(device: number, estimate: number): number | null {
     return Number.isInteger(device) && device > 0 && Math.abs(device - estimate) <= 1 ? device : null;
+  }
+
+  /** A device size last reported, if a box of `estimate` device pixels can still snap to it. */
+  private _snapsTo(device: number, estimate: number): number | null {
+    return device > 0 && device >= Math.floor(estimate) && device <= Math.ceil(estimate) ? device : null;
   }
 
   /** Clear the whole bitmap and reset the transform to bitmap (device-px) scope. */
