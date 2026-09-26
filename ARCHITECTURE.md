@@ -56,6 +56,39 @@ explicitly labeled estimates; use the current API types for implementation.
 | Custom studies | Descriptor registry in base; optional built-ins and external-data helpers | [Indicators](https://marketcalls.github.io/openalgo-charts/docs/indicators/) |
 | Host interface | Canvas containers in base; toolbar, Data/Objects dock, rich symbol search, dialogs and translated controls in the widget | [Widget](docs/widget.md) |
 
+## Chart internals
+
+`Chart` (`src/core/chart.ts`) is the facade: it holds the state every concern shares
+(panes, time scale, data layer, series and studies), builds the frame, runs the event bus
+and the lifecycle, and keeps every public method with its documentation. Until 2.5.7 it
+also held all the logic, 6,729 lines of it. Each concern now lives in a collaborator of its
+own, created by the chart and reaching the rest of it through a host interface declared in
+the collaborator's file. The chart is that host: every interface member is typed as
+`Chart['name']`, so the compiler rejects a member the chart does not have, and no
+forwarding object is built.
+
+| File | Holds |
+|---|---|
+| `chart-types.ts` | The public option, event and payload types, re-exported from `chart.ts` |
+| `chart-series.ts` | Series creation, series type changes, price formats and the data writes behind a series handle |
+| `chart-studies.ts` | The study host: adding, moving and removing studies, the `IndicatorHost` they run against, bar colours and the recompute queue |
+| `chart-panes.ts` | The pane stack and its layout: creating, removing, moving, maximizing and folding panes, axis columns and divider hits |
+| `chart-legends.ts` | Legend rows per pane, their controls and the collapsed indicator list |
+| `chart-scales.ts` | The price-scale patches behind the chart-wide and one-axis setters, and axis placement |
+| `chart-primitives.ts` | Primitives on panes, the draw order (series stack) and the event strip |
+| `chart-appearance.ts` | Branding, the text watermark, the option batch and the image and SVG exports |
+| `chart-input.ts` | Pointer, wheel, double-click, pinch, keyboard, shortcut, context-menu, hover and cursor routing |
+| `chart-motion.ts` | Kinetic scroll and the eased wheel zoom |
+| `chart-pixels.ts` | Following the container's size and the device pixel ratio |
+| `chart-state.ts` | `getState` and `restoreState` |
+
+The split moved code and changed nothing else: no test assertion changed (one
+compatibility inventory now names the file three moved comments live in), and the
+render-parity spec painted the same pixels as 2.5.6 at every zoom. Private members stay private, so the published declarations show
+only `private` names for the collaborators. `scripts/line-caps.json` holds every source file
+to 1,500 lines through ESLint, with the few older files over the limit capped at their
+size so that they can only shrink.
+
 ## 0. Why from scratch (and the principles we follow)
 
 We are writing our own engine from scratch, with no external charting dependency. We deliberately follow the well-established design principles that make minimal canvas charting engines small and fast, because they are the right ideas:
@@ -118,7 +151,7 @@ src/
 ├── core/
 │   ├── canvas.ts            # HiDPI canvas pair (media+bitmap), resize observer
 │   ├── render-loop.ts       # rAF scheduler + invalidate mask
-│   ├── chart.ts             # top-level orchestrator (owns panes, scales, model)
+│   ├── chart.ts             # top-level orchestrator (owns panes, scales, model); see Chart internals
 │   └── pane.ts              # a stacked drawing region (price pane, volume pane…)
 ├── model/
 │   ├── data-layer.ts        # shared DataLayer: merge-by-time, logical indices, prepend/merge (§4)
