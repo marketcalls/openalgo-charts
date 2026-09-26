@@ -317,6 +317,22 @@ describe('drawing targets', () => {
     expect(painted()).toEqual([true, true]);
   });
 
+  it('makes a target layer hidden when the study is hidden, and shows it with the study', () => {
+    const { chart } = mount();
+    const study = chart.addIndicator(routedDraws(), { zone: 'study' });
+    study.setVisible(false);
+    // A pass while hidden routes a shape somewhere new: its layer must not paint yet.
+    study.setSettings({ zone: 'price' });
+    expect(drawLayers(chart, study)).toEqual([
+      { pane: 1, scale: 'right', overlay: false, ids: ['ray'] },
+      { pane: 0, scale: null, overlay: true, ids: ['zone'] },
+    ]);
+    const painted = () => ownedLayers(chart, study).filter(layer => layer.kind === 'IndicatorDrawings').map(layer => layer.ops.length > 0);
+    expect(painted()).toEqual([false, false]);
+    study.setVisible(true);
+    expect(painted()).toEqual([true, true]);
+  });
+
   it('keeps price-pane layers on pane zero through moves and releases them with the study or its pane', () => {
     const id = routedDraws();
     const { chart } = mount();
@@ -962,6 +978,26 @@ describe('routed layer lifecycle', () => {
     // Earlier outputs of the same pass are not rolled back.
     expect(study.values().osc[0]).toBe(2);
     expect(markerLayers(chart, study).map(layer => layer.ids)).toEqual([['next']]);
+  });
+
+  it('holds back the bar colours of a settings change whose drawing target is rejected', () => {
+    const id = `targets-settings-colours-${seq++}`;
+    registerIndicator({
+      id, name: 'Coloured settings', placement: 'pane', plots: PLOTS, calc: CALC,
+      inputs: [{ key: 'bad', type: 'boolean', label: 'Bad', default: false }],
+      barColors: ({ bars, settings }) => bars.map(() => (settings.bad === true ? '#ff0000' : '#00ff00')),
+      draws: ({ bars, settings }) => [{ kind: 'box', from: { time: bars[10].time, price: 124 }, to: { time: bars[20].time, price: 112 },
+        ...(settings.bad === true ? { plot: 'missing' } : { overlay: true }) } as never],
+    });
+    const { chart } = mount();
+    const study = chart.addIndicator(id);
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+    // The settings path reorders every study's resources after its pass, which must not run the colours of a failed one.
+    study.setSettings({ bad: true });
+    expect(study.dataStatus()?.state).toBe('error');
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+    expect(chart.moveIndicator(study.id, chart.panes().length)).toBe(true);
+    expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
   });
 
   it('keeps a study\'s marks under its shapes on the candles when a later study restacks the pane', () => {

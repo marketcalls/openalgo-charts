@@ -429,11 +429,12 @@ export interface DrawAnchor {
 }
 
 /**
- * Where one returned drawing or marker goes, when the study's own layer is the
- * wrong place for it. A study in its own pane still has things to say about
- * the candles (a supply zone, a buy signal), and a study whose plots sit on
- * two axes has shapes and marks measured on each. Naming no target keeps the
- * output in the study's own layer, exactly as before.
+ * Where one returned drawing, marker or shading column goes, when the study's
+ * own layer is the wrong place for it. A study in its own pane still has
+ * things to say about the candles (a supply zone, a buy signal, a regime), and
+ * a study whose plots sit on two axes has shapes and marks measured on each.
+ * Naming no target keeps the output in the study's own layer, exactly as
+ * before.
  *
  * Each distinct target gets a layer of its own, owned by the instance: it
  * hides with the study, is released with it, and is released as soon as a
@@ -441,12 +442,16 @@ export interface DrawAnchor {
  * study's own marks already anchor to join that layer instead, so marks at
  * one bar stack rather than overlap, unless that series is an `overlay` plot
  * of a study in its own pane (see `plot`). A study's layers stack in a fixed
- * order: its own marks, its marker targets, its own shapes, then its drawing
- * targets, each kind's targets taking the price pane first and then the plots
- * in declaration order. A targeted layer created after the study was added
- * is put back in that order among the targeted layers on its pane, below
- * those of the studies added after it. No other layer moves for it, so an
- * output that names no target stacks exactly as before.
+ * order: its own marks, its marker targets, its own shapes, its drawing
+ * targets, its own shading, then its shading targets, each kind's targets
+ * taking the price pane first and then the plots in declaration order.
+ * Shading paints behind every series on its pane, so on any one pane it sits
+ * under the candles, the plots, the marks and the shapes whatever its slot;
+ * the order decides which study's shading covers another's. A targeted layer
+ * created after the study was added is put back in that order among the
+ * targeted layers on its pane, below those of the studies added after it. No
+ * other layer moves for it, so an output that names no target stacks exactly
+ * as before.
  */
 export interface IndicatorOutputTarget {
   /**
@@ -454,8 +459,11 @@ export interface IndicatorOutputTarget {
    * its effective price scale; a marker is anchored to that plot's series, so
    * `aboveBar` and `belowBar` read its values, and where it has none, the
    * candle's whenever that plot is on the price pane and on the candles' scale,
-   * first plot or not. Either follows the plot through a scale reassignment
-   * or a study move. An `overlay` plot takes it to the price pane.
+   * first plot or not. A shading column fills that plot's pane and is bound to
+   * its effective scale, which has no price to measure but keeps the layer on
+   * the axis the plot uses, so a reassignment never leaves a column held for
+   * nothing. Each follows the plot through a scale reassignment or a study
+   * move. An `overlay` plot takes it to the price pane.
    */
   plot?: string;
   /**
@@ -464,10 +472,20 @@ export interface IndicatorOutputTarget {
    * (its crosshair readout, which is the candles' own scale on whichever axis
    * they sit) and holds no axis itself, so the price axis stays free to move.
    * A marker is anchored to the instrument's candles, so `belowBar` sits
-   * under the low; it is drawn once the chart has a primary series. Naming a
+   * under the low; it is drawn once the chart has a primary series. A shading
+   * column fills the price pane's full height and binds no axis. Naming a
    * plot as well is rejected: a plot already decides its pane.
    */
   overlay?: boolean;
+}
+
+/**
+ * One column of per-bar shading a study's `background` returns in its list
+ * form, optionally sent to another pane or plot. `colors` is what the plain
+ * form returns: one entry per bar, `null` where nothing is shaded.
+ */
+export interface IndicatorBackgroundSpec extends IndicatorOutputTarget {
+  colors: readonly (string | null)[];
 }
 
 /** A signal marker a study returns, optionally sent to another pane or plot. */
@@ -1020,13 +1038,19 @@ export interface IndicatorDescriptor {
    * value to sit at and would fight the pane's autoscale; as a column behind the
    * candles it reads at a glance and costs the scale nothing.
    *
-   * Runs after every `calc`. Return `[]` to clear the layer.
+   * Return a list of {@link IndicatorBackgroundSpec} instead to shade somewhere
+   * else as well: each column can name the price pane or a plot (see
+   * {@link IndicatorOutputTarget}), one column per target, and a column naming
+   * none shades the indicator's pane exactly as the plain form does.
+   *
+   * Runs after every `calc`. Return `[]` to clear the study's own shading and
+   * release every targeted column.
    */
   background?(ctx: {
     bars: readonly Bar[];
     values: IndicatorValues;
     settings: Readonly<IndicatorSettings>;
-  }): readonly (string | null)[];
+  }): readonly (string | null)[] | readonly IndicatorBackgroundSpec[];
   /**
    * Optional recolouring of the **main price candles**, one entry per bar,
    * `null` to leave that bar with its own colour.

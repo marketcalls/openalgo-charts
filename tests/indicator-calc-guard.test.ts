@@ -173,6 +173,31 @@ describe('recompute guard', () => {
     expect(failing.values().v).toHaveLength(12);
   });
 
+  it('keeps the last good candle colours when a settings change makes calc throw, and does not throw itself', () => {
+    // The colour hook reads a column, so running it on a pass that produced none would throw.
+    registerIndicator({
+      ...FAILING, id: 'guard-settings-colours', inputs: [{ key: 'bad', type: 'boolean', label: 'Bad', default: false }],
+      calc: (b, settings) => {
+        if (settings.bad === true) throw new IndicatorInputError('Bad is set');
+        return { v: b.map(x => x.close) };
+      },
+      barColors: ({ values }) => values.v.map(() => '#00ff00'),
+    });
+    const { chart, flush } = manualChart();
+    try {
+      chart.addSeries('candlestick').setData(bars(10));
+      const study = chart.addIndicator('guard-settings-colours');
+      flush();
+      expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+      expect(() => study.setSettings({ bad: true })).not.toThrow();
+      const status = study.dataStatus();
+      expect(status?.state === 'error' && status.error instanceof IndicatorInputError).toBe(true);
+      expect(chart.primarySeries()!.getData()[0].color).toBe('#00ff00');
+      study.setSettings({ bad: false });
+      expect(study.dataStatus()?.state).toBe('ready');
+    } finally { chart.destroy(); }
+  });
+
   it('still refuses a descriptor that throws on its first calc', () => {
     const { chart } = manualChart();
     chart.addSeries('candlestick').setData(bars(5));

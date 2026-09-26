@@ -540,6 +540,37 @@ import by 43.
 
 - The yfinance reference host's chart state card hid its Dismiss button in the markup
   only: the button style overrode the hidden attribute, so an empty chart showed it too.
+### Added
+
+- A study's background shading can name a target, the way its drawings and
+  markers can since 2.5.4. `background` may return a list of columns, typed as
+  `IndicatorBackgroundSpec` (`{ colors, overlay?, plot? }`), instead of one
+  colour per bar: `overlay: true` shades the price pane behind the candles and
+  binds no axis, and `plot: 'key'` shades that plot's pane, bound to the plot's
+  effective scale. Each target is a layer of its own, owned by the instance: it
+  follows `setPlotPriceScales`, `setPriceScale` and `moveIndicator` (price-pane
+  shading stays on the price pane), hides with the study, is released when a
+  pass returns no column for it and goes with the study or its pane. Shading
+  stacks after the study's marks and shapes, its own column first and then its
+  targets, price pane first; it paints behind every series, so it always sits
+  under the candles, plots, marks and shapes. One column per target: a second
+  column for the same target, a column without colours, a hole in the list,
+  colours mixed with columns, an unknown plot, or `plot` with `overlay: true`
+  throw before any shading layer changes. The plain form, and a list whose
+  one column names no target, render exactly as before.
+- The reference host's Routed signal sample shades the candles by the sign of
+  its momentum, with a Momentum shading input that sends the shading to the
+  study's own pane or turns it off.
+
+### Fixed
+
+- A settings change whose pass fails keeps the study's last good candle
+  colours, as the documented pass order says. The chart restacks every study
+  after a settings change, and that restack ran the `barColors` hook again on
+  the failed pass: it published the colours of a pass rejected at a drawing,
+  marker or shading target, and when `calc` itself had thrown, a hook reading
+  one of its columns threw out of `setSettings` instead of leaving the error
+  status. Moving or reordering a study whose last pass failed keeps them too.
 
 ## 2.5.5
 

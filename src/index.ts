@@ -127,6 +127,7 @@ export type {
   IndicatorDrawing,
   IndicatorMarker,
   IndicatorOutputTarget,
+  IndicatorBackgroundSpec,
   DrawAnchor,
 } from './model/indicator-registry';
 export type { IndicatorApi, IndicatorHost } from './model/indicator-instance';

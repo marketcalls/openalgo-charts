@@ -201,6 +201,12 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // scope check. Measured 76874 to 77076 bytes (75.07 to 75.27 KiB); allow
 // 75.27 KiB. The alert controller and the loading controller's variant
 // handling still shake out.
+// Background targets route a study's shading to the price pane or a plot's
+// pane inside the indicator runtime, which every chart carries: the list form,
+// its checks and one layer per target, sharing the drawing targets' layer
+// upkeep. Measured 76874 to 77082 bytes (75.07 to 75.28 KiB). Holding the last
+// good bar colours through the restack after a failed settings pass takes it to
+// 77119 bytes (75.31 KiB); allow 75.32 KiB.
 const LIMIT_BYTES = 77.08 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter

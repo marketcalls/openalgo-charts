@@ -817,19 +817,21 @@ shapes use.
 ## Drawing and marker targets
 
 A study in its own pane often has something to say about the candles: the range a signal
-fired in, a Buy plate under the bar that triggered it. A study whose plots sit on two axes
-has shapes and marks measured on each. Any drawing returned by `draws` and any marker
-returned by `markers` can name where it goes with two optional fields, together typed as
-`IndicatorOutputTarget`:
+fired in, a Buy plate under the bar that triggered it, the regime each bar belongs to. A
+study whose plots sit on two axes has shapes and marks measured on each. Any drawing
+returned by `draws`, any marker returned by `markers` and any
+[shading column](#background-targets-unreleased) (unreleased) returned by `background` can name where it goes
+with two optional fields, together typed as `IndicatorOutputTarget`:
 
-| Field | Drawing | Marker |
-|---|---|---|
-| `overlay: true` | Drawn on the price pane in the instrument's units, measured on the scale that pane quotes prices on: the candles' own, whichever axis that is. | Anchored to the instrument's candles, so `belowBar` sits under the low. Drawn once the chart has a primary series. |
-| `plot: 'key'` | Drawn on that declared plot's pane and measured on its effective scale. | Anchored to that plot's series: its pane, its scale and its values. Where the plot has no value, the candle stands in when that plot is on the price pane and shares the candles' scale. |
+| Field | Drawing | Marker | Shading (unreleased) |
+|---|---|---|---|
+| `overlay: true` | Drawn on the price pane in the instrument's units, measured on the scale that pane quotes prices on: the candles' own, whichever axis that is. | Anchored to the instrument's candles, so `belowBar` sits under the low. Drawn once the chart has a primary series. | Fills the price pane's full height behind the candles. Binds no axis. |
+| `plot: 'key'` | Drawn on that declared plot's pane and measured on its effective scale. | Anchored to that plot's series: its pane, its scale and its values. Where the plot has no value, the candle stands in when that plot is on the price pane and shares the candles' scale. | Fills that plot's pane, bound to the plot's effective scale so the layer never holds an axis the plot has left. |
 
 With neither field, an output stays where it always went: drawings in the study's own
 layer on its first local plot's scale, markers on the first plot or, with
-`markerAnchor: 'price'`, on the candles. Such a descriptor renders exactly as before.
+`markerAnchor: 'price'`, on the candles, shading behind the study's own pane. Such a
+descriptor renders exactly as before.
 
 ```ts
 registerIndicator({
@@ -872,13 +874,17 @@ What the runtime does with a target:
 - **Scales.** A `plot` target follows that plot through `setPlotPriceScales` and
   `setPriceScale`. Price-pane drawings and markers both follow the candles: moving the
   price axis to the left, or the instrument onto another scale, takes them along. Neither
-  holds an axis of its own, so neither stops the price axis from moving.
+  holds an axis of its own, so neither stops the price axis from moving, and price-pane
+  shading has no price at all.
 - **Hiding and removal.** Hiding the study hides every target. A target that a later
   calculation no longer returns is released rather than kept empty, and removing the study,
   or the pane it lives in, releases all of them.
 - **Stacking.** A study's layers stack in a fixed order: its own marks, its marker
-  targets, its own shapes, then its drawing targets, with each kind's targets taking the
-  price pane first and then the plots in declaration order. A targeted layer made after
+  targets, its own shapes, its drawing targets, its own shading, then its shading
+  targets, with each kind's targets taking the price pane first and then the plots in
+  declaration order. Shading paints behind every series on its pane, so it always sits
+  under the candles, the plots, the marks and the shapes; the order decides which study's
+  shading covers another's where two overlap. A targeted layer made after
   the study was added, for a target returned again or for the first time, is put back in
   that order among the targeted layers on its pane, below those of the studies added
   after it. Only targeted layers move to do it, and nothing is recomputed or recoloured.
@@ -888,8 +894,9 @@ What the runtime does with a target:
   through `subscribeClick` where they are drawn: on the price pane or on the plot's axis.
 - **Saved state.** Targets are descriptor data, so a restored layout routes the same way.
 - **Errors.** An unknown plot, or `plot` together with `overlay: true`, throws before any
-  layer of that kind changes, and so does an invalid style on any shape or mark: every
-  drawing layer, or every marker layer, keeps what the last good pass drew. `addIndicator`
+  layer of that kind changes, and so does an invalid style on any shape or mark, or two
+  shading columns for one target: every drawing layer, marker layer or shading layer
+  keeps what the last good pass drew. `addIndicator`
   throws; a later pass publishes an error status instead. The rest of that pass is not
   rolled back. A pass syncs plots and fills, markers, the table, drawings, then background,
   bar colours, levels and alerts: those before the failing output stay applied, and those
@@ -903,6 +910,43 @@ plot: marks naming that plot keep a layer of their own, because they take the ca
 where the plot has no value and the study's own marks there do not. Marks on different
 series, the candles and a plot, are measured against different values and do not stack
 against each other.
+
+### Background targets (unreleased)
+
+`background` has two return forms. The plain one is one colour per bar for the study's own
+pane, as [before](#shading-the-pane-by-regime). The list form returns columns typed as
+`IndicatorBackgroundSpec`: each holds `colors`, one entry per bar with `null` for none, and
+may name a target.
+
+```ts
+registerIndicator({
+  id: 'momentum-regime', name: 'Momentum regime', placement: 'pane', inputs: [],
+  plots: [{ key: 'momentum', type: 'histogram', title: 'Momentum' }],
+  calc: (bars) => ({ momentum: bars.map((b, i) => i < 10 ? null : b.close - bars[i - 10].close) }),
+  background: ({ values }) => [
+    // Behind the candles: the regime is a statement about the price bars.
+    { overlay: true, colors: values.momentum.map((v) =>
+      v === null ? null : v > 0 ? 'rgba(38,166,154,0.08)' : 'rgba(239,83,80,0.08)') },
+    // No target: the study's own pane, exactly as the plain form shades it.
+    { colors: values.momentum.map((v) => (v !== null && Math.abs(v) > 5 ? 'rgba(79,140,255,0.10)' : null)) },
+  ],
+});
+```
+
+- **One column per target.** Two columns for the price pane, for one plot, or with no
+  target at all throw, as does a list mixing colours and columns, a list with a hole in it,
+  or a column without a `colors` array. Nothing changes on any shading layer when a pass
+  throws; the outputs the pass synced before shading stay applied, and the candle colours
+  after it wait for the next good pass, a settings change included.
+- **The column naming no target** is the study's own layer: created on the first pass that
+  shades anything, kept through passes that shade nothing, hidden rather than released
+  with the study. A pass whose list leaves it out clears it.
+- **A targeted layer** is created on the first column with entries for its target and kept
+  while that target is returned at all, even with nothing shaded; a pass that returns no
+  column for it releases it. `[]` clears the study's own layer and releases every target.
+- **Moves, hiding, scales and removal** follow the rules above: price-pane shading stays on
+  the price pane when the study moves, a `plot` column follows its plot, and every layer
+  hides and goes with the study.
 
 ## Trading sessions
 
@@ -1530,10 +1574,12 @@ background: ({ bars, values }) => values.trend.map((v) =>
 
 One entry per bar, `null` for a bar that should not be shaded. It runs after every `calc`
 alongside `markers`, `table` and `draws`, and the returned list replaces the previous one
-wholesale, so returning `[]` clears the layer.
+wholesale, so returning `[]` clears the layer. To shade the candles or another plot's pane
+from the same hook, return a list of columns instead, each naming its
+[target](#background-targets-unreleased) (unreleased).
 
 - The shading contributes **nothing to autoscale**, and it is drawn in the indicator's own
-  pane.
+  pane unless a column names a target.
 - Band edges are bar midpoints, so consecutive bars sharing a colour coalesce into one fill
   and two neighbouring runs abut exactly rather than overlapping by a pixel. Everything
   outside the visible range is dropped before any painting, so a two-state regime over 50k
@@ -1770,7 +1816,7 @@ and put the message beside the study instead of in a console.
 | `table` | `({ bars, values, settings }) => \{ rows, options \} \| null` | Optional corner-pinned summary grid, run after every `calc`. |
 | `tables` | `({ bars, values, settings }) => IndicatorTableSpec[]` | Multiple grids with stable, unique nonempty `id` values, `rows`, optional `options` and optional `overlay`. Omitted IDs are removed. Takes precedence over `table`. |
 | `draws` | `({ bars, values, settings }) => IndicatorDrawing[]` | Optional free-standing shapes anchored to time and price, run after every `calc`. A `label` or `box` with a `tooltip` or an `id` (2.4.0) is hit-testable: clicks reach `subscribeClick` and the tooltip paints on hover. A shape may name a [target](#drawing-and-marker-targets): `overlay: true` for the price pane, `plot` for another plot's pane and scale. |
-| `background` | `({ bars, values, settings }) => (string \| null)[]` | Optional [per-bar shading](#shading-the-pane-by-regime) behind the indicator's own pane, run after every `calc`. |
+| `background` | `({ bars, values, settings }) => (string \| null)[] \| IndicatorBackgroundSpec[]` | Optional [per-bar shading](#shading-the-pane-by-regime) behind the indicator's own pane, run after every `calc`. The list form (unreleased) sends columns to [targets](#background-targets-unreleased): `overlay: true` for the price pane, `plot` for another plot's pane. |
 | `barColors` | `({ bars, values, settings }) => (string \| null)[]` | Optional [recolouring of the price candles](#recolouring-the-price-candles), run after every `calc`. |
 | `alerts` | `IndicatorAlertSpec[]?` | Optional [conditions the runtime watches](#alerts), emitted as `indicator:alert`. `message` may be a function of the bar that fired (2.4.0). |
 | `levels` | `(ctx) => IndicatorLevel[]` | Optional horizontal reference lines. `ctx` is the settings plus `bars` and `values`, so a level can be data-derived. |
