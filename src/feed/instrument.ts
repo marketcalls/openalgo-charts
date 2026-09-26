@@ -3,6 +3,7 @@ import { tryResolveInterval } from './intervals';
 import { isValidTimezone, parseSessionSpec, utcSecondsToZonedParts, zonedWallClockToUtcSeconds, type SessionSpec } from './time';
 import { TickSchedule, type TickBand } from './tick-schedule';
 import { applyInstrumentTicks } from '../core/trading-controller';
+import { InvalidationLevel } from '../core/invalidate-mask';
 
 export interface InstrumentCalendar {
   /** HHMM-HHMM[:days], with opening weekdays 1 (Sunday) through 7. */
@@ -87,18 +88,24 @@ function zone(value: unknown, f: Fail): string {
   const timezone = text(value, 'timezone', f);
   return isValidTimezone(timezone) ? timezone : f('unknown timezone');
 }
-/** One validation for an instrument's calendar and a bare one, so both refuse the same input. */
-function calendarOf(value: unknown, f: Fail): InstrumentCalendar {
-  const calendar = record(value, f), exceptions: Record<string, readonly string[]> = {};
+/**
+ * A calendar's exception dates, validated the same way for an instrument and
+ * a bare calendar so both refuse the same input. The weekly sessions are
+ * checked by the caller, after the rest of its fields.
+ */
+function exceptionsOf(calendar: Record<string, unknown>, f: Fail): Readonly<Record<string, readonly string[]>> {
+  const exceptions: Record<string, readonly string[]> = {};
   if (calendar.exceptions !== undefined) {
     const values = record(calendar.exceptions, f);
     if (Object.keys(values).length > 3660) return f('too many session exceptions');
     for (const [key, value] of Object.entries(values)) { date(key, f); exceptions[key] = sessions(value, f); }
   }
-  return Object.freeze({ sessions: sessions(calendar.sessions, f), exceptions: Object.freeze(exceptions) });
+  return Object.freeze(exceptions);
 }
 function metadata(input: unknown): InstrumentMetadata {
-  const raw = record(input);
+  // The order of these checks decides which fault a host sees when an input
+  // has several, and a host may match on that message, so it does not move.
+  const raw = record(input), calendar = record(raw.calendar);
   const timezone = zone(raw.timezone, fail);
   const priceTick = positive(raw.priceTick, 'price tick');
   const precision = raw.pricePrecision;
@@ -113,7 +120,7 @@ function metadata(input: unknown): InstrumentMetadata {
     const rule = tryResolveInterval(code)?.bucketing;
     if (!rule || (rule.mode === 'interval' && (!Number.isFinite(rule.seconds) || rule.seconds <= 0))) return fail(`unsupported interval ${code}`);
   }
-  const calendar = calendarOf(raw.calendar, fail);
+  const exceptions = exceptionsOf(calendar, fail);
   if (raw.hasOpenInterest !== undefined && typeof raw.hasOpenInterest !== 'boolean') return fail('invalid OI capability');
   const bands = raw.tickBands === undefined ? undefined : new TickSchedule(raw.tickBands as readonly TickBand[]);
   // One number for the axis and the old tickSize readers, so it has to be the
@@ -123,7 +130,7 @@ function metadata(input: unknown): InstrumentMetadata {
     symbol: text(raw.symbol, 'symbol'), exchange: text(raw.exchange, 'exchange'), timezone,
     priceTick, pricePrecision: precision, quantityStep: positive(raw.quantityStep, 'quantity step'),
     intervals: Object.freeze(intervals),
-    calendar,
+    calendar: Object.freeze({ sessions: sessions(calendar.sessions, fail), exceptions }),
     ...(raw.hasOpenInterest === undefined ? {} : { hasOpenInterest: raw.hasOpenInterest }),
     ...(bands ? { tickBands: bands.bands } : {}),
   });
@@ -218,9 +225,9 @@ class SessionHours {
 
 /**
  * Validated, detached trading hours: the calendar an {@link Instrument}
- * carries, without the price and quantity rules. Pass one to
- * `chart.dataLayer.setSessionCalendar` so times past the last bar follow the
- * venue's sessions, and read it with the same `sessionAt` and `sessionFrom`.
+ * carries, without the price and quantity rules. Apply one to a chart so
+ * times past the last bar follow the venue's sessions, and read it with the
+ * same `sessionAt` and `sessionFrom`.
  */
 export class SessionCalendar {
   /** The validated IANA zone. */
@@ -232,7 +239,8 @@ export class SessionCalendar {
   public constructor(input: unknown) {
     const f = failWith('session calendar'), raw = record(input, f);
     this.timezone = zone(raw.timezone, f);
-    this.calendar = calendarOf(raw, f);
+    const exceptions = exceptionsOf(raw, f);
+    this.calendar = Object.freeze({ sessions: sessions(raw.sessions, f), exceptions });
     this._hours = new SessionHours(this.timezone, this.calendar, f);
   }
 
@@ -244,6 +252,38 @@ export class SessionCalendar {
    * most about a year ahead. Null when nothing opens in that time.
    */
   public sessionFrom(utcSeconds: number): InstrumentSession | null { return this._hours.from(utcSeconds); }
+
+  /**
+   * Lay the chart's time axis past the last bar out in these hours, and
+   * repaint, so a drawing already placed there moves to the time it now
+   * means. `chart.dataLayer.setSessionCalendar` sets the same without asking
+   * for a frame, for a host about to load bars or move the view anyway.
+   */
+  public applyTo(chart: Chart): void {
+    if (chart.isDestroyed) return failWith('session calendar')('chart is destroyed');
+    chart.dataLayer.setSessionCalendar(this);
+    chart.invalidate(mask => mask.invalidateGlobal(InvalidationLevel.Full));
+  }
+}
+
+/** Charts whose data context is already watched for a symbol change. */
+const watched = new WeakSet<Chart>();
+
+/**
+ * An instrument's hours belong to its symbol. A host that moves the chart to
+ * a symbol it holds no instrument for must not have that symbol's future laid
+ * out in the last one's sessions, which the bars cannot always reveal: a
+ * round-the-clock feed seen during cash hours sits inside them. Hours a host
+ * set itself are the host's to replace.
+ */
+function dropHoursOnSymbolChange(chart: Chart): void {
+  if (watched.has(chart)) return;
+  watched.add(chart);
+  chart.on('data:context', () => {
+    const hours = chart.dataLayer.sessionCalendar, context = chart.getDataContext();
+    if (hours instanceof Instrument
+      && (hours.metadata.symbol !== context?.symbol || hours.metadata.exchange !== context?.exchange)) chart.dataLayer.setSessionCalendar(null);
+  });
 }
 
 /** Validated, detached rules. Construction does not change global intervals or chart defaults. */
@@ -297,8 +337,10 @@ export class Instrument {
     series.priceScale().setPriceFormatter(value => this.formatPrice(value));
     chart.setDataContext({ symbol: m.symbol, exchange: m.exchange, interval, hasOpenInterest: m.hasOpenInterest });
     // Times past the last bar follow this instrument's sessions, so a drawing
-    // placed there after a close lands on the next opening, and a symbol
-    // switch replaces the previous instrument's hours.
+    // placed there after a close lands on the next opening. Another
+    // instrument replaces them, and a context moved to another symbol drops
+    // them.
+    dropHoursOnSymbolChange(chart);
     chart.dataLayer.setSessionCalendar(this);
     // Drags snap by the same schedule the order constraints carry, and a
     // constant tick clears the one an earlier instrument left.

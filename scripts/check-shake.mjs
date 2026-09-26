@@ -168,8 +168,10 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // shapes and linked viewports all read them. Replacing the last-gap
 // extrapolation with the median spacing and a lazily generated, bounded
 // session-calendar plan measures 76874 to 77551 bytes (75.07 to 75.73 KiB,
-// 0.66 KiB); allow 75.74 KiB. SessionCalendar itself only rides in by type.
-const LIMIT_BYTES = 75.74 * 1024;
+// 0.66 KiB). Reading each session window's bar offset rather than one for all
+// brings it to 77575 bytes (75.76 KiB); allow 75.76 KiB. SessionCalendar
+// itself only rides in by type.
+const LIMIT_BYTES = 75.76 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

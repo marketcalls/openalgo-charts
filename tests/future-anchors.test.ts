@@ -71,13 +71,15 @@ describe('future anchors without a session calendar', () => {
     expect(layer(times).indexToTimeFloat(3)).toBe(ist('2026-02-10T00:00:00'));
   });
 
-  it('extrapolates left of the first bar at the median too', () => {
-    // Friday then the whole next week: the first gap is the weekend.
+  it('leaves the left of the first bar at the first gap', () => {
+    // Friday then the whole next week: the first gap is the weekend. Only the
+    // right edge changed; positions before the first loaded bar, and the linked
+    // ranges built on them, read as they always have.
     const times = ['2026-02-06', '2026-02-09', '2026-02-10', '2026-02-11', '2026-02-12', '2026-02-13']
       .map(date => ist(`${date}T00:00:00`));
     const d = layer(times);
-    expect(d.indexToTimeFloat(-1)).toBe(ist('2026-02-05T00:00:00'));
-    expect(d.timeToIndexFloat(ist('2026-02-05T00:00:00'))).toBe(-1);
+    expect(d.indexToTimeFloat(-1)).toBe(ist('2026-02-03T00:00:00'));
+    expect(d.timeToIndexFloat(ist('2026-02-03T00:00:00'))).toBe(-1);
   });
 
   it('keeps even spacing exactly as before', () => {
@@ -233,6 +235,64 @@ describe('future anchors with a session calendar', () => {
   });
 });
 
+describe('future anchors when the windows of a day open off one bar grid', () => {
+  // A lunch break of 09:00-11:30 and 12:30-15:00: an hourly bar grid on the
+  // clock meets the morning opening on a bar and the afternoon one half a bar
+  // in, so each window has its own offset from its opening.
+  const lunch = (exceptions?: Record<string, string[]>): SessionCalendar =>
+    new SessionCalendar({ timezone: 'UTC', sessions: ['0900-1130:23456', '1230-1500:23456'], ...(exceptions ? { exceptions } : {}) });
+  const utc = (wall: string): number => Date.parse(`${wall}:00Z`) / 1000;
+  const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00'];
+  const hourly = (dates: readonly string[], hours = HOURS): number[] =>
+    dates.flatMap(date => hours.map(h => utc(`${date}T${h}`)));
+  const ahead = (d: DataLayer, n: number, count: number): number[] =>
+    Array.from({ length: count }, (_, k) => d.indexToTimeFloat(n + k));
+
+  it('keeps every window on the clock when the last bar is in the afternoon', () => {
+    const times = hourly(['2026-02-02', '2026-02-03']);
+    const d = layer(times, lunch());
+    expect(ahead(d, times.length, 7)).toEqual(['2026-02-04T09:00', '2026-02-04T10:00', '2026-02-04T11:00',
+      '2026-02-04T12:00', '2026-02-04T13:00', '2026-02-04T14:00', '2026-02-05T09:00'].map(utc));
+    for (const k of [0, 3, 6]) expect(d.timeToIndexFloat(d.indexToTimeFloat(times.length + k))).toBe(times.length + k);
+  });
+
+  it('keeps every window on the clock when the last bar is in the morning', () => {
+    const times = [...hourly(['2026-02-02', '2026-02-03']), ...hourly(['2026-02-04'], ['09:00', '10:00', '11:00'])];
+    const d = layer(times, lunch());
+    expect(ahead(d, times.length, 4)).toEqual(['2026-02-04T12:00', '2026-02-04T13:00', '2026-02-04T14:00',
+      '2026-02-05T09:00'].map(utc));
+  });
+
+  it('keeps bars that start again at each opening on those openings', () => {
+    // 12:30, not 12:00: this feed restarts its grid after lunch.
+    const times = hourly(['2026-02-02', '2026-02-03'], ['09:00', '10:00', '11:00', '12:30', '13:30', '14:30']);
+    const d = layer(times, lunch());
+    expect(ahead(d, times.length, 7)).toEqual(['2026-02-04T09:00', '2026-02-04T10:00', '2026-02-04T11:00',
+      '2026-02-04T12:30', '2026-02-04T13:30', '2026-02-04T14:30', '2026-02-05T09:00'].map(utc));
+  });
+
+  it('keeps a half day\'s morning on the clock', () => {
+    // Wednesday closes at 11:30.
+    const times = hourly(['2026-02-02', '2026-02-03']);
+    const d = layer(times, lunch({ '2026-02-04': ['0900-1130'] }));
+    expect(ahead(d, times.length, 4)).toEqual(['2026-02-04T09:00', '2026-02-04T10:00', '2026-02-04T11:00',
+      '2026-02-05T09:00'].map(utc));
+  });
+
+  it('a window whose opening no bar has shown keeps the last bar\'s offset', () => {
+    // US hours in New York, two-hour bars from each opening. The bars end
+    // before the clocks change on 8 March, so Monday's opening is an hour
+    // earlier in UTC than any the bars sat in, and still 09:30 in New York.
+    const ny = new SessionCalendar({ timezone: 'America/New_York', sessions: ['0930-1600:23456'] });
+    const et = (wall: string, offset: string): number => Date.parse(`${wall}:00${offset}`) / 1000;
+    const times = ['2026-03-02', '2026-03-03', '2026-03-04', '2026-03-05', '2026-03-06']
+      .flatMap(date => ['09:30', '11:30', '13:30', '15:30'].map(h => et(`${date}T${h}`, '-05:00')));
+    const d = layer(times, ny);
+    expect(ahead(d, times.length, 5)).toEqual([et('2026-03-09T09:30', '-04:00'), et('2026-03-09T11:30', '-04:00'),
+      et('2026-03-09T13:30', '-04:00'), et('2026-03-09T15:30', '-04:00'), et('2026-03-10T09:30', '-04:00')]);
+  });
+});
+
 describe('the calendar reaches the data layer', () => {
   const charts: Chart[] = [];
   afterEach(() => { for (const c of charts.splice(0)) c.destroy(); });
@@ -256,5 +316,87 @@ describe('the calendar reaches the data layer', () => {
     const x = chart.timeToCoordinate(monday);
     expect(chart.coordinateToTime(x)).toBeCloseTo(monday, 3);
     expect(chart.dataLayer.timeToIndexFloat(monday)).toBe(times.length + 2);
+  });
+
+  /** A measured chart whose frames wait until `flush`, so a test can see whether anything asked for one. */
+  function idleChart(): { chart: Chart; flush: () => void } {
+    const frames: (() => void)[] = [];
+    const doc = fakeDocument();
+    const chart = new Chart(doc.createElement('div'), { document: doc, shortcuts: false, pixelRatio: () => 1,
+      raf: { schedule: (cb: () => void) => { frames.push(cb); return frames.length; }, cancel: () => {} } });
+    charts.push(chart);
+    chart.applySize(800, 600);
+    return { chart, flush: () => { while (frames.length) frames.shift()!(); } };
+  }
+
+  /** The x each paint gives a time, as a drawing anchored there would be placed. */
+  function paintedAt(chart: Chart, time: number): number[] {
+    const painted: number[] = [];
+    chart.addPrimitive({ zOrder: () => 'top', draw: (_ctx, rc) => { painted.push(rc.timeScale.indexToX(rc.dataLayer.timeToIndexFloat(time))); } });
+    return painted;
+  }
+
+  it("an instrument's hours leave with its symbol when the host moves on without one", () => {
+    const { chart, flush } = idleChart();
+    const series = chart.addSeries('candlestick');
+    new Instrument(cash()).applyTo(chart, '5m');
+    // The host switches to a round-the-clock symbol it holds no instrument for,
+    // and its bars happen to sit inside the cash session's hours.
+    chart.setDataContext({ symbol: 'BTCUSD', exchange: 'CRYPTO', interval: '5m' });
+    const times = Array.from({ length: 40 }, (_, i) => ist('2026-02-04T12:00:00') + i * 5 * MIN);
+    series.setData(times.map(bar));
+    flush();
+    // Ten bars on is fifty minutes later, not the cash market's next morning.
+    expect(chart.dataLayer.indexToTimeFloat(times.length - 1 + 10)).toBe(times[times.length - 1] + 50 * MIN);
+    expect(chart.dataLayer.sessionCalendar).toBeNull();
+  });
+
+  it("keeps an instrument's hours across an interval change, and a host calendar across a symbol change", () => {
+    const { chart } = idleChart();
+    chart.addSeries('candlestick');
+    const instrument = new Instrument(cash());
+    instrument.applyTo(chart, '5m');
+    chart.setDataContext({ symbol: 'CASH', exchange: 'NSE', interval: 'D' });
+    expect(chart.dataLayer.sessionCalendar).toBe(instrument);
+    const next = new Instrument({ ...cash(), symbol: 'NEXT' });
+    next.applyTo(chart, '5m');
+    expect(chart.dataLayer.sessionCalendar).toBe(next);
+    // Venue hours a host set itself are the host's to replace.
+    const venue = nse();
+    chart.dataLayer.setSessionCalendar(venue);
+    chart.setDataContext({ symbol: 'OTHER', exchange: 'NSE', interval: '5m' });
+    expect(chart.dataLayer.sessionCalendar).toBe(venue);
+  });
+
+  it('SessionCalendar.applyTo repaints what an idle chart already shows past the last bar', () => {
+    const { chart, flush } = idleChart();
+    const times = WEEK.flatMap(date => session(date));
+    chart.addSeries('candlestick').setData(times.map(bar));
+    const monday = ist('2026-02-09T09:25:00');
+    const painted = paintedAt(chart, monday);
+    flush();
+    const before = painted.length;
+    // Hours that arrive after the chart went idle, as metadata fetched late does.
+    nse().applyTo(chart);
+    flush();
+    expect(painted.length).toBeGreaterThan(before);
+    expect(painted[painted.length - 1]).toBe(chart.timeScale.indexToX(times.length + 2));
+  });
+
+  it('re-applying an instrument with new hours repaints an idle chart', () => {
+    const { chart, flush } = idleChart();
+    const series = chart.addSeries('candlestick');
+    new Instrument(cash()).applyTo(chart, '5m');
+    const times = WEEK.flatMap(date => session(date));
+    series.setData(times.map(bar));
+    const tuesday = ist('2026-02-10T09:25:00');
+    const painted = paintedAt(chart, tuesday);
+    flush();
+    const before = painted.length;
+    // The same symbol and interval, now with Monday closed.
+    new Instrument({ ...cash(), calendar: { sessions: ['0915-1530:23456'], exceptions: { '2026-02-09': [] } } }).applyTo(chart, '5m');
+    flush();
+    expect(painted.length).toBeGreaterThan(before);
+    expect(painted[painted.length - 1]).toBe(chart.timeScale.indexToX(times.length + 2));
   });
 });

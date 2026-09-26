@@ -46,6 +46,23 @@ describe('instrument metadata', () => {
     expect(() => new Instrument({ ...cash(), ...patch })).toThrow();
   });
 
+  // A host that logs or shows the refusal sees the same first fault as before
+  // SessionCalendar shared this validation: the calendar object is checked
+  // straight after the input, and its weekly sessions last.
+  it.each([
+    [{ timezone: 'Mars/City', calendar: 5 }, 'expected a plain object'],
+    [{ priceTick: 0, calendar: Object.defineProperty({}, 'sessions', { get: () => [], enumerable: true }) }, 'accessors are not metadata'],
+    [{ symbol: '', calendar: { sessions: ['bad'] } }, 'symbol'],
+    [{ exchange: '', calendar: { sessions: ['bad'] } }, 'exchange'],
+    [{ quantityStep: 0, calendar: { sessions: ['bad'] } }, 'quantity step'],
+    [{ hasOpenInterest: 'yes', calendar: { sessions: ['bad'] } }, 'invalid OI capability'],
+    [{ hasOpenInterest: 'yes', calendar: { sessions: [], exceptions: { '2026-02-30': [] } } }, 'invalid exception date'],
+    [{ intervals: ['0m'], calendar: { sessions: [], exceptions: { '2026-02-30': [] } } }, 'unsupported interval 0m'],
+    [{ timezone: 'Mars/City', calendar: { sessions: ['bad'] } }, 'unknown timezone'],
+  ])('reports the first fault of several in a fixed order: %j', (patch, message) => {
+    expect(() => new Instrument({ ...cash(), ...patch })).toThrow(new Error(`Invalid instrument: ${message}`));
+  });
+
   it('preserves explicit and unknown OI capabilities independently of observations', () => {
     expect(new Instrument(cash()).metadata.hasOpenInterest).toBe(false);
     expect(new Instrument({ ...cash(), hasOpenInterest: true }).metadata.hasOpenInterest).toBe(true);

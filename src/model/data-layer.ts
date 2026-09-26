@@ -72,14 +72,17 @@ interface FuturePlan {
 
 /**
  * A generator of future bar times that follows `calendar`, or null when the
- * recent bars `w` do not sit in its sessions (a calendar left over from
- * another instrument, or hours that do not describe this feed).
+ * recent bars `w` do not sit in its sessions (hours that do not describe this
+ * feed, such as regular hours against extended-hours bars).
  *
  * Bars sharing a session are intraday: the spacing is their median gap, and a
- * session that ends restarts at the next opening, keeping the offset a feed
- * gives its first bar (09:00 for hourly bars stamped on the hour against a
- * 09:15 open). One bar per session is daily: each later trading date, at the
- * last bar's offset from its opening. Weekly and longer bars keep the median.
+ * session that ends restarts at the next opening, at the offset the feed's
+ * bars keep from that opening. The offset belongs to each window, since one
+ * bar grid can meet the windows of a day differently: hourly bars on the
+ * clock put 09:00 at a 09:00 opening and 12:00 before a 12:30 one after
+ * lunch, and 09:00 before a 09:15 open. One bar per session is daily: each
+ * later trading date, at the last bar's offset from its opening. Weekly and
+ * longer bars keep the median.
  */
 function sessionSlots(w: readonly number[], calendar: SessionCalendarSource, median: number): (() => number | null) | null {
   let lookups = 0;
@@ -87,11 +90,12 @@ function sessionSlots(w: readonly number[], calendar: SessionCalendarSource, med
     ++lookups > MAX_LOOKUPS ? undefined : calendar.sessionFrom(time);
   let s = from(w[0]);
   if (!s) return null;
-  const same: number[] = [];
+  const same: number[] = [], opens = [s.open];
   let lead = s.open - w[0];
   for (let i = 1; i < w.length; i++) {
     if (w[i] < s.close) same.push(w[i] - w[i - 1]);
     else if (!(s = from(w[i]))) return null;
+    opens.push(s.open);
     lead = Math.max(lead, s.open - w[i]);
   }
   const last = w[w.length - 1];
@@ -100,17 +104,28 @@ function sessionSlots(w: readonly number[], calendar: SessionCalendarSource, med
     const step = lowerMedian(same);
     // A bar a whole step before the session it is filed under is outside it.
     if (lead >= step) return null;
-    const phase = (((last - session.open) % step) + step) % step;
-    const first = phase > 1e-6 && step - phase > 1e-6 ? phase - step : 0;
+    // Where a bar sits against its opening, as the first bar's offset: zero,
+    // or up to a step before the opening for a bar stamped on an earlier grid.
+    const offsetOf = (t: number, open: number): number => {
+      const phase = (((t - open) % step) + step) % step;
+      return phase > 1e-6 && step - phase > 1e-6 ? phase - step : 0;
+    };
+    // Each window's offset, keyed by its opening's time of day and read from
+    // the latest bar in a window like it. A window no bar has shown, such as
+    // a special session or an opening the clocks moved, takes the last bar's.
+    const offsets = new Map<number, number>();
+    for (let i = 0; i < w.length; i++) offsets.set(opens[i] % DAY, offsetOf(w[i], opens[i]));
+    const fallback = offsetOf(last, session.open);
     return () => {
       let t = cur + step;
-      if (t >= session.close) {
+      while (t >= session.close) {
         const n = from(session.close);
         if (!n) return n === null ? null : NaN;
         session = n;
         // Back-to-back windows with a first bar stamped before the open would
         // step backwards; the next bar is then simply one step on.
-        if (n.open + first > cur) t = n.open + first;
+        const first = n.open + (offsets.get(n.open % DAY) ?? fallback);
+        if (first > cur) t = first;
       }
       return (cur = t);
     };
@@ -207,7 +222,12 @@ export class DataLayer {
    * session's first, across a night, a weekend or a closed date, so an anchor
    * placed there lands on a time the market will print. Without one, or when
    * the recent bars do not sit in its sessions, the axis continues at the
-   * median of the recent bar spacing. `Instrument.applyTo` sets this.
+   * median of the recent bar spacing.
+   *
+   * This changes where times fall but asks for no frame: the data layer has
+   * no way to reach the chart. `SessionCalendar.applyTo` and
+   * `Instrument.applyTo` set it and repaint; call this directly where bars or
+   * a view change follow anyway.
    */
   public setSessionCalendar(calendar: SessionCalendarSource | null): void {
     this._calendar = calendar;
@@ -343,14 +363,15 @@ export class DataLayer {
    * Past the last bar the whole indices are the bar times still to come: from
    * the session calendar when one is set (`setSessionCalendar`), otherwise one
    * median recent spacing apart. Never the last gap alone, which is the gap most
-   * likely to be a night or a weekend. Left of the first bar the median applies.
+   * likely to be a night or a weekend. Left of the first bar the first gap
+   * applies.
    */
   public indexToTimeFloat(index: number): number {
     const t = this._sortedTimes;
     const n = t.length;
     if (n === 0) return NaN;
     if (n === 1) return t[0];
-    if (index <= 0) return t[0] + index * this._headStep();
+    if (index <= 0) return t[0] + index * (t[1] - t[0]);
     if (index >= n - 1) {
       const p = this._plan(), d = index - (n - 1), k = Math.floor(d), a = futureSlot(p, k);
       return d === k ? a : a + (d - k) * (futureSlot(p, k + 1) - a);
@@ -365,7 +386,10 @@ export class DataLayer {
     const n = t.length;
     if (n === 0) return NaN;
     if (n === 1) return 0;
-    if (time <= t[0]) return (time - t[0]) / this._headStep();
+    if (time <= t[0]) {
+      const step = t[1] - t[0];
+      return step > 0 ? (time - t[0]) / step : 0;
+    }
     if (time >= t[n - 1]) {
       const p = this._plan(), s = p.slots;
       while (p.next && s[s.length - 1] <= time) grow(p);
@@ -376,15 +400,6 @@ export class DataLayer {
     }
     const lo = floorIndex(t, time, n - 1);
     return lo + (time - t[lo]) / (t[lo + 1] - t[lo]);
-  }
-
-  /**
-   * The spacing left of the first bar: the median of the earliest gaps. Not
-   * cached, unlike the right edge: few positions are ever asked for there, and
-   * the median of 64 gaps is a few microseconds.
-   */
-  private _headStep(): number {
-    return lowerMedian(gapsOf(this._sortedTimes.slice(0, SAMPLE + 1)));
   }
 
   /**

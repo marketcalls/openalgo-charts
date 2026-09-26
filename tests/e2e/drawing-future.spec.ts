@@ -335,3 +335,81 @@ test('without a calendar, a weekend in the last gap does not stretch the future'
   expect((await futureRegions(page)).axis).toBe(0);
   await page.screenshot({ path: info.outputPath('intraday-future-median.png') });
 });
+
+// Hourly bars stamped on the clock at a venue with a lunch break, 09:00 to
+// 11:30 and 12:30 to 15:00 UTC, 2026-02-02 (a Monday) through 2026-02-06: the
+// afternoon's first bar is 12:00, half a bar before its opening, while the
+// morning's is 09:00, on its opening.
+const utc = (wall: string): number => Date.parse(`${wall}:00Z`) / 1000;
+
+async function mountLunch(page: Page) {
+  await page.setViewportSize({ width: 1200, height: 760 });
+  await page.goto('/');
+  await page.waitForFunction(() => (window as any).__ready);
+  await page.evaluate(async () => {
+    (window as any).__api.chart.destroy();
+    const base = '/dist/openalgo-charts.mjs';
+    const tier = '/dist/openalgo-charts.draw.mjs';
+    const { createChart, SessionCalendar } = await import(base);
+    const { DrawingController } = await import(tier);
+    const chart = createChart(document.getElementById('c'), { priceAxisWidth: 64, timeAxisHeight: 28, timeNavigator: false, timezone: 'UTC' });
+    const times: number[] = [];
+    for (const day of ['2026-02-02', '2026-02-03', '2026-02-04', '2026-02-05', '2026-02-06']) {
+      for (const hour of ['09', '10', '11', '12', '13', '14']) times.push(Date.parse(`${day}T${hour}:00:00Z`) / 1000);
+    }
+    const bars = times.map((time, i) => {
+      const close = 23800 + Math.sin(i / 3) * 60;
+      return { time, open: close - 8, high: close + 14, low: close - 16, close };
+    });
+    const series = chart.addSeries('candlestick');
+    series.setData(bars);
+    const last = bars.length - 1;
+    chart.setVisibleLogicalRange({ from: last - 20, to: last + 12 });
+    const draw = new DrawingController(chart, { defaultStyle: { color: '#ff00ff', lineWidth: 3 } });
+    const lunch = new SessionCalendar({ timezone: 'UTC', sessions: ['0900-1130:23456', '1230-1500:23456'] });
+    (window as any).__future = { chart, draw, series, bars, last, lunch };
+  });
+}
+
+/** Two animation frames, so anything a call asked to paint has painted. */
+const frames = (page: Page) => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+
+test('past a lunch break each window keeps its own bar offset, and applying the hours repaints an idle chart', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mountLunch(page);
+  // A box on Monday morning, saved before the hours are known: without them
+  // it sits about 70 median bars out, off screen.
+  await page.evaluate(() => {
+    const { draw } = (window as any).__future;
+    const monday = (wall: string) => Date.parse(`2026-02-09T${wall}:00Z`) / 1000;
+    draw.add({ tool: 'rectangle', paneIndex: 0, style: { color: '#ff00ff', lineWidth: 3 },
+      points: [{ time: monday('09:00'), price: 23840 }, { time: monday('11:00'), price: 23780 }] });
+  });
+  await frames(page);
+  expect((await futureRegions(page)).plot).toBe(0);
+  // The hours arrive on an idle chart. Nothing else asks for a frame.
+  await page.evaluate(() => { const { lunch, chart } = (window as any).__future; lunch.applyTo(chart); });
+  await expect.poll(async () => (await futureRegions(page)).plot).toBeGreaterThan(100);
+  expect((await futureRegions(page)).axis).toBe(0);
+  const slots = await page.evaluate(() => {
+    const { chart, last } = (window as any).__future;
+    const at = (wall: string) => chart.dataLayer.timeToIndexFloat(Date.parse(`${wall}:00Z`) / 1000) - last;
+    return [at('2026-02-09T09:00'), at('2026-02-09T10:00'), at('2026-02-09T11:00'), at('2026-02-09T12:00'),
+      at('2026-02-09T14:00'), at('2026-02-10T09:00')];
+  });
+  expect(slots).toEqual([1, 2, 3, 4, 6, 7]);
+  // A trend line clicked two bars past Friday's last candle ends on Monday 10:00.
+  const from = await at(page, (await page.evaluate(() => (window as any).__future.last)) - 8, 23820);
+  const to = await at(page, (await page.evaluate(() => (window as any).__future.last)) + 2, 23770);
+  await page.evaluate(() => (window as any).__future.draw.setTool('trend-line'));
+  await page.mouse.click(from.x, from.y);
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.click(to.x, to.y);
+  await page.mouse.move(5, 5);
+  const end = await page.evaluate(() => (window as any).__future.draw.drawings()[1].points[1].time as number);
+  // Half a CSS pixel of a click is a small fraction of one hourly bar.
+  expect(Math.abs(end - utc('2026-02-09T10:00'))).toBeLessThan(120);
+  await page.screenshot({ path: info.outputPath('lunch-future-calendar.png') });
+  expect(errors).toEqual([]);
+});

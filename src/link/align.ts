@@ -107,9 +107,11 @@ export function followerIndex(
  * span collapses), or a non-finite endpoint.
  *
  * A follower whose history does not overlap the window at all is *not* refused.
- * `timeToIndexFloat` extrapolates at the edge bar spacing, so it scrolls into
- * its own empty margin and shows nothing, which is the truth. Clamping it back
- * onto its last bars would show the user a different period than the leader.
+ * `timeToIndexFloat` extrapolates past either edge (left of the first bar at
+ * the first gap, right of the last on the follower's own future bar times), so
+ * it scrolls into its own empty margin and shows nothing, which is the truth.
+ * Clamping it back onto its last bars would show the user a different period
+ * than the leader.
  */
 export function followerRange(
   leader: LinkDataLayer,

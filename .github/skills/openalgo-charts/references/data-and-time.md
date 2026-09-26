@@ -23,8 +23,11 @@ exceptions })` (a `SessionCalendarSpec`) validates, detaches and freezes like an
 instrument's calendar, throws `Invalid session calendar: ...`, and reads with
 `sessionAt` and `sessionFrom`. Either one is a `SessionCalendarSource` for
 `chart.dataLayer.setSessionCalendar(calendar)` (read back with the `sessionCalendar`
-getter, `null` clears), and `applyTo` sets the instrument itself there. See
-[times past the last bar](#times-past-the-last-bar) for what it changes.
+getter, `null` clears). That setter asks for no frame; `calendar.applyTo(chart)` on a
+`SessionCalendar` sets it and repaints, and `Instrument.applyTo` sets the instrument
+itself there. An instrument's hours are dropped when the chart's data context moves
+to another symbol or exchange; hours a host set itself stay until it replaces them.
+See [times past the last bar](#times-past-the-last-bar) for what it changes.
 
 `OpenAlgoConfig.hasOpenInterest(request)` optionally supplies instrument
 capability to the REST adapter. Explicit false removes the API's placeholder
@@ -127,8 +130,8 @@ Consequences you must design around:
 
 Whole indices right of the last bar are the bar times still to come; drawing anchors, study shapes and linked viewports placed there all go through them.
 
-- **With a session calendar** (`chart.dataLayer.setSessionCalendar(calendar)`, which `Instrument.applyTo` does for you), the bar after a session's last one is the next session's first: Friday's 15:25 is followed by Monday's 09:15, a closed date is skipped, a shortened day ends early and a lunch break is stepped over. Intraday bars keep the offset the feed gives a session's first bar (hourly bars stamped 09:00 against a 09:15 open stay on the hour); daily bars step through trading dates at the last bar's offset from its opening; weekly and longer bars use the median below.
-- **Without one**, or when the last 64 bars do not sit in its sessions (a calendar left from another instrument, regular hours against extended-hours data), the axis continues at the lower median of the last 64 bar intervals. Never at the last gap alone: that is the gap most likely to be a night or a weekend. Left of the first bar, the median of the first 64.
+- **With a session calendar** (`calendar.applyTo(chart)` for a `SessionCalendar`, `Instrument.applyTo` for an instrument, or `chart.dataLayer.setSessionCalendar(calendar)` where a repaint follows anyway), the bar after a session's last one is the next session's first: Friday's 15:25 is followed by Monday's 09:15, a closed date is skipped, a shortened day ends early and a lunch break is stepped over. Intraday bars keep, in each window, the offset the feed's bars keep from that window's opening, read from the recent bars in windows opening at the same time of day: hourly bars on the clock stay on the clock at a 09:00 morning opening and at 12:00 before a 12:30 afternoon one, and hourly bars stamped 09:00 against a 09:15 open stay on the hour. A window no recent bar sat in (a special session, or an opening a daylight-saving change moved) takes the last bar's offset. Daily bars step through trading dates at the last bar's offset from its opening; weekly and longer bars use the median below.
+- **Without one**, or when the last 64 bars do not sit in its sessions (regular hours against extended-hours data), the axis continues at the lower median of the last 64 bar intervals. Never at the last gap alone: that is the gap most likely to be a night or a weekend. Bars that happen to sit inside hours that are not theirs cannot show it, which is why an instrument's hours leave with its symbol. Left of the first bar the spacing is the first gap.
 - A position between two future bar times interpolates across the closed hours between them, as it does between two loaded bars, and converts back exactly. A calendar that throws (a window in a daylight-saving gap) falls back to the median; it never stops the paint.
 - Generation is lazy and bounded: past 4096 future bars or 512 calendar reads the axis continues at the average pace already generated, so an anchor years ahead stays cheap.
 - Stored drawings keep their times. A host with no calendar still gets the median, which removes the weekend-sized spacing on its own.
