@@ -128,6 +128,28 @@ describe('inputStates', () => {
     expect(states.get('b')!.visible).toBe(true);
     expect(states.get('c')!.active).toBe(true);
   });
+
+  it('cascades through the switch and swatches of a colour pair, which belong to the pair', () => {
+    const values = { on: false, pe: true, pu: '#00ff00' };
+    const rules = [
+      { key: 'w', visibleWhen: { key: 'pe', is: true } },
+      { key: 'shade', activeWhen: { key: 'pu', isNot: '' } },
+    ];
+    // A chart settings pair carries its keys on the input itself.
+    const flat = inputStates([{ key: 'on' }, { key: 'p', visibleWhen: { key: 'on', is: true },
+      enabled: { key: 'pe' }, up: { key: 'pu' }, down: { key: 'pd' } }, ...rules], values);
+    expect(flat.get('p')!.visible).toBe(false);
+    expect(flat.get('w')!.visible).toBe(false);
+    expect(flat.get('shade')).toMatchObject({ visible: true, active: false, dependsOn: ['pu'] });
+    // The widget's own controls carry the same keys under `pair`.
+    const nested = inputStates([{ key: 'on' }, { key: 'p', visibleWhen: { key: 'on', is: true },
+      pair: { enabled: { key: 'pe' }, up: { key: 'pu' }, down: { key: 'pd' } } }, ...rules], values);
+    expect(nested.get('w')!.visible).toBe(false);
+    expect(nested.get('shade')!.active).toBe(false);
+    // Once the pair is shown, its switch decides by value again.
+    expect(inputStates([{ key: 'on' }, { key: 'p', visibleWhen: { key: 'on', is: true },
+      enabled: { key: 'pe' }, up: { key: 'pu' }, down: { key: 'pd' } }, ...rules], { ...values, on: true }).get('w')!.visible).toBe(true);
+  });
 });
 
 describe('controlsFromInputs', () => {
@@ -140,6 +162,23 @@ describe('controlsFromInputs', () => {
     expect(byKey.get('width')!.visibleWhen).toEqual({ key: 'mode', is: 'bands' });
     expect(byKey.get('bandColor')!.activeWhen).toEqual({ key: 'width', isNot: 0.5 });
     expect(byKey.get('p')!.visibleWhen).toEqual({ key: 'mode', is: 'bands' });
+  });
+
+  it('takes no inline id on a colour pair, which is always a row of its own', () => {
+    const pair: ChartSettingsInput = {
+      key: 'p', type: 'colorPair', label: 'P',
+      // @ts-expect-error a colour pair already holds a switch and two swatches on one row
+      inline: 'x',
+      up: { key: 'p.up', label: 'Up', default: '#0f0' }, down: { key: 'p.down', label: 'Down', default: '#f00' },
+    };
+    expect(controlsFromInputs([pair])[0].inline).toBeUndefined();
+    const list: ChartSettingsInput[] = [
+      { key: 'a', type: 'number', label: 'A', default: 1, inline: 'x' },
+      pair,
+      { key: 'b', type: 'number', label: 'B', default: 1, inline: 'x' },
+    ];
+    const h = form({}, list, { a: 1, 'p.up': '#0f0', 'p.down': '#f00', b: 1 });
+    expect(h.host.querySelectorAll('.oac-row').map(row => [row.dataset.key, row.dataset.inline])).toEqual([['a', 'x'], ['p', undefined], ['b', 'x']]);
   });
 });
 
@@ -300,7 +339,9 @@ describe('renderForm with conditions', () => {
 
   it('updates a hidden control on sync, so it is not stale when it returns', () => {
     const h = form();
+    expect(h.visible('width')).toBe(false);
     h.handle.sync({ width: 4 });
+    expect(h.visible('width')).toBe(false);
     expect(h.field('width').value).toBe('4');
     h.handle.sync({ mode: 'bands' });
     expect(h.visible('width')).toBe(true);
@@ -336,6 +377,27 @@ describe('renderForm with conditions', () => {
     expect(h.field('wickDown-trigger').disabled).toBe(false);
     expect(h.field('wickDown-trigger').title).toBe('Down');
     expect(h.host.querySelector('[data-key="wick"]')!.classList.contains('oac-row--off')).toBe(false);
+  });
+
+  it('hides a row that reads the switch of a hidden colour pair, and names the pair for one that reads its swatch', () => {
+    const list: ChartSettingsInput[] = [
+      { key: 'on', type: 'boolean', label: 'On', default: false },
+      { key: 'borders', type: 'colorPair', label: 'Borders', visibleWhen: { key: 'on', is: true },
+        enabled: { key: 'pe', default: true },
+        up: { key: 'pu', label: 'Up', default: '#00ff00' }, down: { key: 'pd', label: 'Down', default: '#ff0000' } },
+      { key: 'w', type: 'number', label: 'Border width', default: 1, visibleWhen: { key: 'pe', is: true } },
+      { key: 'shade', type: 'number', label: 'Shade', default: 1, activeWhen: { key: 'pu', isNot: '' } },
+    ];
+    const h = form({}, list, { on: false, pe: true, pu: '#00ff00', pd: '#ff0000', w: 1, shade: 1 });
+    expect(h.visible('pe')).toBe(false);
+    expect(h.visible('w')).toBe(false);
+    expect(h.field('shade').disabled).toBe(true);
+    expect(h.field('shade').title).toBe('Depends on Borders');
+    h.field('on').checked = true; h.field('on').fire('change');
+    expect(h.visible('w')).toBe(true);
+    expect(h.field('shade').disabled).toBe(false);
+    h.field('pe').checked = false; h.field('pe').fire('change');
+    expect(h.visible('w')).toBe(false);
   });
 });
 
@@ -403,7 +465,7 @@ let serial = 0;
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const dispose of cleanups.splice(0).reverse()) dispose(); });
 
-function dialog(list: IndicatorInput[] = inputs, settings: Record<string, unknown> = {}) {
+function dialog(list: IndicatorInput[] = inputs, settings: Record<string, unknown> = {}, extra: Partial<WidgetContext> = {}) {
   const dom = installDom(), doc = asDoc(dom.doc);
   const chart = new Chart(asEl(dom.chartEl), { document: doc, pixelRatio: () => 1, shortcuts: false,
     branding: false, timeNavigator: false, raf: { schedule: callback => { callback(); return 1; }, cancel() {} } });
@@ -422,7 +484,7 @@ function dialog(list: IndicatorInput[] = inputs, settings: Record<string, unknow
     toast: vi.fn(() => ({ node: doc.createElement('div'), dismiss() {} })), status() {},
     openOverlay: (node, options) => overlays.open(node, options), overlays,
     tips: { attach() {}, refreshLabel() {}, show() {}, hide() {}, target: () => null, destroy() {} },
-    symbol: () => ({ symbol: 'PRIMARY', exchange: 'HOST' }), interval: () => '1m' };
+    symbol: () => ({ symbol: 'PRIMARY', exchange: 'HOST' }), interval: () => '1m', ...extra };
   cleanups.push(() => { overlays.destroy(); draw.destroy(); chart.destroy(); });
   const open = () => mountIndicatorSettings(ctx, undefined, { instanceId: inst.id });
   let panel = open();
@@ -517,5 +579,28 @@ describe('the widget study settings dialog', () => {
     expect(pick.title).toBe('Depends on Anchor');
     h.field('anchored').checked = true; h.field('anchored').fire('change');
     expect(pick.disabled).toBe(false);
+  });
+
+  it('turns off the symbol search of a symbol input that is inactive, and names the host reason once it is not', () => {
+    const list: IndicatorInput[] = [
+      { key: 'useOther', type: 'boolean', label: 'Use other', default: false },
+      { key: 'other', type: 'symbol', label: 'Other symbol', default: 'AAA', activeWhen: { key: 'useOther', is: true } },
+    ];
+    const searched = dialog(list, {}, { symbolSearch: () => [] });
+    const search = searched.root.querySelector('[data-input-action="other"]')!;
+    expect(search.disabled).toBe(true);
+    expect(search.title).toBe('Depends on Use other');
+    searched.field('useOther').checked = true; searched.field('useOther').fire('change');
+    expect(search.disabled).toBe(false);
+    expect(search.title).toBe('');
+    searched.field('useOther').checked = false; searched.field('useOther').fire('change');
+    expect(search.disabled).toBe(true);
+    // With no search configured, the field's own reason still comes first.
+    const plain = dialog(list);
+    const idle = plain.root.querySelector('[data-input-action="other"]')!;
+    expect(idle.title).toBe('Depends on Use other');
+    plain.field('useOther').checked = true; plain.field('useOther').fire('change');
+    expect(idle.disabled).toBe(true);
+    expect(idle.title).toBe('Symbol search is not configured; enter an instrument manually');
   });
 });

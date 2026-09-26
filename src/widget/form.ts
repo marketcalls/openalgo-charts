@@ -39,7 +39,9 @@ export type FormKind =
 /**
  * One row of a generated form, whatever schema it came from. The presentation
  * fields come from the input: `activeWhen` and `visibleWhen` are re-read on
- * every change, and consecutive controls sharing `inline` share one row.
+ * every change, and consecutive controls sharing `inline` share one row. A
+ * `colorPair`, a `custom` body and a `multiline` box always take a row of
+ * their own, whatever `inline` they carry.
  */
 export interface FormControl extends IndicatorInputPresentation {
   /** The flat key `onChange` reports. A `colorPair` reports its halves' keys instead. */
@@ -204,7 +206,7 @@ export function controlsFromInputs(inputs: readonly ChartSettingsInput[], transl
       if (input.tooltip !== undefined) control.tooltip = input.tooltip;
       if (input.activeWhen !== undefined) control.activeWhen = input.activeWhen;
       if (input.visibleWhen !== undefined) control.visibleWhen = input.visibleWhen;
-      if (input.inline !== undefined) control.inline = input.inline;
+      if (input.type !== 'colorPair' && input.inline !== undefined) control.inline = input.inline;
     }
   }
   return localizeControls(out, translation);
@@ -1125,8 +1127,9 @@ export function renderForm(host: HTMLElement, controls: readonly FormControl[], 
     host.appendChild(live);
   }
 
+  // A pair's switch and swatches are named by the pair, as the reader counts them.
   const labelOf = (key: string): string | undefined =>
-    controls.find(c => c.key === key || c.pair?.enabled?.key === key)?.label;
+    controls.find(c => c.key === key || [c.pair?.enabled, c.pair?.up, c.pair?.down].some(part => part?.key === key))?.label;
   const usable = (b: Bound): boolean => b.member?.shown !== false && !(b.control as HTMLInputElement).disabled;
   const focusFirst = (): boolean => {
     if (destroyed) return false;

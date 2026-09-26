@@ -62,8 +62,12 @@ export type ChartSettingsTabId = 'price' | 'readout' | 'axes' | 'appearance' | '
  * `enabled` is absent when the pair has no visibility flag behind it (a candle
  * body is always drawn), which is the difference between a row whose checkbox
  * does something and one whose checkbox would be a lie.
+ *
+ * It takes `visibleWhen` and `activeWhen`, and a condition that reads any of
+ * its three value keys reads the pair. It takes no `inline`: the row already
+ * holds a switch and two swatches, so it always stands on its own.
  */
-export interface ChartSettingsColorPairInput extends IndicatorInputPresentation {
+export interface ChartSettingsColorPairInput extends Omit<IndicatorInputPresentation, 'inline'> {
   key: string;
   type: 'colorPair';
   label: string;

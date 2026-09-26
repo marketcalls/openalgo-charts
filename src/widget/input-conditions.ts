@@ -57,30 +57,45 @@ function keysOf(condition: unknown, out: string[] = []): string[] {
  *
  * An input a condition reads counts for its own state as well as its value: a
  * control hidden behind a switch cannot also be what shows a third, and one
- * nobody can edit cannot be what enables another. A key outside `inputs` (a
- * setting on another tab) is decided by its value alone, and so is a key met
- * again while it is being decided, so a cycle in a descriptor ends.
+ * nobody can edit cannot be what enables another. A colour pair writes its
+ * switch and its two colours under keys of their own, given on the input
+ * (`enabled`, `up`, `down`) or under `pair` as a form control carries them,
+ * and a condition reading any of those reads the pair. A key outside `inputs`
+ * (a setting on another tab) is decided by its value alone, and so is a key
+ * met again while it is being decided, so a cycle in a descriptor ends.
  */
 export function inputStates(
-  inputs: readonly (IndicatorInputPresentation & { key: string })[], values: Values,
+  inputs: readonly (IndicatorInputPresentation & {
+    key: string;
+    enabled?: { key: string }; up?: { key: string }; down?: { key: string };
+    pair?: { enabled?: { key: string }; up?: { key: string }; down?: { key: string } };
+  })[],
+  values: Values,
 ): Map<string, InputState> {
-  const byKey = new Map(inputs.map(input => [input.key, input]));
+  type Input = (typeof inputs)[number];
+  const owner = new Map<string, Input>();
+  for (const input of inputs) {
+    const pair = input.pair ?? input;
+    for (const part of [pair.enabled, pair.up, pair.down]) if (typeof part?.key === 'string') owner.set(part.key, input);
+  }
+  // Set last, so an input's own key is never taken by another's switch.
+  for (const input of inputs) owner.set(input.key, input);
   const out = new Map<string, InputState>();
-  const pending = new Set<string>();
+  const pending = new Set<Input>();
   const resolve = (key: string): InputState | undefined => {
-    const input = byKey.get(key);
-    if (input === undefined || pending.has(key)) return undefined;
-    let state = out.get(key);
+    const input = owner.get(key);
+    if (input === undefined || pending.has(input)) return undefined;
+    let state = out.get(input.key);
     if (state !== undefined) return state;
-    pending.add(key);
+    pending.add(input);
     const dependsOn = keysOf(input.activeWhen);
     const visible = inputConditionMet(input.visibleWhen, values)
       && keysOf(input.visibleWhen).every(k => resolve(k)?.visible !== false);
     const active = inputConditionMet(input.activeWhen, values)
       && dependsOn.every(k => { const s = resolve(k); return s === undefined || (s.visible && s.active); });
-    pending.delete(key);
+    pending.delete(input);
     state = { visible, active, dependsOn };
-    out.set(key, state);
+    out.set(input.key, state);
     return state;
   };
   for (const input of inputs) resolve(input.key);
