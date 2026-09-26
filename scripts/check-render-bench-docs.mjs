@@ -16,7 +16,7 @@ import {
   BENCH_METRICS,
   BENCH_METRIC_LABELS,
   BENCH_RENDERERS,
-  RENDER_BENCH_BUDGETS,
+  RENDER_BENCH_PROFILES,
   renderBenchBudgetMs,
 } from './render-bench-budgets.mjs';
 
@@ -27,24 +27,33 @@ const END = '<!-- render-bench-budgets:end -->';
 const ms = (n) => `${n} ms`;
 const grouped = (n) => n.toLocaleString('en-US');
 
-/** The block as the table says it should read. */
+/**
+ * The block as the tables say it should read: the desktop table local runs use,
+ * then the runner table CI uses. Both are always rendered, so the check gives
+ * the same answer on a desktop and on a runner.
+ */
 function renderBudgetBlock() {
-  const { margin, floorMs, reference } = RENDER_BENCH_BUDGETS;
   const head = ['Renderer', 'Bars', ...BENCH_METRICS.map((m) => `${BENCH_METRIC_LABELS[m]}, measured (budget)`)];
-  const lines = [
-    `Measured on ${reference}.`,
-    `Budget = max(ceil(measured p95 x ${margin}), ${floorMs} ms).`,
-    '',
-    `| ${head.join(' | ')} |`,
-    `| ${head.map(() => '---').join(' | ')} |`,
-  ];
-  for (const renderer of BENCH_RENDERERS) {
-    for (const bars of BENCH_BAR_COUNTS) {
-      const cells = BENCH_METRICS.map((m) => {
-        const measured = RENDER_BENCH_BUDGETS.measuredP95Ms[renderer][bars][m];
-        return `${ms(measured)} (${ms(renderBenchBudgetMs(renderer, bars, m))})`;
-      });
-      lines.push(`| ${renderer} | ${grouped(bars)} | ${cells.join(' | ')} |`);
+  const lines = [];
+  const titles = { desktop: 'Local runs (the desktop table)', runner: 'CI (the hosted runner table)' };
+  for (const name of /** @type {const} */ (['desktop', 'runner'])) {
+    const profile = RENDER_BENCH_PROFILES[name];
+    if (lines.length) lines.push('');
+    lines.push(
+      `${titles[name]}: measured on ${profile.reference}.`,
+      `Budget = max(ceil(measured p95 x ${profile.margin}), ${profile.floorMs} ms).`,
+      '',
+      `| ${head.join(' | ')} |`,
+      `| ${head.map(() => '---').join(' | ')} |`,
+    );
+    for (const renderer of BENCH_RENDERERS) {
+      for (const bars of BENCH_BAR_COUNTS) {
+        const cells = BENCH_METRICS.map((m) => {
+          const measured = profile.measuredP95Ms[renderer][bars][m];
+          return `${ms(measured)} (${ms(renderBenchBudgetMs(renderer, bars, m, profile))})`;
+        });
+        lines.push(`| ${renderer} | ${grouped(bars)} | ${cells.join(' | ')} |`);
+      }
     }
   }
   return [START, ...lines, END].join('\n');
