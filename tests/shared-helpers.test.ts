@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { fromFirstValue, emaOfGapped, smoothingMa } from '../src/indicators/smoothing';
 import { sma, wma, rma, vwma, smaSeededEma } from '../src/indicators/calc';
+import { windowMean } from '../src/indicators/window-mean';
 import {
   srgbLuminance, luminance as canvasLuminance, contrastText, withAlpha as canvasWithAlpha,
   parseColor as canvasParse,
@@ -65,7 +66,38 @@ function expectBitwise(actual: readonly number[], expected: readonly number[], l
   }
 }
 
-// The copies this module replaced, verbatim apart from their names.
+// The copies this module replaced, verbatim apart from their names. None of
+// them calls into the module under test, so a regression in a shared helper
+// cannot carry an oracle along with it.
+
+/** The momentum and ranges copy, whose smoother is told where the tail starts. */
+function fromFirstValueCopy(
+  values: readonly number[],
+  smooth: (tail: readonly number[], start: number) => number[],
+): number[] {
+  const n = values.length;
+  const out = new Array<number>(n).fill(NaN);
+  let start = 0;
+  while (start < n && !Number.isFinite(values[start])) start += 1;
+  if (start >= n) return out;
+  const tail = smooth(values.slice(start), start);
+  for (let i = 0; i < tail.length && start + i < n; i++) out[start + i] = tail[i];
+  return out;
+}
+/** The wavetrend copy: the same alignment for a smoother that needs no offset. */
+function fromFirstValueWavetrend(
+  values: readonly number[],
+  smooth: (tail: readonly number[]) => number[],
+): number[] {
+  const n = values.length;
+  const out = new Array<number>(n).fill(NaN);
+  let start = 0;
+  while (start < n && !Number.isFinite(values[start])) start += 1;
+  if (start >= n) return out;
+  const tail = smooth(values.slice(start));
+  for (let i = 0; i < tail.length && start + i < n; i++) out[start + i] = tail[i];
+  return out;
+}
 function emaOfGappedCopy(values: readonly number[], period: number): number[] {
   const n = values.length;
   const out = new Array<number>(n).fill(NaN);
@@ -79,18 +111,21 @@ function emaOfGappedCopy(values: readonly number[], period: number): number[] {
 /** The momentum copy: every kernel starts at the first real value. */
 function smoothingAligned(kind: string, values: readonly number[], vols: readonly number[], length: number): number[] {
   switch (kind) {
-    case 'EMA': return fromFirstValue(values, (t) => smaSeededEma(t, length));
-    case 'SMMA (RMA)': return fromFirstValue(values, (t) => rma(t, length));
-    case 'WMA': return fromFirstValue(values, (t) => wma(t, length));
-    case 'VWMA': return fromFirstValue(values, (t, start) => vwma(t, vols.slice(start), length));
-    default: return fromFirstValue(values, (t) => sma(t, length));
+    case 'EMA': return fromFirstValueCopy(values, (t) => smaSeededEma(t, length));
+    case 'SMMA (RMA)': return fromFirstValueCopy(values, (t) => rma(t, length));
+    case 'WMA': return fromFirstValueCopy(values, (t) => wma(t, length));
+    case 'VWMA': return fromFirstValueCopy(values, (t, start) => vwma(t, vols.slice(start), length));
+    default: return fromFirstValueCopy(values, (t) => sma(t, length));
   }
 }
 /** The ranges copy: the EMA finds its own seed and is not sliced. */
 function smoothingEmaUnsliced(kind: string, values: readonly number[], vols: readonly number[], length: number): number[] {
   return kind === 'EMA' ? smaSeededEma(values, length) : smoothingAligned(kind, values, vols, length);
 }
-/** The volume copy: no alignment at all, for a running total that prints from bar 0. */
+/**
+ * The volume copy, for a running total that prints from bar 0, and the
+ * moving-average ribbon's, for a price source: no alignment at all.
+ */
 function smoothingRaw(kind: string, values: readonly number[], vols: readonly number[], length: number): number[] {
   switch (kind) {
     case 'EMA': return smaSeededEma(values, length);
@@ -119,6 +154,24 @@ describe('fromFirstValue', () => {
   it('never writes past the input, whatever length the smoother returns', () => {
     expectBitwise(fromFirstValue([NaN, 1, 2], () => [7, 8, 9, 10]), [NaN, 7, 8], 'long tail');
   });
+
+  it('matches the three copies it replaced, bit for bit, whatever the smoother', () => {
+    const smoothers: [string, (t: readonly number[]) => number[]][] = [
+      ['ema 9', (t) => smaSeededEma(t, 9)],
+      ['window mean 3', (t) => windowMean(t, 3)],
+      ['sma 14', (t) => sma(t, 14)],
+      ['short', (t) => t.slice(0, 2).map((v) => v * 2)],
+      ['long', (t) => [...t, 1, 2, 3]],
+    ];
+    for (let seed = 1; seed <= 40; seed++) {
+      const v = series(seed, 1 + (seed * 29) % 200);
+      for (const [name, smooth] of smoothers) {
+        const merged = fromFirstValue(v, smooth);
+        expectBitwise(merged, fromFirstValueCopy(v, smooth), `seed ${seed} ${name} (momentum and ranges copies)`);
+        expectBitwise(merged, fromFirstValueWavetrend(v, smooth), `seed ${seed} ${name} (wavetrend copy)`);
+      }
+    }
+  });
 });
 
 describe('emaOfGapped', () => {
@@ -140,7 +193,7 @@ describe('smoothingMa', () => {
   const lengths = (n: number): number[] => [1, 2, 3, 4, 7, 14, 20, 50, n - 1, n, n + 1, 1e6, 2 ** 53 + 2]
     .filter((l) => l >= 1);
 
-  it('matches all three copies it replaced, bit for bit, on gapped series', () => {
+  it('matches the four copies it replaced, bit for bit, on gapped series', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const n = 1 + (seed * 53) % 300;
       const v = series(seed, n);
@@ -151,7 +204,7 @@ describe('smoothingMa', () => {
           const label = `seed ${seed} ${kind} length ${length}`;
           expectBitwise(merged, smoothingAligned(kind, v, vol, length), label + ' (aligned copy)');
           expectBitwise(merged, smoothingEmaUnsliced(kind, v, vol, length), label + ' (unsliced EMA copy)');
-          expectBitwise(merged, smoothingRaw(kind, v, vol, length), label + ' (unaligned copy)');
+          expectBitwise(merged, smoothingRaw(kind, v, vol, length), label + ' (unaligned volume and ribbon copies)');
         }
       }
     }
@@ -173,6 +226,29 @@ describe('smoothingMa', () => {
     // (20 * 1 + 30 * 2) / 3 over the last two bars.
     expect(smoothingMa('VWMA', v, vol, 2)[4]).toBeCloseTo(80 / 3, 12);
     expect(smoothingMa('VWMA', v, vol, 2)[3]).toBe(15);
+  });
+});
+
+describe('one copy of each shared indicator helper', () => {
+  // The merge only pays if no study module keeps a private copy that can be
+  // corrected apart from its siblings, which is how the copies drifted in the
+  // first place. So the modules are read as text, resolved at transform time
+  // like the tier-boundary suite's sources: every definition of a shared piece
+  // has to be the one in smoothing.ts.
+  const SOURCES = (import.meta as unknown as {
+    glob(pattern: string, options: { query: string; import: string; eager: true }): Record<string, string>;
+  }).glob('../src/indicators/*.ts', { query: '?raw', import: 'default', eager: true });
+  const definedIn = (pattern: RegExp): string[] => Object.keys(SOURCES)
+    .filter((path) => pattern.test(SOURCES[path]))
+    .map((path) => path.slice(path.lastIndexOf('/') + 1));
+
+  it.each([
+    ['the first-value alignment', /function fromFirstValue\b/],
+    ['the gapped EMA', /function emaOfGapped\b/],
+    ['the Smoothing kernel switch', /case 'SMMA \(RMA\)'/],
+    ['the Smoothing option list and its Bollinger choice', /'SMA \+ Bollinger Bands'/],
+  ])('%s lives only in smoothing.ts', (_name, pattern) => {
+    expect(definedIn(pattern)).toEqual(['smoothing.ts']);
   });
 });
 

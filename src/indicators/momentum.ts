@@ -5,7 +5,7 @@
 import { rsi, atr, trueRange, sourceValues } from 'openalgo-charts';
 import type { IndicatorDescriptor, IndicatorSource } from 'openalgo-charts';
 import { sma, rma, smaSeededEma, stdev, highest, lowest, nulls } from './calc';
-import { fromFirstValue, smoothingMa } from './smoothing';
+import { fromFirstValue, smoothingMa, SMOOTHING_MA_TYPES, BOLLINGER_MA } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -31,20 +31,6 @@ const src = (s: Readonly<Record<string, unknown>>): IndicatorSource => (s.source
  */
 const constant = (n: number, value: number): (number | null)[] =>
   new Array<number | null>(n).fill(value);
-
-/** The selectable smoothing kernels of the "Smoothing" block. */
-const SMOOTHING_MA_TYPES: readonly { label: string; value: string }[] = [
-  { label: 'None', value: 'None' },
-  { label: 'SMA', value: 'SMA' },
-  { label: 'SMA + Bollinger Bands', value: 'SMA + Bollinger Bands' },
-  { label: 'EMA', value: 'EMA' },
-  { label: 'SMMA (RMA)', value: 'SMMA (RMA)' },
-  { label: 'WMA', value: 'WMA' },
-  { label: 'VWMA', value: 'VWMA' },
-];
-
-/** Set by `maType` when the two Bollinger band plots become visible. */
-const BOLLINGER_MA = 'SMA + Bollinger Bands';
 
 export const RSI: IndicatorDescriptor = {
   id: 'rsi',

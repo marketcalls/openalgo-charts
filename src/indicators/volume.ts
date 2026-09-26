@@ -4,7 +4,7 @@
  */
 import type { Bar, IndicatorDescriptor } from 'openalgo-charts';
 import { nulls, sma, stdev } from './calc';
-import { smoothingMa } from './smoothing';
+import { smoothingMa, SMOOTHING_MA_TYPES, BOLLINGER_MA } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -25,20 +25,6 @@ const str = (s: Readonly<Record<string, unknown>>, k: string, d: string): string
  */
 const vol = (b: Bar): number =>
   typeof b.volume === 'number' && Number.isFinite(b.volume) ? b.volume : 0;
-
-/** The selectable smoothing kernels of the "Smoothing" block. */
-const SMOOTHING_MA_TYPES: readonly { label: string; value: string }[] = [
-  { label: 'None', value: 'None' },
-  { label: 'SMA', value: 'SMA' },
-  { label: 'SMA + Bollinger Bands', value: 'SMA + Bollinger Bands' },
-  { label: 'EMA', value: 'EMA' },
-  { label: 'SMMA (RMA)', value: 'SMMA (RMA)' },
-  { label: 'WMA', value: 'WMA' },
-  { label: 'VWMA', value: 'VWMA' },
-];
-
-/** Set by `maType` when the two Bollinger band plots become visible. */
-const BOLLINGER_MA = 'SMA + Bollinger Bands';
 
 export const VOLUME: IndicatorDescriptor = {
   id: 'volume',

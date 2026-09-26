@@ -17,8 +17,8 @@ import {
   atr, sourceValues, sessionStartFlags, DEFAULT_TIMEZONE, isValidTimezone,
 } from 'openalgo-charts';
 import type { Bar, IndicatorDescriptor, IndicatorInput, IndicatorSource } from 'openalgo-charts';
-import { sma, wma, rma, nulls, smaSeededEma, vwma, percentileNearestRank } from './calc';
-import { emaOfGapped } from './smoothing';
+import { sma, rma, nulls, smaSeededEma, vwma, percentileNearestRank } from './calc';
+import { emaOfGapped, smoothingMa } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -257,22 +257,6 @@ const MA_TYPE_OPTIONS: readonly { label: string; value: string }[] = [
   { label: 'VWMA', value: 'VWMA' },
 ];
 
-function movingAverage(
-  kind: string,
-  values: readonly number[],
-  vols: readonly number[],
-  length: number,
-): number[] {
-  switch (kind) {
-    case 'EMA': return smaSeededEma(values, length);
-    case 'SMMA (RMA)': return rma(values, length);
-    case 'WMA': return wma(values, length);
-    case 'VWMA': return vwma(values, vols, length);
-    // 'SMA' and, because a settings blob can carry anything, anything else.
-    default: return sma(values, length);
-  }
-}
-
 /**
  * The ribbon's four lanes are configured identically, so the inputs are
  * generated rather than written out four times. `group` puts each lane's five
@@ -326,7 +310,7 @@ export const MA_RIBBON: IndicatorDescriptor = {
         continue;
       }
       const values = sourceValues(bars, src(s, `ma${lane}Source`));
-      out[`ma${lane}`] = nulls(movingAverage(
+      out[`ma${lane}`] = nulls(smoothingMa(
         str(s, `ma${lane}Type`, 'SMA'),
         values,
         vols,

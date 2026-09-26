@@ -4,11 +4,29 @@
  *
  * Internal to the indicator tier: `./index` does not export it, and no base
  * module imports it, so none of it reaches a chart-only build. It exists so
- * the alignment rule is written once. Private copies of these helpers sat in
- * seven study modules, where one copy could be corrected and its siblings
- * left behind.
+ * the alignment rule and the Smoothing block are written once. Private copies
+ * of these helpers and of the block's option list sat in eight study modules,
+ * where one copy could be corrected and its siblings left behind.
  */
 import { sma, wma, rma, vwma, smaSeededEma } from './calc';
+
+/**
+ * The Smoothing block's choices, for every study that offers the block. 'None'
+ * leaves the average off and `BOLLINGER_MA` also draws the two band plots; the
+ * rest name a `smoothingMa` kernel.
+ */
+export const SMOOTHING_MA_TYPES: readonly { label: string; value: string }[] = [
+  { label: 'None', value: 'None' },
+  { label: 'SMA', value: 'SMA' },
+  { label: 'SMA + Bollinger Bands', value: 'SMA + Bollinger Bands' },
+  { label: 'EMA', value: 'EMA' },
+  { label: 'SMMA (RMA)', value: 'SMMA (RMA)' },
+  { label: 'WMA', value: 'WMA' },
+  { label: 'VWMA', value: 'VWMA' },
+];
+
+/** Set by `maType` when the two Bollinger band plots become visible. */
+export const BOLLINGER_MA = 'SMA + Bollinger Bands';
 
 /**
  * Run `smooth` over the tail that begins at the series' first real value, then
@@ -48,13 +66,15 @@ export function emaOfGapped(values: readonly number[], period: number): number[]
 }
 
 /**
- * The Smoothing block's kernel switch, applied to an indicator's own output.
+ * The Smoothing block's kernel switch, applied to an indicator's own output,
+ * and the moving-average ribbon's, applied to a price source.
  *
  * Every branch starts at the smoothed series' first real value, because that
  * series is usually an indicator with a warmup gap. A running total that prints
- * from bar 0 (OBV) has no leading gap, so the alignment passes it through
- * untouched. 'SMA', 'SMA + Bollinger Bands' and, because a settings blob can
- * carry anything, every unknown kind take the SMA branch.
+ * from bar 0 (OBV) or a price source has no leading gap, so the alignment
+ * passes it through untouched; for a whole length the kernels give the same
+ * answer either way. 'SMA', 'SMA + Bollinger Bands' and, because a settings
+ * blob can carry anything, every unknown kind take the SMA branch.
  */
 export function smoothingMa(
   kind: string,

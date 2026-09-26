@@ -25,7 +25,7 @@ import {
   sma, stdev, highest, lowest, nulls,
   change, roc, rollingSum, swma, stoch, cci,
 } from './calc';
-import { fromFirstValue, smoothingMa } from './smoothing';
+import { fromFirstValue, smoothingMa, SMOOTHING_MA_TYPES, BOLLINGER_MA } from './smoothing';
 
 const num = (s: Readonly<Record<string, unknown>>, k: string, d: number): number => {
   const v = s[k];
@@ -310,17 +310,6 @@ export const RELATIVE_VIGOR_INDEX: IndicatorDescriptor = {
   },
 };
 
-/** the reference "Smoothing" block offers these seven, `None` included. */
-const RVI_MA_TYPES: readonly { label: string; value: string }[] = [
-  { label: 'None', value: 'None' },
-  { label: 'SMA', value: 'SMA' },
-  { label: 'SMA + Bollinger Bands', value: 'SMA + Bollinger Bands' },
-  { label: 'EMA', value: 'EMA' },
-  { label: 'SMMA (RMA)', value: 'SMMA (RMA)' },
-  { label: 'WMA', value: 'WMA' },
-  { label: 'VWMA', value: 'VWMA' },
-];
-
 /**
  * Relative Volatility Index — RSI's arithmetic applied to volatility instead of
  * price: how much of the recent standard deviation arrived on up bars.
@@ -345,7 +334,7 @@ export const RELATIVE_VOLATILITY_INDEX: IndicatorDescriptor = {
     { key: 'fillColor', type: 'color', label: 'Background', default: '#7e57c2' },
     {
       key: 'maType', type: 'select', label: 'Type', default: 'SMA',
-      options: RVI_MA_TYPES, group: 'Smoothing',
+      options: SMOOTHING_MA_TYPES, group: 'Smoothing',
     },
     { key: 'maLength', type: 'number', label: 'Length', default: 14, min: 1, max: 500, step: 1, group: 'Smoothing' },
     { key: 'bbMult', type: 'number', label: 'BB StdDev', default: 2, min: 0.001, max: 50, step: 0.5, group: 'Smoothing' },
@@ -405,7 +394,7 @@ export const RELATIVE_VOLATILITY_INDEX: IndicatorDescriptor = {
     const maType = str(s, 'maType', 'SMA');
     const maLength = int(s, 'maLength', 14);
     const mult = num(s, 'bbMult', 2);
-    const isBB = maType === 'SMA + Bollinger Bands';
+    const isBB = maType === BOLLINGER_MA;
     const ma = maType === 'None'
       ? new Array<number>(n).fill(NaN)
       : smoothingMa(maType, rvi, bars.map((b) => b.volume ?? 0), maLength);
