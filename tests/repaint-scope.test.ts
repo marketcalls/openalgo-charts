@@ -7,8 +7,10 @@
  * pane over exactly one frame, so a write that reaches a pane it has no
  * business in fails here, and so does one that misses a pane that has to
  * change: the price pane on a tick, a study's own pane and any pane its output
- * targets, every pane when the shared time scale moves, and the pane that
- * carries the time axis.
+ * targets, every pane when the shared time scale moves, and the panes whose
+ * axis chrome reads the wall clock (the corner clock on the pane that carries
+ * the time axis, the bar countdown in each price tag), which read it only as
+ * their pane paints.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Chart } from '../src/core/chart';
@@ -26,8 +28,19 @@ const BARS: Bar[] = Array.from({ length: 200 }, (_, i) => ({
 const LAST = BARS[BARS.length - 1];
 
 let sequence = 0;
-/** A study with one plot of its own, and optionally one sent to the candles. */
-function probe(options: { overlay?: boolean } = {}): { id: string; recompute: () => void } {
+
+/** What a probe study draws besides its own plot. */
+interface ProbeOptions {
+  /** A second plot, sent to the candles. */
+  overlay?: boolean;
+  /** A level at the last close, so a tick moves it. */
+  level?: boolean;
+  /** Bar colours that paint the last bar red while its close is on an odd tenth. */
+  barColors?: boolean;
+}
+
+/** A study with one plot of its own, and whatever else `options` asks for. */
+function probe(options: ProbeOptions = {}): { id: string; recompute: () => void } {
   let attachment: IndicatorAttachContext | undefined;
   const id = `repaint-scope-probe-${sequence++}`;
   registerIndicator({
@@ -37,6 +50,11 @@ function probe(options: { overlay?: boolean } = {}): { id: string; recompute: ()
       ...(options.overlay ? [{ key: 'o', type: 'line' as const, title: 'On price', overlay: true }] : []),
     ],
     calc: input => ({ v: input.map(bar => bar.close - bar.open), o: input.map(bar => bar.close) }),
+    ...(options.level ? { levels: ({ bars }: { bars: readonly Bar[] }) => [{ price: bars[bars.length - 1]?.close ?? 0 }] } : {}),
+    ...(options.barColors ? {
+      barColors: ({ bars }: { bars: readonly Bar[] }) => bars.map((bar, i) =>
+        i === bars.length - 1 && Math.round(bar.close * 10) % 2 === 1 ? '#ff0000' : null),
+    } : {}),
     attach: context => { attachment = context; },
   });
   return { id, recompute: () => attachment?.requestRecompute() };
@@ -54,7 +72,7 @@ afterEach(() => {
  * pane 1 a study computed from it, pane 2 an unrelated line series and the
  * time axis.
  */
-function fixture(study: { overlay?: boolean } = {}) {
+function fixture(study: ProbeOptions = {}) {
   let now = 0;
   let id = 0;
   const queue = new Map<number, () => void>();
@@ -115,6 +133,59 @@ describe('a live tick', () => {
     f.price.update({ ...LAST, high, close: high - 1 });
     f.settle();
     expect(f.chart.panes()[0].priceScale.priceRange().max).toBeGreaterThanOrEqual(high);
+  });
+
+  it('that moves a study level repaints the study pane, not every pane', () => {
+    const f = fixture({ level: true });
+    const close = LAST.close + 0.1;
+    const counts = paints(f.chart, () => {
+      f.price.update({ ...LAST, close });
+      f.frame();
+    });
+    const levels = f.chart.panes()[1].primitives().map(p => (p as { options?: () => { price?: number } }).options?.().price);
+    expect(levels).toContain(close);
+    expect(counts.base).toEqual([1, 1, 0]);
+  });
+
+  it('that recolours the forming bar repaints the price pane, not every pane', () => {
+    const f = fixture({ barColors: true });
+    const color = (): string | undefined => { const data = f.price.getData(); return data[data.length - 1]?.color; };
+    expect(color()).toBeUndefined();
+    const counts = paints(f.chart, () => {
+      f.price.update({ ...LAST, close: LAST.close + 0.1 });
+      f.frame();
+    });
+    expect(color()).toBe('#ff0000');
+    expect(counts.base).toEqual([1, 1, 0]);
+  });
+
+  it('with the corner clock on also repaints the bottom pane, whose clock reads the time as it paints', () => {
+    const f = fixture();
+    f.chart.setAxisChromeOptions({ sessionClock: true });
+    f.settle();
+    const tick = paints(f.chart, () => {
+      f.price.update({ ...LAST, close: LAST.close + 0.1 });
+      f.frame();
+    });
+    expect(tick.base).toEqual([1, 1, 1]);
+    const recompute = paints(f.chart, () => { f.recompute(); f.settle(); });
+    expect(recompute.base).toEqual([0, 1, 1]);
+  });
+
+  it('with the bar countdown on also repaints every pane whose price tag carries one', () => {
+    const f = fixture();
+    // A histogram is not a price series, so its pane has no last-price tag
+    // and no countdown, and nothing here writes to it.
+    f.chart.addSeries('histogram', { paneIndex: 3 }).setData(BARS.map(bar => ({ time: bar.time, value: bar.close })));
+    f.chart.setAxisChromeOptions({ barCountdown: true });
+    f.settle();
+    const counts = paints(f.chart, () => {
+      f.other.update({ time: LAST.time, value: LAST.close * 3 });
+      f.frame();
+    });
+    // The host line's own pane for the write, and the price and study panes
+    // for the countdown their tags carry.
+    expect(counts.base).toEqual([1, 1, 1, 0]);
   });
 
   it('on a series of another pane repaints that pane alone', () => {

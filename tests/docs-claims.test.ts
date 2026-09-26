@@ -263,6 +263,21 @@ const TICK_LOCAL: Readonly<Record<string, RegExp>> = {
   'ARCHITECTURE.md': /a live tick that replaces the forming bar[^.]*repaints only its own series' pane/i,
   'README.md': /a live tick repaints the price pane and the panes of the studies computed from it/i,
 };
+/**
+ * What each document says about the wall-clock readings keeping a pane
+ * repainting on a pane-scoped write: the corner clock on the bottom pane, and
+ * the bar countdown in the last-price tag of each pane with a price series.
+ */
+const CLOCK_REPAINT: Readonly<Record<'sessionClock' | 'barCountdown', Readonly<Record<string, RegExp>>>> = {
+  sessionClock: {
+    'ARCHITECTURE.md': /except while the corner clock is on \(`axisChrome\.sessionClock`\)[^.]*each such write also repaints that pane/i,
+    'README.md': /the bottom pane repaints with them while the corner clock is on/i,
+  },
+  barCountdown: {
+    'ARCHITECTURE.md': /the bar countdown \(`axisChrome\.barCountdown`\)[^.]*each such write also repaints every pane with a price series/i,
+    'README.md': /every pane with a price series while the bar countdown is on/i,
+  },
+};
 
 describe('how far a repaint reaches', () => {
   afterEach(() => { vi.restoreAllMocks(); });
@@ -340,6 +355,22 @@ describe('how far a repaint reaches', () => {
       if (otherPane) expect(localRepaintClaims(text), name).toEqual([]);
     }
   });
+
+  for (const reading of ['sessionClock', 'barCountdown'] as const) {
+    it(`${reading}: the documents say it keeps an unrelated pane repainting exactly when it does`, () => {
+      const plain = mount();
+      const without = repainted(plain.chart, plain.tick)[2];
+      plain.chart.destroy();
+      const on = mount();
+      on.chart.setAxisChromeOptions({ [reading]: true });
+      const withReading = repainted(on.chart, on.tick)[2];
+      on.chart.destroy();
+      // The unrelated pane is the bottom one, where the clock is drawn, and it
+      // holds a line, a price series whose last-price tag carries the countdown.
+      const readingOnly = withReading && !without;
+      for (const [name, text] of Object.entries(DOCS)) expect(CLOCK_REPAINT[reading][name].test(text), name).toBe(readingOnly);
+    });
+  }
 
   it('recognises the pane-local wording the document used while it was false', () => {
     for (const old of [

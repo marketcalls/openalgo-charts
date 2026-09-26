@@ -50,6 +50,7 @@ export interface SeriesHost {
   readonly _width: Chart['_width'];
   readonly _leftAxisWidth: Chart['_leftAxisWidth'];
   readonly _rightAxisWidth: Chart['_rightAxisWidth'];
+  readonly _axisChrome: Chart['_axisChrome'];
   _primary: Chart['_primary'];
   _firstPane: Chart['_firstPane'];
   _hasFitContent: Chart['_hasFitContent'];
@@ -60,6 +61,7 @@ export interface SeriesHost {
   readonly _primitives: Chart['_primitives'];
   readonly _motion: Chart['_motion'];
   _primaryIndex: Chart['_primaryIndex'];
+  _bottomPaneIndex: Chart['_bottomPaneIndex'];
   _mutateTimeScale: Chart['_mutateTimeScale'];
   _fitDefaultView: Chart['_fitDefaultView'];
   _updateAccessibleSummary: Chart['_updateAccessibleSummary'];
@@ -260,8 +262,9 @@ export class ChartSeries {
   /**
    * Ask for the repaint a write to `panes` needs, given `before` from
    * `_sharedAxis`. Each of those panes repaints at `Full`, so its scales
-   * re-measure. Every pane repaints instead when the write moved the shared
-   * index or the time scale: each pane's x positions and the time axis
+   * re-measure, and the panes reading the wall clock repaint at `Light` (see
+   * `_clockedPanes`). Every pane repaints instead when the write moved the
+   * shared index or the time scale: each pane's x positions and the time axis
    * follow them.
    */
   public _invalidateWrite(panes: Iterable<Pane>, before: readonly number[]): void {
@@ -272,9 +275,29 @@ export class ChartSeries {
       return;
     }
     if (indices.length === 0) return;
+    const clocked = this._clockedPanes();
     this._host.invalidate((m) => {
       for (const index of indices) m.invalidatePane(index, { level: InvalidationLevel.Full, autoScale: true });
+      for (const index of clocked) m.invalidatePane(index, { level: InvalidationLevel.Light, autoScale: false });
     });
+  }
+
+  /**
+   * The panes that read the wall clock as they paint: the bottom one for the
+   * corner clock, and each pane with a price series for the countdown in its
+   * last-price tag. Neither reading has a timer. While every write repainted
+   * every pane, the writes were what kept them moving, so a write still
+   * repaints these panes while the readings are on.
+   */
+  private _clockedPanes(): number[] {
+    const chrome = this._host._axisChrome, out: number[] = [];
+    if (chrome.barCountdown === true) {
+      this._host._panes.forEach((pane, index) => {
+        if (pane.series().some(s => s.style.visible !== false && getChartType(s.type).isPriceSeries)) out.push(index);
+      });
+    }
+    if (chrome.sessionClock) out.push(this._host._bottomPaneIndex());
+    return out;
   }
 
   /** Apply one live bar; auto-scroll only on a genuine right-edge append. */

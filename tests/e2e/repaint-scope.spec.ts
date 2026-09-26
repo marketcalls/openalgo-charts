@@ -7,7 +7,9 @@ import { test, expect, type Page } from '@playwright/test';
 // of the studies computed from it, and leaves every other pane's canvases as
 // they are. The unit tests count those paints. What only a browser can show is
 // that the pixels the chart leaves alone are still right: after every tick,
-// each canvas must match what a chart-wide repaint then paints over it.
+// each canvas must match what a chart-wide repaint then paints over it, at a
+// whole and at a fractional device scale, and with the axis chrome that reads
+// the wall clock switched on.
 //
 // The glides step inside the render loop's frame. Every animation-frame
 // request is counted per frame here, keyed by the timestamp all callbacks of
@@ -34,65 +36,116 @@ test.beforeEach(async ({ page }) => {
   await page.waitForFunction(() => (window as any).__ready === true);
 });
 
-test('a live tick leaves every pane it does not repaint exactly as a full repaint paints it', async ({ page }, info) => {
-  await page.evaluate(async () => {
-    const { registerIndicator } = await import('/dist/openalgo-charts.mjs' as string);
-    const api = (window as any).__api;
-    registerIndicator({
-      id: 'e2e-repaint-scope', name: 'Range', placement: 'pane', inputs: [],
-      plots: [{ key: 'v', type: 'line', title: 'Range' }],
-      calc: (input: { high: number; low: number }[]) => ({ v: input.map(bar => bar.high - bar.low) }),
-    });
-    api.chart.addIndicator('e2e-repaint-scope');
-    // Paint counts per pane, by instance, so the bundle's own class is untouched.
-    api.paints = api.chart.panes().map(() => 0);
-    api.chart.panes().forEach((pane: any, i: number) => {
-      const paint = pane.paintBase;
-      pane.paintBase = function (...args: unknown[]) { api.paints[i]++; return paint.apply(this, args); };
+// At a whole and a fractional device scale: a pane painted alone has to land on
+// the same device pixels as one painted with every other pane.
+for (const scale of [1, 1.25]) {
+  test.describe(`at a device scale of ${scale}`, () => {
+    test.use({ deviceScaleFactor: scale });
+
+    test('a live tick leaves every pane it does not repaint exactly as a full repaint paints it', async ({ page }, info) => {
+      expect(await page.evaluate(() => window.devicePixelRatio)).toBe(scale);
+      await page.evaluate(async () => {
+        const { registerIndicator } = await import('/dist/openalgo-charts.mjs' as string);
+        const api = (window as any).__api;
+        registerIndicator({
+          id: 'e2e-repaint-scope', name: 'Range', placement: 'pane', inputs: [],
+          plots: [{ key: 'v', type: 'line', title: 'Range' }],
+          calc: (input: { high: number; low: number }[]) => ({ v: input.map(bar => bar.high - bar.low) }),
+        });
+        api.chart.addIndicator('e2e-repaint-scope');
+        // Paint counts per pane, by instance, so the bundle's own class is untouched.
+        api.paints = api.chart.panes().map(() => 0);
+        api.chart.panes().forEach((pane: any, i: number) => {
+          const paint = pane.paintBase;
+          pane.paintBase = function (...args: unknown[]) { api.paints[i]++; return paint.apply(this, args); };
+        });
+      });
+      await frames(page);
+      expect(await page.evaluate(() => (window as any).__api.chart.panes().length)).toBe(4);
+      // Compared against repaints only: a line's very first paint can differ from
+      // every later one by a pixel, in the published build as much as this one.
+      await page.evaluate(() => (window as any).__api.chart.invalidate((m: any) => m.invalidateGlobal(3)));
+      await frames(page);
+
+      const tick = (kind: 'replace' | 'append', step: number) => page.evaluate(({ kind, step }) => {
+        const api = (window as any).__api;
+        const data = api.price.getData();
+        const last = data[data.length - 1];
+        api.paints.fill(0);
+        // A new high past the range, then prices back inside it, so the price
+        // scale has to re-measure both ways.
+        const close = last.close + (step % 2 === 0 ? 9 : -4);
+        const bar = kind === 'append'
+          ? { time: last.time + 300, open: last.close, high: Math.max(last.close, close) + 1, low: Math.min(last.close, close) - 1, close }
+          : { ...last, high: Math.max(last.high, close + 1), low: Math.min(last.low, close - 1), close };
+        api.price.update(bar);
+      }, { kind, step });
+
+      const steps: ('replace' | 'append')[] = ['replace', 'replace', 'replace', 'append', 'replace', 'replace'];
+      for (const [step, kind] of steps.entries()) {
+        await tick(kind, step);
+        await frames(page);
+        const paints = await page.evaluate(() => [...(window as any).__api.paints]);
+        if (kind === 'replace') {
+          // The price pane and the study computed from it; the host's histogram
+          // and line panes have nothing new to show.
+          expect(paints, `paints after ${kind} ${step}`).toEqual([1, 0, 0, 1]);
+        } else {
+          expect(paints.every((n: number) => n >= 1), `paints after ${kind} ${step}`).toBe(true);
+        }
+        const local = await canvases(page);
+        await page.evaluate(() => (window as any).__api.chart.invalidate((m: any) => m.invalidateGlobal(3)));
+        await frames(page);
+        const full = await canvases(page);
+        expect(local.length).toBe(8);
+        for (let i = 0; i < full.length; i++) expect(local[i] === full[i], `canvas ${i} after ${kind} ${step}`).toBe(true);
+      }
+      await info.attach(`after the ticks at ${scale}`, { body: await page.screenshot(), contentType: 'image/png' });
     });
   });
-  await frames(page);
-  expect(await page.evaluate(() => (window as any).__api.chart.panes().length)).toBe(4);
-  // Compared against repaints only: a line's very first paint can differ from
-  // every later one by a pixel, in the published build as much as this one.
-  await page.evaluate(() => (window as any).__api.chart.invalidate((m: any) => m.invalidateGlobal(3)));
-  await frames(page);
+}
 
-  const tick = (kind: 'replace' | 'append', step: number) => page.evaluate(({ kind, step }) => {
-    const api = (window as any).__api;
-    const data = api.price.getData();
-    const last = data[data.length - 1];
-    api.paints.fill(0);
-    // A new high past the range, then prices back inside it, so the price
-    // scale has to re-measure both ways.
-    const close = last.close + (step % 2 === 0 ? 9 : -4);
-    const bar = kind === 'append'
-      ? { time: last.time + 300, open: last.close, high: Math.max(last.close, close) + 1, low: Math.min(last.close, close) - 1, close }
-      : { ...last, high: Math.max(last.high, close + 1), low: Math.min(last.low, close - 1), close };
-    api.price.update(bar);
-  }, { kind, step });
-
-  const steps: ('replace' | 'append')[] = ['replace', 'replace', 'replace', 'append', 'replace', 'replace'];
-  for (const [step, kind] of steps.entries()) {
-    await tick(kind, step);
+// The corner clock and the bar countdown have no timer: each reads the
+// injected wall clock as its pane paints. The fixture's bottom pane is a host
+// line that no tick here writes to, and it carries both the clock and, as a
+// price series, a countdown in its last-price tag. The clock moves on before
+// each tick, and that pane must show the new reading after it.
+for (const reading of ['sessionClock', 'barCountdown'] as const) {
+  test(`a live tick keeps the ${reading} reading the time on a pane the tick does not write to`, async ({ page }) => {
+    await page.evaluate(reading => {
+      const api = (window as any).__api;
+      const data = api.price.getData();
+      // Inside the forming bar, so the countdown has a close to count to.
+      api.clockAt = data[data.length - 1].time + 10;
+      api.chart.setAxisChromeOptions({ [reading]: true, clock: () => api.clockAt });
+      api.paints = api.chart.panes().map(() => 0);
+      api.chart.panes().forEach((pane: any, i: number) => {
+        const paint = pane.paintBase;
+        pane.paintBase = function (...args: unknown[]) { api.paints[i]++; return paint.apply(this, args); };
+      });
+    }, reading);
     await frames(page);
-    const paints = await page.evaluate(() => [...(window as any).__api.paints]);
-    if (kind === 'replace') {
-      // The price pane and the study computed from it; the host's histogram
-      // and line panes have nothing new to show.
-      expect(paints, `paints after ${kind} ${step}`).toEqual([1, 0, 0, 1]);
-    } else {
-      expect(paints.every((n: number) => n >= 1), `paints after ${kind} ${step}`).toBe(true);
+    expect(await page.evaluate(() => (window as any).__api.chart.panes().length)).toBe(3);
+    for (let step = 1; step <= 3; step++) {
+      await page.evaluate(step => {
+        const api = (window as any).__api;
+        api.clockAt += 7;
+        api.paints.fill(0);
+        const data = api.price.getData();
+        const last = data[data.length - 1];
+        api.price.update({ ...last, close: last.close + step / 10 });
+      }, step);
+      await frames(page);
+      // The price pane for the tick, the bottom pane for the reading, and not the histogram between them.
+      expect(await page.evaluate(() => [...(window as any).__api.paints]), `paints after tick ${step}`).toEqual([1, 0, 1]);
+      const local = await canvases(page);
+      await page.evaluate(() => (window as any).__api.chart.invalidate((m: any) => m.invalidateGlobal(3)));
+      await frames(page);
+      const full = await canvases(page);
+      for (let i = 0; i < full.length; i++) expect(local[i] === full[i], `canvas ${i} after tick ${step}`).toBe(true);
     }
-    const local = await canvases(page);
-    await page.evaluate(() => (window as any).__api.chart.invalidate((m: any) => m.invalidateGlobal(3)));
-    await frames(page);
-    const full = await canvases(page);
-    expect(local.length).toBe(8);
-    for (let i = 0; i < full.length; i++) expect(local[i] === full[i], `canvas ${i} after ${kind} ${step}`).toBe(true);
-  }
-  await info.attach('after the ticks', { body: await page.screenshot(), contentType: 'image/png' });
-});
+  });
+}
 
 test('a fling and a wheel-zoom glide ask for one animation frame per frame', async ({ page }) => {
   await page.evaluate(() => {
