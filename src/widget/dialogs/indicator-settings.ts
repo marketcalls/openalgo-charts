@@ -19,6 +19,7 @@ import {
   button, controlsFromInputs, dialogFrame, el, glyphSvg, openPanel, renderForm, tabList,
   type FormHandle, type PanelHandle,
 } from '../form';
+import { STYLE_GLYPH } from '../glyphs';
 
 export type IndicatorSettingsTab = 'inputs' | 'style';
 
@@ -35,8 +36,6 @@ export interface IndicatorSettingsOptions {
   /** Runs once when the dialog is gone; `committed` is false after Cancel or Escape. */
   onClose?(committed: boolean): void;
 }
-
-const STYLE_GLYPH = 'M3 13c2.5 0 3.5-1.5 4-3.5M7.5 9.5 13 4a1.4 1.4 0 0 1 2 2l-5.5 5.5';
 
 function studySource(value: unknown): value is IndicatorStudySource {
   if (value === null || typeof value !== 'object') return false;

@@ -21,6 +21,7 @@ import {
   button, controlsFromFields, dialogFrame, el, glyphSvg, openPanel, placePanel, renderForm, selectionPoint,
   type ButtonSpec, type FormHandle, type PanelHandle,
 } from '../form';
+import { ABOVE_GLYPH, BEHIND_GLYPH } from '../glyphs';
 import { mountLevelEditor } from './level-editor';
 import { mountTextEditor } from './text-editor';
 
@@ -90,9 +91,6 @@ export function resolvedDrawingValues(d: Drawing, schema: SettingsSchema, tool: 
   }
   return out;
 }
-
-const ABOVE_GLYPH = 'M3 4h10M8 14V6M5 9l3-3 3 3';
-const BEHIND_GLYPH = 'M3 12h10M8 2v8M5 7l3 3 3-3';
 
 function toolOf(id: string): DrawingTool | null {
   try { return getDrawingTool(id); } catch { return null; }
