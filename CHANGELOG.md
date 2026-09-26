@@ -132,6 +132,17 @@ base 125.25 kB, base + trade 141.94 kB, draw 48.42 kB, widget 92.42 kB,
 terminal 302.52 kB, everything 355.53 kB, workspace 10.47 kB and the
 chart-only import 79.27 KiB.
 
+Keeping a canvas's reported device size only while its new box can snap to it,
+and the chart-wide history letting go of the studies and panes no step
+reaches, measured on the merged build before and after, Brotli bytes: base
+engine 125,248 to 125,345, base + trade 141,935 to 142,032, widget tier 92,413
+to 92,720, widget terminal 302,518 to 302,922 and everything 355,530 to
+355,934. The chart-only import falls from 81,172 to 81,148 bytes, and the
+indicator, draw, transform, profile, WebGL2 and workspace rows do not move.
+Each budget that moved is the smallest two-decimal value that passes: base
+125.35 kB, base + trade 142.04 kB, widget 92.72 kB, terminal 302.93 kB,
+everything 355.94 kB and the chart-only import 79.25 KiB.
+
 ### Deprecated
 
 - `mapOrder` is deprecated in favour of `decodeOrder`, which returns the reason a

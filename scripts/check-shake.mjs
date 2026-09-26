@@ -214,8 +214,10 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // device-pixel layout, layout:change, priceScaleDefaults and
 // setSessionCalendar take the merged build to 81172 bytes (79.27 KiB), and the
 // undo history's reconciliation on top of them, again in the draw and widget
-// tiers, leaves it there; allow 79.27 KiB.
-const LIMIT_BYTES = 79.27 * 1024;
+// tiers, leaves it there; allow 79.27 KiB. Keeping a canvas's reported device
+// size only while its new box can snap to it moves it to 81148 bytes
+// (79.25 KiB); the budget follows it down to 79.25 KiB.
+const LIMIT_BYTES = 79.25 * 1024;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.
