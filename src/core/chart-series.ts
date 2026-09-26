@@ -19,6 +19,7 @@ import { InvalidationLevel } from './invalidate-mask';
 import type { Chart } from './chart';
 import { compactVolume, type AddSeriesOptions } from './chart-types';
 import type { PreservedScaleFormats } from './chart-state';
+import type { Pane } from './pane';
 import type { PriceScale } from '../scale/price-scale';
 import { createSeriesRecord, type SeriesApi, type BarConfirmationOptions, type SeriesUpdateOptions } from '../model/series';
 import { bindSeriesProvenance, SeriesProvenance, validateSeriesOptions } from '../model/series-provenance';
@@ -49,6 +50,7 @@ export interface SeriesHost {
   readonly _width: Chart['_width'];
   readonly _leftAxisWidth: Chart['_leftAxisWidth'];
   readonly _rightAxisWidth: Chart['_rightAxisWidth'];
+  readonly _axisChrome: Chart['_axisChrome'];
   _primary: Chart['_primary'];
   _firstPane: Chart['_firstPane'];
   _hasFitContent: Chart['_hasFitContent'];
@@ -59,6 +61,7 @@ export interface SeriesHost {
   readonly _primitives: Chart['_primitives'];
   readonly _motion: Chart['_motion'];
   _primaryIndex: Chart['_primaryIndex'];
+  _bottomPaneIndex: Chart['_bottomPaneIndex'];
   _mutateTimeScale: Chart['_mutateTimeScale'];
   _fitDefaultView: Chart['_fitDefaultView'];
   _updateAccessibleSummary: Chart['_updateAccessibleSummary'];
@@ -158,9 +161,9 @@ export class ChartSeries {
     if (!preserveFormat && record.style.precision !== undefined) this._applyPrecision(scale, record.style.precision);
 
     const api: SeriesApi = {
-      setData: (bars: readonly SeriesDataItem[], metadata?: BarConfirmationOptions): void => this._setData(dataId, bars.map(toBar), metadata),
+      setData: (bars: readonly SeriesDataItem[], metadata?: BarConfirmationOptions): void => this._setData(dataId, bars.map(toBar), metadata, owner),
       prependData: (bars: readonly SeriesDataItem[]): void => this._prependData(dataId, bars.map(toBar)),
-      update: (bar: SeriesDataItem, metadata?: SeriesUpdateOptions): void => this._updateBar(dataId, toBar(bar), metadata),
+      update: (bar: SeriesDataItem, metadata?: SeriesUpdateOptions): void => this._updateBar(dataId, toBar(bar), metadata, owner),
       getData: (): Bar[] => this._host._dataLayer.indexedBars(dataId).map((ib) => ib.bar),
       applyOptions: (patch: Partial<SeriesStyle>): void => {
         for (const key of Object.keys(patch) as (keyof SeriesStyle)[]) delete owner.inheritedStyle[key];
@@ -244,9 +247,63 @@ export class ChartSeries {
     scale.setPriceFormatter((v) => v.toFixed(digits));
   }
 
+  /**
+   * What every pane shares and a data write can move: the shared index (its
+   * length and the times at either end) and the time scale's window. A write
+   * that leaves all of it as it was changes the panes holding what it wrote,
+   * and no other pane has anything new to show.
+   */
+  public _sharedAxis(): number[] {
+    const layer = this._host._dataLayer, scale = this._host._timeScale;
+    return [layer.length, layer.indexToTime(0) ?? 0, layer.indexToTime(layer.baseIndex) ?? 0,
+      scale.visibleRange().to, scale.barSpacing, scale.width];
+  }
+
+  /**
+   * Ask for the repaint a write to `panes` needs, given `before` from
+   * `_sharedAxis`. Each of those panes repaints at `Full`, so its scales
+   * re-measure, and the panes reading the wall clock repaint at `Light` (see
+   * `_clockedPanes`). Every pane repaints instead when the write moved the
+   * shared index or the time scale: each pane's x positions and the time axis
+   * follow them.
+   */
+  public _invalidateWrite(panes: Iterable<Pane>, before: readonly number[]): void {
+    const after = this._sharedAxis();
+    const indices = [...panes].map(pane => this._host._panes.indexOf(pane));
+    if (indices.includes(-1) || after.some((value, i) => value !== before[i])) {
+      this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+      return;
+    }
+    if (indices.length === 0) return;
+    const clocked = this._clockedPanes();
+    this._host.invalidate((m) => {
+      for (const index of indices) m.invalidatePane(index, { level: InvalidationLevel.Full, autoScale: true });
+      for (const index of clocked) m.invalidatePane(index, { level: InvalidationLevel.Light, autoScale: false });
+    });
+  }
+
+  /**
+   * The panes that read the wall clock as they paint: the bottom one for the
+   * corner clock, and each pane with a price series for the countdown in its
+   * last-price tag. Neither reading has a timer. While every write repainted
+   * every pane, the writes were what kept them moving, so a write still
+   * repaints these panes while the readings are on.
+   */
+  private _clockedPanes(): number[] {
+    const chrome = this._host._axisChrome, out: number[] = [];
+    if (chrome.barCountdown === true) {
+      this._host._panes.forEach((pane, index) => {
+        if (pane.series().some(s => s.style.visible !== false && getChartType(s.type).isPriceSeries)) out.push(index);
+      });
+    }
+    if (chrome.sessionClock) out.push(this._host._bottomPaneIndex());
+    return out;
+  }
+
   /** Apply one live bar; auto-scroll only on a genuine right-edge append. */
-  private _updateBar(dataId: number, bar: Bar, options?: SeriesUpdateOptions): void {
+  private _updateBar(dataId: number, bar: Bar, options: SeriesUpdateOptions | undefined, owner: { readonly pane: Pane }): void {
     validateSeriesOptions(options, true);
+    const before = this._sharedAxis();
     const bars = this._host._dataLayer.seriesBars(dataId);
     const tailTime = bars[bars.length - 1]?.time;
     const change = tailTime === undefined || bar.time > tailTime ? 'append' : bar.time === tailTime ? 'replace' : 'correction';
@@ -259,14 +316,19 @@ export class ChartSeries {
     if (kind === 'append' && !wasAtRight) {
       this._host._mutateTimeScale(() => this._host._timeScale.setRightOffset(this._host._timeScale.rightOffset - 1));
     }
+    // A tick that replaces the forming bar moves nothing the panes share, so it
+    // repaints its own pane alone; the studies it feeds repaint theirs when
+    // they recompute. An appended bar grows the index, and every pane repaints.
     if (dataId === this._host._firstDataId.value) this._host._studies._invalidateIndicators();
-    this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    this._invalidateWrite([owner.pane], before);
     this._host._updateAccessibleSummary();
     if (dataId === this._host._firstDataId.value) this._host.emit('data:update', { kind: 'update', time: bar.time });
   }
 
-  private _setData(dataId: number, bars: readonly Bar[], options?: BarConfirmationOptions): void {
+  private _setData(dataId: number, bars: readonly Bar[], options: BarConfirmationOptions | undefined,
+    owner: { readonly pane: Pane; readonly indicatorOwned: boolean }): void {
     validateSeriesOptions(options);
+    const before = this._sharedAxis();
     if (dataId === this._host._firstDataId.value) this._host._motion._stopNavigationMotion();
     this._host._dataLayer.setSeriesData(dataId, bars);
     const sorted = this._host._dataLayer.seriesBars(dataId);
@@ -296,7 +358,10 @@ export class ChartSeries {
       this._host._timeScale.setWidth(Math.max(0, this._host._width - this._host._rightAxisWidth - this._host._leftAxisWidth));
       this._host._hasFitContent = this._host._fitDefaultView();
     }
-    this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
+    // A study writes its plots again on every recompute, so a plot repaints
+    // the pane it is on. A host's own replace still repaints every pane.
+    if (owner.indicatorOwned) this._invalidateWrite([owner.pane], before);
+    else this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
     this._host._updateAccessibleSummary();
     if (dataId === this._host._firstDataId.value) this._host.emit('data:update', { kind: 'reset' });
   }
