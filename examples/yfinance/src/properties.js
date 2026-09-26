@@ -10,7 +10,7 @@
 // the fields their schemas share, and writes through `updateMany` so one
 // edit is one undo entry.
 import {
-  drawingSettingsSchema, readDrawingSettings, applyDrawingSettings, getDrawingTool, chromeIconSvg,
+  drawingSettingsSchema, readDrawingSettings, applyDrawingSettings, getDrawingTool, chromeIconSvg, CHROME_ICON_STROKE,
   formatRatio, gannLabel, cloneLevels, DEFAULT_FIB,
 } from '/dist/openalgo-charts.draw.mjs';
 import { el, inTextField, toast } from './ui.js';
@@ -113,13 +113,15 @@ const GLYPH = {
   levels: 'M2 4h12M2 8h12M2 12h12',
   opacity: 'M3 3h10v10H3zM3 8h10M8 3v10',
   order: 'M2 10h7v4H2zM7 2h7v7H7z',
-  behind: 'M3 12h10M8 2v8M5 7l3 3 3-3',
-  above: 'M3 4h10M8 14V6M5 9l3-3 3 3',
+  // The arrow stops a pixel short of its bar: at the 2px chrome line a tip
+  // one stroke away from the bar joins it.
+  behind: 'M3 13h10M8 2v7M5 6l3 3 3-3',
+  above: 'M3 3h10M8 14V7M5 10l3-3 3 3',
   // A pushpin: the drawing is fixed to the screen.
   pin: 'M6 2h4M7 2v4L5 9h6L9 6V2M8 9v5',
 };
 const XMLNS = 'http://www.w3.org/2000/svg';
-const glyph = (id, stroke = 1.5) =>
+const glyph = (id, stroke = CHROME_ICON_STROKE) =>
   `<svg xmlns="${XMLNS}" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor"`
   + ` stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${GLYPH[id]}"/></svg>`;
 const chrome = (id) => chromeIconSvg(id, { size: 16 });

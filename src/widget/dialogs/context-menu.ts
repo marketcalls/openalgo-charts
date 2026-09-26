@@ -27,6 +27,7 @@ import { drawingSettingsSchema } from 'openalgo-charts/draw';
 import type { Drawing } from 'openalgo-charts/draw';
 import { editableIds, type WidgetContext } from '../context';
 import { boxInRoot, chromeGlyph, el, glyphSvg, openPanel, placePanel, stopOwnKeys, type PanelHandle } from '../form';
+import { ABOVE_GLYPH, BEHIND_GLYPH, FIT_GLYPH } from '../glyphs';
 import { mountDrawingProperties } from './drawing-properties';
 import { mountIndicatorPicker } from './indicator-picker';
 import { mountIndicatorSettings } from './indicator-settings';
@@ -93,9 +94,6 @@ export interface ContextMenuOptions {
 const SEP: MenuEntry = { kind: 'separator' };
 const header = (label: string): MenuEntry => ({ kind: 'header', label });
 
-const ABOVE_GLYPH = 'M3 4h10M8 14V6M5 9l3-3 3 3';
-const BEHIND_GLYPH = 'M3 12h10M8 2v8M5 7l3 3 3-3';
-const FIT_GLYPH = 'M2 8h12M4 5l-2 3 2 3M12 5l2 3-2 3';
 const TICK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4"/></svg>';
 
 /** Our words for the four scale modes, in the engine's order. */

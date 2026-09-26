@@ -998,7 +998,7 @@ export const RAIL_CSS = `
 .rail .rail__glyph { display: grid; place-items: center; width: 24px; height: 24px; line-height: 0; }
 .rail .rail__glyph > svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2;
   stroke-linecap: round; stroke-linejoin: round; }
-.rail .rail__btn--chrome .rail__glyph > svg { width: 16px; height: 16px; stroke-width: 1.5; }
+.rail .rail__btn--chrome .rail__glyph > svg { width: 16px; height: 16px; stroke-width: 2; }
 .rail .rail__chev { position: absolute; right: 0; bottom: 0; width: 13px; height: 13px; display: grid;
   place-items: center; border-radius: 5px 0 6px 0; color: var(--mut); opacity: 0; transition: opacity .1s, background .1s; }
 .rail .rail__chev > svg { width: 9px; height: 9px; fill: none; stroke: currentColor; stroke-width: 2.2;
