@@ -141,13 +141,24 @@ function firstWhere(n: number, after: (i: number) => boolean): number {
   return lo;
 }
 
-function place(chart: Chart, frame: Frame, from: number, to: number | undefined, reach: HistoryReach | undefined): DateNavigationResult {
+/**
+ * The instant the first bar at or after `t` can count from: the open of the
+ * session the chart's calendar has at `t`, or opens next, when that is later.
+ * `t` itself without a calendar, or when no session opens.
+ */
+function firstSessionFrom(chart: Chart, frame: Frame, t: number): number {
+  const session = chart.dataLayer.sessionCalendar?.sessionFrom(t);
+  return session ? Math.max(t, frame.open(session.open)) : t;
+}
+
+function place(chart: Chart, frame: Frame, from: number, to: number | undefined, reach: HistoryReach | undefined, due = from): DateNavigationResult {
   const bars = chart.primaryBars();
   const n = bars.length;
   // Every index read below is inside the bars: firstWhere probes [0, n), and
   // start, stop, last and n - 1 are in [0, n) once the no-data return has passed.
-  // History only falls short when its first bar still counts from after the request.
-  const history = reach !== undefined && reach !== 'loaded' && n > 0 && frame.open(bars[0]!.time) > from ? reach : undefined;
+  // History only falls short when its first bar still counts from after the
+  // request's first session: a weekend or a night before it holds no bars.
+  const history = reach !== undefined && reach !== 'loaded' && n > 0 && frame.open(bars[0]!.time) > due ? reach : undefined;
   const start = firstWhere(n, i => frame.close(bars[i]!.time) > from);
   const stop = to === undefined ? start : firstWhere(n, i => frame.open(bars[i]!.time) > to) - 1;
   if (start >= n || stop < start) return history === undefined ? { status: 'no-data' } : { status: 'no-data', history };
@@ -244,9 +255,12 @@ export class DateNavigator {
     const view = chart.getVisibleLogicalRange();
     const lead = to === undefined ? Math.ceil(Math.max(0, view.to - view.from) / 2) : 0;
     const aim = from - lead * (frame.close(from) - frame.open(from));
+    // No bar can start where no session opens: history that reaches the first
+    // session at or after the aim has nothing older to give before it.
+    const due = firstSessionFrom(chart, frame, aim);
     let first = bars[0]!.time; // not empty: the no-data return above
     let reach: HistoryReach | undefined;
-    while (frame.open(first) > aim) {
+    while (frame.open(first) > due) {
       const load = this._options.loadHistory;
       if (load === undefined || isReplaying(chart)) { reach = 'unavailable'; break; }
       reach = await abortable(load(aim, signal), signal);
@@ -258,6 +272,6 @@ export class DateNavigator {
       if (next === undefined || next >= first) { reach = 'empty'; break; }
       first = next;
     }
-    return place(chart, frame, from, to, reach);
+    return place(chart, frame, from, to, reach, firstSessionFrom(chart, frame, from));
   }
 }

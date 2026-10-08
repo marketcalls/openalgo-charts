@@ -9,9 +9,9 @@ import { Callout } from 'nextra/components'
 # Getting started
 
 **OpenAlgo Charts** is a dependency-free, canvas-based financial charting engine. The full
-package (every tier) is **419.05 kB Brotli**, the base engine alone is **137.53 kB**, and it
+set of tier bundles plus opt-in terminal tools and trading forms is **441.35 kB Brotli**, the base engine alone is **137.56 kB**, and it
 has **zero runtime dependencies** - what
-you import is what ships. Measurements are from the 2.6.0 build.
+you import is what ships. Measurements are from the current terminal branch build, including unreleased fixes.
 
 Nothing to install for a first look: the library runs straight from a CDN with no
 build step, which is covered in [Use from a CDN](/docs/cdn). Everything below is the
@@ -111,10 +111,36 @@ import { OrderEngine } from 'openalgo-charts/trade';
 import { runTransform, RenkoTransform } from 'openalgo-charts/transform';
 ```
 
+## Optional terminal workspace
+
+For an embedded chart, continue using `createChart`. Use `createWidget` when
+the host needs chart controls. Dockable panels are a further opt-in: call
+`loadTerminal()` from `openalgo-charts/widget` only when the user opens a
+workspace. Its trading forms have a separate `loadTradingPanels()` loader.
+The base engine supplies no application controls, and these loaders add no
+runtime dependencies.
+
+```ts
+import { loadTerminal } from 'openalgo-charts/widget';
+
+const { createTerminalWorkspace } = await loadTerminal();
+const container = document.getElementById('workspace');
+if (!container) throw new Error('Workspace container not found');
+const workspace = createTerminalWorkspace(container, { persist: false });
+await workspace.ready;
+```
+
+Give the container a non-zero height. This creates an empty workspace; add
+chart and depth panels using the [Optional Terminal Workspace](/docs/terminal-workspace)
+guide. It covers chart-local controls, link groups, asynchronous restoration,
+trading adapters and cleanup. The APIs require a build containing the terminal
+changes; an npm release must include them before registry consumers can use them.
+
 ## Next steps
 
 - [Core Concepts](/docs/core-concepts) - the data model, time/price scales, and panes.
 - [The Widget Tier](/docs/widget) - the chart with its chrome in one `createWidget` call.
+- [Optional Terminal Workspace](/docs/terminal-workspace) - dockable panels and chart-local depth, with separately loaded trading controls.
 - [Workspaces](/docs/workspaces) - named layouts, templates, revisions and asynchronous storage.
 - [Render Backends & SVG Export](/docs/rendering) - `renderer: 'auto'`, the WebGL2 tier and `exportSVG`.
 - [Chart Types](/docs/chart-types) - a live gallery of every built-in style.

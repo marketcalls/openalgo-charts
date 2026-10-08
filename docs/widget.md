@@ -396,6 +396,15 @@ silently overridden. `settings` decides what the drawing properties dialog shows
 tool: a control appears only for a field the tool's `draw` reads, which is how the widget
 avoids ever showing a control with nothing behind it.
 
+## Optional dockable panels
+
+`loadTerminal()` loads docking and standalone depth tools on demand. Its
+`loadTradingPanels()` loader requests order tickets, order books and the existing
+watchlist adapter separately. Chart market data uses `DataFeed`; order entry uses
+the trade tier's `OrderFeed`, driven by `OrderEngine`. See [Optional Terminal Workspace](terminal-workspace.md)
+for chart-local controls, shared linking, asynchronous restoration and cleanup.
+These controls are optional for hosts that only need `createWidget`.
+
 ## Loading without a bundler
 
 Every tier bundle imports its neighbours by sibling path (`./openalgo-charts.mjs`,

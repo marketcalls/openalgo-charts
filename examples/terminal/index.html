@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenAlgo Native Terminal Workspace</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #121418;
+      color: #e1e3e6;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #app {
+      display: flex;
+      flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+    }
+    #topbar {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      background: linear-gradient(110deg, #111c2b, #0d131d);
+      border-bottom: 1px solid #2b2f36;
+      font-size: 13px;
+    }
+    .brand {
+      font-weight: 600;
+      color: #73cfff;
+      letter-spacing: 0.5px;
+      margin-right: 8px;
+    }
+    .btn {
+      background: #172232;
+      color: #d1d4dc;
+      border: 1px solid #2d4058;
+      padding: 5px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.15s ease;
+    }
+    .btn:hover {
+      background: #363a45;
+    }
+    .btn-primary {
+      background: #2962ff;
+      border-color: #2962ff;
+      color: #ffffff;
+    }
+    .btn-primary:hover {
+      background: #1e53e5;
+    }
+    select.preset-select {
+      background: #2a2e39;
+      color: #d1d4dc;
+      border: 1px solid #434651;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      outline: none;
+    }
+    .feed-label { margin-left: auto; color: #7e96ae; font-size: 9px; letter-spacing: 0.7px; white-space: nowrap; }
+    .btn:focus-visible, .preset-select:focus-visible { outline: 2px solid #73cfff; outline-offset: 2px; }
+    @media (max-width: 1100px) { .feed-label { display: none; } #topbar { gap: 5px; padding: 0 8px; } .btn { padding: 5px 7px; } }
+    #terminal-container {
+      flex: 1;
+      width: 100%;
+      height: calc(100% - 42px);
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="topbar">
+      <span class="brand">OPENALGO TERMINAL</span>
+      <select id="preset-selector" class="preset-select">
+        <option value="chart-dom">Preset: Chart + DOM</option>
+        <option value="two-charts-dom">Preset: 2 Charts + DOM</option>
+        <option value="scalper">Preset: Scalper</option>
+        <option value="order-flow">Preset: Order Flow</option>
+        <option value="analysis">Preset: Analysis</option>
+      </select>
+      <button id="btn-add-chart" class="btn">+ Add Chart</button>
+      <button id="btn-add-dom" class="btn">+ Add DOM</button>
+      <button id="btn-reset" class="btn">Reset Layout</button>
+      <button id="btn-depth" class="btn" aria-pressed="false">Animate depth</button>
+      <span class="feed-label">OFFLINE BARS / SIMULATED DEPTH</span>
+    </div>
+    <div id="terminal-container"></div>
+  </div>
+
+  <script type="module">
+    import '../../dist/openalgo-charts.indicators.mjs';
+    import { loadTerminal } from '../../dist/openalgo-charts.widget.mjs';
+    const {
+      createTerminalWorkspace,
+      createChartPanel: createChartAdapter,
+      createStandaloneDomPanel: createDomAdapter,
+      createSimpleDockPanel,
+      loadTradingPanels,
+      TERMINAL_PRESETS,
+    } = await loadTerminal();
+    import { SampleMarketDataFeed, SAMPLE_NOW } from '../sample-feed.js';
+    import { WatchlistRepository, createMemoryWatchlistStorage, createIndexedDbWatchlistStorage } from '../../dist/openalgo-charts.workspace.mjs';
+    const { createOrderTicketPanel, createOrdersPanel, createWatchlistDockPanel } = await loadTradingPanels();
+    let watchlists;
+    try {
+      watchlists = new WatchlistRepository(createIndexedDbWatchlistStorage(indexedDB, 'terminal-demo-watchlists'), 'terminal-demo');
+      await watchlists.load();
+    } catch { watchlists = new WatchlistRepository(createMemoryWatchlistStorage(), 'terminal-demo'); }
+    if (!(await watchlists.load()).lists.length) {
+      await watchlists.createList('Market', ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'SENSEX'].map(symbol => ({ symbol, exchange: '' })));
+    }
+    const charts = new Map(), bookListeners = new Set();
+    let tradingPromise;
+    function ensureTrading() {
+      return tradingPromise ??= import('../../dist/openalgo-charts.trade.mjs').then(({ FakeBroker, OrderEngine }) => {
+        const broker = new FakeBroker({ accounts: [{ id: 'paper', mode: 'analyzer', balance: 10000000 }] });
+        for (const [symbol, price] of Object.entries(basePrices)) broker.setMark(symbol, price);
+        const engine = new OrderEngine({ feed: broker, mode: 'analyzer', armed: true,
+          selectedAccount: () => 'paper', constraints: { tickSize: 0.05 } });
+        const clientIds = new Map();
+        broker.onOrderUpdate((order, info) => {
+          if (info.clientToken) clientIds.set(order.id, info.clientToken);
+          engine.onBrokerOrder({ ...order, clientToken: info.clientToken });
+        });
+        broker.onBook(() => { for (const listener of bookListeners) listener(); });
+        return { broker, engine, clientIds };
+      });
+    }
+    const basePrices = { NIFTY: 22720, BANKNIFTY: 48500, RELIANCE: 2950, TCS: 3800, SENSEX: 75000 };
+    function createTicket(id, symbol, exchange = '', linkGroup = null, draft) {
+      return createOrderTicketPanel({ id, symbol, exchange, linkGroup, draft, label: 'PAPER / SIMULATED BROKER', mode: 'analyzer',
+        capabilities: { place: true, cancel: true, orderTypes: ['MARKET', 'LIMIT'], modes: ['analyzer'] },
+        bracketSupport: () => ({ supported: true }),
+        placeOrder: async request => (await ensureTrading()).engine.placeOrder(request),
+        placeBracket: async request => (await ensureTrading()).engine.placeBracket(request) });
+    }
+    function createBook(id = 'orders_book') {
+      return createOrdersPanel({ id, label: 'Paper orders', subscribe(callback) {
+        let active = true;
+        const notify = () => { void ensureTrading().then(({ broker }) => {
+          if (active) callback(broker.orders().map(order => ({ ...order,
+            cancellable: ['working', 'partial', 'pending'].includes(order.status) })));
+        }); };
+        bookListeners.add(notify); notify();
+        return () => { active = false; bookListeners.delete(notify); };
+      }, cancel: async id => {
+        const { engine, clientIds } = await ensureTrading();
+        const clientId = clientIds.get(id);
+        if (!clientId) throw new Error('Order identity unavailable');
+        await engine.cancelOrder(clientId);
+      } });
+    }
+    function addTool(panel, chartId) {
+      if (workspace.getPanel(panel.id)) { workspace.activateTab(panel.id); return; }
+      const depthId = `${chartId}_depth`;
+      if (panel.type === 'orders' && workspace.getPanel(depthId)) workspace.addPanel(panel, depthId, 'bottom');
+      else workspace.addPanel(panel, chartId, 'right');
+      if (panel.type === 'watchlist') workspace.floatPanel(panel.id, { x: 560, y: 100, width: 340, height: 480 });
+    }
+
+    const depthPanels = new Map();
+    function createStandaloneDomPanel(options) {
+      const existing = depthPanels.get(options.id);
+      if (existing && workspace.getPanel(options.id) === existing.panel) return existing.panel;
+      const panel = createDomAdapter({ ...options, onOrder: (side, type, price, qty) => {
+        const symbol = panel.state().symbol;
+        const sourceId = panel.id.endsWith('_depth') ? panel.id.slice(0, -6) : panel.id;
+        const id = `${sourceId}_ticket`;
+        const exchange = charts.get(sourceId)?.widget()?.exchange() ?? '';
+        // A new depth click carries a new draft (side, price): replace an open ticket rather than refocus it.
+        if (workspace.getPanel(id)) workspace.removePanel(id);
+        addTool(createTicket(id, symbol, exchange, options.linkGroup, { qty, type: type.toUpperCase(), price, side: side === 'sell' ? 'SELL' : 'BUY' }), sourceId);
+        if (!workspace.getPanel('orders_book')) workspace.addPanel(createBook(), id, 'bottom');
+      } });
+      depthPanels.set(panel.id, { panel, basePrice: options.depth.ltp });
+      return panel;
+    }
+
+    function createChartPanel(options) {
+      const panel = createChartAdapter({ ...options, widgetOptions: { now: () => SAMPLE_NOW, lookbackBars: 10000,
+        watchlist: { store: watchlists } }, onInstrumentChange(id, instrument) {
+          const entry = depthPanels.get(`${id}_depth`);
+          if (entry && workspace.getPanel(entry.panel.id)) {
+            entry.basePrice = basePrices[instrument.symbol] ?? 1000;
+            entry.panel.setSymbol(instrument.symbol);
+            entry.panel.setDepth(generateDepth(entry.basePrice));
+          }
+          workspace.getPanel(`${id}_ticket`)?.onLinkUpdate?.({ ...instrument, group: 'red' });
+        }, tools: [
+        { label: 'Depth', open(widget, id) {
+          addTool(createStandaloneDomPanel({ id: `${id}_depth`, symbol: widget.symbol(), tickSize: 0.5,
+            depth: generateDepth(basePrices[widget.symbol()] ?? 1000) }), id);
+        } },
+        { label: 'Trade', open(widget, id) {
+          addTool(createTicket(`${id}_ticket`, widget.symbol(), widget.exchange()), id);
+          if (!workspace.getPanel('orders_book')) workspace.addPanel(createBook(), `${id}_ticket`, 'bottom');
+        } },
+        { label: 'Watchlist', open(widget, id) {
+          addTool(createSavedPanel(`${id}_watchlist`, { type: 'watchlist', title: 'Watchlist', state: { sourceChart: id } }), id);
+        } },
+      ] });
+      const mount = panel.mount.bind(panel);
+      panel.mount = host => {
+        const handle = mount(host), destroy = handle.destroy.bind(handle);
+        return { ...handle, destroy() {
+          workspace.removePanel(`${panel.id}_watchlist`);
+          destroy();
+        } };
+      };
+      charts.set(panel.id, panel);
+      return panel;
+    }
+
+    const feed = new SampleMarketDataFeed('../dockview/data/');
+    const container = document.getElementById('terminal-container');
+    let workspace = createTerminalWorkspace(container, {
+      persist: 'openalgo_terminal_browser_v1',
+      createPanel: createSavedPanel,
+    });
+
+    // Helper to generate simulated market depth around an LTP
+    function generateDepth(basePrice) {
+      const bids = [];
+      const asks = [];
+      const tick = basePrice > 1000 ? 0.5 : 0.05;
+      for (let i = 1; i <= 100; i++) {
+        bids.push({
+          price: +(basePrice - i * tick).toFixed(2),
+          qty: Math.floor(Math.random() * 500) + 20,
+        });
+        asks.push({
+          price: +(basePrice + i * tick).toFixed(2),
+          qty: Math.floor(Math.random() * 500) + 20,
+        });
+      }
+      return { ltp: basePrice, bids, asks };
+    }
+
+    function createSavedPanel(id, info) {
+      const state = info.state || {};
+      const symbol = state.symbol || 'NIFTY';
+      if (info.type === 'chart') {
+        return createChartPanel({ id, symbol, interval: state.interval || '5m', feed, linkGroup: info.linkGroup });
+      }
+      if (info.type === 'dom') {
+        return createStandaloneDomPanel({ id, symbol, tickSize: 0.5, linkGroup: info.linkGroup, depth: generateDepth(basePrices[symbol] ?? 1000) });
+      }
+      if (info.type === 'orders') return state.kind === 'book' ? createBook(id) : createTicket(id, symbol, state.exchange, info.linkGroup);
+      if (info.type === 'watchlist') return { ...createWatchlistDockPanel({ id, context() {
+        // The saved source chart may exist without a mounted widget; fall back to any mounted chart.
+        const chart = [charts.get(state.sourceChart), ...charts.values()].find(panel => panel?.widget());
+        if (!chart) throw new Error('A watchlist needs a mounted chart context');
+        return chart.widget().context;
+      }, watchlist: { store: watchlists, onSelect(instrument) {
+        const source = charts.get(state.sourceChart)?.widget();
+        if (source) { source.setSymbol(instrument.symbol, instrument.exchange); return; }
+        for (const chart of charts.values()) if (workspace.getPanel(chart.id)) {
+          chart.widget()?.setSymbol(instrument.symbol, instrument.exchange); break;
+        }
+      } } }), state: () => ({ sourceChart: state.sourceChart }) };
+      return createSimpleDockPanel({ id, type: info.type, title: info.title, mountContent(host) {
+        host.textContent = info.title;
+        return { destroy() { host.textContent = ''; } };
+      } });
+    }
+
+    function initDefaultPanels() {
+      if (!workspace.getLayout() && workspace.saveLayout().floating.length === 0) {
+        const chart1 = createChartPanel({
+          id: 'chart_nifty',
+          symbol: 'NIFTY',
+          interval: '5m',
+          feed,
+          linkGroup: 'red',
+        });
+
+        const dom1 = createStandaloneDomPanel({
+          id: 'dom_nifty',
+          symbol: 'NIFTY',
+          tickSize: 0.5,
+          linkGroup: 'red',
+          depth: generateDepth(22720),
+        });
+
+        workspace.addPanel(chart1);
+        workspace.addPanel(dom1, chart1.id, 'right');
+        workspace.loadPreset('chart-dom');
+      }
+    }
+
+    await workspace.ready;
+    initDefaultPanels();
+
+    // Topbar actions
+    async function applyPreset(presetKey) {
+      const presetDef = TERMINAL_PRESETS[presetKey];
+      if (!presetDef) return;
+
+      await workspace.clearSavedLayout();
+      workspace.destroy();
+      charts.clear();
+      depthPanels.clear();
+      container.innerHTML = '';
+      workspace = createTerminalWorkspace(container, {
+          persist: 'openalgo_terminal_browser_v1',
+        createPanel: createSavedPanel,
+      });
+
+      await workspace.ready;
+      if (presetKey === 'chart-dom') {
+        const c1 = createChartPanel({ id: 'chart_1', symbol: 'NIFTY', interval: '5m', feed, linkGroup: 'red' });
+        const d1 = createStandaloneDomPanel({ id: 'dom_1', symbol: 'NIFTY', tickSize: 0.5, linkGroup: 'red', depth: generateDepth(22720) });
+        workspace.addPanel(c1);
+        workspace.addPanel(d1);
+        workspace.loadPreset('chart-dom');
+      } else if (presetKey === 'two-charts-dom') {
+        const c1 = createChartPanel({ id: 'chart_1', symbol: 'NIFTY', interval: '5m', feed, linkGroup: 'red' });
+        const c2 = createChartPanel({ id: 'chart_2', symbol: 'NIFTY', interval: '15m', feed, linkGroup: 'red' });
+        const d1 = createStandaloneDomPanel({ id: 'dom_1', symbol: 'NIFTY', tickSize: 0.5, linkGroup: 'red', depth: generateDepth(22720) });
+        workspace.addPanel(c1);
+        workspace.addPanel(c2);
+        workspace.addPanel(d1);
+        workspace.loadPreset('two-charts-dom');
+      } else if (presetKey === 'scalper') {
+        const c1 = createChartPanel({ id: 'chart_1', symbol: 'NIFTY', interval: '1m', feed, linkGroup: 'red' });
+        const c2 = createChartPanel({ id: 'chart_2', symbol: 'NIFTY', interval: '15m', feed, linkGroup: 'blue' });
+        const d1 = createStandaloneDomPanel({ id: 'dom_1', symbol: 'NIFTY', tickSize: 0.5, linkGroup: 'red', depth: generateDepth(22720) });
+        workspace.addPanel(c1);
+        workspace.addPanel(c2);
+        workspace.addPanel(d1);
+        workspace.loadPreset('scalper');
+      } else if (presetKey === 'order-flow') {
+        const c1 = createChartPanel({ id: 'chart_1', symbol: 'BANKNIFTY', interval: '5m', feed, linkGroup: 'blue' });
+        const d1 = createStandaloneDomPanel({ id: 'dom_1', symbol: 'BANKNIFTY', tickSize: 1.0, linkGroup: 'blue', depth: generateDepth(48500) });
+        workspace.addPanel(c1);
+        workspace.addPanel(d1);
+        workspace.addPanel(createSavedPanel('watchlist_1', { type: 'watchlist', title: 'Watchlist' }));
+        workspace.addPanel(createSavedPanel('news_1', { type: 'news', title: 'News' }));
+        workspace.loadPreset('order-flow');
+      } else if (presetKey === 'analysis') {
+        const c1 = createChartPanel({ id: 'chart_1', symbol: 'NIFTY', interval: '5m', feed, linkGroup: 'red' });
+        const c2 = createChartPanel({ id: 'chart_2', symbol: 'BANKNIFTY', interval: '15m', feed, linkGroup: 'blue' });
+        const c3 = createChartPanel({ id: 'chart_3', symbol: 'RELIANCE', interval: '1h', feed, linkGroup: 'green' });
+        const c4 = createChartPanel({ id: 'chart_4', symbol: 'TCS', interval: '1d', feed, linkGroup: 'yellow' });
+        workspace.addPanel(c1);
+        workspace.addPanel(c2);
+        workspace.addPanel(c3);
+        workspace.addPanel(c4);
+        workspace.loadPreset('analysis');
+      }
+    }
+
+    const presetSelect = document.getElementById('preset-selector');
+    presetSelect.addEventListener('change', (e) => {
+      applyPreset(e.target.value);
+    });
+
+    let depthTimer;
+    const depthButton = document.getElementById('btn-depth');
+    depthButton.addEventListener('click', () => {
+      if (depthTimer) {
+        clearInterval(depthTimer);
+        depthTimer = undefined;
+      } else {
+        depthTimer = setInterval(() => {
+          if (document.hidden) return;
+          for (const [id, entry] of depthPanels) {
+            if (!workspace.getPanel(id)) { depthPanels.delete(id); continue; }
+            entry.panel.setDepth(generateDepth(entry.basePrice));
+          }
+        }, 125);
+      }
+      depthButton.textContent = depthTimer ? 'Pause depth' : 'Animate depth';
+      depthButton.setAttribute('aria-pressed', String(Boolean(depthTimer)));
+    });
+    window.addEventListener('pagehide', () => clearInterval(depthTimer));
+
+    const symbols = ['BANKNIFTY', 'RELIANCE', 'TCS', 'SENSEX'];
+    let symIdx = 0;
+
+    document.getElementById('btn-add-chart').addEventListener('click', () => {
+      const sym = symbols[symIdx++ % symbols.length];
+      const p = createChartPanel({
+        symbol: sym,
+        interval: '5m',
+        feed,
+        linkGroup: 'blue',
+      });
+      workspace.addPanel(p);
+    });
+
+    document.getElementById('btn-add-dom').addEventListener('click', () => {
+      const sym = symbols[symIdx++ % symbols.length];
+      const p = createStandaloneDomPanel({
+        symbol: sym,
+        tickSize: 0.05,
+        linkGroup: 'blue',
+        depth: generateDepth(sym === 'RELIANCE' ? 2950 : 3800),
+      });
+      workspace.addPanel(p);
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', async () => {
+      await workspace.clearSavedLayout();
+      location.reload();
+    });
+  </script>
+</body>
+</html>

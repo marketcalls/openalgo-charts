@@ -28,7 +28,7 @@ export { widgetText } from './localization';
 export type { WidgetBuiltinMessage, WidgetMessageKey, WidgetMessageValues, WidgetMessageParameters, WidgetTranslator, WidgetTranslationOptions } from './localization';
 
 export { createWidget, stripView, resolveTheme, loadWindow, DEFAULT_INTERVALS, DEFAULT_LOOKBACK_BARS, SAVE_DEBOUNCE_MS, STATE_KEY, DRAWINGS_KEY_PREFIX, WIDGET_STATE_VERSION } from './widget';
-export type { Widget, WidgetOptions, WidgetState, WidgetChartState, WidgetRestoreReport, WidgetEventName, WidgetWatchlistOptions, WidgetNewsOptions } from './widget';
+export type { Widget, WidgetInstance, WidgetOptions, WidgetState, WidgetChartState, WidgetRestoreReport, WidgetEventName, WidgetWatchlistOptions, WidgetNewsOptions } from './widget';
 export { createChartGrid, CHART_GRID_PRESETS } from './grid';
 export type { ChartGrid, ChartGridOptions, ChartGridCell, ChartGridLayout, ChartGridPreset, ChartGridApplyReport, ChartGridEvents, ChartGridEventName } from './grid';
 // The grid's layout catalogue, its link groups and its message keys.
@@ -158,3 +158,17 @@ export { createAlertUi } from './alert-ui';
 export type { AlertUi, AlertUiOptions } from './alert-ui';
 export { EventDetailsPopup, EVENT_DETAILS_CSS } from './event-details';
 export type { EventDetailsPopupOptions, EventDetailsLoader, EventDetailsLabels, EventDetailAction } from './event-details';
+
+export { loadTerminal } from './terminal-loader';
+export type {
+  TerminalWorkspace, TerminalPanel, TerminalPanelHandle,
+  PanelType as TerminalPanelType,
+  DockNode, DockSplitNode, DockTabsNode, DockPanelNode, DockDropPosition,
+  FloatingPanelState, LinkColor, LinkContext,
+  TerminalDocument, TerminalOptions, TerminalPreset,
+  StandaloneDomOptions, DomLadderRow, StandaloneDomPanel, SerializedPanelInfo,
+  ChartPanelOptions, SimplePanelOptions,
+} from './dock/index';
+
+
+export type { TradingPanelUiOptions, OrderTicketOptions, OrdersPanelOptions, OrdersPanelRow } from './dock/trading-panels';

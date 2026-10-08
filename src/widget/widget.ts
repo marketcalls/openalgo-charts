@@ -279,6 +279,8 @@ export interface WidgetRestoreReport {
 export type WidgetEventName = 'symbol' | 'interval' | 'variant' | 'theme' | 'layout' | 'data' | 'status';
 
 export interface Widget {
+  /** Resize the widget and its underlying chart to dimensions, or container size when omitted. */
+  resize?(width?: number, height?: number): void;
   /** Managed data owner, or null when the host supplies series data directly. */
   readonly dataController: DataLoadingController | null;
   readonly chart: Chart;
@@ -381,6 +383,8 @@ export interface Widget {
   destroy(): void;
   readonly isDestroyed: boolean;
 }
+
+export type WidgetInstance = Widget;
 
 /** The options the shell consumes; the rest of `WidgetOptions` is the chart's. */
 const WIDGET_ONLY_KEYS: ReadonlyArray<keyof WidgetOptions> = [
@@ -1016,6 +1020,7 @@ class WidgetImpl implements Widget {
     // half-updated. A link group listens for the same fact on the chart's bus.
     this._bus.emit('symbol', { symbol: s, exchange: ex });
     this.chart.emit('symbol', { symbol: s, exchange: ex });
+    this.chart.emit('symbol_change', s);
   }
 
   public setInterval(code: string): void {
@@ -1037,7 +1042,10 @@ class WidgetImpl implements Widget {
     this._scheduleSave();
     if (this._opts.feed) void this.reload();
     this._bus.emit('interval', { interval: c });
+    this.chart.emit('interval_change', c);
   }
+
+  public resize(width?: number, height?: number): void { this.chart.resize(width, height); }
 
   public setDataVariant(variant: DataVariant | undefined): void {
     const next = normalizeDataVariant(variant);

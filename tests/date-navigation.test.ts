@@ -274,6 +274,29 @@ describe('date placement with missing history', () => {
       .toEqual({ status: 'partial', history: 'unavailable', from: all[30].time, to: all[30].time });
   });
 
+  it('does not count a night or a weekend before the first session as missing history', async () => {
+    // Weekday sessions 09:15 to 15:30 in January 2024; the 6th and 7th are a weekend.
+    const sessions = Array.from({ length: 31 }, (_, i) => i + 1)
+      .filter(d => ![0, 6].includes(new Date(Date.UTC(2024, 0, d)).getUTCDay()))
+      .map(d => ({ date: `2024-01-${String(d).padStart(2, '0')}`, open: at(2024, 1, d, 9, 15), close: at(2024, 1, d, 15, 30) }));
+    const calendar = { sessionFrom: (t: number) => sessions.find(s => s.close > t) ?? null };
+    const bars = hourly([[2024, 1, 8], [2024, 1, 9], [2024, 1, 10]]);
+    const range = { from: at(2024, 1, 6), to: at(2024, 1, 10, 23, 59) };
+    const loadHistory = vi.fn(async (): Promise<HistoryReach> => 'exhausted');
+
+    const plain = makeChart(bars, '1h');
+    expect(await new DateNavigator({ chart: plain }).goTo(range)).toMatchObject({ status: 'partial', history: 'unavailable' });
+
+    const hours = makeChart(bars, '1h');
+    hours.setSessionCalendar(calendar);
+    expect(await new DateNavigator({ chart: hours, loadHistory }).goTo(range))
+      .toEqual({ status: 'placed', from: bars[0]!.time, to: bars[bars.length - 1]!.time });
+    expect(loadHistory).not.toHaveBeenCalled();
+    // A session the calendar has before the first bar is still missing.
+    expect(await new DateNavigator({ chart: hours, loadHistory }).goTo({ ...range, from: at(2024, 1, 5) }))
+      .toMatchObject({ status: 'partial', history: 'exhausted' });
+  });
+
   it('reports a failed load without placing anything', async () => {
     const all = dailySessions(2024, 1, 1, 65);
     const chart = makeChart(all.slice(30));

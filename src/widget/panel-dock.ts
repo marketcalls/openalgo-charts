@@ -1,6 +1,7 @@
 import type { WidgetContext } from './context';
 import { button, el } from './form';
 import { widgetText } from './localization';
+import { releasePanel } from './panel-lifetime';
 
 export type PanelDockId = 'data' | 'objects' | 'watchlist' | 'news';
 export interface PanelDockState { panel: PanelDockId | null; width: number }
@@ -111,7 +112,7 @@ export function mountPanelDock(ctx: WidgetContext, stage: HTMLElement, opts: Pan
     if (state.panel === null) return;
     state.panel = null; drag = null;
     detachOverlay();
-    current?.destroy(); current = null; body.textContent = ''; panel.hidden = true;
+    releasePanel(current); current = null; body.textContent = ''; panel.hidden = true;
     stage.appendChild(panel);
     pressTabs(null);
     const focused = doc.activeElement;
@@ -125,7 +126,7 @@ export function mountPanelDock(ctx: WidgetContext, stage: HTMLElement, opts: Pan
     if (!available.includes(id) || mount === undefined) return;
     if (state.panel === id && current !== null) { if (focus) (current.initialFocus ?? closeButton).focus(); return; }
     if (state.panel === null || current === null) restoreFocus = doc.activeElement as HTMLElement | null;
-    current?.destroy(); body.textContent = '';
+    releasePanel(current); body.textContent = '';
     state.panel = id; panel.hidden = false;
     pressTabs(id);
     current = mount(body);

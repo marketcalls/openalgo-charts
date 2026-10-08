@@ -30,6 +30,8 @@ notifications. Pipeline arrows show data flow, not package dependencies.
 
 ---
 
+The current terminal branch build, including unreleased docking and workspace recovery fixes, measures 137.56 kB base, 123.70 kB widget, 18.86 kB opt-in terminal tools and 441.35 kB for tier bundles plus terminal tools and trading forms (decimal Brotli sizes).
+
 ## Current integration map
 
 For 2.6.0 integrations, start with these current guides and implementation
@@ -1188,3 +1190,28 @@ Point-by-point mapping of the implementation review to where each is now address
 ---
 
 *End of document. Next deliverable options: (a) start Phase 0 to 3 as a working prototype in `D:\testing\openalgo-charts` (repo + size-limit harness + shared DataLayer + static candles + interaction), (b) detailed TypeScript interface stubs for every module (DataLayer, scales, primitive API, candle-builder, feed adapters, trade state machine), or (c) the trade-layer + OpenAlgo adapter spec expanded with sequence diagrams.*
+
+### Optional terminal workspace services
+
+The terminal loader retains its opt-in boundary. Dock geometry has a separate model,
+but selection synchronization uses the same base LinkGroup engine as the grid.
+Both layouts use the WidgetStorage mirror, asynchronous writes, journal, load-failure
+protection and namespacing. Terminal hosts await ready before adding defaults, flush
+pending writes when leaving, and can explicitly clear rejected saved state.
+PanelDock and docking share an idempotent release operation for mounted content.
+
+Terminal documents cross a bounded plain-data validator before panel factories or
+restoration callbacks. The validator checks panel identities/types, groups, references,
+intervals, aggregation and geometry. Host validators cover custom panel schemas.
+Trading drafts, execution preferences and credentials do not belong to layouts.
+Trading panels use the shared widget form, tokens and translation contract; optional
+account and capability sources determine available actions. The host execution engine
+retains broker authority and checks again at delivery.
+
+The opt-in browser soak in tests/e2e/terminal-workspace.spec.ts measures eight chart
+renders and eight virtualized depth ladders with sustained updates. It records renderer
+main-thread task time, response/frame percentiles, collected heap and DOM-node counts,
+and asserts bounded resources and cleanup. Set TERMINAL_SOAK_MS to extend its duration.
+
+See [the measured terminal workload](benchmarks/terminal-soak-2026-10-07.md) for the
+recorded build hashes, hardware, results and reproduction command.

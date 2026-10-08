@@ -1,8 +1,9 @@
 # Getting started
 
 OpenAlgo Charts is a dependency-free, canvas-based financial charting engine.
-The base engine is **95.04 kB Brotli**; all nine tiers total **256.08 kB Brotli**,
-measured with `size-limit` on the 2.5.2 build. Optional tiers are separate imports.
+Optional tiers are separate imports. Embedded charts do not load widget controls
+or dockable panels. Measure the current build with `npm run size` for its Brotli
+sizes and enforced budgets.
 
 ## Install
 
@@ -68,6 +69,27 @@ Only pay for what you use: each of the nine tiers is a separate entry point.
 | `openalgo-charts/webgl` | the WebGL2 series backend behind `renderer: 'auto'` |
 | `openalgo-charts/workspace` | portable layouts, indicator templates, revisioned catalogs and asynchronous storage |
 | `openalgo-charts/widget` | the chart with its chrome in one `createWidget` call: top bar, drawing rail, status line, dialogs, shortcuts, persistence. The only tier that supplies application controls |
+
+## Optional terminal workspace
+
+Use `createChart` for an embedded chart and `createWidget` for a chart with
+controls. Load docking only when needed:
+
+```ts
+import { loadTerminal } from 'openalgo-charts/widget';
+
+const { createTerminalWorkspace } = await loadTerminal();
+const container = document.getElementById('workspace');
+if (!container) throw new Error('Workspace container not found');
+const workspace = createTerminalWorkspace(container, { persist: false });
+await workspace.ready;
+```
+
+Give the container a non-zero height. The workspace starts empty. Follow the
+[terminal workspace guide](terminal-workspace.md) to add charts, chart-local
+depth controls and separately loaded trading forms, configure restoration and
+release subscriptions. These APIs require a package build containing the
+terminal changes; merging the source does not publish an npm release.
 
 ## OpenAlgo data
 

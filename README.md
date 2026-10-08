@@ -12,7 +12,7 @@ with no runtime dependencies.
 [![npm version](https://img.shields.io/npm/v/openalgo-charts.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/openalgo-charts)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![npm downloads](https://img.shields.io/npm/dm/openalgo-charts.svg?color=0ea5e9&label=npm%20downloads)](https://www.npmjs.com/package/openalgo-charts)
-[![tests](https://img.shields.io/badge/engine%20tests-11591%20passing-brightgreen.svg)](#develop)
+[![tests](https://img.shields.io/badge/engine%20tests-11654%20passing-brightgreen.svg)](#develop)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](#principles)
 
 [**Documentation**](https://marketcalls.github.io/openalgo-charts/) &nbsp;·&nbsp; [**Live examples**](https://marketcalls.github.io/openalgo-charts/examples) &nbsp;·&nbsp; [**Getting started**](./docs/getting-started.md) &nbsp;·&nbsp; [**Migrating to 2.0**](./docs/migrating-to-2.md) &nbsp;·&nbsp; [**Architecture**](./ARCHITECTURE.md)
@@ -179,17 +179,17 @@ Unused optional tiers stay out of the base chart download.
 
 | Import | Contents | Brotli |
 |---|---|---|
-| `openalgo-charts` | Engine, 13 chart types, panes and scales, custom indicator registry, primitives, alerts, replay, comparisons, chart linking, state, feeds, bar cache, trading overlays, CSV and SVG export | 137.53 kB |
+| `openalgo-charts` | Engine, 13 chart types, panes and scales, custom indicator registry, primitives, alerts, replay, comparisons, chart linking, state, feeds, bar cache, trading overlays, CSV and SVG export | 137.56 kB |
 | `openalgo-charts/indicators` | 112 built-in indicators, calculation helpers and helpers for studies that use external data | 43.02 kB |
 | `openalgo-charts/draw` | 87 drawing tools + a headless drawing controller, clipboard, settings schema, level palette, freehand geometry and SVG icons | 58.36 kB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point &amp; Figure, Kagi, and symbol arithmetic (`AAPL/MSFT`) | 6.07 kB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO) with compact pixel letters, Footprint, order flow | 14.94 kB |
 | `openalgo-charts/trade` | Order, position and bracket tools, account state, order preview and position commands, plus a depth-of-market ladder | 16.88 kB |
 | `openalgo-charts/webgl` | GPU drawing for supported series, with Canvas 2D fallback | 6.97 kB |
-| `openalgo-charts/widget` | `createWidget`: toolbar, bottom bar, Data, Objects, Watchlist and News dock, account summary, symbol search, dialogs, mobile controls, a shortcuts editor, saved layouts, the chart grid (`createChartGrid`) and optional persistence in IndexedDB | 123.57 kB |
+| `openalgo-charts/widget` | `createWidget`: toolbar, bottom bar, Data, Objects, Watchlist and News dock, account summary, symbol search, dialogs, mobile controls, a shortcuts editor, saved layouts, the chart grid (`createChartGrid`) and optional persistence in IndexedDB | 123.70 kB |
 | `openalgo-charts/workspace` | Validated workspace and indicator-template documents, named watchlists, named catalogs with revision checks, asynchronous storage and an IndexedDB adapter; no DOM | 11.73 kB |
 
-Everything together is **419.05 kB Brotli**; a widget terminal with built-in indicators (base + draw + indicators + widget) is 362.48 kB. The widget's seven first-use parts (the shortcuts editor, the Layouts menu, the templates list, the chart data dialog, the grid bar and its menus, and the IndexedDB store) add 18.24 kB in files of their own, fetched only when a widget first uses one. The nine classic-script files together are 430.90 kB. Figures are measured from the 2.6.0 release build. The trade tier is 16.88 kB on its own; base + trade costs 154.41 kB. Sizes use decimal kB.
+The nine tier bundles plus terminal tools and optional trading forms total **441.35 kB Brotli**; a widget terminal with built-in indicators (base + draw + indicators + widget) is 381.50 kB, including the 18.86 kB terminal chunk fetched by `await loadTerminal()`. Trading forms add 3.25 kB when `loadTradingPanels()` is requested. Docking shares the grid's linking and asynchronous storage contracts. The [terminal soak report](benchmarks/terminal-soak-2026-10-07.md) records the sustained eight-chart/depth workload and its limits. The widget's seven first-use parts (the shortcuts editor, the Layouts menu, the templates list, the chart data dialog, the grid bar and its menus, and the IndexedDB store) add 18.24 kB in files of their own, fetched only when a widget first uses one. The nine classic-script files together are 450.40 kB. Figures are measured from the current terminal branch build, including unreleased fixes. The trade tier is 16.88 kB on its own; base + trade costs 154.47 kB. Sizes use decimal kB.
 
 ## What's built
 
@@ -509,25 +509,52 @@ The series pass on each pane goes through a render backend port. The shipped Can
 ### Data
 OpenAlgo REST history + WebSocket ticks with auto-reconnect and resubscribe, live candle aggregation, tick/volume bars, a unified `chart.on(...)` event bus, markers and signals, earnings/dividend/expiry event markers, an IANA chart timezone, and custom price/time formatters. Regular and extended hours, adjusted and raw prices, and a quote currency or unit are each their own provider series (`BarsRequest.variant`, `DataFeed.dataVariants`): nothing is converted locally, and a variant the feed does not declare is reported rather than made up. A session calendar (`chart.setSessionCalendar`, `Instrument.applyTo`) lays the space past the last bar out in the venue's hours, so a drawing placed there lands on a real session time. The same calendar answers which part of the trading day an instant falls in (pre-open, regular, post-close, extended, closed or holiday) and a market status for now (`marketStatusAt`), and `attachSessionShading` washes the pre-open, post-close and extended-hours bars when a host asks for it.
 
+## Terminal workspace
+
+Docking and depth ladders load asynchronously from the widget tier:
+
+```js
+import { loadTerminal } from 'openalgo-charts/widget';
+
+const terminal = await loadTerminal();
+const workspace = terminal.createTerminalWorkspace('terminal-container');
+```
+
+The loader returns synchronous panel factories and workspace methods. It replaces direct terminal imports from earlier unreleased branches and leaves the published widget API intact. Plain widgets fetch no terminal code or styles. The ladder reuses a bounded set of visible rows, coalesces depth snapshots per frame, and displays current bid/ask liquidity intensity. Historical liquidity needs retained depth snapshots from the host. See [the terminal example](./examples/terminal/index.html) for chart and DOM presets and simulated depth animation.
+
+`createChartPanel({ ..., tools: [{ label: 'Depth', open(widget, panelId) { ... } }] })` adds chart-local controls. The callback receives the current widget, so read `widget.symbol()` and `widget.exchange()` when opening a tool. `onInstrumentChange(panelId, instrument)` lets a host keep that chart's depth and ticket synchronized independently of shared link colours. `panel.widget()` returns the mounted widget, or null before mounting and after removal.
+
+Order forms are a further optional module: `const trading = await terminal.loadTradingPanels()`. It exposes `createOrderTicketPanel`, `createOrdersPanel` and `createWatchlistDockPanel`. A ticket takes host callbacks for `placeOrder` and optional native `placeBracket`, matching an opt-in trade-tier `OrderEngine`. It never imports the trading engine at runtime. Broker feature checks, accounts, confirmation and execution remain with that engine or the host adapter. Bracket entry uses one provider operation; it does not approximate OCO protection by placing independent orders. The trade tier also already exposes `OrderEngine.linkOco` for hosts that manage linked client orders.
+
+The order book accepts authoritative snapshots and an optional cancel callback, reuses rows, coalesces rendering per frame and unsubscribes on close. The watchlist adapter mounts the existing named-list and quote UI using a supplied widget context; keep that context alive until the watchlist closes. These panels use the same docking, tabs, floating windows and layout persistence as charts. Tickets clear their prices and quantity when their instrument changes, block duplicate submissions and do not persist order drafts or submit on restoration. After an ambiguous outcome, check broker status before reopening the ticket.
+
+The terminal example has Depth, Trade and Watchlist buttons on each chart. Depth order buttons prepare a ticket; Buy or Sell submits to the explicitly labelled simulated broker. Its order book is session-only, while watchlists use IndexedDB when available. A live host supplies chart market data through a `DataFeed` and depth snapshots separately; order entry goes through the trade tier's `OrderEngine`, which drives the broker's `OrderFeed`.
+
 ## Size budget
 
 Enforced in CI by [`size-limit`](./.size-limit.json). Nothing is excluded, because there are no runtime dependencies to exclude.
 
+The table below measures the current terminal branch build, including the unreleased docking and workspace recovery fixes. The import table above describes the same build.
+
 | Bundle | Limit | Actual |
 |---|---|---|
-| Base engine | 137.54 kB | 137.53 kB |
-| Base + trade | 154.42 kB | 154.41 kB |
+| Base engine | 137.57 kB | 137.56 kB |
+| Base + trade | 154.52 kB | 154.47 kB |
 | Indicators tier | 43.02 kB | 43.02 kB |
 | Draw tier | 58.36 kB | 58.36 kB |
 | Transform tier | 6.07 kB | 6.07 kB |
 | Profile tier | 14.94 kB | 14.94 kB |
 | WebGL2 tier | 6.97 kB | 6.97 kB |
-| Widget tier | 123.57 kB | 123.57 kB |
+| Widget tier | 123.74 kB | 123.70 kB |
 | Widget first-use parts (seven files beside the widget tier) | 18.24 kB | 18.24 kB |
-| Widget terminal (base + draw + indicators + widget) | 362.48 kB | 362.48 kB |
+| Terminal tools (fetched by `loadTerminal`) | 18.91 kB | 18.86 kB |
+| Trading forms (fetched by `loadTradingPanels`) | 3.28 kB | 3.25 kB |
+| Widget terminal (base + draw + indicators + widget + terminal tools) | 381.56 kB | 381.50 kB |
 | Workspace tier | 11.73 kB | 11.73 kB |
-| Script tags (the nine classic-script files) | 430.91 kB | 430.90 kB |
-| **Everything** | 419.06 kB | 419.05 kB |
+| Script tags (the nine classic-script files) | 450.43 kB | 450.40 kB |
+| Base classic script | 137.65 kB | 137.55 kB |
+| Widget classic script | 154.74 kB | 154.71 kB |
+| **Tier bundles plus terminal tools and trading forms** | 441.39 kB | 441.35 kB |
 
 ## Documentation
 
@@ -578,7 +605,7 @@ See [Contributing](./CONTRIBUTING.md) for setup, targeted checks, documentation 
 ```bash
 npm install        # install dev toolchain
 npm run typecheck  # TypeScript: src with the stricter flags, then the tests
-npm test           # engine unit tests (Vitest): 11591 across 512 files
+npm test           # engine unit tests (Vitest): 11654 across 519 files
 npm run test:demo  # reference-host tests: 689 across 67 files
 npm run test:endurance # node endurance-harness tests: 7 cases
 npm run build      # Rollup -> dist/ (minified ESM per tier + types)

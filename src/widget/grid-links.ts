@@ -33,6 +33,8 @@ import { DrawingLinkGroup } from 'openalgo-charts/draw';
 import type { WorkspaceLinkChannels, WorkspaceLinkGroup, WorkspacePayload, WorkspaceSync } from 'openalgo-charts/workspace';
 import type { Widget } from './widget';
 import { isChartTypeChoice } from './chart-type-choice';
+import { instrument } from './workspace-links';
+export { instrument } from './workspace-links';
 
 /** One link group as the grid reports it. */
 export interface ChartGridLinkGroup {
@@ -82,13 +84,6 @@ const NO_EXCHANGE = '-';
 export const ALL_OFF: ResolvedLinkOptions = {
   crosshair: false, viewport: false, symbol: false, interval: false, chartType: false, appearance: false, drawings: false, whenMissing: 'nearest',
 };
-
-/**
- * An instrument as the one string the link group compares. The exchange rides
- * inside it: one ticker on two exchanges is two instruments, and a bare ticker
- * would let a change of exchange alone pass the followers by.
- */
-export const instrument = (symbol: string, exchange: string): string => JSON.stringify([symbol, exchange]);
 
 /** The channels a group writes: the four the schema requires, then only what differs from off. */
 function savedChannels(o: ResolvedLinkOptions): WorkspaceLinkChannels {

@@ -8,6 +8,7 @@ export default {
   'core-concepts': 'Core Concepts',
   architecture: 'Architecture',
   widget: 'The Widget Tier',
+  'terminal-workspace': 'Optional Terminal Workspace',
   frameworks: 'Framework Integration',
   // The old Vue guide's URL, kept only to send readers to the Vue 3 section.
   vue: { display: 'hidden' },

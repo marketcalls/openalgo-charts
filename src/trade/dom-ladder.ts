@@ -12,6 +12,7 @@
  */
 import type { IPrimitive, PrimitiveHost, PrimitiveRenderContext, PrimitiveHit, TickSchedule, ZOrder } from 'openalgo-charts';
 import type { MarketDepth } from '../feed/types';
+import { aggregateDepthRows, depthBucket } from '../feed/depth-rows';
 import { contrastText, withAlpha, parseColor } from '../render/pill';
 
 export type LadderTier = 'none' | 'compact' | 'deep';
@@ -29,39 +30,8 @@ export interface LadderRow {
   askQty: number;
 }
 
-/**
- * Only an object is a schedule. Anything else, a numeric string from a plain-JS
- * host included, keeps the arithmetic that predates schedules. A type guard,
- * because the website compiles this file with strict null checks off, where an
- * inline null check does not narrow the union.
- */
-function isSchedule(tickSize: number | TickSchedule): tickSize is TickSchedule {
-  return typeof tickSize === 'object' && tickSize !== null;
-}
-
 function scheduleError(where: string): TypeError {
   return new TypeError(`${where} takes a tick size or a schedule built with new TickSchedule(bands)`);
-}
-
-/**
- * A row price on a tick schedule: the level's nearest valid price, and with
- * grouping the nearest multiple of `n` ticks of that price's band, kept inside
- * the band so the row is still a price a click can trade at.
- */
-function scheduleBucket(ticks: TickSchedule, n: number): (p: number) => number {
-  return (p) => {
-    const price = ticks.round(p), { bands } = ticks;
-    if (n === 1 || !Number.isFinite(price)) return price;
-    // A schedule has at least one band (its constructor refuses none), and i
-    // walks down from the last to no lower than the first.
-    let i = bands.length - 1;
-    while (i > 0 && price < bands[i]!.from!) i--;
-    const band = bands[i]!;
-    const step = band.tick * n;
-    const lower = band.from ?? -Infinity, upper = bands[i + 1]?.from ?? Infinity;
-    // A boundary is valid in both bands, so it is where a group stops.
-    return ticks.round(Math.min(Math.max(Math.round(price / step) * step, lower), upper));
-  };
 }
 
 /**
@@ -73,26 +43,12 @@ function scheduleBucket(ticks: TickSchedule, n: number): (p: number) => number {
  * There `groupBy` counts whole ticks, a fraction rounding down (2.5 groups by
  * 2), because a fractional group would label rows between the prices a band
  * allows. The constant path multiplies `tickSize * groupBy` as it always has.
+ * The row building is shared with the terminal's standalone ladder (feed/depth-rows).
  */
 export function buildRows(depth: MarketDepth, tickSize: number | TickSchedule, groupBy = 1): LadderRow[] {
-  let bucket: (p: number) => number;
-  if (!isSchedule(tickSize)) {
-    const step = tickSize * Math.max(1, groupBy);
-    bucket = (p: number): number => Math.round(Math.round(p / step) * step * 1e8) / 1e8;
-  } else {
-    if (typeof tickSize.round !== 'function') throw scheduleError('buildRows');
-    bucket = scheduleBucket(tickSize, groupBy > 1 ? Math.floor(groupBy) : 1);
-  }
-  const map = new Map<number, LadderRow>();
-  const add = (price: number, qty: number, side: 'bid' | 'ask'): void => {
-    const key = bucket(price);
-    let row = map.get(key);
-    if (row === undefined) { row = { price: key, bidQty: 0, askQty: 0 }; map.set(key, row); }
-    if (side === 'bid') row.bidQty += qty; else row.askQty += qty;
-  };
-  for (const b of depth.bids) add(b.price, b.qty, 'bid');
-  for (const a of depth.asks) add(a.price, a.qty, 'ask');
-  return Array.from(map.values()).sort((x, y) => y.price - x.price);
+  const bucket = depthBucket(tickSize, groupBy);
+  if (bucket === null) throw scheduleError('buildRows');
+  return aggregateDepthRows(depth, bucket);
 }
 
 /**

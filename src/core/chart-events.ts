@@ -277,8 +277,10 @@ export interface ChartEventMap {
   // Emitted by a host, never by the engine: a link group follows them.
   /** The host switched instrument. The widget emits it; a link group and a drawing link follow it. */
   symbol: { symbol: string; exchange?: string } | string;
+  symbol_change: string;
   /** The host switched timeframe. A link group follows it. */
   interval: { interval: string } | string;
+  interval_change: string;
   /** The host switched chart type. A link group follows it. */
   chartType: { chartType: string } | string;
 }

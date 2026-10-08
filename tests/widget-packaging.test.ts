@@ -151,19 +151,28 @@ describe('the widget is budgeted', () => {
   });
 
   it('its first-use parts have a row, by glob, since each name changes with its content', () => {
-    expect(sizeRows.filter((r) => r.path === 'dist/openalgo-charts.widget.*.mjs')).toHaveLength(1);
+    const row = sizeRows.find(r => r.name.startsWith('Widget first-use parts'))!;
+    expect(pathsOf(row)).toEqual(['dist/openalgo-charts.widget.*.mjs',
+      '!dist/openalgo-charts.widget.terminal-*.mjs', '!dist/openalgo-charts.widget.trading-panels-*.mjs']);
   });
 
   it('the Everything row measures every tier bundle, the widget included', () => {
-    const everything = sizeRows.find((r) => r.name.startsWith('Everything'))!;
+    const everything = sizeRows.find((r) => r.name.startsWith('All tier bundles'))!;
     const measured = pathsOf(everything).sort();
-    expect(measured).toEqual(esTiers.map((c) => c.output.file).sort());
+    expect(measured).toEqual([...esTiers.map((c) => c.output.file),
+      'dist/openalgo-charts.widget.terminal-*.mjs', 'dist/openalgo-charts.widget.trading-panels-*.mjs'].sort());
   });
 
-  it('the terminal row is the set one createWidget call loads', () => {
+  it('budgets optional trading forms separately from the trading engine', () => {
+    const row = sizeRows.find(r => r.name.startsWith('Terminal trading forms'))!;
+    expect(pathsOf(row)).toEqual(['dist/openalgo-charts.widget.trading-panels-*.mjs']);
+  });
+
+  it('the terminal row includes tools explicitly requested through loadTerminal', () => {
     const terminal = sizeRows.find((r) => r.name.startsWith('Widget terminal'))!;
     expect(pathsOf(terminal).sort()).toEqual(
-      ['dist/openalgo-charts.mjs', 'dist/openalgo-charts.draw.mjs', 'dist/openalgo-charts.indicators.mjs', WIDGET_BUNDLE].sort(),
+      ['dist/openalgo-charts.mjs', 'dist/openalgo-charts.draw.mjs', 'dist/openalgo-charts.indicators.mjs', WIDGET_BUNDLE,
+        'dist/openalgo-charts.widget.terminal-*.mjs'].sort(),
     );
   });
 

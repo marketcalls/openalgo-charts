@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-07T13:18:08.489Z",
+  "platform": "win32",
+  "cpu": "AMD Ryzen 5 5600X 6-Core Processor             ",
+  "logicalCpus": 12,
+  "totalMemoryBytes": 34240761856,
+  "browser": "149.0.7827.55",
+  "durationMs": 180000,
+  "viewport": "1920x1080",
+  "charts": 8,
+  "ladders": 8,
+  "depthLevelsPerLadder": 2000,
+  "updatesPerSecond": 20,
+  "barsPerChart": [
+    135,
+    135,
+    135,
+    135,
+    135,
+    135,
+    135,
+    135
+  ],
+  "snapshotsPerLadder": 3706,
+  "visibleRows": 152,
+  "frameP95Ms": 16.70000000001164,
+  "responseP95Ms": 24.80000000447035,
+  "responseMaxMs": 31.600000001490116,
+  "rendererTaskSeconds": 54.382957,
+  "rendererTaskPercent": 30.18188938577095,
+  "baselineHeapBytes": 7436424,
+  "sampleHeapBytes": [
+    7259896,
+    7410500,
+    7462136
+  ],
+  "heapGrowthBytes": 25712,
+  "teardownHeapBytes": 4743668,
+  "emptyHeapBytes": 527056,
+  "baselineNodes": 7011,
+  "sampleNodes": [
+    7024,
+    7011,
+    7011
+  ],
+  "teardownNodes": 226,
+  "errors": [],
+  "notes": "Counters include the warm-up. Synthetic DOM clicks; renderer main-thread task time, not whole-machine CPU. Forced GC before each memory sample can affect latency. No comparison baseline.",
+  "sourceParentCommit": "d1560c3fd99729d2ec94c9128d97962968334a36",
+  "workingTreeChanges": true,
+  "bundleSha256": {
+    "openalgo-charts.widget.mjs": "951a670d2921d7b3070f453f3e22d49c5cc3e9d5ac4ec67b02b54892c66abc5e",
+    "openalgo-charts.widget.terminal-CEvmwjnT.mjs": "ac87a90353d51dd2d77b9552d972bb970a8d0f1eb800d094ca24172dbb451ec0"
+  }
+}

@@ -1989,7 +1989,7 @@ export class Chart {
     build(this._pending);
     if (this._scaleMutationDepth === 0 && !this._framing) this._loop.requestFrame();
   }
-
+  public resize(width?: number, height?: number): void { const ch = this._container.clientHeight, cw = this._container.clientWidth; this.applySize(width !== undefined && cw > 0 ? Math.min(width, cw) : (width ?? cw), height !== undefined && ch > 0 ? Math.min(height, ch) : (height ?? ch)); }
   public applySize(width: number, height: number): void {
     if (width === this._width && height === this._height) return;
     this._width = width;

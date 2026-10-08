@@ -860,6 +860,14 @@ collides with an existing one is reported rather than silently overridden. `sett
 decides what the drawing properties dialog shows for the tool: a control appears only for
 a field the tool's `draw` reads.
 
+## Optional dockable panels
+
+`loadTerminal()` loads docking and standalone depth tools on demand. Its
+`loadTradingPanels()` loader requests order tickets, order books and the existing
+watchlist adapter separately. See [Optional Terminal Workspace](/docs/terminal-workspace)
+for chart-local controls, shared linking, asynchronous restoration and cleanup.
+These controls are optional for hosts that only need `createWidget`.
+
 ## Loading without a bundler
 
 Every tier bundle imports its neighbours by sibling path (`./openalgo-charts.mjs`,

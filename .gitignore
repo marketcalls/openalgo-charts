@@ -22,3 +22,9 @@ artifacts/
 
 # baseline build for e2e render-parity checks (scripts/build-baseline.mjs)
 dist-baseline/
+
+# Emitted by build:terminal-examples; TypeScript is the demo source of truth.
+examples/sample-feed.js
+examples/dockview/src/ChartPanel.js
+examples/dockview/src/TerminalApp.js
+examples/dockview/dockview_preview.png

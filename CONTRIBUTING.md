@@ -34,7 +34,8 @@ library build, demo tests, declaration checks, the compatibility gate, bundle bu
 and tree-shaking checks. Run a focused test while developing, for example
 `npx vitest run tests/navigation-settings.test.ts`.
 
-TypeScript runs twice, and `npm run typecheck` runs both. `tsconfig.json` compiles
+`npm run typecheck` checks the library, tests and Dockview examples (including
+the sample feed). `tsconfig.json` compiles
 `src`, the code that ships, with `strict` and two more flags:
 `noUncheckedIndexedAccess` (an index read may be `undefined`) and
 `exactOptionalPropertyTypes` (an optional property that is absent is not one set to

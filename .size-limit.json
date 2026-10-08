@@ -2,7 +2,7 @@
   {
     "name": "Base engine (chart types + indicator registry + watermark + shortcuts + trading API + alerts)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "137.54 kB",
+    "limit": "137.57 kB",
     "brotli": true
   },
   {
@@ -11,7 +11,7 @@
       "dist/openalgo-charts.mjs",
       "dist/openalgo-charts.trade.mjs"
     ],
-    "limit": "154.42 kB",
+    "limit": "154.52 kB",
     "brotli": true
   },
   {
@@ -47,13 +47,25 @@
   {
     "name": "Widget tier (shell, top bar, drawing rail, status line, dialogs, keymap, styles)",
     "path": "dist/openalgo-charts.widget.mjs",
-    "limit": "123.57 kB",
+    "limit": "123.74 kB",
     "brotli": true
   },
   {
     "name": "Widget first-use parts (shortcuts panel, Layouts menu, templates list, chart data dialog, grid bar and menus, IndexedDB store)",
-    "path": "dist/openalgo-charts.widget.*.mjs",
+    "path": ["dist/openalgo-charts.widget.*.mjs", "!dist/openalgo-charts.widget.terminal-*.mjs", "!dist/openalgo-charts.widget.trading-panels-*.mjs"],
     "limit": "18.24 kB",
+    "brotli": true
+  },
+  {
+    "name": "Terminal tools (docking, depth ladder and styles, fetched by loadTerminal)",
+    "path": "dist/openalgo-charts.widget.terminal-*.mjs",
+    "limit": "18.91 kB",
+    "brotli": true
+  },
+  {
+    "name": "Terminal trading forms (order ticket, order book and existing watchlist adapter, fetched by loadTradingPanels)",
+    "path": "dist/openalgo-charts.widget.trading-panels-*.mjs",
+    "limit": "3.28 kB",
     "brotli": true
   },
   {
@@ -62,9 +74,10 @@
       "dist/openalgo-charts.mjs",
       "dist/openalgo-charts.draw.mjs",
       "dist/openalgo-charts.indicators.mjs",
-      "dist/openalgo-charts.widget.mjs"
+      "dist/openalgo-charts.widget.mjs",
+      "dist/openalgo-charts.widget.terminal-*.mjs"
     ],
-    "limit": "362.48 kB",
+    "limit": "381.56 kB",
     "brotli": true
   },
   {
@@ -74,7 +87,7 @@
     "brotli": true
   },
   {
-    "name": "Everything (all tiers, full package)",
+    "name": "All tier bundles and terminal tools including trading forms (widget first-use parts measured separately)",
     "path": [
       "dist/openalgo-charts.mjs",
       "dist/openalgo-charts.trade.mjs",
@@ -84,9 +97,11 @@
       "dist/openalgo-charts.draw.mjs",
       "dist/openalgo-charts.webgl.mjs",
       "dist/openalgo-charts.widget.mjs",
+      "dist/openalgo-charts.widget.terminal-*.mjs",
+      "dist/openalgo-charts.widget.trading-panels-*.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "419.06 kB",
+    "limit": "441.39 kB",
     "brotli": true
   },
   {
@@ -102,7 +117,7 @@
       "dist/openalgo-charts.widget.standalone.js",
       "dist/openalgo-charts.workspace.standalone.js"
     ],
-    "limit": "430.91 kB",
+    "limit": "450.43 kB",
     "brotli": true
   },
   {
@@ -114,7 +129,7 @@
   {
     "name": "Widget classic script (widget first-use parts inlined)",
     "path": "dist/openalgo-charts.widget.standalone.js",
-    "limit": "135.21 kB",
+    "limit": "154.74 kB",
     "brotli": true
   }
 ]

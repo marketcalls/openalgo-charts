@@ -127,15 +127,17 @@ export class WidgetStorage {
   public key(name: string): string { return this._ns + name; }
 
   public get(name: string): unknown {
+    const raw = this.getRaw(name);
+    try { return raw === null ? null : JSON.parse(raw); } catch { return null; }
+  }
+
+  /** Raw JSON lets document validators distinguish a missing key from corrupt saved data. */
+  public getRaw(name: string): string | null {
     if (this._async !== null) {
-      const text = this._mirror.get(this.key(name));
-      try { return text === undefined ? null : JSON.parse(text); } catch { return null; }
+      return this._mirror.get(this.key(name)) ?? null;
     }
     if (this._store === null) return null;
-    try {
-      const raw = this._store.getItem(this.key(name));
-      return raw === null ? null : JSON.parse(raw);
-    } catch { return null; }
+    try { return this._store.getItem(this.key(name)); } catch { return null; }
   }
 
   /** True when the write landed; over an asynchronous store, when it was taken to be sent. */

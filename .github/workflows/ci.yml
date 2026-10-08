@@ -140,6 +140,11 @@ jobs:
         with:
           name: verified-dist
           path: dist/
+      - name: Emit the terminal example modules
+        # The artifact carries dist/ only; the terminal and Dockview example
+        # pages import git-ignored modules that `npm run build` emits beside
+        # their TypeScript sources (examples/sample-feed.js, examples/dockview/src/*.js).
+        run: npm run build:terminal-examples
       - name: Build the render-parity baseline from the latest release
         # render-parity.spec.ts compares this build's pixels with a release's
         # and skips itself when dist-baseline/ is absent, which on a fresh
