@@ -85,6 +85,26 @@ For indicator performance or allocation changes, use `npm run bench` or `npm run
 as appropriate. [CI](.github/workflows/ci.yml) also checks skill coverage, browser
 behavior, documentation builds and supply-chain constraints.
 
+Measure a release with `npm run bench:release` after its final versioned build,
+on an idle machine that the benchmark budget profile covers. The desktop profile
+was measured on its recorded desktop, so a different software graphics device
+can exceed those budgets even on an unchanged release. Keep such failures and
+compare the previous build before diagnosing a source regression.
+
+The existing Nightly workflow also has a dedicated release benchmark mode:
+
+```sh
+gh workflow run nightly.yml --ref <candidate-branch> -f release_version=<version>
+```
+
+It prepares the requested version without committing, tagging or publishing,
+then measures five current and five previous runs on one dedicated hosted runner
+under the existing runner budgets. Other nightly jobs are skipped in this mode.
+Download `release-benchmark`, compare its built runtime files with the local
+candidate, and review and commit its generated benchmark data and website page.
+Update the home page's benchmark values from that same entry. A failed run is
+evidence to investigate, never a reason to carry an earlier release's figures.
+
 A prose-only change needs accurate links and examples. Run the website build when
 editing its MDX or components; a root Markdown correction does not require new tests
 or an unrelated screenshot refresh.

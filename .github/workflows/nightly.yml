@@ -10,6 +10,12 @@ on:
     # 20:30 UTC is 02:00 in India, between one session and the next.
     - cron: '30 20 * * *'
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Benchmark this candidate version against its previous tag, without publishing. Empty runs the nightly checks.'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -23,6 +29,7 @@ concurrency:
 jobs:
   build:
     name: build
+    if: inputs.release_version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -128,5 +135,57 @@ jobs:
         with:
           name: render-bench-nightly
           path: artifacts/render-bench/
+          if-no-files-found: error
+          retention-days: 90
+
+  release-benchmark:
+    name: release benchmark (five runs per version)
+    if: github.event_name == 'workflow_dispatch' && inputs.release_version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Prepare the requested candidate version without a commit or tag
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const requested = process.env.RELEASE_VERSION;
+          assert.match(requested, /^\d+\.\d+\.\d+$/);
+          for (const file of ['package.json', 'package-lock.json']) {
+            const data = JSON.parse(readFileSync(file, 'utf8'));
+            data.version = requested;
+            if (file === 'package-lock.json') data.packages[''].version = requested;
+            writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+          }
+          const file = 'src/version.ts';
+          const source = readFileSync(file, 'utf8');
+          assert.match(source, /export const VERSION = '[^']+';/);
+          writeFileSync(file, source.replace(/export const VERSION = '[^']+';/, `export const VERSION = '${requested}';`));
+          NODE
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Measure both builds alone with the existing runner budgets
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npm run bench:release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        if: always()
+        with:
+          name: release-benchmark
+          path: |
+            artifacts/bench-release/
+            benchmarks/releases.json
+            website/pages/benchmarks.mdx
+            dist/
           if-no-files-found: error
           retention-days: 90
