@@ -1,6 +1,6 @@
 # OpenAlgo Charts architecture diagram: update brief
 
-## Current diagram: 2.6.4, updated 2026-10-14
+## Current diagram: 2.6.5, updated 2026-10-17
 
 The current SVG replaces the old seven-row capability list with explicit ownership
 boundaries and data flow. The old layout had received updated numbers but did not
@@ -108,6 +108,8 @@ transforms the chart applies itself. The `/indicators` chip says 112 built-in st
 the title and version label name 2.6.4. In-chart transforms, the study bar source and the
 typed event map live inside the base engine's existing boxes, and the classic tier scripts
 are a second form of the same tiers; the release adds no box or arrow.
+
+Rechecked on 2.6.5 with `npm run size` on the final versioned release build: base 137.83 kB, indicators 43.02 kB, draw 58.44 kB, profile 20.83 kB, transform 6.23 kB, trade 16.88 kB on its own (base + trade 154.71 kB), workspace 11.73 kB, WebGL2 6.97 kB, widget 125.89 kB, and 427.81 kB for all tiers. Registry counts are 112 indicators (Trend 40, Momentum 31, Volatility 23, Volume 18), 87 drawing tools, 13 base chart types, 15 with the transform tier, and six series transforms. The widget's eight first-use parts total 21.00 kB and receive no tier chip. The title, version label, visible size labels and accessibility description identify this build. OpenAlgo modification sequencing and recovery remain in the base feed adapter; compact drawing search, groups, SVG previews, shared Favorites and the indicator picker with Running studies first remain in the optional packaged widget. The release adds no box or arrow.
 
 Source references: `src/index.ts`, `src/feed/data-controller.ts`,
 `src/feed/instrument.ts`, `src/model/bar.ts`, `src/core/pane.ts`,

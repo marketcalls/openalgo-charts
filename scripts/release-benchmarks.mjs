@@ -61,7 +61,7 @@ export function renderBlock(data) {
       '',
       `## ${r.version}`,
       '',
-      `Measured ${r.date} against ${r.comparedWith}, both built from their release tags and run in one session on one machine: each cell is the lowest p95 of ${r.runs.release} runs of ${r.version} and ${r.runs.previous} of ${r.comparedWith}.`,
+      `Measured ${r.date} against ${r.comparedWith}, both run in one session on one machine: each cell is the lowest p95 of ${r.runs.release} runs of ${r.version} and ${r.runs.previous} of ${r.comparedWith}.`,
       '',
       `Machine: ${r.machine.cpu} (${r.machine.logicalCpus} logical CPUs), ${r.machine.os}, ${r.machine.browser}, ${r.machine.gl}, device pixel ratio ${r.machine.dpr}.`,
       '',

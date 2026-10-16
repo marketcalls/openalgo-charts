@@ -8,6 +8,64 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.6.5
+
+2026-10-17
+
+A correctness and mobile usability release: acknowledged order modifications,
+searchable compact drawing tools, shared favorites and running studies before
+the indicator catalog.
+
+### Fixed
+
+- **Order edits retain acknowledged values.** Modifications for the same order
+  wait for one another, and stale order-book reads cannot undo a newer result.
+  After any failed modification, refresh the order book before editing it again;
+  an HTTP error can arrive after broker dispatch. Cancellation keeps its
+  instrument identity. See [Trading](/docs/trading).
+- **Portable shortcut tests.** The context-menu checks exercise Windows and
+  Mac shortcuts without changing the production bindings.
+
+### Added and changed
+
+- **Find tools on a phone.** Search IDs and names, browse the existing groups,
+  recognize the SVG previews and pin favorites shared with the desktop rail.
+  Custom tools, translations and allowlists work in the same chooser.
+- **Reach running indicators.** The picker keeps search first, running studies
+  next and the independently scrollable catalog below. Existing keyboard and
+  protected-study behavior remains. Try [the compact widget example](/docs/widget#find-tools-on-a-compact-chart).
+- **Predictable build memory.** The release build declares a 4 GiB JavaScript
+  heap budget for Rollup. This affects the toolchain, not the chart runtime.
+- **Dedicated release measurements.** The Nightly workflow can measure five
+  current and five previous runs on one hosted runner, keeping the existing
+  budgets and retaining both the raw measurements and candidate build.
+- **Compatibility.** Published 2.6.4 joins the retained 2.x declaration and
+  saved-document baselines. Public signatures and document formats are unchanged.
+
+### Size
+
+Base 137.83 kB Brotli, base + trade 154.71 kB, widget 125.89 kB and all tiers
+427.81 kB. Against published 2.6.4, the base adds 189 bytes and the widget
+954 bytes; the other seven tier files keep their compressed sizes. The
+chart-only import is 87.32 KiB. No public exports or runtime dependencies
+are added.
+
+### Performance
+
+Five runs per version on one dedicated four-vCPU Linux runner with Chromium 149
+and software GL. At 200,000 bars the lowest Canvas 2D p95 pan, full zoom-out
+and ten-study tick are 7.1, 126.3 and 264.2 ms, against 8.2, 124.2 and 263.0 ms
+for 2.6.4. Rendering paths are unchanged; the timing differences do not establish
+a rendering speedup. See the [same-session benchmark](/benchmarks#265).
+
+### Tests
+
+11,725 engine tests across 518 files and 730 reference-host tests across
+68 files. The changed widget interactions pass 39 real-browser cases.
+The packed candidate passes 1,248 consumer trading tests, typecheck,
+production build and the trading-page harness in Chromium, Firefox and
+WebKit, using synthetic broker traffic.
+
 ## 2.6.4
 
 2026-10-14

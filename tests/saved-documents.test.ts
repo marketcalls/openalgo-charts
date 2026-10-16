@@ -153,6 +153,7 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
     '2.6.4': [
       { path: 'chart.canvas.grid', change: 'added', why: GRID_MIRROR },
       { path: 'chart.barSpacing', change: 'changed', why: PLOT_WIDTH },
+      { path: 'savedBy', change: 'changed', why: 'the restored state records the current writer version' },
     ],
   },
   'widget-storage': {
@@ -165,7 +166,7 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
       { path: 'oac-widget:compat:drawings:NSE:RELIANCE', change: 'added', why: 'drawings are kept per instrument since 2.5.9: the layout\'s own drawings are copied under the instrument it was saved on, and stay in the layout too' },
     ],
     '2.6.0': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'added', why: SAVED_BY }, ...under('oac-widget:compat:state', [DRAG])],
-    '2.6.4': WIDGET_START,
+    '2.6.4': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'changed', why: 'the restored state records the current writer version' }],
   },
   'workspace-catalog': { '2.5.1': OPENED, '2.6.0': OPENED, '2.6.4': OPENED },
 };

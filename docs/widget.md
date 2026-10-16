@@ -197,6 +197,11 @@ drawing sheets reuse the existing drawing controller, object inventory and dialo
 Changing layout retains drawings, selection and undo history; `rail.tools` restricts
 the same tool ids in both layouts.
 
+The Drawing sheet offers search, the rail's tool groups, SVG tool previews and
+Favorites. Pins share the desktop rail's saved preferences. Search includes custom
+tools and follows the same allowlist. The indicator picker places Running studies
+before the available catalog, with a separate scroll area for each list.
+
 Vertical wheel input zooms time proportionally; dominant horizontal input and Shift-wheel
 pan time. A vertical wheel movement over a visible price axis scales that axis around
 the pointer price. Ctrl-wheel and Meta-wheel zoom time at the pointer inside the plot.
@@ -394,7 +399,7 @@ createWidget('#terminal', {
 Register before you call `createWidget`: the rail reads the registry once when it
 builds, shows only ids it finds there, and drops a favourite it cannot resolve. The rail
 labels every button with the tool's `name` and draws a glyph when the draw tier's icon
-registry (`DRAWING_TOOL_ICONS`) has one for the id; the built-in 51 all do.
+registry (`DRAWING_TOOL_ICONS`) has one for the id.
 A tool that declares `shortcut` is bound by the widget's keymap and listed in the `?`
 panel, and a binding that collides with an existing one is reported rather than
 silently overridden. `settings` decides what the drawing properties dialog shows for the
@@ -459,14 +464,14 @@ cannot name a part either: allow the origin, or the directory as a path ending i
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.6.4 build, Brotli, enforced by
+Budgets from `.size-limit.json` and measurements from the 2.6.5 build, decimal Brotli kB, enforced by
 `npm run size`:
 
 | Row | Files | Budget | Actual |
 |---|---|---|---|
-| Widget tier | `openalgo-charts.widget.mjs` | 124.94 kB | 124.94 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 125.90 kB | 125.89 kB |
 | Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.00 kB | 21.00 kB |
-| Widget terminal | base + draw + indicators + widget | 364.05 kB | 364.04 kB |
+| Widget terminal | base + draw + indicators + widget | 365.19 kB | 365.19 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged. Measure, do not

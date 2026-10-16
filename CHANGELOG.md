@@ -2,6 +2,86 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.6.5
+
+2026-10-17
+
+A correctness and mobile usability release. Order modifications retain only
+acknowledged values, compact drawing tools are searchable and grouped, and
+running indicators are easier to reach.
+
+### Fixed
+
+- **Failed order edits cannot supply values to a later partial edit.**
+  `OpenAlgoTradeFeed.modify()` builds its full payload from acknowledged
+  context and serializes modifications for the same order. Successful edits
+  retain each other's fields, and unrelated orders remain independent.
+- **Uncertain modification outcomes require reconciliation.** After any
+  failed on-wire modification, including an HTTP error, load a new readable
+  order book through `getOrders()` or `getOrderBook()` before editing that
+  order again. An HTTP error can arrive after broker dispatch, so it does
+  not prove the order stayed unchanged. Already-running or older reads
+  cannot clear that uncertainty or undo a newer acknowledgement.
+  Cancellation retains the instrument identity needed by capability checks.
+- **The context-menu shortcut test covers both platforms.** It checks
+  `Ctrl+C` and `Cmd+C` deterministically without changing shortcut behavior.
+
+### Added
+
+- **Mobile drawing search and groups.** The Drawing sheet searches tool
+  IDs, original names and translated names, browses the rail's existing
+  groups, and presents each tool with its existing SVG glyph and text.
+  Custom tools remain searchable and tool allowlists still apply.
+- **Shared mobile favorites.** Pin a tool from the compact chooser or
+  browse Favorites. The pins use the existing rail preferences and storage.
+  Search text, caret, focus and scroll survive drawing-state refreshes;
+  search, group and tool controls have touch-sized targets.
+
+### Changed
+
+- **Running studies precede the indicator catalog.** Search stays first;
+  running instances and the available catalog scroll separately, preserving
+  protected-study policies, instance-specific removal and Arrow/Enter selection.
+- **An explicit build heap budget.** `npm run build` gives Rollup a 4 GiB
+  JavaScript heap budget for the tier and declaration builds. Contributor
+  guidance describes the requirement; chart runtime allocations are unaffected.
+- **A dedicated release benchmark runner.** The Nightly workflow can prepare
+  a requested candidate version and measure five current and five previous
+  runs on one hosted runner, under the existing budgets. It retains the
+  generated data and built files for comparison without publishing.
+- **Current-release compatibility fixtures.** Declaration checks and
+  saved-document tests include published 2.6.4, the previous release and
+  OpenAlgo's current pin, while retaining the older 2.x baselines.
+  Public method signatures, tool IDs and saved-state formats are unchanged.
+
+### Size
+
+The base engine is 137.83 kB Brotli, base + trade 154.71 kB, the widget
+125.89 kB and all tiers 427.81 kB. Against the published 2.6.4 files,
+the base adds 189 bytes and the widget 954 bytes; the other seven tier
+files are unchanged in compressed size. The chart-only import measures
+89,419 bytes (87.32 KiB). Production source grows by 134 lines, with no
+new public exports or runtime dependencies. Budgets match these measurements.
+
+### Performance
+
+Five runs of each version on one dedicated four-vCPU Linux runner, with
+Chromium 149 and software GL. At 200,000 bars, the lowest Canvas 2D p95 pan,
+full zoom-out and ten-study tick are 7.1, 126.3 and 264.2 ms against 8.2,
+124.2 and 263.0 ms for 2.6.4. Rendering paths are unchanged; these timing
+differences do not establish a rendering speedup. See the
+[same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#265).
+All 27 measured runtime files match the locally tested build byte-for-byte.
+
+### Tests
+
+11,725 engine tests across 518 files and 730 reference-host tests across
+68 files. The affected compact chooser and indicator picker pass 39
+browser cases across Chromium, Firefox and WebKit. The packed candidate
+also passes OpenAlgo's 1,248 trading tests, typecheck, production build
+and the actual trading-page harness in all three browser engines.
+Consumer checks use synthetic broker traffic; they do not place live orders.
+
 ## 2.6.4
 
 2026-10-14
