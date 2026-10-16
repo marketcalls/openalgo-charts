@@ -8,7 +8,7 @@
  * shell's own (`createOverlayStack`), so Escape and the outside press are the
  * real thing rather than a stub of them.
  */
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import {
   Chart, darkTheme, readChartSettings, registerIndicator, chartSettingsSchema,
 } from 'openalgo-charts';
@@ -304,20 +304,28 @@ describe('mountSettingsDialog', () => {
 // ── indicator picker ──────────────────────────────────────────────────────
 
 describe('mountIndicatorPicker', () => {
-  it('lists running study instances separately and removes only the selected duplicate', () => {
+  it('keeps running study controls before the catalog and removes only the selected duplicate', () => {
     const rig = makeRig();
     const first = rig.chart.addIndicator('test-ma');
     const second = rig.chart.addIndicator('test-ma');
     const handle = mountIndicatorPicker(rig.ctx);
+    const find = rig.q('.oac-pick__find') as FakeElement;
+    expect(rig.q('.oac-dialog__body')?.children.map(child => child.className)).toEqual([
+      'oac-pick__findwrap',
+      'oac-head oac-pick__running-head',
+      'oac-pick__running',
+      'oac-pick__list',
+    ]);
+    expect(rig.dom.doc.activeElement).toBe(find);
     const running = rig.qa('.oac-pick__running-row');
     expect(running.map(row => row.dataset.instanceId)).toEqual([first.id, second.id]);
-    const find = rig.q('.oac-pick__find') as FakeElement;
     find.value = 'no such study';
     find.fire('input');
     expect(rig.qa('.oac-pick__running-row').length).toBe(2);
     (running[1].querySelector('.oac-pick__remove') as FakeElement).click();
     expect(rig.chart.indicators().map(inst => inst.id)).toEqual([first.id]);
     expect(rig.qa('.oac-pick__running-row').map(row => row.dataset.instanceId)).toEqual([first.id]);
+    expect(rig.dom.doc.activeElement).toBe(find);
     rig.chart.removeIndicator(first.id);
     expect(rig.q('.oac-pick__running-empty')?.textContent).toBe('No running studies');
     handle.close();
@@ -347,10 +355,18 @@ describe('mountIndicatorPicker', () => {
     expect(rows.some((r) => r.dataset.id === 'test-ma')).toBe(true);
     const find = rig.q('.oac-pick__find') as FakeElement;
     expect(rig.dom.doc.activeElement).toBe(find);
+    find.value = 'test-';
+    find.fire('input');
+    find.fire('keydown', { key: 'ArrowDown' });
+    expect(rig.q('.oac-pick__row[aria-selected="true"]')?.dataset.id).toBe('test-ma');
+    find.fire('keydown', { key: 'ArrowUp' });
+    expect(rig.q('.oac-pick__row[aria-selected="true"]')?.dataset.id).toBe('test-osc');
+    expect(rig.dom.doc.activeElement).toBe(find);
     find.value = 'oscill';
     find.fire('input');
     expect(rig.qa('.oac-pick__row').map((r) => r.dataset.id)).toEqual(['test-osc']);
     find.fire('keydown', { key: 'Enter' });
+    expect(rig.dom.doc.activeElement).toBe(find);
     expect(added).toEqual(['test-osc']);
     expect(rig.chart.indicators().map((i) => i.indicatorId)).toEqual(['test-osc']);
     expect(rig.toasts).toEqual(['success:Added Test Oscillator']);
@@ -944,23 +960,29 @@ describe('contextMenuEntries', () => {
 });
 
 describe('mountContextMenu', () => {
-  it('renders the rows at the pointer, marks switches and choices, runs a row and closes', () => {
-    const rig = makeRig();
-    const a = line(rig.draw);
-    mountContextMenu(rig.ctx, undefined, { event: event(rig, { kind: 'drawing', id: `draw:${a.id}` }) });
-    const menu = rig.q('.oac-ctx') as FakeElement;
-    expect(menu.getAttribute('role')).toBe('menu');
-    // The pointer sat at 200,150 in chart px; the chart starts at 42,40 in the root.
-    expect([menu.style.left, menu.style.top]).toEqual(['242px', '190px']);
-    const row = (act: string): FakeElement => menu.querySelector(`[data-act="${act}"]`) as FakeElement;
-    expect(row('draw-above').getAttribute('role')).toBe('menuitemradio');
-    expect(row('draw-above').getAttribute('aria-checked')).toBe('true');
-    expect(row('draw-lock').getAttribute('role')).toBe('menuitemcheckbox');
-    expect(row('draw-copy').querySelector('kbd')?.textContent).toBe('Ctrl+C');
-    expect(rig.dom.doc.activeElement).toBe(row('draw-props'));
-    row('draw-hide').click();
-    expect(rig.draw.get(a.id)?.visible).toBe(false);
-    expect(rig.stack.size()).toBe(0);
+  it.each([
+    { platform: 'Win32', chord: 'Ctrl+C' },
+    { platform: 'MacIntel', chord: 'Cmd+C' },
+  ])('renders the rows and shortcut for $platform, runs a row and closes', ({ platform, chord }) => {
+    vi.stubGlobal('navigator', { platform });
+    try {
+      const rig = makeRig();
+      const a = line(rig.draw);
+      mountContextMenu(rig.ctx, undefined, { event: event(rig, { kind: 'drawing', id: `draw:${a.id}` }) });
+      const menu = rig.q('.oac-ctx') as FakeElement;
+      expect(menu.getAttribute('role')).toBe('menu');
+      // The pointer sat at 200,150 in chart px; the chart starts at 42,40 in the root.
+      expect([menu.style.left, menu.style.top]).toEqual(['242px', '190px']);
+      const row = (act: string): FakeElement => menu.querySelector(`[data-act="${act}"]`) as FakeElement;
+      expect(row('draw-above').getAttribute('role')).toBe('menuitemradio');
+      expect(row('draw-above').getAttribute('aria-checked')).toBe('true');
+      expect(row('draw-lock').getAttribute('role')).toBe('menuitemcheckbox');
+      expect(row('draw-copy').querySelector('kbd')?.textContent).toBe(chord);
+      expect(rig.dom.doc.activeElement).toBe(row('draw-props'));
+      row('draw-hide').click();
+      expect(rig.draw.get(a.id)?.visible).toBe(false);
+      expect(rig.stack.size()).toBe(0);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it('keeps the axis menu up while a switch is flipped, repainting its state in place', () => {

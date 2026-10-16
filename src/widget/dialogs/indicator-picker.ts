@@ -82,12 +82,12 @@ export function mountIndicatorPicker(
   list.setAttribute('role', 'listbox');
   list.setAttribute('aria-label', widgetText(ctx, 'Indicators'));
   frame.body.appendChild(findWrap);
-  frame.body.appendChild(list);
   const runningHead = el(doc, 'div', 'oac-head oac-pick__running-head', widgetText(ctx, 'schema.ui.indicatorPicker.running', {}, 'Running studies'));
   const running = el(doc, 'div', 'oac-pick__running');
   running.setAttribute('aria-label', widgetText(ctx, 'schema.ui.indicatorPicker.running', {}, 'Running studies'));
   frame.body.appendChild(runningHead);
   frame.body.appendChild(running);
+  frame.body.appendChild(list);
   frame.actions.appendChild(button(doc, { label: widgetText(ctx, 'Done'), variant: 'primary', onClick: () => handle.close() }));
   const templates = opts.templates === undefined ? templateStoreOf(ctx) : opts.templates ?? undefined;
   let templatesMenu: PanelHandle | null = null;
@@ -234,10 +234,16 @@ export function mountIndicatorPicker(
 
 /** Include beside the dialog stylesheet in the widget's static CSP stylesheet. */
 export const INDICATOR_PICKER_CSS = `
-.oac-widget .oac-pick__running-head { margin-top: 10px; border-top: 1px solid var(--oac-bd); padding-top: 9px; }
-.oac-widget .oac-pick__running { display: grid; gap: 1px; max-height: 132px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--oac-sb-thumb) transparent; }
-.oac-widget .oac-pick__running::-webkit-scrollbar { width: 6px; }
-.oac-widget .oac-pick__running::-webkit-scrollbar-thumb { background: var(--oac-sb-thumb); border-radius: 3px; }
+.oac-widget .oac-pick .oac-dialog__body { display: flex; flex-direction: column; overflow: hidden; }
+.oac-widget .oac-pick__findwrap { flex: none; }
+.oac-widget .oac-pick__running-head { flex: none; padding: 1px 6px 3px; }
+.oac-widget .oac-pick__running { display: grid; align-content: start; gap: 1px; flex: 0 1 auto; min-height: 31px; max-height: 132px; }
+.oac-widget .oac-pick__list { flex: 1 1 auto; max-height: 300px; margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--oac-bd); }
+.oac-widget .oac-pick__list, .oac-widget .oac-pick__running { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--oac-sb-thumb) var(--oac-panel); }
+.oac-widget .oac-pick :is(.oac-pick__list, .oac-pick__running)::-webkit-scrollbar { width: 6px; }
+.oac-widget .oac-pick :is(.oac-pick__list, .oac-pick__running)::-webkit-scrollbar-track { background: var(--oac-panel); }
+.oac-widget .oac-pick :is(.oac-pick__list, .oac-pick__running)::-webkit-scrollbar-thumb { background: var(--oac-sb-thumb); border-radius: 3px; }
+.oac-widget .oac-pick :is(.oac-pick__list, .oac-pick__running)::-webkit-scrollbar-thumb:hover { background: var(--oac-sb-thumb-hover); }
 .oac-widget .oac-pick__running-row { display: flex; align-items: center; gap: 7px; min-height: 29px; padding: 2px 6px; }
 .oac-widget .oac-pick__running-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-widget .oac-pick__running-number { min-width: 16px; color: var(--oac-mut); font-size: 11px; text-align: right; }

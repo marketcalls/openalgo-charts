@@ -20,8 +20,9 @@ import { gunzipSync } from 'node:zlib';
  * step updates this list (CONTRIBUTING.md, Compatibility gate).
  */
 export const BASELINES = [
-  { version: '2.5.1', why: 'the version OpenAlgo pins' },
-  { version: '2.6.0', why: 'the previous release' },
+  { version: '2.5.1', why: 'a retained 2.x compatibility baseline' },
+  { version: '2.6.0', why: 'a retained 2.x compatibility baseline' },
+  { version: '2.6.4', why: 'the previous release and the version OpenAlgo pins' },
 ];
 
 const NAME = 'openalgo-charts';

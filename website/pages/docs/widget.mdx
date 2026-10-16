@@ -44,6 +44,22 @@ widget.series.setData(bars);
 widget.chart.timeScale.fitContent(160);
 return widget;`} />
 
+## Find tools on a compact chart
+
+From 2.6.5, the compact Drawing sheet has search, the rail's existing tool groups,
+SVG tool previews and Favorites. Pins share the desktop rail's saved preferences.
+Custom tools remain searchable, and `rail.tools` still limits the available tools.
+The indicator picker places Running studies before the available catalog, with
+separate scrolling so existing instances are easy to reach.
+
+<RunnableExample height={480} tiers={['widget', 'indicators']} caption="Open Draw, search for a tool, choose a group or pin a favorite. Open Indicators to manage the running study." code={`const widget = lib.createWidget(el, {
+  symbol: 'DEMO', exchange: 'NSE', interval: '1h', mobile: 'always',
+});
+widget.series.setData(lib.generateBars(1700000000, 240, 3600));
+widget.chart.addIndicator('sma');
+widget.chart.timeScale.fitContent(160);
+return widget;`} />
+
 <a id="the-engine-still-ships-no-dom"></a>
 
 ## Engine and interface separation

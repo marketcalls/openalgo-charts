@@ -18,9 +18,10 @@ import { DRAWING_COORDINATES_CSS } from './dialogs/drawing-coordinates';
 // The bottom bar's rules ride the shared sheet, so a custom host's bar is styled under CSP too.
 import { BOTTOMBAR_CSS } from './bottombar';
 import { LAYOUTS_BUTTON_CSS } from './layouts-widget';
+import { MOBILE_DRAWINGS_CSS } from './mobile-drawings';
 
 /** Shared first-mount styles keep embedded hosts and full widgets identical under CSP. */
 export const WIDGET_COMPONENT_CSS = DIALOG_CSS + OBJECTS_PANEL_CSS + EVENT_DETAILS_CSS
   + DATA_WINDOW_CSS + PANEL_DOCK_CSS + SYMBOL_PICKER_CSS + QUICK_ENTRY_CSS + COLOR_PICKER_CSS + INDICATOR_PICKER_CSS + DATE_NAVIGATION_CSS
   + CHART_GRID_CSS + WATCHLIST_PANEL_CSS + NEWS_PANEL_CSS + ACCOUNT_SUMMARY_CSS
-  + DRAWING_TOOLBAR_CSS + DRAWING_TEMPLATES_CSS + DRAWING_COORDINATES_CSS + BOTTOMBAR_CSS + LAYOUTS_BUTTON_CSS;
+  + DRAWING_TOOLBAR_CSS + DRAWING_TEMPLATES_CSS + DRAWING_COORDINATES_CSS + BOTTOMBAR_CSS + LAYOUTS_BUTTON_CSS + MOBILE_DRAWINGS_CSS;

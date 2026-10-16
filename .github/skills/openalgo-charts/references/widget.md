@@ -386,6 +386,16 @@ Both layouts share `ctx.draw`, `ctx.objects`, widget events, dialogs and the ove
 so resizing does not copy or reset selection, drawings or undo state. `RailOptions.tools`
 filters the mobile Drawing sheet to the same allowed tool ids as the desktop rail.
 
+Since 2.6.5 the Drawing sheet searches tool ids, original names and translated names,
+browses the rail's existing groups and shows the same SVG glyphs. Its Favorites view
+and pin buttons share the rail's saved preferences. Custom registered tools remain in
+All tools and search even when no built-in group contains them. The search field stays
+mounted while drawing state refreshes, preserving its value and caret.
+
+The indicator picker keeps search first, then Running studies, then the independently
+scrollable available catalog. Existing instance removal, protected-study policies and
+Arrow/Enter selection are unchanged.
+
 If `prefers-reduced-motion: reduce` matches, `createWidget` supplies `animZoom: false` and
 `animAutoscale: false` only when the host omitted those options. Explicit values win.
 `mountMobile` is public for custom composition and returns `{ el, active, refresh, destroy }`;

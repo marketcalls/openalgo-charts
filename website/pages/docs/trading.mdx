@@ -682,6 +682,13 @@ is deprecated and is removed in 3.0.0. See
 `getOrders()` so that a later `modify()` can supply the complete payload that
 OpenAlgo's modify endpoint requires.
 
+From 2.6.5, modifications for the same order wait for one another and only acknowledged
+changes enter that context. Rejected values do not travel into the next partial edit.
+After any failed modification, including an HTTP error, the order may have changed at
+the broker. Refresh with `getOrders()` or `getOrderBook()` before modifying it again;
+a read started before that uncertain outcome cannot resolve it. Cancellation remains
+available. New-order placement uses its existing path.
+
 <Callout type="warning">
 The trade path is broker-live. Test against OpenAlgo **analyzer mode** first, and verify the
 exact endpoints/fields against your running OpenAlgo build before trading real money. See

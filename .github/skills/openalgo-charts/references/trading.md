@@ -274,3 +274,10 @@ state, and OCO bookkeeping. Use it when you need to remember what the user is do
   stays `'unknown'` rather than becoming `working`.
 
 Everything the client checks is advisory. The broker RMS is authoritative.
+
+Since 2.6.5, `modify()` serializes writes for the same order and retains only
+acknowledged changes in its full-order context. A rejected patch cannot supply values
+to a later partial edit. Any failed modification can leave its outcome uncertain,
+including an HTTP error returned after broker dispatch; load a new order book before
+modifying that order again. A book read already in flight before that uncertainty cannot clear it. Cancel
+remains available, and a fresh readable broker row is authoritative.

@@ -104,6 +104,7 @@ interface OrderContext {
   quantity: number;
   price: number;
   triggerPrice: number;
+  uncertain?: true;
 }
 
 export class OpenAlgoTradeFeed implements OrderFeed {
@@ -112,6 +113,8 @@ export class OpenAlgoTradeFeed implements OrderFeed {
   private readonly _strategy: string;
   private readonly _defaultProduct: string;
   private readonly _ctx = new Map<string, OrderContext>();
+  private readonly _modifies = new Map<string, Promise<void>>();
+  private _bookRead = 0;
   /**
    * Client order ids this feed has put on the wire, and whether the outcome is
    * known. A claimed-but-unresolved entry blocks a repeat. See `_claimToken`.
@@ -394,40 +397,53 @@ export class OpenAlgoTradeFeed implements OrderFeed {
 
   public async modify(orderId: string, changes: { price?: number; triggerPrice?: number; qty?: number }): Promise<void> {
     const patch = { ...changes };
+    // Full-order payloads must wait for earlier patches to settle before reading context.
+    const previous = this._modifies.get(orderId) ?? Promise.resolve();
+    const pending = previous.catch(() => {}).then(() => this._modify(orderId, patch));
+    this._modifies.set(orderId, pending);
+    try { await pending; }
+    finally { if (this._modifies.get(orderId) === pending) this._modifies.delete(orderId); }
+  }
+
+  private async _modify(orderId: string, patch: { price?: number; triggerPrice?: number; qty?: number }): Promise<void> {
     const ctx = this._ctx.get(orderId);
     // An order with no cached context asks without a symbol, which a request reads as absent.
     assertTradingCapability(this.capabilities, { operation: 'modify', orderId,
       symbol: ctx?.symbol, exchange: ctx?.exchange, type: ctx?.pricetype } satisfies LooseOptional<TradingCapabilityRequest> as TradingCapabilityRequest);
-    if (ctx === undefined) {
-      // Pre-flight: nothing can be built, so nothing is sent, so the order is
-      // exactly where it was and the caller may retry once it has the book.
-      throw preflight(`openalgo-charts: cannot modify ${orderId}, unknown order context (place it or load the order book first)`);
+    if (ctx === undefined || ctx.uncertain === true) {
+      // Missing or uncertain context cannot supply honest whole-order defaults.
+      const reason = ctx?.uncertain === true ? 'previous modification outcome is unknown (load a new order book first)'
+        : 'unknown order context (place it or load the order book first)';
+      throw preflight(`openalgo-charts: cannot modify ${orderId}, ${reason}`);
     }
-    // Keep the cache in step with what we are about to send, so a second
-    // modify of a different field does not resurrect the previous value.
-    if (patch.qty !== undefined) ctx.quantity = patch.qty;
-    if (patch.price !== undefined) ctx.price = patch.price;
-    if (patch.triggerPrice !== undefined) ctx.triggerPrice = patch.triggerPrice;
-    // OpenAlgo modifyorder requires the full order context, not just the delta.
-    //
-    // The price fields therefore fall back to the CACHED value, never to 0.
-    // They used to read `patch.price ?? 0`, which quietly zeroed whichever of
-    // the two the caller had not mentioned. Dragging a stop-limit order's line
-    // sends only a trigger, so that path sent `price: 0` and wiped the limit
-    // price off a live working order at the broker.
-    await this._post('/api/v1/modifyorder', {
-      orderid: orderId,
-      strategy: this._strategy,
-      symbol: ctx.symbol,
-      action: ctx.action,
-      exchange: ctx.exchange,
-      pricetype: ctx.pricetype,
-      product: ctx.product,
-      quantity: ctx.quantity,
-      price: ctx.price,
-      trigger_price: ctx.triggerPrice,
-      disclosed_quantity: 0, // required by the modifyorder API
-    });
+    try {
+      const ack = await this._post('/api/v1/modifyorder', {
+        orderid: orderId, strategy: this._strategy,
+        symbol: ctx.symbol, action: ctx.action, exchange: ctx.exchange,
+        pricetype: ctx.pricetype, product: ctx.product,
+        quantity: patch.qty ?? ctx.quantity, price: patch.price ?? ctx.price,
+        trigger_price: patch.triggerPrice ?? ctx.triggerPrice, disclosed_quantity: 0,
+      }) as { status?: string; orderid?: string; order_id?: string; message?: string } | null;
+      if (ack?.status === 'error') {
+        throw new Error(`openalgo-charts: modifyorder failed: ${ack.message ?? 'order rejected'}`);
+      }
+      if (ack == null || (ack.status !== 'success' &&
+        !(ack.status === undefined && (ack.orderid ?? ack.order_id) === orderId))) {
+        throw new Error('openalgo-charts: modifyorder returned no readable acknowledgement');
+      }
+      // Apply only acknowledged deltas to the current context, never an awaited snapshot.
+      const current = this._ctx.get(orderId);
+      if (current !== undefined) this._ctx.set(orderId, {
+        ...current, quantity: patch.qty ?? current.quantity,
+        price: patch.price ?? current.price, triggerPrice: patch.triggerPrice ?? current.triggerPrice,
+      });
+    } catch (error) {
+      // OpenAlgo can return an internal error after dispatching to the broker.
+      // An uncertain outcome needs a newly started book read before another write.
+      // Keep identity available to cancel; a new object also invalidates older book reads.
+      this._ctx.set(orderId, { ...(this._ctx.get(orderId) ?? ctx), uncertain: true });
+      throw error;
+    }
   }
 
   public async cancel(orderId: string): Promise<void> {
@@ -447,6 +463,8 @@ export class OpenAlgoTradeFeed implements OrderFeed {
    * thing the trader must see, and a quietly shorter list is not.
    */
   public async getOrderBook(): Promise<OrderBookSnapshot> {
+    const read = ++this._bookRead;
+    const contexts = new Map(this._ctx);
     const json = (await this._post('/api/v1/orderbook', {})) as { data?: { orders?: RawOrder[] } | RawOrder[] };
     const rows = Array.isArray(json.data) ? json.data : (json.data?.orders ?? []);
     const orders: DecodedOrder[] = [];
@@ -466,7 +484,8 @@ export class OpenAlgoTradeFeed implements OrderFeed {
       // modify() refuses by name, which is a failure the trader can act on.
       const exchange = str(raw.exchange);
       const product = str(raw.product);
-      if (exchange !== undefined && product !== undefined) {
+      if (exchange !== undefined && product !== undefined && read === this._bookRead &&
+        !this._modifies.has(res.order.id) && this._ctx.get(res.order.id) === contexts.get(res.order.id)) {
         this._ctx.set(res.order.id, {
           symbol: res.order.symbol, exchange, action: res.order.side, pricetype: res.order.type,
           product, quantity: res.order.qty, price: res.order.price,

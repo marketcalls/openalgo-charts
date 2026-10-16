@@ -78,7 +78,7 @@
       "createLayoutsController": 387
     },
     "src/widget/mobile.ts": {
-      "mountMobile": 472
+      "mountMobile": 447
     },
     "src/widget/news-panel.ts": {
       "mountNewsPanel": 194

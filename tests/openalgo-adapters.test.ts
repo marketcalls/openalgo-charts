@@ -73,7 +73,8 @@ describe('OpenAlgoTradeFeed (offline, injected fetch)', () => {
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       capture.url = url;
       capture.body = JSON.parse(String(init?.body));
-      return { ok: true, status: 200, json: async () => json } as Response;
+      return { ok: true, status: 200,
+        json: async () => String(url).endsWith('/modifyorder') ? { status: 'success' } : json } as Response;
     }) as unknown as typeof fetch;
     return new OpenAlgoTradeFeed({ baseUrl: 'http://x', apiKey: 'k', fetchImpl });
   }

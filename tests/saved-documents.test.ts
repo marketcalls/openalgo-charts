@@ -105,8 +105,8 @@ const SAVED_SINCE_254: readonly Named[] = [
 ];
 /** 2.6.0's study timeframe input, a7922a74: empty is the chart's own interval, the only one a study computed on before. */
 const TIMEFRAME: Named = { path: 'indicators.*.settings.timeframe', change: 'added', why: 'the study timeframe input (2.6.0), empty, the chart\'s own interval' };
-/** Restoring applies the saved `grid`, which the chart mirrors whole into its canvas options. 2.5.1 and 2.6.0 do the same to their own documents (`--self`). */
-const GRID_MIRROR = 'restoring the saved grid mirrors it whole into the canvas options, as 2.5.1 and 2.6.0 do on their own documents';
+/** Restoring mirrors the saved grid whole into canvas options, including on each published baseline itself (`--self`). */
+const GRID_MIRROR = 'restoring the saved grid mirrors it whole into the canvas options, as the published baselines do on their own documents';
 /** The unit tests' fake DOM lays the widget out at another plot width than the browser that wrote the layout. */
 const PLOT_WIDTH = 'bar spacing is the saved view in pixels per bar, and the fake DOM\'s plot is narrower than the browser\'s; the view itself round-trips';
 /** The widget's own reads and writes on start, the same in 2.5.1 and 2.6.0 (`--self`). */
@@ -133,6 +133,7 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
   'chart-state': {
     '2.5.1': [...SAVED_SINCE_254, TIMEFRAME, { path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
     '2.6.0': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
+    '2.6.4': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
   },
   'widget-state': {
     '2.5.1': [
@@ -149,6 +150,10 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
       { path: 'savedBy', change: 'added', why: SAVED_BY },
       DRAG,
     ],
+    '2.6.4': [
+      { path: 'chart.canvas.grid', change: 'added', why: GRID_MIRROR },
+      { path: 'chart.barSpacing', change: 'changed', why: PLOT_WIDTH },
+    ],
   },
   'widget-storage': {
     '2.5.1': [
@@ -160,8 +165,9 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
       { path: 'oac-widget:compat:drawings:NSE:RELIANCE', change: 'added', why: 'drawings are kept per instrument since 2.5.9: the layout\'s own drawings are copied under the instrument it was saved on, and stay in the layout too' },
     ],
     '2.6.0': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'added', why: SAVED_BY }, ...under('oac-widget:compat:state', [DRAG])],
+    '2.6.4': WIDGET_START,
   },
-  'workspace-catalog': { '2.5.1': OPENED, '2.6.0': OPENED },
+  'workspace-catalog': { '2.5.1': OPENED, '2.6.0': OPENED, '2.6.4': OPENED },
 };
 const named = (doc: string, version: string): readonly Named[] => CHANGES[doc]?.[version] ?? [];
 

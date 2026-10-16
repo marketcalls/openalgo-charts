@@ -101,7 +101,7 @@
   ],
   "scripts": {
     "clean": "rimraf dist",
-    "build": "rimraf dist && rollup -c",
+    "build": "rimraf dist && node --max-old-space-size=4096 node_modules/rollup/dist/bin/rollup -c",
     "build:watch": "rollup -c --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests",
     "test": "vitest run",

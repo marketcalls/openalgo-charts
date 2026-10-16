@@ -99,6 +99,99 @@ test('symbol search keeps the final result reachable in a short embedded widget'
   expect(await page.evaluate(() => (window as any).__widget.symbol())).toBe('SYM19');
 });
 
+test('drawing discovery supports touch browsing and shared favorites in both phone orientations', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 390, height: 740 });
+  await page.goto('/tests/e2e/widget-mobile-fixture.html?persist');
+  await page.waitForFunction(() => (window as any).__loaded > 0);
+  const draw = page.locator('[data-mobile-action=draw]');
+  await draw.tap();
+  const search = page.locator('.oac-mobile-drawings__search');
+  const groups = page.locator('.oac-mobile-drawings__groups');
+  const rectangle = page.locator('.oac-mobile__tool[data-tool=rectangle]');
+  const pin = page.locator('[data-mobile-action=favorite][data-tool=rectangle]');
+  await expect(search).toBeVisible();
+  await groups.selectOption('shapes');
+  await search.fill('rect');
+  await expect(page.locator('.oac-mobile__tool')).toHaveCount(2);
+  await expect(rectangle).toContainText('Rectangle');
+  await expect(rectangle.locator('svg use')).toHaveCount(1);
+  await expect(pin).toHaveAttribute('aria-pressed', 'false');
+  await pin.tap();
+  await expect(pin).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => (window as any).__widget.draw.activeTool())).toBeNull();
+  await search.fill('');
+  await groups.selectOption('favorites');
+  await expect(page.locator('.oac-mobile__tool')).toHaveCount(2);
+  await expect(rectangle).toBeVisible();
+
+  for (const [width, height] of [[390, 740], [740, 390]]) {
+    await search.blur();
+    await page.setViewportSize({ width, height });
+    const panel = page.locator('.oac-mobile-sheet');
+    await expect(panel).toBeVisible();
+    const box = (await panel.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+    expect(box.y + box.height).toBeLessThanOrEqual(height + 1);
+    for (const target of [search, groups, rectangle, pin]) {
+      const targetBox = (await target.boundingBox())!;
+      expect(targetBox.height).toBeGreaterThanOrEqual(44);
+      expect(targetBox.width).toBeGreaterThanOrEqual(44);
+    }
+    expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await info.attach(`drawing discovery ${width}x${height}`, {
+      body: await page.screenshot({ path: info.outputPath(`drawing-discovery-${width}.png`) }), contentType: 'image/png',
+    });
+  }
+
+  await page.keyboard.press('Escape');
+  await expect(draw).toBeFocused();
+  await page.reload();
+  await page.waitForFunction(() => (window as any).__loaded > 0);
+  await draw.tap();
+  await groups.selectOption('favorites');
+  await expect(rectangle).toBeVisible();
+  await pin.tap();
+  await expect(rectangle).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__widget.getState().rail.favorites)).toEqual(['trend-line']);
+  expect(errors).toEqual([]);
+});
+
+test('drawing discovery preserves the search field and caret through controller updates', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 480 });
+  await page.goto('/tests/e2e/widget-mobile-fixture.html');
+  await page.waitForFunction(() => (window as any).__loaded > 0);
+  const draw = page.locator('[data-mobile-action=draw]');
+  await draw.tap();
+  const search = page.locator('.oac-mobile-drawings__search');
+  await expect(search).toBeVisible();
+  await expect(search).not.toBeFocused();
+  await search.fill('line');
+  await search.evaluate((element) => {
+    (element as HTMLInputElement).setSelectionRange(1, 3);
+    (window as any).__mobileDrawingSearch = element;
+    document.querySelector('.oac-mobile-sheet__body')!.scrollTop = 80;
+  });
+  const body = page.locator('.oac-mobile-sheet__body');
+  const scroll = await body.evaluate(element => element.scrollTop);
+  expect(scroll).toBeGreaterThan(0);
+  await page.evaluate(() => (window as any).__widget.draw.setTool('trend-line'));
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue('line');
+  expect(await search.evaluate(element => element === (window as any).__mobileDrawingSearch)).toBe(true);
+  expect(await search.evaluate(element => [(element as HTMLInputElement).selectionStart, (element as HTMLInputElement).selectionEnd])).toEqual([1, 3]);
+  expect(await body.evaluate(element => element.scrollTop)).toBe(scroll);
+  await expect(page.locator('.oac-mobile__tool[data-tool=trend-line]')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.oac-mobile-sheet')).toHaveCount(0);
+  await expect(draw).toBeFocused();
+  await draw.tap();
+  await expect(search).toHaveValue('');
+});
+
 /**
  * Replace the fixture's widget with one fed a seeded random walk in market
  * hours, so a screenshot of the chrome shows a chart that reads like a real
