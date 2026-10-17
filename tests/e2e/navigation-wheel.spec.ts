@@ -117,13 +117,15 @@ test('a newly visible extreme eases on canvas and settles on the full price rang
       await new Promise(requestAnimationFrame);
       values.push(chart.priceToCoordinate(23800));
     }
-    return { values, range: chart.panes()[0].priceScale.priceRange() };
+    return { values };
   });
   const travel = Math.abs(samples.values.at(-1)! - samples.values[0]);
   const steps = samples.values.slice(1).map((y, i) => Math.abs(y - samples.values[i]));
   expect(travel).toBeGreaterThan(100);
   expect(Math.max(...steps)).toBeLessThan(travel * 0.5);
-  expect(samples.range).toEqual({ min: 23738.75, max: 24251.25 });
+  // A wall-clock sample can end before the animation's final render frame.
+  await expect.poll(() => page.evaluate(() => (window as any).chart.panes()[0].priceScale.priceRange()))
+    .toEqual({ min: 23738.75, max: 24251.25 });
   expect(errors).toEqual([]);
   await info.attach('settled price transition', { body: await page.screenshot(), contentType: 'image/png' });
 });
