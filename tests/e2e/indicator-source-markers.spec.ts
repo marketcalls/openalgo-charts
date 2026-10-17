@@ -174,6 +174,13 @@ test('transparent plots leave no blank value in the legend', async ({ page }, in
 test('source braces, enlarged hitboxes and stacked rows identify the clicked instance', async ({ page }, info) => {
   await fixture(page, 'source');
   const ids = await page.evaluate(() => window.__indicatorRegression.studies.map(study => study.id));
+  const labelRight = await page.evaluate(() => {
+    const svg = new DOMParser().parseFromString(window.__indicatorRegression.chart.exportSVG(), 'image/svg+xml');
+    const title = [...svg.querySelectorAll('text')].find(text => text.textContent === 'Readout')!;
+    const context = document.createElement('canvas').getContext('2d')!;
+    context.font = `${title.getAttribute('font-weight') ?? ''} ${title.getAttribute('font-size')}px ${title.getAttribute('font-family')}`.trim();
+    return Number(title.getAttribute('x')) + context.measureText(title.textContent ?? '').width + 6;
+  });
   const extents: number[] = [];
   for (const size of [16, 24]) {
     await page.evaluate(size => window.__indicatorRegression.chart.setLegendIconSize(size), size);
@@ -183,8 +190,8 @@ test('source braces, enlarged hitboxes and stacked rows identify the clicked ins
       const cy = 6 + (row + 1) * pitch + pitch / 2;
       await page.mouse.move(30, cy);
       await paint(page);
-      const value = bounds(await ink(page, { left: 60, right: 150, top: cy - 7, bottom: cy + 7 }, 'green'));
-      const pixels = await ink(page, { left: value.right + 3, right: 300, top: cy - size / 2, bottom: cy + size / 2 + 1 }, 'gray');
+      const value = bounds(await ink(page, { left: 60, right: 500, top: cy - 7, bottom: cy + 7 }, 'green'));
+      const pixels = await ink(page, { left: labelRight, right: value.left - 3, top: cy - size / 2, bottom: cy + size / 2 + 1 }, 'gray');
       const glyphs = groups(pixels);
       expect(glyphs, 'Eye, gear, two braces, and remove must all paint').toHaveLength(5);
       const source = bounds(pixels.filter(point => point.x >= glyphs[2].left && point.x <= glyphs[3].right));
@@ -210,8 +217,8 @@ test('source braces, enlarged hitboxes and stacked rows identify the clicked ins
     const plainY = 6 + 3 * pitch + pitch / 2;
     await page.mouse.move(30, plainY);
     await paint(page);
-    const value = bounds(await ink(page, { left: 60, right: 150, top: plainY - 7, bottom: plainY + 7 }, 'green'));
-    const plain = groups(await ink(page, { left: value.right + 3, right: 300, top: plainY - size / 2, bottom: plainY + size / 2 + 1 }, 'gray'));
+    const value = bounds(await ink(page, { left: 60, right: 500, top: plainY - 7, bottom: plainY + 7 }, 'green'));
+    const plain = groups(await ink(page, { left: labelRight, right: value.left - 3, top: plainY - size / 2, bottom: plainY + size / 2 + 1 }, 'gray'));
     expect(plain, 'A descriptor without source has only eye, gear, and remove').toHaveLength(3);
   }
   expect(extents[0]).toBeGreaterThan(9.24);

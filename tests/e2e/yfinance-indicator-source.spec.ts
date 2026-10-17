@@ -58,15 +58,10 @@ async function clickSource(page: Page, pane: Pane, row = 0): Promise<void> {
     if (!title) throw new Error('The sample legend has not rendered');
     const y = Number(title.getAttribute('y'));
     const start = Number(title.getAttribute('x'));
-    const sameRow = texts.filter(text => Number(text.getAttribute('y')) === y
-      && Number(text.getAttribute('x')) >= start && Number(text.getAttribute('x')) < box.width / 2);
     const context = document.createElement('canvas').getContext('2d')!;
-    // The export identifies the visible text; real font metrics locate its canvas controls.
-    let right = start;
-    for (const text of sameRow) {
-      context.font = `${text.getAttribute('font-weight') ?? ''} ${text.getAttribute('font-size')}px ${text.getAttribute('font-family')}`.trim();
-      right += context.measureText(text.textContent ?? '').width + 6;
-    }
+    // This input-free sample's controls follow its title, before changing readings.
+    context.font = `${title.getAttribute('font-weight') ?? ''} ${title.getAttribute('font-size')}px ${title.getAttribute('font-family')}`.trim();
+    const right = start + context.measureText(title.textContent ?? '').width + 6;
     const size = chart.legendIconSize() ?? 16;
     return { x: box.left + right + 2 + 2 * (size + 2) + size / 2, y: box.top + y, hoverX: box.left + start + 10 };
   }, { pane, row, name: SAMPLE });
