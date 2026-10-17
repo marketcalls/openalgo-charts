@@ -34,6 +34,7 @@ import {
   type DrawingDocumentStore, type DrawingInstrument,
 } from 'openalgo-charts/draw';
 import { WidgetBus, type WidgetBusEvents, type WidgetStorage, type WidgetStorageError } from './context';
+import { restoreTimeframeCode } from './timeframe-preferences';
 import { isChartTypeChoice } from './chart-type-choice';
 import { errorText, widgetText } from './localization';
 import { sanitizePanelDockState } from './panel-dock';
@@ -283,6 +284,7 @@ export function restoreWidgetState(this: PersistHost, state: unknown): WidgetRes
   let variant: Readonly<DataVariant> | undefined;
   try { variant = normalizeDataVariant(state.variant); }
   catch (error) { return { applied: false, reason: error instanceof Error ? error.message : 'invalid data variant' }; }
+  restoreTimeframes(state);
   if (state.theme === 'dark' || state.theme === 'light') this.setTheme(state.theme);
   if (isChartTypeChoice(state.chartType)) this._selectChartType(state.chartType, isRecord(state.chart) ? state.chart : undefined);
   if (state.rail !== undefined && this._rail !== null) this._rail.restorePrefs(state.rail);
@@ -349,10 +351,19 @@ export function restoreWidgetState(this: PersistHost, state: unknown): WidgetRes
   return chart === undefined ? { applied: true } : { applied: true, chart };
 }
 
+function restoreTimeframes(state: Record<string, unknown>): void {
+  restoreTimeframeCode(state.interval);
+  if (!isRecord(state.chart) || !Array.isArray(state.chart.indicators)) return;
+  for (const study of state.chart.indicators) {
+    if (isRecord(study) && isRecord(study.settings)) restoreTimeframeCode(study.settings.timeframe);
+  }
+}
+
 /** The stored layout, checked field by field, or null when nothing this build can read is stored. */
 export function readSaved(this: PersistHost): WidgetState | null {
   const raw = this._storage.get(STATE_KEY);
   if (!isRecord(raw) || raw.version !== WIDGET_STATE_VERSION) return null;
+  restoreTimeframes(raw);
   const variant = savedVariant(raw.variant);
   const chart = isRecord(raw.chart) ? (raw.chart as unknown as WidgetChartState) : undefined;
   const out: WidgetState = {

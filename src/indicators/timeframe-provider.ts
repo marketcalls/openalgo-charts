@@ -77,6 +77,7 @@ export function createTimeframeProvider(feed: TimeframeFeed, options: TimeframeP
     let result = snapshot(bars.filter(bar => bar.time < req.to), req);
     const eligible = (): number => result.bars.filter((bar, i) => bar.time < req.from
       && result.confirmed[i] && result.availableAt[i] !== null && result.availableAt[i]! <= req.from).length;
+    let emptyPages = 0;
     for (let calls = 0; eligible() < warmup && !exhausted; calls++) {
       if (calls >= 512 || bars.length >= 100_000) throw new Error('Timeframe warmup history limit reached');
       const page = await pool.getBarsPage({ ...base, before: cursor, countBack: Math.max(1, warmup - eligible()) });
@@ -84,6 +85,10 @@ export function createTimeframeProvider(feed: TimeframeFeed, options: TimeframeP
       const next = page.nextBefore ?? page.bars[0]?.time;
       exhausted = page.hasMore === false || (plan.source.earliest !== undefined && next !== undefined && next <= plan.source.earliest);
       if (!exhausted && (next === undefined || next >= cursor)) throw new Error('Warmup history page did not advance');
+      emptyPages = page.bars.length === 0 ? emptyPages + 1 : 0;
+      // An empty holiday window is not exhaustion. Repeated empty windows with
+      // no source horizon need an honest retryable failure, not hundreds of reads.
+      if (!exhausted && emptyPages >= 4) throw new Error('Insufficient confirmed history: four consecutive source windows are empty');
       if (next !== undefined) cursor = Math.min(cursor, next);
       result = snapshot(bars.filter(bar => bar.time < req.to), req);
     }

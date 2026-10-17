@@ -1,4 +1,4 @@
-import { intervalParts, registerInterval, tryResolveInterval } from 'openalgo-charts';
+import { intervalParts, registerInterval, resolveInterval, tryResolveInterval } from 'openalgo-charts';
 import type { StorageLike, WidgetStorage } from './widget-storage';
 
 /** Clock and calendar units accepted by the custom interval dialog. */
@@ -23,9 +23,15 @@ function valid(code: string, custom = false): string {
       registerInterval({ code: text, bucketing: { mode: 'calendar', unit, count } });
     }
   }
-  const found = tryResolveInterval(text);
-  if (!found || (found.bucketing.mode === 'interval' && (!Number.isSafeInteger(found.bucketing.seconds) || found.bucketing.seconds <= 0))) throw new Error('Unknown interval');
+  const found = resolveInterval(text);
+  if (found.bucketing.mode === 'interval' && (!Number.isSafeInteger(found.bucketing.seconds) || found.bucketing.seconds <= 0)) throw new Error('Unknown interval');
   return text;
+}
+
+/** Saved panes can still use a calendar choice removed from the visible menu. */
+export function restoreTimeframeCode(code: unknown): void {
+  if (typeof code !== 'string' || !/^(\d*)([MQY])$/.test(code)) return;
+  try { valid(code, true); } catch { /* Invalid saved codes keep the existing fallback. */ }
 }
 
 export function timeframeIdentity(code: string): string {

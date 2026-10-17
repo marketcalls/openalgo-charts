@@ -144,7 +144,7 @@ export interface WidgetOptions extends Omit<ChartOptions, 'theme'>, WidgetBottom
    * it through `dataVariants`, or the chart reports it unsupported.
    */
   variant?: DataVariant | undefined;
-  /** The interval pills, each a known code. Default: `DEFAULT_INTERVALS` plus every registered code. */
+  /** Offered intervals, each a known code. Default: `DEFAULT_INTERVALS` plus every registered code. Favorites and the current interval appear as pills. */
   intervals?: readonly string[];
   /** Share favorites and custom choices across host-owned chart panes. */
   timeframePreferences?: TimeframePreferences;
@@ -499,7 +499,7 @@ class WidgetContextImpl implements WidgetContext {
 function initialInterval(options: WidgetOptions, saved: { interval: string } | null): string {
   // A code nothing recognises is an error at the call site (the engine's
   // own rule: a chart showing the wrong timeframe is a wrong trade), and a
-  // saved code from a build that registered it is dropped for the default.
+  // unknown non-calendar saved code still falls back to the default.
   if (options.interval !== undefined) resolveInterval(options.interval);
   for (const code of options.intervals ?? []) resolveInterval(code);
   const savedInterval = saved !== null && isKnownInterval(saved.interval) ? saved.interval : '1d';

@@ -77,7 +77,11 @@ export function planTimeframe(request: BarsRequest, market: TimeframeMarket): Ti
   for (const { source } of covered) {
     const plan: TimeframePlan = { interval: request.interval, source, native: false, market };
     const probe = session ? Math.max(instant, session.open) : instant;
-    const bounds = source.bounds(probe), bucket = timeframeBucketAt(plan, probe);
+    const bucket = timeframeBucketAt(plan, probe);
+    // A candle inside a bucket can fit by accident while the next crosses its
+    // edge. Intraday divisibility must also hold at the target opening.
+    const edge = target.mode === 'interval' && target.seconds < 86400 ? bucket?.from ?? probe : probe;
+    const bounds = source.bounds(edge);
     if (bounds && bucket && bounds.from >= bucket.from && bounds.to <= bucket.to && bounds.to > bounds.from) return plan;
   }
   throw new Error(`Unknown or incompatible source alignment for ${request.interval}`);
