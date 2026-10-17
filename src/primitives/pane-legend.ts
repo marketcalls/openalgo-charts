@@ -1,7 +1,7 @@
 /**
  * Pane legend (ARCHITECTURE.md §8): the row at the top-left
  * of a pane: a color swatch, the source's name, its parameters, the value under
- * the crosshair, and inline action buttons on the right.
+ * the crosshair, and inline action buttons before the changing readings.
  *
  * Drawn on the canvas rather than in the DOM, like `BuySellButtons` and
  * `DomLadder`, so it composites into screenshots and costs no DOM per pane.
@@ -551,6 +551,7 @@ export class PaneLegend implements IPrimitive {
       groups.push({ parts: [title], priority: 0 });
     }
     if (o.params !== undefined && o.params !== '') groups.push({ parts: [text(o.params, dimText, false, GAP)], priority: -3 });
+    const prefixCount = groups.length;
     if (data.marketStatus !== undefined && s.marketStatus !== false) {
       reading(data.marketStatus, dimText, -4);
     }
@@ -563,14 +564,19 @@ export class PaneLegend implements IPrimitive {
       reading(data.lastDayChange, valueColor, -2);
     }
     ctx.font = `600 ${f}px ${FONT}`;
-    const segs = fitGroups(ctx, groups, title, Math.max(0, available - actionWidth));
+    const textWidth = Math.max(0, available - actionWidth);
+    // Fit the label independently: changing readings must not shorten the title
+    // or move a button while the pointer is approaching it.
+    const prefix = actions.length ? fitGroups(ctx, groups.splice(0, prefixCount), title, textWidth) : [];
+    const prefixWidth = prefix.reduce((sum, part) => sum + part.w + part.gap, 0);
+    const segs = [...prefix, ...fitGroups(ctx, groups, actions.length ? undefined : title, Math.max(0, textWidth - prefixWidth))];
 
     // The plate goes down before a single glyph does, which is the whole point
     // of measuring first: text over plate, never plate over text.
     const last = segs[segs.length - 1];
     if (s.background === true && last !== undefined) {
       const pad = 4 * dpr;
-      const w = segs.reduce((a, sg) => a + sg.w + sg.gap, 0) - last.gap + pad * 2;
+      const w = segs.reduce((a, sg) => a + sg.w + sg.gap, 0) + actionWidth - last.gap + pad * 2;
       ctx.globalAlpha = 1;
       ctx.fillStyle = withAlpha(s.backgroundColor ?? rc.theme.background, s.backgroundOpacity ?? 0.8);
       ctx.beginPath();
@@ -579,7 +585,9 @@ export class PaneLegend implements IPrimitive {
       ctx.globalAlpha = dim ? 0.45 : 1;
     }
 
-    for (const sg of segs) {
+    for (let i = 0; i < segs.length; i++) {
+      if (i === prefix.length) x += actionWidth;
+      const sg = segs[i]!;
       if (sg.k === 'text') {
         ctx.font = `${sg.bold ? '600 ' : ''}${f}px ${FONT}`;
         ctx.fillStyle = sg.color;
@@ -594,6 +602,8 @@ export class PaneLegend implements IPrimitive {
       }
       x += sg.w + sg.gap;
     }
+    this._width = x / dpr;
+    x = x0 + prefixWidth;
 
     // Actions appear on hover only, so a row of legends reads as clean text
     // until you approach one. The row itself hit-tests (as `::row`), which is
@@ -627,7 +637,7 @@ export class PaneLegend implements IPrimitive {
       }
     }
 
-    this._width = x / dpr;
+    this._width = Math.max(this._width, x / dpr);
     ctx.restore();
   }
 

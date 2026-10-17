@@ -14,6 +14,7 @@ import {
 } from '../src/widget/index';
 import { fakeWidgetDocument, fakeContainer, fireKey, fire, ensureWindowGlobal, type FakeDocument, type FakeElement } from './helpers/fake-dom-widget';
 import { chromeIconSvg } from 'openalgo-charts/draw';
+import 'openalgo-charts/indicators';
 
 beforeAll(ensureWindowGlobal);
 
@@ -140,6 +141,58 @@ describe('default candle density', () => {
 });
 
 describe('the frame', () => {
+  it('opens settings for the requested legend instance and closes on removal or destroy', () => {
+    const { w, root } = make();
+    w.chart.addIndicator('sma');
+    const study = w.chart.addIndicator('ema');
+    const event = { instanceId: study.id, indicatorId: study.indicatorId, paneIndex: study.paneIndex };
+    w.chart.emit('indicatorSettings', event);
+    expect(root.querySelector('.oac-indset')).not.toBeNull();
+    expect(root.querySelector('.oac-dialog__title')?.textContent).toContain(study.name);
+    study.remove();
+    expect(root.querySelector('.oac-indset')).toBeNull();
+    const next = w.chart.addIndicator('sma');
+    w.chart.emit('indicatorSettings', { instanceId: next.id, indicatorId: next.indicatorId, paneIndex: next.paneIndex });
+    expect(w.context.overlays.size()).toBe(1);
+    w.destroy();
+    expect(w.context.overlays.size()).toBe(0);
+    w.chart.emit('indicatorSettings', event);
+    expect(w.context.overlays.size()).toBe(0);
+  });
+
+  it('declines stale or protected legend settings requests', () => {
+    const { w, root } = make();
+    const study = w.chart.addIndicator('ema', {}, { policy: { configurable: false } });
+    const event = { instanceId: study.id, indicatorId: study.indicatorId, paneIndex: study.paneIndex };
+    w.chart.emit('indicatorSettings', event);
+    expect(root.querySelector('.oac-indset')).toBeNull();
+    study.remove();
+    w.chart.emit('indicatorSettings', event);
+    expect(root.querySelector('.oac-indset')).toBeNull();
+  });
+
+  it('uses the registered indicator dialog and passes the requested instance on its anchor', () => {
+    const previous = widgetDialog('indicatorSettings');
+    const mount = vi.fn((_ctx: WidgetContext, _anchor?: HTMLElement) => ({ close: () => {} }));
+    const undo = registerWidgetDialog('indicatorSettings', mount);
+    try {
+      const { w, root, chartEl } = make();
+      const study = w.chart.addIndicator('ema');
+      const event = { instanceId: study.id, indicatorId: study.indicatorId, paneIndex: study.paneIndex };
+      w.chart.emit('indicatorSettings', event);
+      expect(mount).toHaveBeenCalledWith(w.context, chartEl);
+      expect(chartEl.dataset.instanceId).toBe(study.id);
+      expect(root.querySelector('.oac-indset')).toBeNull();
+      undo();
+      w.chart.emit('indicatorSettings', event);
+      expect(mount).toHaveBeenCalledTimes(1);
+      expect(root.querySelector('.oac-indset')).toBeNull();
+    } finally {
+      undo();
+      if (previous) registerWidgetDialog('indicatorSettings', previous);
+    }
+  });
+
   it('names drawing rows the way the rail and the properties title do', () => {
     const { w } = make();
     const at = [{ time: 1, price: 2 }];

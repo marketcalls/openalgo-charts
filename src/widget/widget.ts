@@ -1356,6 +1356,10 @@ class WidgetImpl implements Widget {
 
   /** Every change that lands in `getState` schedules a save and a layout notice. */
   private _followChart(): void {
+    this._cleanups.push(this.chart.on('indicatorSettings', ({ instanceId }) => {
+      this._chartEl.dataset.instanceId = instanceId;
+      this._openDialog('indicatorSettings', this._chartEl);
+    }));
     const chartEvents = ['paneAdded', 'paneResized', 'paneMoved', 'paneMaximized', 'paneCollapsed', 'paneRemoved', 'indicatorRemoved', 'indicatorSettings', 'priceAxisMoved', 'objects:change'] as const;
     for (const ev of chartEvents) {
       this._cleanups.push(this.chart.on(ev, () => {

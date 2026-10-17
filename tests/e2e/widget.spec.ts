@@ -172,17 +172,11 @@ test('the legend buttons painted on the canvas say what they do under the pointe
   const tip = page.locator('.oac-tip.is-on');
   for (const [action, said] of [['hide', `Hide ${name}`], ['settings', `Settings for ${name}`], ['close', `Remove ${name}`]] as const) {
     await page.mouse.move((await where(action)).row.x, (await where(action)).row.y);
-    let at = (await where(action)).at;
+    const at = (await where(action)).at;
     expect(at, action).not.toBeNull();
-    // The controls reveal on hover and can shift as they do; follow them until they hold still.
-    for (let tries = 0; tries < 4; tries++) {
-      await page.mouse.move(at!.x, at!.y);
-      const next = (await where(action)).at!;
-      const settled = Math.abs(next.x - at!.x) < 0.5 && Math.abs(next.y - at!.y) < 0.5;
-      at = next;
-      if (settled) break;
-    }
+    await page.mouse.move(at!.x, at!.y);
     await expect(tip).toHaveText(said);
+    expect((await where(action)).at).toEqual(at);
   }
   // Off the buttons, the label goes.
   await page.mouse.move(10, 690);
