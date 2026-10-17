@@ -71,6 +71,9 @@ for (const width of [1280, 480]) {
     await page.keyboard.press('Escape');
     await expect(page.locator('.oac-indset')).toHaveCount(0);
     const hide = before.buttons.find(button => button.id.endsWith('::hide'))!;
+    await page.mouse.move(hide.x, hide.y);
+    await paint(page);
+    expect((await geometry(page)).buttons).toEqual(before.buttons);
     await page.mouse.click(hide.x, hide.y);
     expect(await page.evaluate(() => window.__legendActions.study.visible())).toBe(false);
     await paint(page);

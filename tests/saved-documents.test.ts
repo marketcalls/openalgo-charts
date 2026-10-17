@@ -134,6 +134,7 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
     '2.5.1': [...SAVED_SINCE_254, TIMEFRAME, { path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
     '2.6.0': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
     '2.6.4': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
+    '2.6.5': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
   },
   'widget-state': {
     '2.5.1': [
@@ -155,6 +156,11 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
       { path: 'chart.barSpacing', change: 'changed', why: PLOT_WIDTH },
       { path: 'savedBy', change: 'changed', why: 'the restored state records the current writer version' },
     ],
+    '2.6.5': [
+      { path: 'chart.canvas.grid', change: 'added', why: GRID_MIRROR },
+      { path: 'chart.barSpacing', change: 'changed', why: PLOT_WIDTH },
+      { path: 'savedBy', change: 'changed', why: 'the restored state records the current writer version' },
+    ],
   },
   'widget-storage': {
     '2.5.1': [
@@ -167,8 +173,9 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
     ],
     '2.6.0': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'added', why: SAVED_BY }, ...under('oac-widget:compat:state', [DRAG])],
     '2.6.4': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'changed', why: 'the restored state records the current writer version' }],
+    '2.6.5': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'changed', why: 'the restored state records the current writer version' }],
   },
-  'workspace-catalog': { '2.5.1': OPENED, '2.6.0': OPENED, '2.6.4': OPENED },
+  'workspace-catalog': { '2.5.1': OPENED, '2.6.0': OPENED, '2.6.4': OPENED, '2.6.5': OPENED },
 };
 const named = (doc: string, version: string): readonly Named[] => CHANGES[doc]?.[version] ?? [];
 

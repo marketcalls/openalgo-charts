@@ -565,6 +565,12 @@ See [markers](/docs/primitives-and-plugins#markers--event-badges) for the shape 
 
 ## Source access and legend controls
 
+From 2.6.6, hovered legend controls appear after the name and parameters and before
+the values. Their positions stay fixed when the readings change, including while
+moving the pointer across candles. Narrow rows shorten the label independently of
+the values and omit readings that cannot fit whole. Try the
+[stationary controls example](/docs/widget#stationary-indicator-controls).
+
 Set `IndicatorDescriptor.hasSource: true` when the host can show the indicator's code.
 Its legend then offers a source button beside settings. Clicking it emits
 `indicatorSource` with `{ instanceId, indicatorId, paneIndex }`; the engine stores no

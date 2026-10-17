@@ -272,9 +272,10 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // curve per event, and a log scale pads in log space, which every chart
 // carries: 89391 bytes (87.30 KiB), up 111; allow 87.30 KiB, the first
 // hundredth at or above it.
-// 2.6.5 measures 89419 bytes. Keep the byte ceiling exact rather than giving
+// 2.6.6 measures 89437 bytes, up 18 for stable legend actions and the version.
+// Keep the byte ceiling exact rather than giving
 // a rounded KiB display room that the measured build does not need.
-const LIMIT_BYTES = 89419;
+const LIMIT_BYTES = 89437;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

@@ -53,6 +53,10 @@ including repeated copies on the second chart. `hasSource` enables the button;
 uses `textContent` and offers no editing or execution. Removing its instance or
 rebuilding its chart closes the dialog.
 
+From 2.6.6, hovered legend controls sit after the name and parameters, before the
+readings. Changing values keep the buttons and click targets in place, including
+while moving across the chart. Narrow rows show only readings that fit whole.
+
 **Chart settings > Readout > Legend button size** changes all legend buttons on
 the selected chart from 12 to 28 pixels (default 16). Cancel restores the previous
 size. Each chart keeps its own choice across chart-type changes, reloads and saved

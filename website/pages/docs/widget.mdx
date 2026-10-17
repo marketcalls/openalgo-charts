@@ -12,7 +12,7 @@ import { Callout } from 'nextra/components'
 with a top bar (symbol, interval, chart type, theme, settings, indicators, objects, alerts), a drawing rail
 down the left, a status line, the dialogs behind each of those buttons, keyboard shortcuts
 with a `?` panel that lists them, and optional persistence of the layout. It is one of nine
-loadable tiers (**125.89 kB** Brotli in 2.6.5) and the only tier that supplies
+loadable tiers (**125.84 kB** Brotli in 2.6.6) and the only tier that supplies
 application controls.
 
 The rail's last button folds it away and gives the chart its width; a small tab at the
@@ -41,6 +41,23 @@ menu after the chart is ready. Applications with their own controls can call
 // Without a feed the host puts bars on the primary series itself.
 const bars = lib.generateBars(1700000000, 240, 3600);
 widget.series.setData(bars);
+widget.chart.timeScale.fitContent(160);
+return widget;`} />
+
+## Stationary indicator controls
+
+From 2.6.6, a hovered indicator legend places its controls after the name and
+parameters, before the changing values. Moving across candles or updating a
+reading keeps the buttons in place. Narrow rows fit the label independently and
+show only complete readings that fit after the controls.
+Settings opens the selected instance through the existing indicator-dialog
+registry, including a host's registered replacement.
+
+<RunnableExample height={480} tiers={['widget', 'indicators']} caption="Hover the MACD legend and move to Settings. The controls stay in place as the readings change." code={`const widget = lib.createWidget(el, {
+  symbol: 'DEMO', exchange: 'NSE', interval: '1h',
+});
+widget.series.setData(lib.generateBars(1700000000, 240, 3600));
+widget.chart.addIndicator('macd');
 widget.chart.timeScale.fitContent(160);
 return widget;`} />
 
@@ -930,14 +947,14 @@ exact version, never a range or no version at all (see
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.6.5 build, decimal
+Budgets from `.size-limit.json` and measurements from the 2.6.6 build, decimal
 Brotli kB, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 125.90 kB | 125.89 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 125.84 kB | 125.84 kB |
 | Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.00 kB | 21.00 kB |
-| Widget terminal | base + draw + indicators + widget | 365.19 kB | 365.19 kB |
+| Widget terminal | base + draw + indicators + widget | 365.24 kB | 365.24 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.

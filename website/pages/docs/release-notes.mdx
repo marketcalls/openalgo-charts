@@ -8,6 +8,57 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.6.6
+
+2026-10-17
+
+Indicator controls stay under the pointer as readings change, and the packaged
+widget opens the selected study's settings from its legend.
+
+### Fixed
+
+- **Stationary legend controls.** Settings, Hide and Delete follow the name and
+  parameters, before changing values. Narrow rows fit the label independently
+  and show complete readings that fit. Crosshair and live updates keep the same
+  click targets. Resolves issue #64.
+- **Selected study settings.** The widget routes legend requests through its
+  existing dialog registry. Custom replacements and protected-study behavior
+  remain supported; removal and destruction close the dialog.
+- **Direct hover checks.** Browser tests click fixed coordinates while readings
+  change. The tooltip test no longer follows a shifting button.
+
+Try [the live indicator legend example](/docs/widget#stationary-indicator-controls).
+
+### Compatibility and size
+
+Public signatures and saved-state formats are unchanged. Published 2.6.5 joins
+the retained declaration and saved-document baselines, including OpenAlgo's
+2.6.4 pin. Hosts with their own interface receive the engine's legend fix.
+
+Base 137.94 kB Brotli, base + trade 154.82 kB, widget 125.84 kB and all tiers
+427.86 kB. The base adds 106 bytes and the widget removes 55 bytes versus
+published 2.6.5; the other seven tiers keep their compressed sizes. No public
+exports or runtime dependencies are added.
+
+The chart-only import measures 89,437 bytes (87.34 KiB), 18 bytes more than 2.6.5.
+
+### Performance
+
+Five runs of each version on one dedicated 4-vCPU Linux runner, with
+headless Chromium 149.0.7827.55 and software GL (SwiftShader). At 200,000 bars, the lowest
+Canvas 2D p95 pan, full zoom-out and ten-study tick are 7.4, 114.9, 256.9 ms
+against 7.1, 112.6, 256.3 ms for 2.6.5. This release changes legend layout
+and widget event handling; these differences do not establish a general
+rendering speedup. See the [same-session benchmark](/benchmarks#266).
+
+### Tests
+
+11,744 engine tests across 519 files and 730 reference-host tests across
+68 files. The new legend cases pass in Chromium, Firefox and WebKit.
+The packed candidate passes 1,248 OpenAlgo trading tests, typecheck, a
+production build and 22 trading-page checks in each browser, including
+hovered readings during live updates. Broker traffic is synthetic.
+
 ## 2.6.5
 
 2026-10-17

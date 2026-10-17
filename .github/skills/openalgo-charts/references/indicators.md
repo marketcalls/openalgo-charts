@@ -369,6 +369,11 @@ shows the study frozen at its last whole write.
 
 ## Source access and legend sizing (2.4.6)
 
+Since 2.6.6, hovered legend actions sit after the title and parameters, before
+changing readings. The fitted prefix does not depend on value width, so the
+controls and hit targets stay stationary during crosshair and readout updates.
+Narrow rows retain whole readings that fit after the controls.
+
 `IndicatorDescriptor.hasSource: true` adds a source button beside the legend's settings
 button. It emits `indicatorSource` with `{ instanceId, indicatorId, paneIndex }`.
 The host owns the code and must handle the event to display it; the engine neither
