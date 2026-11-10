@@ -1,5 +1,5 @@
 import * as engine from '/dist/openalgo-charts.mjs';
-import { el, esc } from './ui.js';
+import { el, esc, markOverflow } from './ui.js';
 import { renderInputRows, destroyInputRows } from './indicators.js';
 import { descriptionOf, exchangeOf, marketStatusReading, previousSessionClose } from './status.js';
 import { syncTimezoneFromChart } from './timezone.js';
@@ -125,6 +125,8 @@ export function renderChartSettings() {
     b.addEventListener('click', () => { chartSetTab = t.id; renderChartSettings(); });
     nav.appendChild(b);
   }
+  // On a phone the tabs are one scrolling row, and its faded edge says there are more.
+  markOverflow(nav);
   const tab = tabs.find((t) => t.id === chartSetTab) || tabs[0];
   if (!tab) return;
   renderInputRows(el('cset-body'), tab.inputs, values, (key, value) => {

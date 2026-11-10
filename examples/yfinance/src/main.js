@@ -12,7 +12,7 @@ import { createChart, PaneLegend } from '/dist/openalgo-charts.mjs';
 import '/dist/openalgo-charts.indicators.mjs';
 // The bottom bar and its ranges, read off the namespace like the engine's newer surfaces below.
 import * as widgetTier from '/dist/openalgo-charts.widget.mjs';
-import { el, initShell, chartTheme, chartMotionOptions, setChartState, toast, currentTheme } from './ui.js';
+import { el, initShell, chartTheme, chartMotionOptions, setChartState, currentTheme } from './ui.js';
 import { initHover } from './hover.js';
 import { fillIntervalSelect, clampPeriod, rangeLoad, ensureIntervalOption } from './intervals.js';
 import { initFeed, fetchBars, fetchNote, feedErrorState } from './feed.js';
@@ -577,9 +577,11 @@ async function load(opts) {
       setChartState('unsupported', { ...app.req, message: fault.message, retry: () => { el('session').value = 'regular'; load(opts); } });
       return;
     }
-    status.textContent = 'error: ' + fault.message;
+    // The card on the stage names the request, gives the cause and holds the
+    // retry, and no toast repeats it beside the card. The readout keeps the
+    // cause too, in its one line, because Dismiss takes the card away.
+    status.textContent = `${app.req.symbol} ${app.req.interval} did not load: ${fault.message}`;
     setChartState('error', { ...app.req, message: fault.message, retry: () => load(opts) });
-    toast('error', `Could not load ${app.req.symbol}: ${fault.message}`);
   } finally {
     if (revision === loadRevision) {
       app.loading = false;

@@ -215,7 +215,7 @@ export const WIDGET_CSS = `
 /* Rail */
 .oac-widget .oac-rail { flex: none; width: ${v('rail-w')}; display: flex; flex-direction: column; align-items: center;
   gap: 2px; padding: 6px 0 0; background: ${v('panel-2')}; border-right: 1px solid ${v('bd-soft')};
-  overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+  overflow-y: auto; overflow-x: hidden; scrollbar-width: none; container: oac-rail / size; }
 .oac-widget .oac-rail::-webkit-scrollbar { width: 0; height: 0; }
 .oac-widget .oac-rail__btn { position: relative; width: 32px; height: 30px; padding: 0; display: grid; place-items: center;
   flex: none; background: transparent; border: 1px solid transparent; border-radius: 6px; color: ${v('mut')};
@@ -234,6 +234,13 @@ export const WIDGET_CSS = `
 .oac-widget .oac-rail__btn:hover .oac-rail__chev, .oac-widget .oac-rail__btn:focus-visible .oac-rail__chev,
 .oac-widget .oac-rail__btn[aria-expanded="true"] .oac-rail__chev { opacity: 1; }
 .oac-widget .oac-rail__chev:hover { background: ${v('elev-2')}; color: ${v('tx')}; }
+/* A notch in the corner of a button that opens a flyout, so the rail says which
+   buttons hold more before the pointer finds out. The caret shows only on hover,
+   over the glyph's corner, and at rest it would sit on every glyph's anchor. */
+.oac-widget .oac-rail__group::before { content: ''; position: absolute; right: 2px; bottom: 2px;
+  border: 2.5px solid transparent; border-right-color: ${v('faint')}; border-bottom-color: ${v('faint')}; }
+.oac-widget .oac-rail__group:hover::before, .oac-widget .oac-rail__group:focus-visible::before,
+.oac-widget .oac-rail__group[aria-expanded="true"]::before { content: none; }
 .oac-widget .oac-rail__btn.is-held::after, .oac-widget .oac-rail__btn[data-mode="weak"]::after,
 .oac-widget .oac-rail__btn[data-mode="strong"]::after { content: ''; position: absolute; top: 3px; right: 3px;
   width: 5px; height: 5px; border-radius: 50%; }
@@ -248,6 +255,14 @@ export const WIDGET_CSS = `
 .oac-widget .oac-rail__ctl::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 14px;
   background: linear-gradient(to bottom, transparent, ${v('panel-2')}); pointer-events: none; }
 .oac-widget .oac-rail__ctl .oac-rail__sep { margin: 3px 0; }
+/* The controls are as tall as a short chart's whole rail: pinned to its foot in
+   one cell of a two by two grid, they covered every tool, and the rail showed
+   no way to draw. A rail that cannot show five tools above them lets them go
+   and scrolls as one column, tools first. */
+@container oac-rail (max-height: 450px) {
+  .oac-widget .oac-rail__ctl { position: static; margin-top: 0; }
+  .oac-widget .oac-rail__ctl::before { content: none; }
+}
 .oac-widget .oac-rail.is-collapsed { display: none; }
 .oac-widget .oac-rail-tab { position: absolute; left: 0; bottom: 6px; z-index: 6; width: 16px; height: 26px; padding: 0;
   display: grid; place-items: center; background: ${v('panel-2')}; color: ${v('mut')};
@@ -366,6 +381,11 @@ export const WIDGET_CSS = `
 .oac-widget .oac-toast__x > svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 .oac-widget .oac-toast.is-out { opacity: 0; transform: translateY(6px); transition: opacity .16s, transform .16s; }
 @keyframes oac-toast-in { from { opacity: 0; transform: translateY(6px); } }
+/* A menu, a flyout or a dialog arrives over a tenth of a second, where it used
+   to cut in on the next frame. Opacity and nothing else: a dialog is centred by
+   its transform and a menu is placed by measuring it the moment it opens. */
+.oac-widget .oac-menu, .oac-widget .oac-fly, .oac-widget .oac-dialog { animation: oac-pop-in .1s ease-out; }
+@keyframes oac-pop-in { from { opacity: 0; } }
 
 /* Overlay layer: popovers anchored to a control, dialogs centred over a scrim. */
 .oac-widget .oac-layer { container: oac-widget / inline-size; position: absolute; inset: 0; z-index: 60; pointer-events: none; }
@@ -419,11 +439,10 @@ export const WIDGET_CSS = `
 @media (max-width: 720px) {
   .oac-widget .oac-sym > input { width: 104px; }
 }
+/* Everything, not a list: the list named six selectors and missed the form
+   controls, which went on easing their colours for a user who asked for none. */
 @media (prefers-reduced-motion: reduce) {
-  .oac-widget .oac-rail__btn, .oac-widget .oac-rail__chev, .oac-widget .oac-tip, .oac-widget .oac-fly__star,
-  .oac-widget .oac-btn, .oac-widget .oac-toast.is-out { transition: none; }
-  .oac-widget .oac-toast { animation: none; }
-  .oac-widget .oac-mobile__action { transition: none; }
+  .oac-widget *, .oac-widget *::before, .oac-widget *::after { transition: none !important; animation: none !important; }
 }
 `;
 

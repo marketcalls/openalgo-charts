@@ -1,4 +1,4 @@
-import { el, esc, currentTheme, toggleTheme, plural } from './ui.js';
+import { el, esc, currentTheme, toggleTheme, plural, markOverflow } from './ui.js';
 import { attachTip, hideTip } from './hover.js';
 import { cycleMagnet, magnetMode, focusChart, syncNavigationControls, applyRailCollapsed } from './rail.js';
 import { INTERVALS, intervalLabel, intervalName, periodsFor, clampPeriod, ensureIntervalOption } from './intervals.js';
@@ -18,6 +18,7 @@ import { autosave } from './persist.js';
 import { rememberIndicators, renderIndicatorChips } from './indicators.js';
 import { recordChartType, withoutHistory } from './history.js';
 import { mountSymbolPicker, mountIndicatorPicker, openTimeframeMenu } from '/dist/openalgo-charts.widget.mjs';
+import { chromeIconSvg } from '/dist/openalgo-charts.draw.mjs';
 import { referenceSymbolSearch } from './symbol-search.js';
 import { toggleInspection } from './inspection.js';
 import { openGoTo } from './goto.js';
@@ -54,13 +55,6 @@ export const TOOLBAR_ICON = {
   search: '<circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/>',
   download: '<path d="M10 3v9m0 0 3.2-3.2M10 12 6.8 8.8"/><path d="M3.5 14v2.5h13V14"/>',
   copy: '<rect x="6.5" y="6.5" width="9" height="9" rx="1.5"/><path d="M13 4.5H5A1.5 1.5 0 0 0 3.5 6v8"/>',
-  candles: '<path d="M6 4v12M6 6h0"/><rect x="4" y="6" width="4" height="7"/><path d="M14 3v14"/><rect x="12" y="6" width="4" height="8"/>',
-  bars: '<path d="M6 4v12M6 7h3M3 10h3"/><path d="M14 4v12M14 7h3M11 10h3"/>',
-  line: '<path d="M3 14l4-5 4 3 6-8"/>',
-  area: '<path d="M3 15l4-5 4 3 6-8v10z"/>',
-  baseline: '<path d="M3 10h14"/><path d="M3 13l4-5 4 3 6-6"/>',
-  renko: '<rect x="3" y="10" width="4" height="5"/><rect x="8" y="6" width="4" height="5"/><rect x="13" y="3" width="4" height="5"/>',
-  pnf: '<path d="M3 4l4 4M7 4l-4 4"/><circle cx="10" cy="12" r="2"/><path d="M14 4l4 4M18 4l-4 4"/>',
   indicators: '<path d="M3 15l3-6 3 3 3-7 3 5 2-2"/>',
   save: '<path d="M4 4h9l3 3v9H4z"/><path d="M7 4v4h6V4M7 16v-5h6v5"/>',
   restore: '<path d="M4 10a6 6 0 1 1 2 4.5"/><path d="M3 6v4h4"/>',
@@ -102,32 +96,42 @@ export const TOOLBAR_ICON = {
   sun: '<circle cx="10" cy="10" r="3.6"/><path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1L4.7 4.7"/>',
   moon: '<path d="M16.5 12.2A6.6 6.6 0 0 1 7.8 3.5a6.6 6.6 0 1 0 8.7 8.7z"/>',
 };
-export const ticon = (k) => '<svg viewBox="0 0 20 20">' + (TOOLBAR_ICON[k] || '') + '</svg>';
+/**
+ * The markup for an icon key. A `chart-<type>` key is one of the draw tier's
+ * chart-type glyphs, drawn on that tier's 16 grid at the bar's 17px box, so
+ * its line lands at the weight of the 20 grid icons beside it.
+ */
+export const ticon = (k) => (k.startsWith('chart-')
+  ? chromeIconSvg(k, { size: 17, className: 'tglyph' })
+  : '<svg viewBox="0 0 20 20">' + (TOOLBAR_ICON[k] || '') + '</svg>');
 
+// Each type carries the draw tier's glyph for it, the set the widget's menu
+// reads too. One picture per type: when three kinds of line shared a
+// silhouette, the menu left the words to tell them apart.
 export const CHART_TYPES = [
   { group: 'Time-indexed' },
-  { v: 'candlestick', label: 'Candles', icon: 'candles' },
-  { v: 'hollow-candle', label: 'Hollow candles', icon: 'candles' },
-  { v: 'bar', label: 'Bars', icon: 'bars' },
-  { v: 'high-low', label: 'High-low', icon: 'bars' },
-  { v: 'volume-candle', label: 'Volume candles', icon: 'candles' },
-  { v: 'line', label: 'Line', icon: 'line' },
-  { v: 'line-markers', label: 'Line with markers', icon: 'line' },
-  { v: 'step', label: 'Step line', icon: 'line' },
-  { v: 'area', label: 'Area', icon: 'area' },
-  { v: 'hlc-area', label: 'HLC area', icon: 'area' },
-  { v: 'baseline', label: 'Baseline', icon: 'baseline' },
+  { v: 'candlestick', label: 'Candles', icon: 'chart-candlestick' },
+  { v: 'hollow-candle', label: 'Hollow candles', icon: 'chart-hollow-candle' },
+  { v: 'bar', label: 'Bars', icon: 'chart-bar' },
+  { v: 'high-low', label: 'High-low', icon: 'chart-high-low' },
+  { v: 'volume-candle', label: 'Volume candles', icon: 'chart-volume-candle' },
+  { v: 'line', label: 'Line', icon: 'chart-line' },
+  { v: 'line-markers', label: 'Line with markers', icon: 'chart-line-markers' },
+  { v: 'step', label: 'Step line', icon: 'chart-step' },
+  { v: 'area', label: 'Area', icon: 'chart-area' },
+  { v: 'hlc-area', label: 'HLC area', icon: 'chart-hlc-area' },
+  { v: 'baseline', label: 'Baseline', icon: 'chart-baseline' },
   { group: 'Transforms' },
-  { v: 't:heikin-ashi', label: 'Heikin Ashi', icon: 'candles' },
-  { v: 't:renko', label: 'Renko', icon: 'renko' },
-  { v: 't:range', label: 'Range bars', icon: 'renko' },
-  { v: 't:line-break', label: 'Line break', icon: 'renko' },
-  { v: 't:point-figure', label: 'Point and figure', icon: 'pnf' },
-  { v: 't:kagi', label: 'Kagi', icon: 'line' },
+  { v: 't:heikin-ashi', label: 'Heikin Ashi', icon: 'chart-heikin-ashi' },
+  { v: 't:renko', label: 'Renko', icon: 'chart-renko' },
+  { v: 't:range', label: 'Range bars', icon: 'chart-range-bars' },
+  { v: 't:line-break', label: 'Line break', icon: 'chart-line-break' },
+  { v: 't:point-figure', label: 'Point and figure', icon: 'chart-point-figure' },
+  { v: 't:kagi', label: 'Kagi', icon: 'chart-kagi' },
 ];
 
 export const chartTypeLabel = (v) => (CHART_TYPES.find((t) => t.v === v) || { label: 'Candles' }).label;
-export const chartTypeIcon = (v) => (CHART_TYPES.find((t) => t.v === v) || { icon: 'candles' }).icon;
+export const chartTypeIcon = (v) => (CHART_TYPES.find((t) => t.v === v) || { icon: 'chart-candlestick' }).icon;
 
 /** Link metadata for the chart's active branding, or null when it has no link. */
 export function brandingLink(chart) {
@@ -286,7 +290,19 @@ export function renderToolbar() {
     + '<path d="M3 17.5 9 7l4 6.5L21 3v4.2l-8 10.3-4-6.5-3.6 6.5z"/></svg></span>'
     + '<span class="brand-name">OpenAlgo <em>yfinance</em></span>';
   bar.appendChild(brand);
-  bar.appendChild(divider());
+
+  // The bar is a row of named clusters. Each is one box, so a bar that wraps
+  // breaks between two clusters and never inside one, and the rule between
+  // them is the cluster's own edge (styles.css), which a row's first cluster
+  // does not show: a separate divider node would be left hanging there.
+  const cluster = (label) => {
+    const group = document.createElement('div');
+    group.className = 'tgroup';
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', label);
+    bar.appendChild(group);
+    return group;
+  };
 
   if (isSplit()) {
     const selection = tbtn('Chart ' + pane, 'Selected chart');
@@ -299,8 +315,22 @@ export function renderToolbar() {
         el(index === 2 ? 'chart2' : 'chart').focus();
       },
     }))));
+    // A child of the bar, not of a cluster: it is sticky against the bar's scroll.
     bar.appendChild(selection);
   }
+
+  // In reading order: what is charted and over what time, how it is drawn,
+  // how the plot is framed, what is read off it (the dock panels, then the
+  // alert and event lists), working with the session on screen, the simulated
+  // orders, and what the page keeps. Made here, in that order, because the
+  // code below fills them in the order the controls were written.
+  const instrument = cluster('Symbol and time');
+  const setup = cluster('Chart setup');
+  const view = cluster('View');
+  const inspect = cluster('Inspection');
+  const tools = cluster('Session tools');
+  const trading = cluster('Simulated trading');
+  const workspace = cluster('Settings and layouts');
 
   // symbol
   const sym = tbtn(ticon('search') + '<b>' + esc((request.symbol || '').toUpperCase()) + '</b>', 'Change symbol');
@@ -335,8 +365,7 @@ export function renderToolbar() {
       changeRequest(target, { symbol: query.toUpperCase() });
     });
   });
-  bar.appendChild(sym);
-  bar.appendChild(divider());
+  instrument.appendChild(sym);
 
   // interval pills
   const ig = document.createElement('div');
@@ -352,7 +381,7 @@ export function renderToolbar() {
     b.addEventListener('click', () => changeRequest(target, { interval: iv }));
     ig.appendChild(b);
   }
-  bar.appendChild(ig);
+  instrument.appendChild(ig);
   const intervals = tbtn(ticon('chevron'), 'Timeframes');
   intervals.id = 'timeframe-menu';
   intervals.addEventListener('click', () => {
@@ -364,7 +393,7 @@ export function renderToolbar() {
       onSelect: code => changeRequest(target, { interval: code }),
     });
   });
-  bar.appendChild(intervals);
+  instrument.appendChild(intervals);
 
   // range menu
   const range = tbtn('<span>' + esc(request.period || '') + '</span>' + ticon('chevron'), 'History range');
@@ -374,7 +403,7 @@ export function renderToolbar() {
     label: p, on: p === request.period,
     onSelect: () => changeRequest(target, { period: p }),
   }))));
-  bar.appendChild(range);
+  instrument.appendChild(range);
   // Trading session. Extended hours are the source's own pre and post market
   // bars, served only for intraday bars of a US listed stock, so the row is
   // greyed with the reason everywhere else. A chart already on extended hours
@@ -395,7 +424,7 @@ export function renderToolbar() {
       reason: extendedServed ? '' : `Not available for ${request.symbol || 'this symbol'} at ${request.interval}`,
       onSelect: () => changeRequest(target, { session: 'extended' }) },
   ], { role: 'menu' }));
-  bar.appendChild(sessionButton);
+  instrument.appendChild(sessionButton);
   // Go to a date or range, loading a longer period when the date is older
   // than the one on screen.
   const goTo = tbtn('<span>Go to</span>', 'Go to a date or range', 'Loads older history when it is needed');
@@ -403,8 +432,7 @@ export function renderToolbar() {
   goTo.setAttribute('aria-haspopup', 'dialog');
   goTo.disabled = !target?.current() || Boolean(pane === 2 ? app.loading2 || app.loadFailed2 : app.loading || app.loadFailed);
   goTo.addEventListener('click', () => openGoTo(goTo));
-  bar.appendChild(goTo);
-  bar.appendChild(divider());
+  instrument.appendChild(goTo);
 
   // chart type menu
   const ct = tbtn(ticon(chartTypeIcon(ctype)) + '<span>' + esc(chartTypeLabel(ctype)) + '</span>' + ticon('chevron'), 'Chart type');
@@ -413,7 +441,7 @@ export function renderToolbar() {
     label: t.label, icon: t.icon, on: t.v === ctype,
     onSelect: () => changeType(target, { chartType: t.v }),
   }))));
-  bar.appendChild(ct);
+  setup.appendChild(ct);
 
   // The settings of a transform that has a dialog, beside the type, and only
   // while that type is the one drawn.
@@ -422,7 +450,7 @@ export function renderToolbar() {
     set.id = 'box-settings';
     set.setAttribute('aria-haspopup', 'dialog');
     set.disabled = ct.disabled;
-    bar.appendChild(set);
+    setup.appendChild(set);
   }
 
   // indicators
@@ -438,19 +466,19 @@ export function renderToolbar() {
       autosave();
     } });
   });
-  bar.appendChild(ind);
+  setup.appendChild(ind);
   const PANELS = { data: ['Data', 'Data window'], objects: ['Objects', 'Chart objects'], watchlist: ['Watchlist', 'Watchlists and quotes'], news: ['News', 'News for this symbol'] };
   for (const [panel, [label, title]] of Object.entries(PANELS)) {
     const control = tbtn(label, title);
     control.setAttribute('aria-pressed', String(app['inspection' + pane]?.dock.state().panel === panel));
     control.addEventListener('click', () => toggleInspection(pane, panel));
-    bar.appendChild(control);
+    inspect.appendChild(control);
   }
   const templates = tbtn('Templates', 'Indicator templates');
   templates.setAttribute('aria-label', 'Templates'); templates.setAttribute('aria-haspopup', 'dialog');
   templates.setAttribute('aria-controls', 'templatemodal');
   templates.addEventListener('click', () => { templates.focus(); app.openTemplates?.(); });
-  bar.appendChild(templates);
+  setup.appendChild(templates);
 
   // compare: a second instrument on the price pane
   const comparisons = comparisonState(target?.pane).items;
@@ -459,11 +487,14 @@ export function renderToolbar() {
   if (comparisons.length) cmp.classList.add('is-on');
   cmp.disabled = !target?.current() || Boolean(app[pane === 2 ? 'loading2' : 'loading'] || app[pane === 2 ? 'loadFailed2' : 'loadFailed']);
   cmp.addEventListener('click', () => openCompare(target));
-  bar.appendChild(cmp);
+  setup.appendChild(cmp);
 
   const alerts = tbtn('<span>Alerts</span>', 'Alerts');
   alerts.addEventListener('click', () => openAlerts(app));
-  bar.appendChild(alerts);
+  inspect.appendChild(alerts);
+  const events = tbtn('Events', 'Timeline events (sample data)');
+  events.addEventListener('click', event => { event.stopPropagation(); openTimelineMenu(app, events); });
+  inspect.appendChild(events);
 
   // replay: enter the session bar by bar, or leave and get the chart back
   const rp = tbtn(ticon('replay') + '<span>Replay</span>',
@@ -472,13 +503,16 @@ export function renderToolbar() {
   rp.disabled = !app.replay && !app.replayPicking && !app.replayLoading
     && (!target?.current() || Boolean(app[pane === 2 ? 'loading2' : 'loading'] || app[pane === 2 ? 'loadFailed2' : 'loadFailed']));
   rp.addEventListener('click', () => ((app.replay || app.replayPicking || app.replayLoading) ? askExitReplay() : enterReplay()));
-  bar.appendChild(rp);
+  tools.appendChild(rp);
 
   // Snapshot. The chart is a picture people share, and the two things they
   // do with it are save it and paste it, so both are one click from here.
   const snap = tbtn(ticon('camera'), 'Chart snapshot');
   snap.addEventListener('click', (e) => { e.stopPropagation(); openSnapMenu(snap); });
-  bar.appendChild(snap);
+  tools.appendChild(snap);
+  // The arrow the snapshot menu draws beside the same action: a second camera
+  // here read as a second copy of the button before it.
+  tools.appendChild(iconBtn('download', 'Save PNG', () => downloadSnapshot(target)));
 
   // Split view and the link switches. Two controls over one group: the
   // toggle opens the second chart, the menu decides what crosses between
@@ -489,17 +523,12 @@ export function renderToolbar() {
     : 'Split view needs a dist/ with chart linking',
     () => (isSplit() ? closeSplit() : openSplit()));
   if (isSplit()) sp.classList.add('is-on');
-  bar.appendChild(sp);
 
   const lk = iconBtn('link', app.linkGroup
     ? 'Chart linking (' + describeLink() + ')'
     : 'Chart linking needs a newer dist/',
     () => openLinkMenu(lk));
   if (app.linkGroup && isSplit() && describeLink() !== 'nothing synced') lk.classList.add('is-on');
-  bar.appendChild(lk);
-  const events = tbtn('Events', 'Timeline events (sample data)');
-  events.addEventListener('click', event => { event.stopPropagation(); openTimelineMenu(app, events); });
-  bar.appendChild(events);
 
   // Bar cache. The counter is the point: a feature you can only feel as
   // "that seemed quicker" is a feature nobody can check.
@@ -509,19 +538,17 @@ export function renderToolbar() {
       `Bar cache: ${s.hits} warm of ${plural(s.hits + s.misses, 'load')}, ${s.entries} series held`);
     if (s.hits > 0) cc.classList.add('is-on');
     cc.addEventListener('click', () => openCacheMenu(cc));
-    bar.appendChild(cc);
+    tools.appendChild(cc);
   }
-  bar.appendChild(divider());
 
-  // view + layout icons
   const fit = iconBtn('fit', 'Reset view', () => {
     if (currentTarget(target) && target.chart.navigationOptions?.().zoomEnabled !== false) target.chart.resetScale();
   });
   fit.id = 'toolbar-fit';
-  bar.appendChild(fit);
+  view.appendChild(fit);
   // Anchor on the button that was clicked: by the time the handler runs,
   // bar.lastChild is whatever the toolbar appended last, not this button.
-  bar.appendChild(iconBtn('grid', 'Grid', (ev) => {
+  view.appendChild(iconBtn('grid', 'Grid', (ev) => {
     if (!currentTarget(target)) return;
     const grid = target.chart.gridOptions();
     popupMenu(ev.currentTarget, [
@@ -541,31 +568,29 @@ export function renderToolbar() {
   const mg = iconBtn('magnet', 'Magnet: ' + magnetMode(), () => { cycleMagnet(); renderToolbar(); },
     'Snaps anchors to a bar or study value: off, weak, strong');
   if (magnetMode() !== 'off') mg.classList.add('is-on');
-  bar.appendChild(mg);
-  bar.appendChild(iconBtn('camera', 'Save PNG', () => downloadSnapshot(target)));
+  view.appendChild(mg);
   const fs = iconBtn(isChartFull() ? 'fullscreenExit' : 'fullscreen',
     isChartFull() ? 'Exit full screen (Esc)' : 'Full screen chart', toggleChartFullscreen);
   if (isChartFull()) fs.classList.add('is-on');
-  bar.appendChild(fs);
-  const light = currentTheme() === 'light';
-  bar.appendChild(iconBtn(light ? 'moon' : 'sun', light ? 'Dark theme' : 'Light theme', () => { toggleTheme(); renderToolbar(); }));
+  view.appendChild(fs);
+  view.appendChild(sp);
+  view.appendChild(lk);
 
   // Bracket entry. The buttons that own this live in the legacy sub-bar,
   // which is display:none, and a hidden ancestor takes its whole subtree out
   // of the box tree: they still fire when clicked programmatically, but a
   // user had no way to reach them, which also stranded the Trading tab's
   // entry and exit colours with nothing on the chart to recolour.
-  bar.appendChild(divider());
   const buy = tbtn('<b>Buy</b>', 'Place a Buy OCO bracket: entry, target and stop', pane === 2 ? 'Trading is available on Chart 1' : undefined);
   buy.disabled = pane === 2;
   buy.classList.add('tbtn--buy');
   buy.addEventListener('click', () => { if (pane === 1 && currentTarget(target)) el('buy').click(); });
-  bar.appendChild(buy);
+  trading.appendChild(buy);
   const sell = tbtn('<b>Sell</b>', 'Place a Sell OCO bracket: entry, target and stop', pane === 2 ? 'Trading is available on Chart 1' : undefined);
   sell.disabled = pane === 2;
   sell.classList.add('tbtn--sell');
   sell.addEventListener('click', () => { if (pane === 1 && currentTarget(target)) el('sell').click(); });
-  bar.appendChild(sell);
+  trading.appendChild(sell);
   // The sandbox broker: the trade tier's account, preview and native close
   // contract against a simulated provider, beside the page's own simulation.
   const account = tbtn('<span>Account</span>', 'Sandbox broker account',
@@ -574,17 +599,19 @@ export function renderToolbar() {
   account.disabled = pane === 2;
   account.setAttribute('aria-haspopup', 'dialog');
   account.addEventListener('click', () => { if (pane === 1 && currentTarget(target)) app.openAccount?.(account); });
-  bar.appendChild(account);
+  trading.appendChild(account);
 
-  bar.appendChild(divider());
-  bar.appendChild(iconBtn('gear', 'Chart settings (or right-click the chart)', () => openChartSettings(undefined, target)));
-  bar.appendChild(iconBtn('save', 'Save layout', () => el('lsave').click()));
+  workspace.appendChild(iconBtn('gear', 'Chart settings (or right-click the chart)', () => openChartSettings(undefined, target)));
+  workspace.appendChild(iconBtn('save', 'Save layout', () => el('lsave').click()));
   const layouts = tbtn('Layouts', 'Named layouts');
   layouts.setAttribute('aria-label', 'Layouts');
   layouts.setAttribute('aria-haspopup', 'dialog');
   layouts.setAttribute('aria-controls', 'workspacemodal');
   layouts.addEventListener('click', () => { layouts.focus(); app.openLayouts?.(); });
-  bar.appendChild(layouts);
+  workspace.appendChild(layouts);
+  // Last, and apart from the gear: a sun beside a cog is two spoked circles in a row.
+  const light = currentTheme() === 'light';
+  workspace.appendChild(iconBtn(light ? 'moon' : 'sun', light ? 'Dark theme' : 'Light theme', () => { toggleTheme(); renderToolbar(); }));
 
   const status = document.createElement('div');
   status.className = 'status';
@@ -595,6 +622,8 @@ export function renderToolbar() {
   // assign to #status directly and every one of them would have to remember.
   status.addEventListener('pointerenter', () => { status.title = statusText.textContent; });
   bar.appendChild(status);
+  // On a phone the bar is one scrolling row; its faded edge says which way more lies.
+  markOverflow(bar);
   syncNavigationControls();
   app.refreshWorkspaceControls?.();
 }
@@ -618,12 +647,6 @@ export function iconBtn(icon, title, onClick, sub) {
   b.addEventListener('click', onClick);
   return b;
 }
-export function divider() {
-  const d = document.createElement('span');
-  d.className = 'divider';
-  return d;
-}
-
 export function initToolbar(a) {
   app = a;
   app.changeRequest = changeRequest;

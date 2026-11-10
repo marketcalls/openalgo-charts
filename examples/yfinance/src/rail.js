@@ -3,7 +3,7 @@ import {
   iconSprite, toolCursor, DRAWING_TOOL_ICONS, BUILTIN_DRAWING_TOOLS,
   ICON_SIZE, ICON_STROKE, CHROME_ICON_SIZE, CHROME_ICON_STROKE,
 } from '/dist/openalgo-charts.draw.mjs';
-import { el, inTextField, MOD } from './ui.js';
+import { el, inTextField, MOD, markOverflow } from './ui.js';
 import {
   RAIL_FLYOUT_CSS, toolGlyph, chromeGlyph, attachRailTip, hideRailTip, refreshTipLabel,
   openFlyout, closeFlyout, flyoutOpen, flyoutEl, openRailMenu, closeRailMenu, railMenuOpen,
@@ -1089,12 +1089,15 @@ export function initMobile(a) {
   el('mobile-undo').addEventListener('click', () => { historyPress('undo'); syncMobileControls(activeDraw()?.activeTool()); });
   el('mobile-redo').addEventListener('click', () => { historyPress('redo'); syncMobileControls(activeDraw()?.activeTool()); });
   onHistoryChange(() => syncMobileControls(activeDraw()?.activeTool()));
-  el('mobile-magnet').addEventListener('click', () => { cycleMagnet(); syncMobileControls(activeDraw()?.activeTool()); });
+  // The magnet's label changes length with its mode, and with it how much of the bar is off screen.
+  el('mobile-magnet').addEventListener('click', () => { cycleMagnet(); syncMobileControls(activeDraw()?.activeTool()); markOverflow(el('mobilebar')); });
   el('mobile-zoom-out').addEventListener('click', () => zoomVisibleRange(activeChart(), 1.25));
   el('mobile-zoom-in').addEventListener('click', () => zoomVisibleRange(activeChart(), 0.8));
   el('mobile-fit').addEventListener('click', () => { const chart = activeChart(); if (chart && chart.navigationOptions?.().zoomEnabled !== false) chart.resetScale(); });
 
   el('mobilebar').addEventListener('pointerdown', (event) => event.stopPropagation());
+  // Eight controls in a phone's width: the faded edge says the row goes on.
+  markOverflow(el('mobilebar'));
   for (const [id, pane] of [['chart', 1], ['chart2', 2]]) {
     const node = el(id);
     if (!node) continue;
@@ -1124,8 +1127,8 @@ export const RAIL_CSS = `
 .rail .rail__btn:focus-visible { outline: 2px solid var(--acc-2); outline-offset: -2px; }
 .rail .rail__btn.is-on { background: var(--on-bg); border-color: var(--on-bd); color: var(--acc-2); }
 .rail .rail__btn.is-weak { color: var(--acc-2); }
-.rail .rail__btn.is-off { color: var(--faint); cursor: default; }
-.rail .rail__btn.is-off:hover { background: transparent; color: var(--faint); }
+.rail .rail__btn.is-off { color: var(--off); cursor: default; }
+.rail .rail__btn.is-off:hover { background: transparent; color: var(--off); }
 .rail .rail__btn--danger:not(.is-off):hover { color: var(--danger-tx); }
 .rail .rail__glyph { display: grid; place-items: center; width: ${ICON_SIZE}px; height: ${ICON_SIZE}px; line-height: 0; }
 .rail .rail__glyph > svg { width: ${ICON_SIZE}px; height: ${ICON_SIZE}px; fill: none; stroke: currentColor;
@@ -1139,6 +1142,14 @@ export const RAIL_CSS = `
 .rail .rail__btn:hover .rail__chev, .rail .rail__btn:focus-visible .rail__chev,
 .rail .rail__btn[aria-expanded="true"] .rail__chev { opacity: 1; }
 .rail .rail__chev:hover { background: var(--elev-2); color: var(--tx); }
+/* At rest a group is marked by a notch in its corner, so the rail says which
+   buttons hold more tools before the pointer finds them. The chevron stays
+   under the pointer only: at rest it would sit over the glyph's corner and
+   cover an anchor ring. It takes the notch's place when it shows. */
+.rail .rail__group::before { content: ''; position: absolute; right: 2px; bottom: 2px;
+  border: 2.5px solid transparent; border-right-color: var(--faint); border-bottom-color: var(--faint); }
+.rail .rail__group:hover::before, .rail .rail__group:focus-visible::before,
+.rail .rail__group[aria-expanded="true"]::before { content: none; }
 .rail .rail__btn.is-held::after, .rail .rail__btn[data-mode="weak"]::after,
 .rail .rail__btn[data-mode="strong"]::after { content: ''; position: absolute; top: 3px; right: 3px;
   width: 5px; height: 5px; border-radius: 50%; }

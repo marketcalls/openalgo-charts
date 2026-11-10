@@ -272,12 +272,13 @@ test('the widget shows the glyphs as the tier ships them, in the rail, a flyout 
   for (const theme of ['dark', 'light'] as const) {
     const errors = await mount(page, theme);
     // The rail draws tools from the sprite; an accent must travel with its
-    // symbol, filled, or the rail shows a ray without its origin.
+    // symbol, filled, or the rail shows a magnet without its poles. An anchor
+    // is an open ring and takes no fill, so a line's symbol is one path.
     const accents = await page.evaluate(() => ({
-      ray: document.querySelectorAll('#oac-rail-sprite symbol#oac-icon-ray path[fill="currentColor"]').length,
+      magnet: document.querySelectorAll('#oac-rail-sprite symbol#oac-icon-magnet path[fill="currentColor"]').length,
       trend: document.querySelectorAll('#oac-rail-sprite symbol#oac-icon-trend-line path[fill="currentColor"]').length,
     }));
-    expect(accents).toEqual({ ray: 1, trend: 1 });
+    expect(accents).toEqual({ magnet: 1, trend: 0 });
     // The widget's own stylesheet sets each tier's width; it has to match the
     // tier, or the rail draws a weight the set was not drawn for.
     const widths = await page.evaluate(() => [...document.querySelectorAll('.oac-widget .oac-glyph--chrome > svg')]

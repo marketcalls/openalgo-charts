@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fmt, fmtVol, esc, round2, pnlText, onEscape, inTextField, UP, DOWN, plural } from '../src/ui.js';
+import { fmt, fmtVol, esc, round2, pnlText, onEscape, inTextField, UP, DOWN, plural, markOverflow } from '../src/ui.js';
 
 describe('formatting helpers', () => {
   it('fmt writes two decimals with thousands separators', () => {
@@ -52,6 +52,40 @@ describe('keyboard helpers', () => {
     expect(inTextField({ target: { tagName: 'TEXTAREA' } })).toBe(true);
     expect(inTextField({ target: { tagName: 'SELECT' } })).toBe(true);
     expect(inTextField({ target: { tagName: 'DIV' } })).toBe(false);
+  });
+});
+
+describe('markOverflow', () => {
+  /** A strip `width` wide holding `content` px, with the listeners it was given. */
+  const strip = (width, content) => {
+    const listeners = {};
+    return { clientWidth: width, scrollWidth: content, scrollLeft: 0, dataset: {}, listeners,
+      addEventListener: (type, fn) => { listeners[type] = fn; } };
+  };
+
+  it('names the ends of a scrolling strip that hold more, and follows the scroll', () => {
+    const bar = strip(390, 900);
+    markOverflow(bar);
+    expect(bar.dataset.more).toBe('end');
+    bar.scrollLeft = 200;
+    bar.listeners.scroll();
+    expect(bar.dataset.more).toBe('start end');
+    bar.scrollLeft = 510;
+    bar.listeners.scroll();
+    expect(bar.dataset.more).toBe('start');
+  });
+
+  it('marks nothing on a strip that fits, and reads a rebuilt strip again when called', () => {
+    const bar = strip(1440, 1440);
+    markOverflow(bar);
+    expect(bar.dataset.more).toBe('');
+    const wired = bar.listeners.scroll;
+    bar.scrollWidth = 1700;
+    markOverflow(bar);
+    expect(bar.dataset.more).toBe('end');
+    // The second call reads; it does not wire a second listener.
+    expect(bar.listeners.scroll).toBe(wired);
+    expect(() => markOverflow(null)).not.toThrow();
   });
 });
 

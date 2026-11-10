@@ -226,7 +226,10 @@ describe('widget translation contract', () => {
       getBars: async () => { throw new Error('Chart settings'); }, subscribeBars: () => () => {},
     } });
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(root.querySelector('.oac-toast__msg')?.textContent).toBe('Local Could not load BHEL 5m: Chart settings');
+    // Told once, in the row that carries the retry: a toast beside it said the
+    // same failure a second time, and in a grid once more for every chart.
+    expect(root.querySelector('.oac-data-status__text')?.textContent).toBe('Local Could not load BHEL 5m: Chart settings');
+    expect(root.querySelector('.oac-toast__msg')).toBeNull();
     expect(root.querySelector('.oac-data-status button')?.getAttribute('aria-label')).toBe('Local Retry chart data');
   });
 });

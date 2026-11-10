@@ -56,7 +56,12 @@ export function mountDataStatus(
         case 'refreshing': rows.push({ text: widgetText(ctx, 'Refreshing {symbol} {interval}', { symbol, interval }) }); break;
         case 'empty': rows.push({ text: widgetText(ctx, 'No bars for {symbol} {interval}', { symbol, interval }), label: widgetText(ctx, 'Retry chart data'), retry }); break;
         case 'stale': rows.push({ text: widgetText(ctx, 'History is stale for {symbol} {interval}', { symbol, interval }), label: widgetText(ctx, 'Retry chart data'), retry }); break;
-        case 'error': rows.push({ text: widgetText(ctx, 'Could not load {symbol} {interval}', { symbol, interval }), label: widgetText(ctx, 'Retry chart data'), retry }); break;
+        // The reason rides with the retry. It used to arrive in a toast beside
+        // this row, so one failure was told twice over the chart and a third
+        // time in the status line, and in a grid of charts once more per chart.
+        case 'error': rows.push({ text: state.error
+          ? widgetText(ctx, 'Could not load {symbol} {interval}: {error}', { symbol, interval, error: errorText(ctx, state.error) })
+          : widgetText(ctx, 'Could not load {symbol} {interval}', { symbol, interval }), label: widgetText(ctx, 'Retry chart data'), retry }); break;
         // No retry: the same provider would give the same answer. The way out is another variant.
         case 'unsupported': rows.push({ text: widgetText(ctx, 'Not available from this source: {variant}',
           { variant: dataVariantLabel(ctx, state.request?.variant, state.unsupported) }) }); break;

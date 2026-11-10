@@ -328,7 +328,7 @@ examples/yfinance/
     alerts.js         alert controller ownership, shared editor/list and local event delivery
     timeline.js       labelled sample timeline events, group filters and event details
     main.js           composition root: the shared app state, render(), load(), boot
-    ui.js             el(), number and text formatting, the candle palette, toasts, the overlay stack (focus trap, one Escape per layer), the chart loading, empty and error card, the theme switch
+    ui.js             el(), number and text formatting, the candle palette, toasts, the overlay stack (focus trap, one Escape per layer), the chart loading, empty and error card, the theme switch, the faded edge on a strip that scrolls sideways
     hover.js          the one hover label every icon-only control shares
     intervals.js      interval registry, the picker's codes, period clamping
     timeframes.js     source capabilities, shared resampling, confirmed study history and interval preferences
