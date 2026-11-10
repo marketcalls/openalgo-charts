@@ -109,8 +109,12 @@ export function announce(text) {
 // The status readout is one line and is overwritten by the next thing that
 // happens, so anything a user should not miss and nothing else on screen
 // is saying (a saved layout, a study that could not be added) also gets a
-// toast. A failed load does not: the card on the stage already says it and
-// holds the retry. Errors stay until dismissed; the rest go on their own.
+// toast. A failed history fetch does not: the card on the stage already
+// says it and holds the retry. One refusal is still toasted, by the feed
+// itself: an interval this build cannot size, refused before any fetch.
+// The feed serves comparisons, replay and split charts too, and most of
+// those have no card to say it. Errors stay until dismissed; the rest go
+// on their own.
 
 /** How long each kind stays, in ms. 0 keeps it until it is dismissed. */
 export const TOAST_MS = { info: 4000, success: 3500, error: 0 };

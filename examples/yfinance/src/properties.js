@@ -114,8 +114,8 @@ export const PROPERTIES_CSS = `
    page's own condition. The colour square is restated because the 26px rule
    above outranks the page's 40px frame and left a face a few pixels across. */
 @media (max-width: 900px), (pointer: coarse) {
-  .propbar button { height: 34px; min-width: 34px; }
-  .propbar .grip { height: 34px; }
+  .propbar button { height: 40px; min-width: 40px; }
+  .propbar .grip { height: 40px; min-width: 24px; }
   .pb-pop .pb-item { min-height: 36px; }
   .pb-pop input[type=color].swatch { width: 40px; height: 40px; }
 }
@@ -413,7 +413,10 @@ export function mountPropertiesBar(app, anchorEl) {
     const hr = host.getBoundingClientRect();
     const br = btn.getBoundingClientRect();
     const box = plotBox();
+    // The cap and the floor both, or the popover's 160px floor outruns a
+    // plot narrower than that and the popover leaves the pane.
     p.style.maxWidth = Math.max(0, box.w - 8) + 'px';
+    p.style.minWidth = Math.min(160, Math.max(0, box.w - 8)) + 'px';
     p.style.maxHeight = Math.max(0, box.h - 8) + 'px';
     const w = p.offsetWidth || 200;
     const hgt = p.offsetHeight || 100;

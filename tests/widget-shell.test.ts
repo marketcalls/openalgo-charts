@@ -483,6 +483,21 @@ describe('the feed', () => {
     expect(data).toHaveBeenCalledWith({ symbol: 'X', interval: '1d', bars: 0, error: 'rate limited' });
   });
 
+  it('gives the reason in a toast when a refresh fails and the chart keeps its bars', async () => {
+    // A stale chart's row says only that its bars are old, so the reason has
+    // no other place to go: without the toast it would never be shown.
+    let fail = false;
+    const feed = feedOf(async () => { if (fail) throw new Error('upstream timeout'); return bars(30); });
+    const { w, root } = make({ feed, symbol: 'X' });
+    await flush();
+    expect(root.querySelector('.oac-toast--error')).toBeNull();
+    fail = true;
+    await w.dataController!.refresh().catch(() => {});
+    await flush();
+    expect(root.querySelector('.oac-data-status__text')?.textContent).toBe('History is stale for X 1d');
+    expect(root.querySelector('.oac-toast--error')?.textContent).toContain('upstream timeout');
+  });
+
   it('sizes the load window from the interval, and falls back to years for a calendar code', () => {
     expect(loadWindow('5m', 100, 10_000)).toEqual({ from: 10_000 - 100 * 300, to: 10_000 });
     expect(loadWindow('MN', 100, 10_000).from).toBe(10_000 - 5 * 365 * DAY);

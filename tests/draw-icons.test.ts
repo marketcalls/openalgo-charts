@@ -160,7 +160,8 @@ describe.each(TIERS)('the $name set shares one grid', (tier) => {
     // as digits first, so a bare fraction would be measured as a whole
     // number, and every check built on the walk would pass on a glyph it
     // never saw.
-    expect(d).not.toMatch(/(^|[^\d])\.\d/);
+    // Nor a second point inside a number: SVG reads `1.5.5` as 1.5 and .5.
+    expect(d).not.toMatch(/(^|[^\d])\.\d|\d\.\d+\.\d/);
   });
 
   it.each(tier.entries)('%s carries no presentation attributes of its own', (_id, d) => {

@@ -577,10 +577,10 @@ async function load(opts) {
       setChartState('unsupported', { ...app.req, message: fault.message, retry: () => { el('session').value = 'regular'; load(opts); } });
       return;
     }
-    // The failure is told once, by the card on the stage: it names the symbol
-    // and interval, gives the cause and holds the retry. The readout only
-    // says which request it was, and no toast repeats the card beside it.
-    status.textContent = `${app.req.symbol} ${app.req.interval} did not load`;
+    // The card on the stage names the request, gives the cause and holds the
+    // retry, and no toast repeats it beside the card. The readout keeps the
+    // cause too, in its one line, because Dismiss takes the card away.
+    status.textContent = `${app.req.symbol} ${app.req.interval} did not load: ${fault.message}`;
     setChartState('error', { ...app.req, message: fault.message, retry: () => load(opts) });
   } finally {
     if (revision === loadRevision) {

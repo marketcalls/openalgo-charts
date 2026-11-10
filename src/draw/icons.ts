@@ -351,9 +351,12 @@ export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
   // the Gann fan spreads from one anchor about the diagonal. As two fans of
   // three rays and a base from one corner, they were one glyph twice.
   'fib-fan': link(4.5, 19.5, 19.5, 4.5, 2, 2) + ring(4.5, 19.5) + ring(19.5, 4.5) + link(4.5, 19.5, 21.5, 11, 2) + link(4.5, 19.5, 21.5, 16.5, 2),
-  // The gaps grow as 4, 5 and 8, from the line the first anchor sets. The
-  // anchor is a pivot's size: an anchor's would close on the second line.
-  'fib-time-zone': 'M4.5 2.5v8M4.5 13.5v8M8.5 2.5v19M13.5 2.5v19M21.5 2.5v19' + ring(4.5, 12, PIVOT),
+  // The gaps grow as 4, 5 and 8 from the two lines the anchors set: the first
+  // anchor is the origin and the second the unit. They are a pivot's size, an
+  // anchor's would close on the next line, and set at two heights, as two
+  // points placed on a chart are.
+  'fib-time-zone': 'M4.5 2.5v11M4.5 16.5v5M8.5 2.5v5M8.5 10.5v11M13.5 2.5v19M21.5 2.5v19'
+    + ring(4.5, 15, PIVOT) + ring(8.5, 9, PIVOT),
   // The tool rings one centre at each level, and that centre is its anchor.
   'fib-circles': ring(12, 12, 5.5) + ring(12, 12, 9.5) + ring(12, 12),
   // Quarter turns of radius 3, 5, 8 and 13 from the anchor the spiral
@@ -470,9 +473,10 @@ export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
   'date-price-range': 'M3 8.5V3h5.5M21 15.5V21h-5.5M7 17 17 7M12 7h5v5M12 17H7v-5',
 
   // ── cycles ──────────────────────────────────────────────────────────────
-  // Evenly spaced, with the anchor on the first: the Fibonacci time zones
-  // beside them in the rail are bare and spread out.
-  'cyclic-lines': 'M4.5 2.5V10M4.5 14v7.5M10 2.5v19M15.5 2.5v19M21 2.5v19' + ring(4.5, 12),
+  // Evenly spaced, from the two anchors on the first two lines that set the
+  // period, level with each other where the Fibonacci time zones set theirs
+  // at two heights and spread out.
+  'cyclic-lines': 'M4.5 2.5v8M4.5 13.5v8M10 2.5v8M10 13.5v8M15.5 2.5v19M21 2.5v19' + ring(4.5, 12, PIVOT) + ring(10, 12, PIVOT),
   // Arches standing on their anchors, the second running off the edge as
   // the cycles do. Taller than they are wide, so the glyph fills its box.
   'time-cycles': 'M4.5 15.5A4.5 9 0 0 1 13.5 15.5M13.5 15.5A4.5 9 0 0 1 21.5 9.84' + ring(4.5, 17.5) + ring(13.5, 17.5),
