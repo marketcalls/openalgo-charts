@@ -194,20 +194,24 @@ The tier ships a glyph for every tool, as path data:
 ```ts
 import { drawingToolIcon, drawingToolAccent, ICON_ATTRS } from 'openalgo-charts/draw';
 
-const accent = drawingToolAccent('trend-line');   // the two anchor dots, for a fill
+const accent = drawingToolAccent('magnet');   // the two poles, for a fill; undefined for most tools
 <svg {...ICON_ATTRS} width={24} height={24}>
-  <path d={drawingToolIcon('trend-line')} />
+  <path d={drawingToolIcon('magnet')} />
   {accent && <path d={accent} fill="currentColor" stroke="none" />}
 </svg>
 ```
 
-Each path is the whole glyph. The marks that tell siblings apart (a trend
-line ends in two dots, a ray starts at one, a path ends in a head) are drawn in
-the path itself as small closed outlines, so a host that renders only the path
-data still shows every one of them. An **accent** repeats those marks for a
-fill on top: it adds weight, never identity. The builders below always draw it,
-as a second `<path>` with `fill="currentColor" stroke="none"`; a host wrapping
-the raw path data may do the same, and loses only the fill if it does not.
+Each path is the whole glyph. A tool glyph is its drawing as the chart shows it
+selected, in miniature: every point the user places is an **open ring**, the
+grab handle at this scale, and a stroke stops on the ring's edge. The rings
+tell siblings apart (a trend line has one at each end, a ray one at its start,
+an extended line two inside a line that runs on, a rectangle one on each of two
+opposite corners) and are drawn in the path itself, so a host that renders only
+the path data still shows every one of them. A ring takes no fill. An
+**accent** repeats the few marks meant solid (a magnet's poles) for a fill on
+top: it adds weight, never identity. The builders below always draw it, as a
+second `<path>` with `fill="currentColor" stroke="none"`; a host wrapping the
+raw path data may do the same, and loses only the fill if it does not.
 
 | Export | |
 |---|---|
@@ -292,8 +296,10 @@ and `stroke * size / 16` for a chrome glyph, each tier's viewBox width. A host t
 line: a cursor sits over candles and grid lines, not a quiet panel.
 
 The set is held to one grid by `tests/draw-icons.test.ts`, which checks each
-glyph and accent for the live area (2..22 and 2..14), whole units, a single
-weight, complexity and span, that every accent mark is also in its glyph's
+glyph and accent for the live area (2..22 and 2..14), its tier's grid (whole
+units for chrome, two decimal places for tools, which are authored on half
+units and trimmed to their anchor rings), a single weight, complexity and
+span, that no stroke enters an anchor ring, that every accent mark is also in its glyph's
 path, that no hollow shape is filled in by the glyph's other strokes, and
 rejects two glyphs that are the same drawing written differently.
 `tests/e2e/icon-raster.spec.ts` rasterises both tiers in Chromium, Firefox and

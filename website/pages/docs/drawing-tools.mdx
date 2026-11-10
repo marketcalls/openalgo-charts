@@ -1101,18 +1101,21 @@ lockButton.innerHTML = chromeIconSvg('lock');   // 16px
 canvas.style.cursor = toolCursor('trend-line'); // the glyph over a contrasting halo
 ```
 
-Each path is the whole glyph. The marks that tell siblings apart (the anchor dots of a
-trend line, the origin dot of a ray, an arrowhead, a magnet's pole caps) are drawn in the
-path as outlines, so a host that wraps the raw path data gets every one of them. Some
-glyphs also carry an **accent**: the same marks again, for a fill on top. The builders
-always draw it, as a second `<path>` with `fill="currentColor" stroke="none"`; a host with
-its own wrapper can do the same:
+Each path is the whole glyph. A tool glyph is its drawing as the chart shows it selected,
+in miniature: every point you place is an open ring, the grab handle at this scale, and a
+stroke stops on the ring's edge. The rings tell siblings apart (a trend line has one at
+each end, a ray one at its start, an extended line two inside a line that runs on) and are
+drawn in the path, so a host that wraps the raw path data gets every one of them. A ring
+takes no fill. A few glyphs also carry an **accent**: a mark meant solid, such as a
+magnet's poles, again, for a fill on top. The builders always draw it, as a second
+`<path>` with `fill="currentColor" stroke="none"`; a host with its own wrapper can do the
+same:
 
 ```ts
 import { drawingToolIcon, drawingToolAccent, ICON_ATTRS } from 'openalgo-charts/draw';
 
-const accent = drawingToolAccent('ray');         // undefined when the glyph has none
-svg.innerHTML = `<path d="${drawingToolIcon('ray')}"/>`
+const accent = drawingToolAccent('magnet');      // undefined when the glyph has none
+svg.innerHTML = `<path d="${drawingToolIcon('magnet')}"/>`
   + (accent ? `<path d="${accent}" fill="currentColor" stroke="none"/>` : '');
 ```
 

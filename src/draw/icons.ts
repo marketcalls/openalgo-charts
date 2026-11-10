@@ -44,16 +44,38 @@
  *    chrome grid, so the ink stops short of the box. Without it, glyphs that
  *    happen to reach the edge look larger than their neighbours and the rail
  *    reads as ragged.
- *  - **Integer coordinates.** Parallel strokes keep an even gap and a family
- *    of glyphs shares its anchor points, so siblings line up in a list.
+ *  - **Whole units for chrome, half units for tools.** Parallel strokes keep
+ *    an even gap and a family of glyphs shares its anchor points, so siblings
+ *    line up in a list. A 16px box has room for whole units and no more. The
+ *    tool glyphs are authored on half units, and a stroke cut back to the
+ *    edge of an anchor lands wherever its angle puts it, to two decimals.
+ *    Through 2.6.9 the tools sat on whole units too, a rule made for a
+ *    2-unit line shown at 24px, where a unit was a device pixel. At 20px a
+ *    unit is five sixths of a pixel and nothing lands on one, so the rule
+ *    bought no sharpness and cost every glyph its proportions: no corner
+ *    could be rounded, no line could stop short of a mark, and every slope
+ *    was one of a handful.
  *  - **One stroke weight.** Different weights across identically sized boxes
  *    is the single most visible tell of a set assembled rather than drawn.
+ *  - **An anchor is an open ring, and a line stops at it.** A tool glyph is
+ *    its drawing as the chart shows it selected, in miniature: the layer
+ *    paints each point the user placed as a hollow handle, so the glyph
+ *    draws each as a ring of radius 2 and ends its strokes on the ring's
+ *    edge. The rings carry the reading: two at the ends are a segment, one
+ *    at the start is a ray, two inside a line that runs on are an extended
+ *    line, and one at each pivot is a pattern, a size smaller there so five
+ *    of them fit. Through 2.6.9 an anchor was a dot of radius 1 with the line run
+ *    into it, which at 20px was a blot three pixels across on the end of a
+ *    stroke: too small to read as a point, and the same ink as the line.
+ *  - **Corners are rounded.** A box, a bubble or a tag turns its corners on
+ *    a radius of 1.5 to 2, so a frame reads as a drawn object and not as a
+ *    table cell. The round join alone gave a radius of half the line.
  *  - **The whole glyph in its path.** The marks that tell siblings apart (a
- *    segment ends in two dots, a ray starts at one, a path ends in a head)
- *    are small closed shapes drawn in the path itself, so a host that renders
- *    the path data and nothing else still gets every one of them. An accent
- *    registry repeats those marks for a fill on top: a dot then paints solid
- *    rather than as a ring, which adds weight, never identity.
+ *    segment ends in two rings, a ray starts at one, a path ends in a head)
+ *    are drawn in the path itself, so a host that renders the path data and
+ *    nothing else still gets every one of them. An accent registry repeats
+ *    the few marks meant solid (a magnet's poles) for a fill on top, which
+ *    adds weight, never identity.
  *
  * # Rendering
  *
@@ -102,53 +124,86 @@ export const ICON_ATTRS = {
   strokeLinejoin: 'round',
 } as const satisfies IconAttrs;
 
+/** A coordinate as a path spells it: two decimals at most, no trailing zeros. */
+const num = (v: number): string => String(Math.round(v * 100) / 100);
+
 /**
  * A round mark of radius `r` centred on a grid point: two half-turn arcs, so
- * the path closes where it starts. Stroked with the glyph's line, radius 1
+ * the path closes where it starts. Stroked with the chrome line, radius 1
  * paints a near-solid dot over twice the line across, which is what makes it
- * read as an anchor; radius 2 is a ring the accent fills.
+ * read as a mark at 16px; radius 2 is a ring the accent fills.
  */
 function dot(x: number, y: number, r = 1): string {
-  return `M${x - r} ${y}a${r} ${r} 0 0 0 ${2 * r} 0a${r} ${r} 0 0 0 ${-2 * r} 0z`;
+  return `M${num(x - r)} ${num(y)}a${r} ${r} 0 0 0 ${2 * r} 0a${r} ${r} 0 0 0 ${-2 * r} 0z`;
 }
 
 /**
  * A circle that stays open: the same two half turns as `dot`, at a radius the
- * line cannot fill. Named apart because a ring is part of a drawing (a level,
- * a wave) and never a mark an accent paints solid.
+ * line cannot fill. On the tool grid it is an anchor at its default radius,
+ * the point a user places, and at any other a part of the drawing (a level,
+ * a wave). Named apart because a ring is never a mark an accent paints solid.
  */
-const ring = (x: number, y: number, r: number): string => dot(x, y, r);
+const ring = (x: number, y: number, r = 2): string => dot(x, y, r);
+
+/**
+ * A stroke from one point to another that stops `a` short of the first and
+ * `b` short of the second: by a ring's radius where it ends on an anchor, so
+ * the line meets the ring's edge at any angle and never crosses its centre.
+ */
+function link(x1: number, y1: number, x2: number, y2: number, a = 0, b = 0): string {
+  const length = Math.hypot(x2 - x1, y2 - y1);
+  const ux = (x2 - x1) / length;
+  const uy = (y2 - y1) / length;
+  return `M${num(x1 + ux * a)} ${num(y1 + uy * a)} ${num(x2 - ux * b)} ${num(y2 - uy * b)}`;
+}
+
+/** An upright box that turns its corners on radius `r`, clockwise from its top edge. */
+function box(x: number, y: number, w: number, h: number, r = 2): string {
+  const across = num(w - 2 * r);
+  const down = num(h - 2 * r);
+  return `M${num(x + r)} ${num(y)}h${across}a${r} ${r} 0 0 1 ${r} ${r}v${down}a${r} ${r} 0 0 1 ${-r} ${r}`
+    + `h-${across}a${r} ${r} 0 0 1 ${-r} ${-r}v-${down}a${r} ${r} 0 0 1 ${r} ${-r}z`;
+}
+
+/**
+ * The radius of a pivot ring, for a glyph that packs its points close: a
+ * pattern's five pivots, a position's three levels. Its rings are a size
+ * under an anchor's: at radius 2 the rings of neighbouring pivots closed on
+ * each other and the legs between them were stubs.
+ */
+const PIVOT = 1.5;
+
+/** A stroke through `points` in turn, cut back to the pivot ring at each, and those rings. */
+function zigzag(points: readonly (readonly [number, number])[]): string {
+  let legs = '';
+  let rings = '';
+  let from: readonly [number, number] | undefined;
+  for (const to of points) {
+    if (from !== undefined) legs += link(from[0], from[1], to[0], to[1], PIVOT, PIVOT);
+    rings += ring(to[0], to[1], PIVOT);
+    from = to;
+  }
+  return legs + rings;
+}
 
 /**
  * A harmonic pattern through X, A, B, C and D, given as heights on five
- * evenly spaced columns, then the bases XB and BD of the two triangles its
- * tool fills. Price runs up the grid, so a smaller number is a higher price.
+ * evenly spaced columns, with a ring at each pivot, then the bases XB and BD
+ * of the two triangles its tool fills. Price runs up the grid, so a smaller
+ * number is a higher price.
  */
 function harmonic(x: number, a: number, b: number, c: number, d: number): string {
-  return `M2 ${x} 7 ${a} 12 ${b} 17 ${c} 22 ${d}M2 ${x} 12 ${b} 22 ${d}`;
+  return zigzag([[3.5, x], [7.75, a], [12, b], [16.25, c], [20.5, d]])
+    + link(3.5, x, 12, b, PIVOT, PIVOT) + link(12, b, 20.5, d, PIVOT, PIVOT);
 }
 
 /*
- * The closed marks of the tool glyphs, written once: each is drawn in its
+ * The marks of the tool glyphs that are written twice: each is drawn in its
  * glyph's path and repeated in `DRAWING_TOOL_ACCENTS` for the fill.
  */
-const MAGNET_CAPS = 'M5 3h2v3H5zM17 3h2v3h-2z';
-const SEGMENT_ENDS = dot(6, 18) + dot(18, 6);
-const RAY_ORIGIN = dot(4, 18);
-const EXTENDED_DOTS = dot(8, 16) + dot(16, 8);
-const ARROW_HEAD = 'M20 4l-2 8-6-6z';
-const HRAY_ORIGIN = dot(10, 12);
-const CROSS_CENTRE = dot(12, 12);
-const PATH_HEAD = 'M20 8l-6 2 4 4z';
-const POLYLINE_VERTICES = dot(4, 19, 2) + dot(9, 7, 2) + dot(14, 16, 2);
-const LONG_DIRECTION = 'M10 11l3-4 3 4z';
-const SHORT_DIRECTION = 'M10 13l3 4 3-4z';
-const FORK_PIVOT = dot(12, 21);
-const SCHIFF_PIVOT = dot(19, 14);
-const MODIFIED_PIVOT = dot(19, 20);
-const INSIDE_PIVOT = dot(12, 20);
+const MAGNET_POLES = 'M5 3.5h4v4H5zM15 3.5h4v4h-4z';
 /** A pitchfork's head: two outer tines and the crossbar between them. */
-const FORK_HEAD = 'M5 2v8h14V2';
+const FORK_HEAD = 'M5 2.5v8h14v-8';
 
 /**
  * Path data by tool id, plus a few keys a host toolbar needs that are not
@@ -156,206 +211,324 @@ const FORK_HEAD = 'M5 2v8h14V2';
  *
  * Values are the `d` attribute of one `<path>`. Multiple subpaths are joined
  * into the same string rather than split across elements, so a host renders one
- * node per glyph, and that node is the whole glyph: its dots and heads are in
- * the string as outlines. `DRAWING_TOOL_ACCENTS` repeats those marks for a
- * host that also wants them filled.
+ * node per glyph, and that node is the whole glyph: its rings and heads are in
+ * the string. `DRAWING_TOOL_ACCENTS` repeats the marks a host may also fill.
  */
 export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
   // ── chrome ──────────────────────────────────────────────────────────────
   // A pointer, not a cross: the button puts the chart back in its plain mode,
   // and a cross beside the cross-line tool and a plus read as the same button.
-  cursor: 'M6 3v15l4-4h7zM11 15l3 6',
-  magnet: 'M6 7v5a6 6 0 0 0 12 0V7' + MAGNET_CAPS,
+  // Drawn as the outline of the pointer with its tail: a bare wedge with a
+  // stroke hanging off it, as before, read as a broken arrowhead.
+  cursor: 'M6 3.5v14.5l3.9-3.6 2.6 6.1 2.3-1-2.6-6h5.3z',
+  // Two legs and the two poles on them. One line bent into a U with squares
+  // on its ends, as before, was a letter with serifs at 20px.
+  magnet: 'M5 7.5V12a7 7 0 0 0 14 0V7.5M9 7.5V12a3 3 0 0 0 6 0V7.5' + MAGNET_POLES,
 
   // ── lines ───────────────────────────────────────────────────────────────
-  // Told apart by their ends, which is what differs between the tools: two
-  // anchor dots, one origin dot and an open end, dots inside a line that runs
-  // to both edges, and a head. The ray also leaves at a shallower angle: on
-  // the segment's diagonal, its open end ran through the segment's second
-  // dot and the two overlapped by 87 percent at 24px. A line that extends
-  // runs to the edge of the live area; one that stops ends on its dot.
-  'trend-line': 'M6 18 18 6' + SEGMENT_ENDS,
-  ray: 'M4 18 22 6' + RAY_ORIGIN,
-  'extended-line': 'M2 22 22 2' + EXTENDED_DOTS,
-  arrow: 'M4 20 15 9' + ARROW_HEAD,
-  'horizontal-line': 'M2 12h20',
-  // The ray leaves from its anchor two fifths of the way in and runs to the
-  // far edge. Trimmed from the same line with its dot held only in the accent,
-  // it was the horizontal line at 86 percent overlap for a host drawing the
-  // path; from a third of the way in, at the finer line of 2.6.3, 71 percent.
-  'horizontal-ray': 'M10 12h12' + HRAY_ORIGIN,
-  'vertical-line': 'M12 2v20',
-  'cross-line': 'M2 12h20M12 2v20' + CROSS_CENTRE,
-  'trend-angle': 'M4 20 18 8M4 20h12M8 20a8 8 0 0 0 2-5',
-  'info-line': 'M6 18 18 6M3 3h8v5H3z' + SEGMENT_ENDS,
+  // Told apart by their anchors, which is what differs between the tools: a
+  // segment has one at each end, a ray one at its start and an open end, an
+  // extended line two inside a line that runs to both edges, and an arrow
+  // one at its tail and a head. The ray also leaves at a shallower angle: on
+  // the segment's diagonal the two overlapped by 87 percent at 24px. A line
+  // that extends runs to the edge of the live area; one that stops ends on
+  // its ring. A horizontal or vertical line has the one anchor it is placed
+  // by, at its middle, and the horizontal ray has it at its start.
+  'trend-line': link(4.5, 19.5, 19.5, 4.5, 2, 2) + ring(4.5, 19.5) + ring(19.5, 4.5),
+  ray: link(4.5, 18.5, 21.5, 6.5, 2) + ring(4.5, 18.5),
+  'extended-line': link(2.5, 21.5, 8.5, 15.5, 0, 2) + link(8.5, 15.5, 15.5, 8.5, 2, 2) + link(15.5, 8.5, 21.5, 2.5, 2)
+    + ring(8.5, 15.5) + ring(15.5, 8.5),
+  // An open head. Filled, it was a wedge a third of the glyph's ink on the
+  // end of a hairline.
+  arrow: link(4.5, 19.5, 19.5, 4.5, 2) + 'M12.5 4.5h7v7' + ring(4.5, 19.5),
+  'horizontal-line': 'M2.5 12H10M14 12h7.5' + ring(12, 12),
+  'horizontal-ray': 'M6.5 12h15' + ring(4.5, 12),
+  'vertical-line': 'M12 2.5V10M12 14v7.5' + ring(12, 12),
+  'cross-line': 'M2.5 12H10M14 12h7.5M12 2.5V10M12 14v7.5' + ring(12, 12),
+  'trend-angle': link(4.5, 19.5, 19.5, 6.5, 2) + 'M6.5 19.5h13M13.5 19.5A9 9 0 0 0 11.3 13.6' + ring(4.5, 19.5),
+  // A segment that also labels itself: the plate, with a line of text in it.
+  'info-line': link(4.5, 19.5, 19.5, 10.5, 2, 2) + ring(4.5, 19.5) + ring(19.5, 10.5) + box(2.5, 3, 10.5, 6.5, 1.5) + 'M5.5 6.25h4.5',
   // A path points somewhere and a polyline only joins its vertices, which is
-  // the difference between the tools: a head on one, vertex rings on the other.
-  path: 'M3 20 7 7l5 9 5-5' + PATH_HEAD,
-  polyline: 'M4 19 9 7l5 9 6-11' + POLYLINE_VERTICES,
+  // the difference between the tools: a head on one, a ring to end the other.
+  path: link(4.5, 19, 9.5, 9.5, 2, 2) + link(9.5, 9.5, 14.5, 15.5, 2, 2) + link(14.5, 15.5, 21, 5.5, 2) + 'M16 5.5h5v5'
+    + ring(4.5, 19) + ring(9.5, 9.5) + ring(14.5, 15.5),
+  polyline: link(4.5, 18.5, 9.5, 7.5, 2, 2) + link(9.5, 7.5, 14.5, 16, 2, 2) + link(14.5, 16, 19.5, 5.5, 2, 2)
+    + ring(4.5, 18.5) + ring(9.5, 7.5) + ring(14.5, 16) + ring(19.5, 5.5),
 
   // ── channels ────────────────────────────────────────────────────────────
-  'parallel-channel': 'M2 16 14 4M8 22 20 10',
-  'disjoint-channel': 'M2 16 14 6M8 22 22 14',
-  'flat-bottom': 'M2 14 14 4M2 20h20',
-  'fib-channel': 'M2 14 14 4M4 18 16 8M6 22 18 12',
-  'regression-trend': 'M2 18 20 6M4 20 22 8M2 14 20 2',
+  // A channel is two rails, and the two plain ones ring both ends of both.
+  // The disjoint channel places all four; the parallel one places three and
+  // derives the second rail, but one rail with rings over a bare line read
+  // as a segment with a stray stroke under it, not as a channel. The disjoint
+  // rails close toward one side, far enough apart that their rings do not
+  // touch. The rest carry two anchors on the line the user places, and the
+  // lines the tool derives from it are bare, clear of the rings by more than
+  // a line's width, or a ring and the stroke under it close up.
+  'parallel-channel': link(4.5, 11.5, 19.5, 4.5, 2, 2) + link(4.5, 19.5, 19.5, 12.5, 2, 2)
+    + ring(4.5, 11.5) + ring(19.5, 4.5) + ring(4.5, 19.5) + ring(19.5, 12.5),
+  'disjoint-channel': link(4.5, 4.5, 19.5, 8.5, 2, 2) + link(4.5, 19.5, 19.5, 15.5, 2, 2)
+    + ring(4.5, 4.5) + ring(19.5, 8.5) + ring(4.5, 19.5) + ring(19.5, 15.5),
+  'flat-bottom': link(4.5, 12.5, 19.5, 4.5, 2, 2) + ring(4.5, 12.5) + ring(19.5, 4.5) + 'M2.5 19.5h19',
+  'fib-channel': link(4.5, 10, 19.5, 4.5, 2, 2) + ring(4.5, 10) + ring(19.5, 4.5) + 'M4.5 15 19.5 9.5M4.5 21 19.5 15.5',
+  // A regression line is fitted between its two anchors, with a band on
+  // each side: the middle line is the placed one.
+  'regression-trend': link(4.5, 15, 19.5, 9, 2, 2) + ring(4.5, 15) + ring(19.5, 9) + 'M4.5 9.5 19.5 3.5M4.5 20.5 19.5 14.5',
 
-  'flat-top-bottom': 'M3 6h18M3 20 21 12M3 6v14',
-  'regression-channel': 'M3 18 19 6M5 21 21 9M3 12 17 2M10 16h4',
+  'flat-top-bottom': 'M6.5 5h11' + ring(4.5, 5) + ring(19.5, 5) + 'M4.5 20.5 19.5 12.5',
+  // The fitted line dashed between its two deviation bands, edge to edge. A
+  // path carries no dash pattern (that would be a presentation attribute),
+  // so a dashed line is the strokes it is made of.
+  'regression-channel': 'M2.5 16 5.63 14.68M8.86 13.32 15.13 10.68M18.35 9.32 21.5 8M2.5 10.5 21.5 2.5M2.5 21.5 21.5 13.5',
 
   // ── pitchforks ──────────────────────────────────────────────────────────
-  // One trident, upright so it reads as one, and a pivot dot. The four tools
-  // differ only in where the median starts, so that is what the glyphs show,
-  // each as its tool constructs it, turned so the tines point up: time runs
-  // up the glyph and price across it. The standard median starts at the
-  // pivot. The Schiff median starts at the pivot's time and halfway to the
-  // second anchor's price, so the handle stops short and turns square to
-  // the pivot. The modified one also moves halfway in time, to the middle of
-  // the swing from the pivot to the second anchor, and draws that swing. The
-  // inside median starts on the crossbar itself; the swing from the pivot to
-  // both crossbar ends stands for the lines that tool draws below it. Drawn
-  // diagonally through 2.5.8, the four crossed their tines through the
-  // handle and read as an X.
-  pitchfork: FORK_HEAD + 'M12 2v19' + FORK_PIVOT,
-  'schiff-pitchfork': FORK_HEAD + 'M12 2v12h7' + SCHIFF_PIVOT,
-  'modified-schiff-pitchfork': FORK_HEAD + 'M12 2v13M5 10l14 10' + MODIFIED_PIVOT,
-  'inside-pitchfork': FORK_HEAD + 'M12 2v8M5 10l7 10 7-10' + INSIDE_PIVOT,
+  // One trident, upright so it reads as one, and the pivot as its anchor.
+  // The four tools differ only in where the median starts, so that is what
+  // the glyphs show, each as its tool constructs it, turned so the tines
+  // point up: time runs up the glyph and price across it. The standard
+  // median starts at the pivot. The Schiff median starts at the pivot's time
+  // and halfway to the second anchor's price, so the handle stops short and
+  // turns square to the pivot. The modified one also moves halfway in time,
+  // to the middle of the swing from the pivot to the second anchor, and
+  // draws that swing. The inside median starts on the crossbar itself; the
+  // swing from the pivot to both crossbar ends stands for the lines that
+  // tool draws below it. Drawn diagonally through 2.5.8, the four crossed
+  // their tines through the handle and read as an X.
+  pitchfork: FORK_HEAD + 'M12 2.5v15' + ring(12, 19.5),
+  'schiff-pitchfork': FORK_HEAD + 'M12 2.5v12h5' + ring(19, 14.5),
+  'modified-schiff-pitchfork': FORK_HEAD + 'M12 2.5V15' + link(5, 10.5, 19, 19.5, 0, 2) + ring(19, 19.5),
+  // Its head is shorter than the one the other three share, and the swing
+  // under it longer: on the shared head, with the pivot ring at the foot of
+  // both, it was the standard fork at three quarters overlap at 20px.
+  'inside-pitchfork': 'M5 2.5v6h14v-6M12 2.5v6' + link(5, 8.5, 12, 19.5, 0, 2) + link(19, 8.5, 12, 19.5, 0, 2) + ring(12, 19.5),
 
-  'fib-extension-two-point': 'M3 4h18M3 10h18M3 16h18M3 21h18M6 4v12',
+  // The two anchors stacked on the left, each at the level it sets, and the
+  // levels projected past them.
+  'fib-extension-two-point': 'M4.5 17.5v-3M6.5 19.5h15M6.5 12.5h15M2.5 8h19M2.5 3.5h19' + ring(4.5, 19.5) + ring(4.5, 12.5),
   // The tool marks the box its anchors span by the two far edges alone and
   // fans out to both from the first anchor: the diagonal, and the half level
   // on each edge. With the near axes it was the speed fan again with one
   // more ray; with the whole box it was the Gann box and Gann square beside
-  // it in the same flyout, at 0.68 and 0.71 overlap.
-  'fib-speed-resistance-fan': 'M3 3h18v18M3 21 21 3M21 12 3 21 12 3',
-  'icon-stamp': 'M12 3l3 6 6 3-6 3-3 6-3-6-6-3 6-3z',
+  // it in the same flyout, at 0.68 and 0.71 overlap. The two anchors are the
+  // corner it fans from and the far corner, and the diagonal joins them.
+  'fib-speed-resistance-fan': 'M4.5 4.5h13M19.5 6.5v13' + link(4.5, 19.5, 19.5, 4.5, 2, 2) + link(4.5, 19.5, 19.5, 12, 2)
+    + link(4.5, 19.5, 12, 4.5, 2) + ring(4.5, 19.5) + ring(19.5, 4.5),
+  // A four-point star with its sides drawn in, so it is not the diamond a
+  // straight-sided one rasterises to at 20px.
+  'icon-stamp': 'M12 2.5c0.6 5.2 4.3 8.9 9.5 9.5-5.2 0.6-8.9 4.3-9.5 9.5-0.6-5.2-4.3-8.9-9.5-9.5 5.2-0.6 8.9-4.3 9.5-9.5z',
   // ── shapes ──────────────────────────────────────────────────────────────
-  rectangle: 'M3 5h18v14H3z',
-  'rotated-rectangle': 'M2 14 10 4l12 6-8 10z',
-  ellipse: 'M12 5c5 0 9 3 9 7s-4 7-9 7-9-3-9-7 4-7 9-7z',
-  circle: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z',
-  triangle: 'M12 4 21 20H3z',
-  arc: 'M3 19a12 12 0 0 1 18 0',
-  curve: 'M3 18c4-12 14-12 18 0',
-  'double-curve': 'M3 18c3-9 7-9 9 0 2 9 6 9 9 0',
-  brush: 'M3 19c4 0 4-8 8-8s4 8 9 4',
-  highlighter: 'M4 16 14 6l4 4-10 10H4z',
+  // A shape carries the anchors that place it, as a line does: the two
+  // opposite corners of a rectangle, the edge a rotated one is dragged out
+  // from, a point on the rim of a circle or an ellipse, the three corners of
+  // a triangle. Without them the first three were a stop key, a diamond and
+  // a radio button.
+  rectangle: 'M6.5 6H18a1.5 1.5 0 0 1 1.5 1.5V16M17.5 18H6a1.5 1.5 0 0 1-1.5-1.5V8' + ring(4.5, 6) + ring(19.5, 18),
+  'rotated-rectangle': link(4.5, 13, 13.5, 5, 2, 2) + link(13.5, 5, 19.28, 11.5, 2) + 'M19.28 11.5 10.28 19.5'
+    + link(10.28, 19.5, 4.5, 13, 0, 2) + ring(4.5, 13) + ring(13.5, 5),
+  ellipse: 'M20.21 8.73A9.5 6.5 0 1 1 16.96 6.45' + ring(18.72, 7.4),
+  circle: 'M19.25 7.56A8.5 8.5 0 1 1 16.44 4.75' + ring(18, 6),
+  triangle: link(12, 4.5, 19.5, 19.5, 2, 2) + link(19.5, 19.5, 4.5, 19.5, 2, 2) + link(4.5, 19.5, 12, 4.5, 2, 2)
+    + ring(12, 4.5) + ring(19.5, 19.5) + ring(4.5, 19.5),
+  // An arc runs through its three anchors, the middle one on the curve; a
+  // curve joins two and bows off the line between them. Both as a dome with
+  // a ring at each foot, they overlapped as one glyph.
+  arc: 'M5.19 14.62A7.69 7.69 0 0 1 10.02 10.76M13.98 10.76A7.69 7.69 0 0 1 18.81 14.62' + ring(4.5, 16.5) + ring(12, 10.5) + ring(19.5, 16.5),
+  curve: 'M4.9 17.54C6.5 9.5 11.5 5.5 17.52 4.8' + ring(4.5, 19.5) + ring(19.5, 4.5),
+  'double-curve': 'M5.5 10.3C7 5 10 5 12 12s5 7 6.5 1.7' + ring(4.5, 12) + ring(19.5, 12),
+  // The tools themselves, since a freehand stroke has no anchors to show: a
+  // brush with its head of bristles, and a marker over the line it has laid.
+  // The squiggle the brush was drawn as before was the sine line again.
+  brush: 'M13.5 10.5 20.5 3.5M13.5 10.5c2 2 1.7 5.2-0.6 6.8-2.6 1.8-6 1.2-8.9 2.7 1.5-2.9 0.9-6.3 2.7-8.9 1.6-2.3 4.8-2.6 6.8-0.6z',
+  highlighter: 'M14.5 4.5l5 5-8.5 8.5-5-5zM6 13 4.5 19.5 11 18M13.5 20.5h8',
 
   // ── fibonacci and gann ──────────────────────────────────────────────────
-  'fib-retracement': 'M3 4h18M3 9h18M3 14h18M3 19h18',
-  'fib-extension': 'M3 5h18M3 12h18M3 19h18M8 5v14',
-  'fib-fan': 'M3 20 21 4M3 20 21 10M3 20 21 16M3 20h18',
-  'fib-time-zone': 'M4 3v18M8 3v18M14 3v18M22 3v18',
-  // The tool rings one centre at each level.
-  'fib-circles': ring(12, 12, 3) + ring(12, 12, 6) + ring(12, 12, 9),
-  // Quarter turns of radius 2, 3, 5, 8 and 13, each leaving where the last
-  // ended and heading the same way: the golden spiral the tool draws, in
-  // whole units. The last, radius 13, turns 67 degrees rather than 90 and
-  // ends on a 5, 12, 13 triangle, which keeps it on the grid and inside the
-  // box. The arcs it replaced did not meet, and the last one, too short a
-  // chord for its radius, bulged out past the edge as a tail.
-  'fib-spiral': 'M8 10A2 2 0 0 0 10 8 3 3 0 0 0 7 5 5 5 0 0 0 2 10 8 8 0 0 0 10 18 13 13 0 0 0 22 10',
-  // A sector: the two radii and its levels between them. A 3, 4, 5 edge
-  // puts every level on whole units.
-  'fib-wedge': 'M20 18H5l9-12M10 18A5 5 0 0 0 8 14M15 18A10 10 0 0 0 11 10M20 18A15 15 0 0 0 14 6',
+  // Levels, and the anchors that set them. A retracement's two anchors sit
+  // on its outer levels, and the inner pair are closer to each other than to
+  // those, as 0.382 and 0.618 are. An extension projects its levels past the
+  // swing its anchors mark. Four evenly spaced lines, as before, were a menu.
+  'fib-retracement': 'M6.5 4.5h15M2.5 10h19M2.5 14h19M2.5 19.5h15' + ring(4.5, 4.5) + ring(19.5, 19.5),
+  'fib-extension': 'M2.5 4h19M2.5 9h19' + link(4.5, 19.5, 19.5, 14.5, 2, 2) + ring(4.5, 19.5) + ring(19.5, 14.5),
+  // The Fibonacci fan hangs its rays under the trend its two anchors mark;
+  // the Gann fan spreads from one anchor about the diagonal. As two fans of
+  // three rays and a base from one corner, they were one glyph twice.
+  'fib-fan': link(4.5, 19.5, 19.5, 4.5, 2, 2) + ring(4.5, 19.5) + ring(19.5, 4.5) + link(4.5, 19.5, 21.5, 11, 2) + link(4.5, 19.5, 21.5, 16.5, 2),
+  // The gaps grow as 4, 5 and 8, from the line the first anchor sets. The
+  // anchor is a pivot's size: an anchor's would close on the second line.
+  'fib-time-zone': 'M4.5 2.5v8M4.5 13.5v8M8.5 2.5v19M13.5 2.5v19M21.5 2.5v19' + ring(4.5, 12, PIVOT),
+  // The tool rings one centre at each level, and that centre is its anchor.
+  'fib-circles': ring(12, 12, 5.5) + ring(12, 12, 9.5) + ring(12, 12),
+  // Quarter turns of radius 3, 5, 8 and 13 from the anchor the spiral
+  // starts at, each leaving where the last ended and heading the same way:
+  // the golden spiral the tool draws, in whole units. The last, radius 13,
+  // turns 67 degrees rather than 90 and ends on a 5, 12, 13 triangle, which
+  // keeps it on the grid and inside the box. The arcs it replaced did not
+  // meet, and the last one, too short a chord for its radius, bulged out
+  // past the edge as a tail. The turn of radius 2 it began with through
+  // 2.6.9 is where the anchor's ring is now.
+  'fib-spiral': 'M9.33 6.12A3 3 0 0 0 7 5 5 5 0 0 0 2 10 8 8 0 0 0 10 18 13 13 0 0 0 22 10' + ring(10, 8),
+  // A sector: its three anchors, the two radii between them and its levels
+  // as arcs. A 3, 4, 5 edge puts every level on whole units.
+  'fib-wedge': 'M7 18h11' + link(5, 18, 14, 6, 2, 2) + 'M10 18A5 5 0 0 0 8 14M15 18A10 10 0 0 0 11 10M19.87 16.01A15 15 0 0 0 15.52 7.3'
+    + ring(5, 18) + ring(20, 18) + ring(14, 6),
   'fib-speed-fan': 'M3 20V4M3 20h18M3 20 21 4M3 20 13 4',
-  'gann-fan': 'M3 20 21 2M3 20 21 9M3 20 21 15M3 20h18',
-  'gann-box': 'M3 3h18v18H3zM3 3l18 18M3 21 21 3',
-  'trend-fib-time': 'M3 20 8 8 12 15M12 3v18M16 3v18M22 3v18',
+  'gann-fan': link(4.5, 19.5, 21.5, 2.5, 2) + link(4.5, 19.5, 12.5, 2.5, 2) + link(4.5, 19.5, 21.5, 11, 2)
+    + link(4.5, 19.5, 21.5, 15.5, 2) + ring(4.5, 19.5),
+  // A box, wider than it is tall, where the Gann square beside it is square:
+  // on one frame with the same two corners ringed, the two were one glyph at
+  // 0.79 overlap.
+  'gann-box': 'M17.5 6.5h-13v9M6.5 17.5h13v-9M4.5 6.5l15 11' + link(4.5, 17.5, 19.5, 6.5, 2, 2) + ring(4.5, 17.5) + ring(19.5, 6.5),
+  'trend-fib-time': link(4.5, 19.5, 9, 8.5, 2, 2) + link(9, 8.5, 12.5, 15, 2) + ring(4.5, 19.5) + ring(9, 8.5)
+    + 'M12.5 2.5v19M16.5 2.5v19M21.5 2.5v19',
   // Half circles about the trend's first anchor, turned to face along it,
   // with the trend through their crowns. Each arc's radius is written short
   // of its chord on purpose: SVG scales such a radius up to half the chord,
   // which makes the arc an exact half turn on a diagonal whose true radius
-  // is not a whole number.
-  'fib-speed-resistance-arcs': 'M10 14 22 2M2 6a8 8 0 0 1 16 16M6 10a4 4 0 0 1 8 8',
-  'gann-square': 'M3 3h18v18H3zM9 3v18M15 3v18M3 9h18M3 15h18M3 21 21 3',
+  // is not a whole number. The trend runs between its two anchors.
+  'fib-speed-resistance-arcs': link(10, 14, 20, 4, 2, 2) + 'M3.5 7.5a9 9 0 0 1 13 13M6.5 10.5a4 4 0 0 1 7 7' + ring(10, 14) + ring(20, 4),
+  'gann-square': 'M17.5 4.5h-13v13M6.5 19.5h13v-13M9.5 4.5v15M14.5 4.5v15M4.5 9.5h15M4.5 14.5h15'
+    + link(4.5, 19.5, 19.5, 4.5, 2, 2) + ring(4.5, 19.5) + ring(19.5, 4.5),
   // The tool's own figure: a square as tall as the unit arcs, which stand on
   // its bottom corners, arcs a third as high on the same base, and the wall
   // at half. The half rings under a pole it replaced read as an umbrella.
-  'dedekind-tessellation': 'M3 3h18v18H3zM3 3A18 18 0 0 1 21 21M21 3A18 18 0 0 0 3 21'
-    + 'M3 21a6 6 0 0 1 12 0M9 21a6 6 0 0 1 12 0M12 3 12 21',
-  sonic: 'M3 12a9 9 0 0 1 18 0M6 12a6 6 0 0 1 12 0M9 12a3 3 0 0 1 6 0M3 12h18',
-  // Waves inside the Mach cone, each on its axis and tangent to both sides,
-  // as the tool draws them. The two tools differ only in their levels, and
-  // so do the glyphs: equal steps for the one, radii 2, 3 and 5 for the
-  // golden one. The smallest golden wave sits a third of a unit inside the
-  // cone: exactly tangent, it would be centred where the next wave's line
-  // passes, and that line would fill it solid. The half rings across the
-  // cone they replaced matched nothing either tool draws.
-  supersonic: 'M22 3 2 12l20 9' + ring(7, 12, 2) + ring(12, 12, 4),
-  'golden-sonic': 'M3 12a9 9 0 0 1 18 0M7 12a5 5 0 0 1 10 0M10 12a2 2 0 0 1 4 0M3 16h18M12 16v5',
-  'golden-supersonic': 'M22 5 2 12l20 7' + ring(7, 12, 2) + ring(11, 12, 3) + ring(17, 12, 5),
+  // Its anchors are the other pair of corners from the Gann square's: on the
+  // same pair the two were 0.82 alike.
+  'dedekind-tessellation': 'M6.5 4.5h13v13M4.5 6.5v13h13M6.5 4.63A15 15 0 0 1 19.37 17.5M19.5 4.5A15 15 0 0 0 4.5 19.5'
+    + 'M4.5 19.5a5 5 0 0 1 10 0M9.5 19.5A5 5 0 0 1 19.1 17.54M12 4.5v15' + ring(4.5, 4.5) + ring(19.5, 19.5),
+  // The four wave studies take two anchors, and the first wave's diameter
+  // runs between them: so each glyph is that wave on its two rings, a
+  // pivot's size since they sit on its rim. A sonic wave touches the
+  // wavefront, the line across the first anchor, and the next wave is twice
+  // it, centred on the second anchor. The golden one nests a wave at the
+  // golden ratio inside the first instead. A supersonic wave sits in its
+  // Mach cone, on the axis and tangent to both sides, as the tool draws it.
+  // The two supersonic tools differ only in their levels, which one wave
+  // cannot show, so the golden one keeps the narrower cone it has always had.
+  // The half rings over a line the sonic pair were through 2.6.9, and the
+  // half rings across the cone before that, matched nothing a tool draws.
+  sonic: 'M4 2.5v8M4 13.5v8M12.75 13.48A4.5 4.5 0 0 1 4.25 13.48M4.25 10.52A4.5 4.5 0 0 1 12.75 10.52M4.13 10.51A9 9 0 1 1 4.13 13.49'
+    + ring(4, 12, PIVOT) + ring(13, 12, PIVOT),
+  supersonic: 'M18.95 2.5 2.5 12 18.95 21.5M16.51 13.48A4.75 4.75 0 0 1 7.49 13.48M7.49 10.52A4.75 4.75 0 0 1 16.51 10.52'
+    + ring(7.25, 12, PIVOT) + ring(16.75, 12, PIVOT),
+  'golden-sonic': 'M4 2.5v8M4 13.5v8M14.8 13.49A5.5 5.5 0 0 1 4.2 13.49M4.2 10.51A5.5 5.5 0 0 1 14.8 10.51M4.33 10.54A3.4 3.4 0 1 1 4.33 13.46'
+    + ring(4, 12, PIVOT) + ring(15, 12, PIVOT),
+  'golden-supersonic': 'M21.5 4.15 2.5 12 21.5 19.85M17.43 13.48A4.2 4.2 0 0 1 9.56 13.48M9.56 10.52A4.2 4.2 0 0 1 17.43 10.52'
+    + ring(9.3, 12, PIVOT) + ring(17.7, 12, PIVOT),
 
   // ── patterns ────────────────────────────────────────────────────────────
-  'xabcd-pattern': 'M3 19 7 4 12 16 16 8 21 20M3 19 12 16 21 20M7 4 16 8',
-  'abcd-pattern': 'M3 18 9 4 15 15 21 3M3 18 15 15M9 4 21 3',
-  'elliott-impulse': 'M2 21 6 12 9 17 13 5 17 11 22 2',
-  'elliott-correction': 'M3 4 9 18 15 8 21 21M3 4h4M17 21h4',
-  'head-shoulders': 'M2 20 5 10 8 17 12 3 16 17 19 10 22 20M3 17h18',
-  // The six harmonics are one zigzag and differ only in where B and D fall
-  // against XA, so each is drawn to its own ratios, and its tool accepts it
-  // as a valid instance of itself and of no other harmonic. Gartley: B at
-  // 0.61 of XA, D at 0.78. Bat: a shallow B at 0.44, a deep D at 0.89.
-  // Butterfly: D beyond X, at 1.38. Crab: D far beyond X, at 1.58, after a
-  // leg 3.4 times BC. Shark: C above A, D back at X. Cypher: C above A, D at
-  // 0.79 of XC. Drawn by eye, as before, five of the six failed their own
-  // tool's check.
-  gartley: harmonic(21, 3, 14, 7, 17),
-  bat: harmonic(21, 3, 11, 5, 19),
-  butterfly: harmonic(16, 3, 13, 6, 21),
-  crab: harmonic(14, 2, 9, 4, 21),
-  shark: harmonic(22, 5, 13, 2, 22),
-  cypher: harmonic(21, 7, 14, 2, 17),
+  // A pattern is its pivots joined up, so each pivot the user places is a
+  // ring, as an anchor is on a line, and the legs run between them. Bare
+  // zigzags, as before, were lines folded at random: the pivots are what a
+  // trader reads a pattern by. The general five-point pattern also joins A
+  // to C, as its tool does to measure that leg; the four-point one joins A
+  // to C and B to D. An impulse is its five numbered pivots and a correction
+  // its three, with the leg that leads into the first. Head and shoulders
+  // rings the three pivots its tool names, over the neckline: all seven
+  // would be a row of rings with no figure left between them.
+  'xabcd-pattern': harmonic(18.5, 3.5, 16.5, 6.5, 20.5) + link(7.75, 3.5, 16.25, 6.5, PIVOT, PIVOT),
+  'abcd-pattern': zigzag([[3.5, 4], [9, 15], [15, 8], [20.5, 20]])
+    + link(3.5, 4, 15, 8, PIVOT, PIVOT) + link(9, 15, 20.5, 20, PIVOT, PIVOT),
+  'elliott-impulse': zigzag([[3.5, 14], [7.75, 19.5], [12, 8], [16.25, 13], [20.5, 3.5]]),
+  'elliott-correction': link(2.5, 3, 7.5, 14, 0, PIVOT) + zigzag([[7.5, 14], [13, 8], [20, 20]]),
+  'head-shoulders': link(2.5, 20, 6, 11.5, 0, PIVOT) + link(6, 11.5, 9, 16.5, PIVOT) + link(9, 16.5, 12, 4, 0, PIVOT)
+    + link(12, 4, 15, 16.5, PIVOT) + link(15, 16.5, 18, 11.5, 0, PIVOT) + link(18, 11.5, 21.5, 20, PIVOT) + 'M2.5 16.5h19'
+    + ring(6, 11.5, PIVOT) + ring(12, 4, PIVOT) + ring(18, 11.5, PIVOT),
+  // The six harmonics are one zigzag and differ only in where B, C and D
+  // fall against XA, so each is drawn to its own ratios, and its tool accepts
+  // it as a valid instance of itself and of no other harmonic. Each sits
+  // toward the end of its tool's range that its neighbours do not share, so
+  // the six are six figures at 20px and not one. Gartley: B at 0.65 of XA, a
+  // shallow C, D at 0.76. Bat: a shallow B at 0.41, C nearly back at A, a
+  // deep D at 0.88. Butterfly: B at 0.8, D beyond X at 1.36. Crab: D far
+  // beyond X, at 1.62, after a leg 3.6 times BC. Shark: C above A, D back at
+  // X. Cypher: C above A, D at 0.76 of XC. Drawn by eye, as they first were,
+  // five of the six failed their own tool's check.
+  gartley: harmonic(20.5, 3.5, 14.5, 10, 16.5),
+  bat: harmonic(20.5, 3.5, 10.5, 4.5, 18.5),
+  butterfly: harmonic(16, 3.5, 13.5, 7.5, 20.5),
+  crab: harmonic(14, 3.5, 9, 4.5, 20.5),
+  shark: harmonic(20.5, 6.5, 12.5, 3.5, 20.5),
+  cypher: harmonic(20.5, 8, 15.5, 3.5, 16.5),
 
   // ── measure and range ───────────────────────────────────────────────────
-  measure: 'M4 16h16M4 12v8M20 12v8M8 4h8M12 4v6',
-  'anchored-vwap': 'M4 4v16M4 15 8 12 12 14 16 8 20 6M2 4h4',
-  'fixed-range-volume-profile': 'M4 3v18M4 5h8v3H4M4 10h16v3H4M4 15h12v3H4',
-  'price-range': 'M12 4v16M7 9l5-5 5 5M7 15l5 5 5-5',
-  'date-range': 'M4 12h16M9 7l-5 5 5 5M15 7l5 5-5 5',
-  'date-price-range': 'M5 6h14v12H5zM5 12h14M12 6v12',
+  // A rule for the tool that measures both ways, and for each range the two
+  // limits it runs between with the span marked across them: levels for
+  // price, bars for time, the opposite corners of the box for both. The bare
+  // double arrows they were before were the scale buttons of the chrome tier.
+  measure: 'M16.6 3.2 20.8 7.4 7.4 20.8 3.2 16.6zM6.55 13.25l1.4 1.4M9.9 9.9l1.8 1.8M13.25 6.55l1.4 1.4',
+  // What the study is: an average of the candles, from the anchor on. One
+  // candle rides above the average and one below, so it crosses their wicks
+  // and never a body: through a body four units wide, the line and the frame
+  // were one blot at 20px. The average leaves its anchor level and arrives
+  // level, an S and not the slash a straight rise is. A bar the height of
+  // the glyph through the ring, as it was first redrawn, buried the ring in
+  // the bar and said nothing of price.
+  'anchored-vwap': 'M10 2.5v1.5M8 4h4v6H8zM10 10v7.5M17.5 3v8M15.5 11h4v6h-4zM17.5 17v2.5'
+    + 'M6.5 15.5c3.2 0 4.6-1.2 6.2-4.4s3.6-5.6 8.8-5.6' + ring(4.5, 15.5),
+  // The range between its two anchors, and the volume at each price along it.
+  'fixed-range-volume-profile': 'M4.5 6.5v11M4.5 7h7v3h-7M4.5 10.5h15.5v3H4.5M4.5 14h10.5v3H4.5' + ring(4.5, 4.5) + ring(4.5, 19.5),
+  'price-range': 'M2.5 3.5h19M2.5 20.5h19M12 7v10M9 10l3-3 3 3M9 14l3 3 3-3',
+  'date-range': 'M3.5 2.5v19M20.5 2.5v19M7 12h10M10 9l-3 3 3 3M14 9l3 3-3 3',
+  'date-price-range': 'M3 8.5V3h5.5M21 15.5V21h-5.5M7 17 17 7M12 7h5v5M12 17H7v-5',
 
   // ── cycles ──────────────────────────────────────────────────────────────
-  'cyclic-lines': 'M4 4v16M10 4v16M16 4v16M22 4v16',
-  'time-cycles': 'M4 12a4 4 0 0 1 8 0 4 4 0 0 0 8 0M4 4v16',
-  'sine-line': 'M2 12c3-9 6-9 9 0 3 9 6 9 9 0',
+  // Evenly spaced, with the anchor on the first: the Fibonacci time zones
+  // beside them in the rail are bare and spread out.
+  'cyclic-lines': 'M4.5 2.5V10M4.5 14v7.5M10 2.5v19M15.5 2.5v19M21 2.5v19' + ring(4.5, 12),
+  // Arches standing on their anchors, the second running off the edge as
+  // the cycles do. Taller than they are wide, so the glyph fills its box.
+  'time-cycles': 'M4.5 15.5A4.5 9 0 0 1 13.5 15.5M13.5 15.5A4.5 9 0 0 1 21.5 9.84' + ring(4.5, 17.5) + ring(13.5, 17.5),
+  'sine-line': 'M2.5 12c2.1-7.5 4.2-7.5 6.33 0s4.2 7.5 6.33 0 4.2-7.5 6.34 0',
 
   // ── positions and forecast ──────────────────────────────────────────────
-  // A position is one frame split at the entry into its two zones, the
-  // target the taller, with a tick out to the left at the entry price and
-  // the direction solid in the target. A short is the long turned over.
-  // They were one picture in 2.5.5, and the box over a thin stop bar that
-  // replaced it read as an eject key or a laptop. The risk-reward pair
+  // A position is its three levels, the target, the entry and the stop, each
+  // on the anchor that sets it, with the target the farther from the entry
+  // and the direction as an arrow in that gap. The rings are a pivot's size,
+  // so the entry's and the stop's do not touch. A short is the long turned
+  // over. They were one picture in 2.5.5; the box over a thin stop bar that
+  // replaced it read as an eject key or a laptop, and the frame with an
+  // arrow in it after that as a file being sent. With the rings on
+  // alternate ends the three levels were a row of sliders. The risk-reward pair
   // measures instead: from one entry line, the reward as a tall span with a
-  // cap, the risk as a short one the other way, flipped for the short.
-  'long-position': 'M2 14h4M6 3h15v17H6zM6 14h15' + LONG_DIRECTION,
-  'short-position': 'M2 10h4M6 4h15v17H6zM6 10h15' + SHORT_DIRECTION,
-  forecast: 'M3 18 9 10l4 4 8-10M13 4h8v8',
-  'risk-reward-long': 'M2 14h20M8 14V3M5 3h6M17 14v6M14 20h6',
-  'risk-reward-short': 'M2 10h20M8 10v11M5 21h6M17 10V4M14 4h6',
+  // cap, the risk as a short one the other way, flipped for the short. A
+  // forecast is the segment its tool draws broken, as dots: each is a stroke
+  // of no length, which the round cap paints as a disc. As dashes, the caps
+  // closed the gaps and it was the trend line at 93 percent overlap.
+  'long-position': 'M5.5 4.5h16M5.5 13.5h16M5.5 19.5h16M13.5 11V7M11 9.5l2.5-2.5 2.5 2.5'
+    + ring(4, 4.5, PIVOT) + ring(4, 13.5, PIVOT) + ring(4, 19.5, PIVOT),
+  'short-position': 'M5.5 19.5h16M5.5 10.5h16M5.5 4.5h16M13.5 13v4M11 14.5l2.5 2.5 2.5-2.5'
+    + ring(4, 19.5, PIVOT) + ring(4, 10.5, PIVOT) + ring(4, 4.5, PIVOT),
+  forecast: 'M8.18 15.82h0M10.72 13.28h0M13.27 10.73h0M15.81 8.19h0' + ring(4.5, 19.5) + ring(19.5, 4.5),
+  'risk-reward-long': 'M6.5 14h15M13.5 14V4M10 4h7M13.5 14v6M10 20h7' + ring(4.5, 14),
+  'risk-reward-short': 'M6.5 10h15M13.5 10v10M10 20h7M13.5 10V4M10 4h7' + ring(4.5, 10),
 
   // ── annotations ─────────────────────────────────────────────────────────
-  text: 'M4 5h16M12 5v14M8 19h8',
-  note: 'M4 20 9 15M9 5h13v10H9zM4 20v-4',
-  // A callout's tail runs back to a point it annotates, well clear of the
-  // box; a balloon's is a stub under its own anchor, and a comment's smaller.
-  callout: 'M3 3h18v9H11l-6 8 1-8H3z',
-  balloon: 'M3 4h18v12H9l-4 4v-4H3z',
-  comment: 'M3 5h18v10H3zM6 15v4l4-4',
-  signpost: 'M12 21V9M5 3h14v6H5z',
-  'price-label': 'M3 12 8 7h13v10H8z',
-  'price-note': 'M2 12h5M7 6h15v12H7zM10 12h9',
-  table: 'M3 5h18v14H3zM3 10h18M9 10v9M15 10v9',
-  'flag-mark': 'M6 21V3M6 3h12l-3 4 3 4H6',
-  'arrow-up': 'M12 3v18M6 9l6-6 6 6',
-  'arrow-down': 'M12 3v18M6 15l6 6 6-6',
-  'arrow-left': 'M3 12h18M9 6l-6 6 6 6',
-  'arrow-right': 'M3 12h18M15 6l6 6-6 6',
+  // A letter with its serifs, so it is a T and not the I-beam it was.
+  text: 'M5 7V4.5h14V7M12 4.5v15M9 19.5h6',
+  // Five plates in one flyout, so each is its own object. A note is a sheet
+  // with its corner turned and writing on it. A callout is a plate on a
+  // leader that runs back to the point it annotates. A balloon is round, a
+  // comment square, each with its tail under it. A price note is a plate
+  // level with the price it hangs on.
+  note: 'M5 3.5h14a1.5 1.5 0 0 1 1.5 1.5v9.5l-5.5 6H5a1.5 1.5 0 0 1-1.5-1.5V5a1.5 1.5 0 0 1 1.5-1.5z'
+    + 'M20.5 14.5h-4a1.5 1.5 0 0 0-1.5 1.5v4.5M7.5 8h9M7.5 12h5',
+  callout: box(7, 3, 14.5, 9.5) + link(9.5, 12.5, 4.5, 19.5, 0, 2) + ring(4.5, 19.5),
+  balloon: 'M12 3.5c5 0 9 3.1 9 7s-4 7-9 7c-1 0-2-0.1-2.9-0.4L4.5 20l1.3-4.4C4.1 14.3 3 12.5 3 10.5c0-3.9 4-7 9-7z',
+  comment: 'M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
+  signpost: box(4.5, 3, 15, 7, 1.5) + 'M12 10v7.5' + ring(12, 19.5),
+  'price-label': 'M8 6.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H8L3 12zM11 12h6',
+  'price-note': 'M6.5 12h3' + box(9.5, 7, 12, 10) + 'M12.5 12h6' + ring(4.5, 12),
+  table: box(3, 4.5, 18, 15) + 'M3 9.5h18M9 9.5v10M15 9.5v10',
+  'flag-mark': 'M5.5 21.5v-18M5.5 4.5h13l-3 4 3 4h-13',
+  // The marker the tool stamps on the chart, in outline. As a shaft with a
+  // chevron they were the stacking and scale arrows of the chrome tier.
+  'arrow-up': 'M12 3.5l7 7.5h-4v9.5H9V11H5z',
+  'arrow-down': 'M12 20.5l7-7.5h-4V3.5H9V13H5z',
+  'arrow-left': 'M3.5 12l7.5-7v4h9.5v6H11v4z',
+  'arrow-right': 'M20.5 12l-7.5-7v4H3.5v6H13v4z',
 };
 
 /**
- * The fills of the tool glyphs' marks, by tool id: anchor dots, pole caps and
- * arrowheads. Optional: most glyphs have none.
+ * The fills of the tool glyphs' solid marks, by tool id. Optional: an anchor
+ * is an open ring and takes no fill, so nearly every glyph has none.
  *
  * Every mark here is also drawn, as an outline, in the glyph's own path, so a
  * host that renders only `DRAWING_TOOL_ICONS` still shows each one. This adds
@@ -365,22 +538,7 @@ export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
  * `<path d="..." fill="currentColor" stroke="none"/>` for the same result.
  */
 export const DRAWING_TOOL_ACCENTS: Readonly<Record<string, string>> = {
-  magnet: MAGNET_CAPS,
-  'trend-line': SEGMENT_ENDS,
-  ray: RAY_ORIGIN,
-  'extended-line': EXTENDED_DOTS,
-  arrow: ARROW_HEAD,
-  'horizontal-ray': HRAY_ORIGIN,
-  'cross-line': CROSS_CENTRE,
-  'info-line': SEGMENT_ENDS,
-  path: PATH_HEAD,
-  polyline: POLYLINE_VERTICES,
-  'long-position': LONG_DIRECTION,
-  'short-position': SHORT_DIRECTION,
-  pitchfork: FORK_PIVOT,
-  'schiff-pitchfork': SCHIFF_PIVOT,
-  'modified-schiff-pitchfork': MODIFIED_PIVOT,
-  'inside-pitchfork': INSIDE_PIVOT,
+  magnet: MAGNET_POLES,
 };
 
 /**
@@ -479,8 +637,10 @@ const pip = (x: number, y: number): string => `M${x} ${y}h0`;
 export const CHROME_ICONS: Readonly<Record<string, string>> = {
   // ── pointer and snapping ────────────────────────────────────────────────
   // A pointer, not the cross it was: that cross overlapped `plus` by 92
-  // percent at 16px.
-  cursor: 'M4 2v10l3-3h5zM8 10l2 4',
+  // percent at 16px. It is the tool tier's pointer on this grid, in outline
+  // with its tail. The magnet stays one line with its poles: two legs, as
+  // the tool tier draws it, are more strokes than a 16px box carries.
+  cursor: 'M4 2v10l3-2 2 4 2-1-2-4h4z',
   magnet: 'M4 5v3a4 4 0 0 0 8 0V5' + CHROME_MAGNET_CAPS,
 
   // ── state ───────────────────────────────────────────────────────────────
@@ -511,7 +671,7 @@ export const CHROME_ICONS: Readonly<Record<string, string>> = {
   duplicate: 'M8 8h6v6H8zM5 2v6M2 5h6',
   front: 'M2 9h6v5H2zM11 14V2M8 5l3-3 3 3',
   back: 'M2 2h6v5H2zM11 2v12M8 11l3 3 3-3',
-  text: 'M3 3h10M8 3v10M6 13h4',
+  text: 'M3 5V3h10v2M8 3v10M6 13h4',
 
   // ── navigation ──────────────────────────────────────────────────────────
   'chevron-down': 'M3 6l5 5 5-5',

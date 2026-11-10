@@ -65,10 +65,9 @@ describe('iconSvg', () => {
     expect(r['stroke-linejoin']).toBe('round');
     expect(r['aria-hidden']).toBe('true');
     expect(r.class).toBeUndefined();
-    expect(paths(svg)).toEqual([
-      { d: DRAWING_TOOL_ICONS['trend-line'] },
-      { d: DRAWING_TOOL_ACCENTS['trend-line'], fill: 'currentColor', stroke: 'none' },
-    ]);
+    // One path: the segment's anchors are open rings, which take no fill.
+    expect(DRAWING_TOOL_ACCENTS['trend-line']).toBeUndefined();
+    expect(paths(svg)).toEqual([{ d: DRAWING_TOOL_ICONS['trend-line'] }]);
     expect(svg.endsWith('</svg>')).toBe(true);
     expect(svg).not.toMatch(/\n/);
   });
@@ -78,14 +77,14 @@ describe('iconSvg', () => {
   });
 
   it('paints an accent solid in the frame colour, inside the outline the glyph strokes', () => {
-    // The ray's origin dot: the glyph's path strokes its ring with the frame's
-    // line, and the accent fills it, in the frame colour and with no stroke of
-    // its own, so a host restyling the frame restyles the dot with it.
-    const svg = iconSvg('ray', { stroke: 1.5 });
-    const [line, dot] = paths(svg);
-    expect(line).toEqual({ d: DRAWING_TOOL_ICONS.ray });
-    expect(dot).toEqual({ d: DRAWING_TOOL_ACCENTS.ray, fill: 'currentColor', stroke: 'none' });
-    expect(line.d).toContain(dot.d);
+    // The magnet's poles: the glyph's path strokes their outline with the
+    // frame's line, and the accent fills them, in the frame colour and with
+    // no stroke of its own, so a host restyling the frame restyles them too.
+    const svg = iconSvg('magnet', { stroke: 1.5 });
+    const [line, poles] = paths(svg);
+    expect(line).toEqual({ d: DRAWING_TOOL_ICONS.magnet });
+    expect(poles).toEqual({ d: DRAWING_TOOL_ACCENTS.magnet, fill: 'currentColor', stroke: 'none' });
+    expect(line.d).toContain(poles.d);
     expect(root(svg)['stroke-width']).toBe('1.5');
     expect(root(svg).fill).toBe('none');
   });
@@ -187,10 +186,12 @@ describe('iconSprite', () => {
   it('takes a subset, and collapses repeats to one symbol', () => {
     // A repeated element id is an invalid document, and browsers resolve
     // <use> to the first match anyway.
-    const syms = symbols(iconSprite(['ray', 'arrow', 'ray']));
-    expect(syms.map((s) => s.id)).toEqual([`${ICON_SYMBOL_PREFIX}ray`, `${ICON_SYMBOL_PREFIX}arrow`]);
-    expect(syms[0].body).toBe(`<path d="${DRAWING_TOOL_ICONS.ray}"/><path d="${DRAWING_TOOL_ACCENTS.ray}" fill="currentColor" stroke="none"/>`);
-    expect(syms[1].body).toBe(`<path d="${DRAWING_TOOL_ICONS.arrow}"/><path d="${DRAWING_TOOL_ACCENTS.arrow}" fill="currentColor" stroke="none"/>`);
+    // One with a fill and one without: a symbol carries its accent only when
+    // its glyph has one.
+    const syms = symbols(iconSprite(['magnet', 'ray', 'magnet']));
+    expect(syms.map((s) => s.id)).toEqual([`${ICON_SYMBOL_PREFIX}magnet`, `${ICON_SYMBOL_PREFIX}ray`]);
+    expect(syms[0].body).toBe(`<path d="${DRAWING_TOOL_ICONS.magnet}"/><path d="${DRAWING_TOOL_ACCENTS.magnet}" fill="currentColor" stroke="none"/>`);
+    expect(syms[1].body).toBe(`<path d="${DRAWING_TOOL_ICONS.ray}"/>`);
   });
 
   it('throws for an unknown id rather than emitting an empty symbol', () => {
@@ -266,20 +267,20 @@ describe('toolCursor', () => {
   });
 
   it('haloes the marks with their glyph, and fills them in the glyph colour', () => {
-    // The dots on a trend line are part of the picture: a cursor that drops
-    // them draws a different tool, and one that haloes the line but not the
-    // dots loses them on a chart of the same colour. The glyph's path draws
-    // the dots, so the halo and the line both pass around them; the accent
+    // The poles of the magnet are part of the picture: a cursor that drops
+    // them draws a different glyph, and one that haloes the legs but not the
+    // poles loses them on a chart of the same colour. The glyph's path draws
+    // the poles, so the halo and the line both pass around them; the accent
     // then fills them, last and unstroked.
-    const [halo, glyph, marks, ...rest] = paths(parse(toolCursor('trend-line')).svg);
+    const [halo, glyph, marks, ...rest] = paths(parse(toolCursor('magnet')).svg);
     expect(rest).toEqual([]);
-    expect(halo.d).toBe(DRAWING_TOOL_ICONS['trend-line']);
-    expect(halo.d).toContain(DRAWING_TOOL_ACCENTS['trend-line']);
+    expect(halo.d).toBe(DRAWING_TOOL_ICONS.magnet);
+    expect(halo.d).toContain(DRAWING_TOOL_ACCENTS.magnet);
     expect(halo.stroke).toBe('#000');
-    expect(glyph.d).toBe(DRAWING_TOOL_ICONS['trend-line']);
+    expect(glyph.d).toBe(DRAWING_TOOL_ICONS.magnet);
     expect(glyph.fill).toBeUndefined();
     expect(glyph.stroke).toBe('#fff');
-    expect(marks.d).toBe(DRAWING_TOOL_ACCENTS['trend-line']);
+    expect(marks.d).toBe(DRAWING_TOOL_ACCENTS.magnet);
     expect(marks.fill).toBe('#fff');
     expect(marks.stroke).toBeUndefined();
   });
@@ -299,8 +300,8 @@ describe('toolCursor', () => {
 
   it('lets an explicit halo win, and falls back to black for a colour it cannot read', () => {
     expect(paths(parse(toolCursor('ray', { color: '#000', halo: '#f00' })).svg)[0].stroke).toBe('#f00');
-    // The halo, then the glyph in the colour itself, then its dot filled in it.
-    const layers = paths(parse(toolCursor('ray', { color: 'rgb(0,0,0)' })).svg);
+    // The halo, then the glyph in the colour itself, then its poles filled in it.
+    const layers = paths(parse(toolCursor('magnet', { color: 'rgb(0,0,0)' })).svg);
     expect(layers.map((p) => p.stroke)).toEqual(['#000', 'rgb(0,0,0)', undefined]);
     expect(layers[2].fill).toBe('rgb(0,0,0)');
   });

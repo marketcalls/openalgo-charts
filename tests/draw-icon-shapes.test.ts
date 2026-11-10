@@ -17,7 +17,7 @@
  * and of no other harmonic.
  */
 import { describe, expect, it } from 'vitest';
-import { DRAWING_TOOL_ACCENTS, DRAWING_TOOL_ICONS } from '../src/draw/icons';
+import { DRAWING_TOOL_ICONS } from '../src/draw/icons';
 import { PATTERN_DRAWING_TOOLS } from '../src/draw/pattern-tools';
 import type { Drawing, DrawingTool } from '../src/draw/types';
 import type { PrimitiveRenderContext } from '../src';
@@ -65,13 +65,51 @@ function drawn(d: string, p: Pt, q: Pt): boolean {
   return lines(d).some((s) => onSegment(p, s) && onSegment(q, s));
 }
 
-/** Centres of the round marks a glyph's accent fills. */
-function pivots(id: string): Pt[] {
-  return subpaths(DRAWING_TOOL_ACCENTS[id] ?? '').map((s) => {
+/** The radius of an anchor ring: a stroke that ends on an anchor stops this far short of its centre. */
+const ANCHOR = 2;
+/** A trimmed stroke is written to two decimals, so its end is on the ring's edge to within this. */
+const TRIM = 0.02;
+
+/** The radius of a pattern's pivot ring: a size under an anchor's, so five of them share the box. */
+const PIVOT = 1.5;
+
+/** Centres of a glyph's rings of radius `r`: closed marks made of arcs alone. */
+function rings(id: string, r: number): Pt[] {
+  return subpaths(glyph(id)).filter((s) => isClosed(s) && s.segments.every((g) => g.kind === 'A')).flatMap((s) => {
     const xs = s.extent.map((p) => p[0]);
     const ys = s.extent.map((p) => p[1]);
-    return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2] as Pt;
+    const radius = (Math.max(...xs) - Math.min(...xs)) / 2;
+    return Math.abs(radius - r) < 1e-6 ? [[(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2] as Pt] : [];
   });
+}
+
+/** Centres of a glyph's anchor rings. */
+const pivots = (id: string): Pt[] => rings(id, ANCHOR);
+
+/**
+ * A straight stroke joins the rings of radius `r` centred on `a` and `b`:
+ * it lies on the line between the two centres and stops on each ring's edge.
+ */
+function joins(d: string, a: Pt, b: Pt, r: number): boolean {
+  const axis = sub(b, a);
+  const off = (p: Pt): number => Math.abs(cross(axis, sub(p, a))) / len(axis);
+  return lines(d).some(([s, e]) => ([[s, e], [e, s]] as [Pt, Pt][]).some(([from, to]) =>
+    Math.abs(len(sub(from, a)) - r) < TRIM && Math.abs(len(sub(to, b)) - r) < TRIM && off(from) < TRIM && off(to) < TRIM));
+}
+
+/**
+ * A straight stroke runs from `p` to the anchor at `a`: it passes through
+ * `p`, heads for the ring's centre, and stops on the ring's edge. A stroke
+ * never enters a ring, so reaching an anchor is reaching its edge.
+ */
+function reaches(d: string, p: Pt, a: Pt): boolean {
+  return lines(d).some(([s, e]) => ([[s, e], [e, s]] as [Pt, Pt][]).some(([from, to]) => {
+    if (Math.abs(len(sub(to, a)) - ANCHOR) > TRIM) return false;
+    const run = sub(to, from);
+    const off = (v: Pt): number => Math.abs(cross(run, v)) / len(run);
+    const t = dotp(sub(p, from), run) / dotp(run, run);
+    return off(sub(p, from)) < TRIM && t > -1e-3 && t < 1 + 1e-3 && off(sub(a, from)) < TRIM && dotp(run, sub(a, from)) > 0;
+  }));
 }
 
 /** A full circle drawn as one closed subpath of arcs: its centre and radius. */
@@ -108,18 +146,109 @@ function toLine(p: Pt, a: Pt, b: Pt): number {
 }
 
 /**
- * A closed, upright rectangle among a glyph's subpaths: its corners in
- * drawing order and its four edges, the closing edge included.
+ * An upright rectangle a glyph frames itself in: the box its upright strokes
+ * span, with all four edges drawn. Its corners in drawing order and its four
+ * edges. The edges may be split across strokes, as they are where two of the
+ * corners are anchors and the frame is drawn as the two halves between them.
  */
 function box(d: string): { corners: Pt[]; edges: [Pt, Pt][] } | undefined {
-  for (const s of subpaths(d)) {
-    if (!isClosed(s) || s.segments.some((g) => g.kind !== 'L')) continue;
-    const corners = s.points.filter((p, i) => i === 0 || !same(p, s.points[0]));
-    if (corners.length !== 4) continue;
-    const edges = corners.map((p, i) => [p, corners[(i + 1) % 4]] as [Pt, Pt]);
-    if (edges.every(([a, b]) => a[0] === b[0] || a[1] === b[1])) return { corners, edges };
-  }
-  return undefined;
+  const upright = lines(d).filter(([a, b]) => a[0] === b[0] || a[1] === b[1]);
+  if (upright.length === 0) return undefined;
+  const xs = upright.flatMap(([a, b]) => [a[0], b[0]]);
+  const ys = upright.flatMap(([a, b]) => [a[1], b[1]]);
+  const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const corners: Pt[] = [[left, top], [right, top], [right, bottom], [left, bottom]];
+  const edges = corners.map((p, i) => [p, corners[(i + 1) % 4]] as [Pt, Pt]);
+  return edges.every(([a, b]) => drawn(d, a, b)) ? { corners, edges } : undefined;
+}
+
+/** The point three points of a circle are equally far from. */
+function circumcentre(a: Pt, b: Pt, c: Pt): Pt | undefined {
+  const k = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+  if (Math.abs(k) < 1e-9) return undefined;
+  const [p, q, r] = [a, b, c].map((v) => v[0] * v[0] + v[1] * v[1]);
+  return [
+    (p * (b[1] - c[1]) + q * (c[1] - a[1]) + r * (a[1] - b[1])) / k,
+    (p * (c[0] - b[0]) + q * (a[0] - c[0]) + r * (b[0] - a[0])) / k,
+  ];
+}
+
+/**
+ * A glyph's construction with its anchors healed: the rings left out, and
+ * every stroke that stops on a ring's edge run on to the ring's centre, where
+ * the construction puts it. A glyph cuts its strokes back to its anchors so
+ * that a ring keeps a clear centre, and writes the cut end to two decimals;
+ * the checks here are about the figure the tool draws, which meets at the
+ * anchors exactly, so they read the healed path. A straight stroke is run on
+ * only when it is heading for the ring's centre, and an arc only when its
+ * circle passes through it.
+ */
+function healed(d: string): string {
+  const all = subpaths(d);
+  const radius = (s: (typeof all)[number]): number => {
+    const xs = s.extent.map((p) => p[0]);
+    return (Math.max(...xs) - Math.min(...xs)) / 2;
+  };
+  const isRing = (s: (typeof all)[number]): boolean => isClosed(s) && s.segments.every((g) => g.kind === 'A')
+    && [ANCHOR, PIVOT].some((r) => Math.abs(radius(s) - r) < 1e-6);
+  const anchors = all.filter(isRing).map((s) => {
+    const xs = s.extent.map((p) => p[0]);
+    const ys = s.extent.map((p) => p[1]);
+    return { c: [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2] as Pt, r: radius(s) };
+  });
+  /** The centre of the ring whose edge `p` stops on, when `g` is heading for it; else `p`. */
+  const heal = (p: Pt, g: Segment): Pt => {
+    for (const k of anchors) {
+      if (Math.abs(len(sub(p, k.c)) - k.r) > TRIM) continue;
+      if (g.kind === 'L') {
+        const run = sub(g.to, g.from);
+        if (Math.abs(cross(run, sub(k.c, g.from))) / len(run) < TRIM) return k.c;
+      } else if (g.kind === 'A') {
+        const pts = samples(g);
+        const o = circumcentre(g.from, pts[Math.floor(pts.length / 2) - 1], g.to);
+        if (o !== undefined && Math.abs(len(sub(k.c, o)) - len(sub(g.from, o))) < TRIM) return k.c;
+      }
+    }
+    return p;
+  };
+  return all.filter((sp) => !isRing(sp)).map((sp) => {
+    const first = sp.segments[0];
+    const last = sp.segments[sp.segments.length - 1];
+    if (first === undefined || last === undefined) return '';
+    const start = sp.closed ? sp.start : heal(sp.start, first);
+    const end = sp.closed ? last.to : heal(last.to, last);
+    const body = sp.segments.map((g, i) => {
+      const to = i === sp.segments.length - 1 ? end : g.to;
+      switch (g.kind) {
+        case 'L': return `L${to[0]} ${to[1]}`;
+        case 'A': return `A${g.rx} ${g.ry} ${g.rot} ${g.large} ${g.sweep} ${to[0]} ${to[1]}`;
+        case 'C': return `C${g.c1[0]} ${g.c1[1]} ${g.c2[0]} ${g.c2[1]} ${to[0]} ${to[1]}`;
+        case 'Q': return `Q${g.c[0]} ${g.c[1]} ${to[0]} ${to[1]}`;
+      }
+    }).join('');
+    return `M${start[0]} ${start[1]}${body}${sp.closed ? 'z' : ''}`;
+  }).join('');
+}
+
+/** A construction glyph as its tool draws it: its path with the anchors healed. */
+const built = (id: string): string => healed(glyph(id));
+
+/** The two anchors of a wave study, in order along its axis. */
+function waveAnchors(id: string): [Pt, Pt] {
+  const found = rings(id, PIVOT).sort((p, q) => p[0] - q[0]);
+  expect(found, `${id} rings its two anchors`).toHaveLength(2);
+  return [found[0], found[1]];
+}
+
+/**
+ * The arcs of a glyph that run on the circle of radius `r` about `c`. A cut
+ * arc is written to two decimals, and near a half turn its chord is nearly a
+ * diameter, so that rounding moves its centre by several times as much: the
+ * allowance is a twentieth of a unit, far inside the gap to any other wave.
+ */
+function waves(id: string, c: Pt, r: number): Segment[] {
+  return subpaths(glyph(id)).flatMap((sp) => sp.segments)
+    .filter((g) => g.kind === 'A' && [g.from, ...samples(g)].every((p) => Math.abs(len(sub(p, c)) - r) < 0.05));
 }
 
 interface Trident { P: Pt; Q: Pt; M: Pt; u: Pt }
@@ -165,7 +294,7 @@ describe('the pitchfork family are tridents told apart by where the median start
 
   it('starts the standard median at the pivot: one straight handle', () => {
     const { M, u, A } = fork('pitchfork');
-    expect(drawn(glyph('pitchfork'), M, A)).toBe(true);
+    expect(reaches(glyph('pitchfork'), M, A)).toBe(true);
     expect(along(sub(M, A), u), 'the handle continues the median').toBe(true);
   });
 
@@ -175,7 +304,7 @@ describe('the pitchfork family are tridents told apart by where the median start
     const d = glyph('schiff-pitchfork');
     const { M, u, A } = fork('schiff-pitchfork');
     const bases = lines(d).flatMap(([a, b]) => [a, b]).filter((p) => !same(p, M) && !same(p, A)
-      && drawn(d, M, p) && along(sub(M, p), u) && drawn(d, p, A));
+      && drawn(d, M, p) && along(sub(M, p), u) && reaches(d, p, A));
     expect(bases, 'a handle that turns to the pivot').not.toHaveLength(0);
     for (const base of bases) expect(Math.abs(dotp(sub(A, base), u))).toBeLessThan(EPS);
   });
@@ -185,7 +314,7 @@ describe('the pitchfork family are tridents told apart by where the median start
     // leg from the pivot to the crossbar's end, and the glyph draws that leg.
     const d = glyph('modified-schiff-pitchfork');
     const { P, Q, M, u, A } = fork('modified-schiff-pitchfork');
-    const legs = [P, Q].filter((B) => drawn(d, A, B));
+    const legs = [P, Q].filter((B) => reaches(d, B, A));
     expect(legs).toHaveLength(1);
     const base = mid(A, legs[0]);
     expect(drawn(d, M, base)).toBe(true);
@@ -195,7 +324,7 @@ describe('the pitchfork family are tridents told apart by where the median start
   it('starts the inside median on the crossbar itself: no handle, the fork inside the swing', () => {
     const d = glyph('inside-pitchfork');
     const { P, Q, M, u, A } = fork('inside-pitchfork');
-    expect(drawn(d, A, P) && drawn(d, A, Q), 'the swing joins the pivot to both crossbar ends').toBe(true);
+    expect(reaches(d, P, A) && reaches(d, Q, A), 'the swing joins the pivot to both crossbar ends').toBe(true);
     expect(drawn(d, M, sub(M, scale(u, 1 / len(u)))), 'a handle below the crossbar').toBe(false);
   });
 });
@@ -217,7 +346,7 @@ describe('the Fibonacci and Gann constructions', () => {
     // arcs met at corners, and the last, too short a chord for its radius,
     // bulged out past the box as a stray tail. The last turn may stop short
     // of a quarter, which is how the largest radius fits the box.
-    const s = subpaths(glyph('fib-spiral'));
+    const s = subpaths(built('fib-spiral'));
     expect(s, 'one stroke').toHaveLength(1);
     const arcs = s[0].segments;
     expect(arcs.length).toBeGreaterThanOrEqual(4);
@@ -257,7 +386,7 @@ describe('the Fibonacci and Gann constructions', () => {
   });
 
   it('draws the Fib wedge as a sector: two radii and its levels as arcs between them', () => {
-    const d = glyph('fib-wedge');
+    const d = built('fib-wedge');
     const ends = lines(d);
     const centres = ends.flatMap(([a, b]) => [a, b])
       .filter((p) => ends.filter(([a, b]) => same(a, p) || same(b, p)).length >= 2);
@@ -281,7 +410,7 @@ describe('the Fibonacci and Gann constructions', () => {
   it('draws the speed resistance arcs as half circles about the trend start, facing along the trend', () => {
     // The tool centres each level's half circle on the first anchor and turns
     // it to face the second, with the trend line through their crowns.
-    const d = glyph('fib-speed-resistance-arcs');
+    const d = built('fib-speed-resistance-arcs');
     const trend = lines(d);
     expect(trend).toHaveLength(1);
     const found = trend.flatMap(([a, b]) => [[a, b], [b, a]] as [Pt, Pt][]).map(([O, B]) => ({ O, B, arcs: arcsAbout(d, O) }))
@@ -303,7 +432,7 @@ describe('the Fibonacci and Gann constructions', () => {
     // the diagonal. The glyph of 2.5.8 drew the near axes and was the speed
     // fan beside it; a whole box made it the Gann box and square, which sit
     // in the same flyout.
-    const d = glyph('fib-speed-resistance-fan');
+    const d = built('fib-speed-resistance-fan');
     const segs = lines(d);
     const axial = (a: Pt, b: Pt): boolean => a[0] === b[0] || a[1] === b[1];
     const fans: Pt[] = [];
@@ -332,7 +461,7 @@ describe('the Fibonacci and Gann constructions', () => {
   it('draws the Dedekind tessellation as its tool does: arcs standing on the base of a square', () => {
     // A square as tall as the unit arcs, which stand on its bottom corners;
     // smaller arcs a third of that on the same base, and the wall at half.
-    const d = glyph('dedekind-tessellation');
+    const d = built('dedekind-tessellation');
     const frame = box(d);
     expect(frame, 'a square').toBeDefined();
     const xs = frame!.corners.map((p) => p[0]);
@@ -364,32 +493,59 @@ describe('the supersonic pair are waves inside a Mach cone', () => {
     throw new Error('no cone');
   }
 
-  it.each(['supersonic', 'golden-supersonic'])('%s rings the axis with circles tangent to both sides of the cone', (id) => {
-    // The tool centres every wave on the cone's axis, each tangent to both
-    // of its sides. The old glyphs drew half rings across the cone.
-    const d = glyph(id);
-    const { nose, ends } = cone(d);
+  it.each(['supersonic', 'golden-supersonic'])('%s sets its first wave between its two anchors, on the axis and tangent to both sides of the cone', (id) => {
+    // The tool takes two anchors, centres every wave on the cone's axis and
+    // draws each tangent to both of its sides; the first wave's diameter is
+    // the span between the anchors. The glyphs before 2.5.9 drew half rings
+    // across the cone, and through 2.6.9 showed no anchor at all.
+    const { nose, ends } = cone(glyph(id));
     const axis = mid(ends[0], ends[1]);
-    const rings = circles(d);
-    expect(rings.length).toBeGreaterThanOrEqual(2);
-    for (const { c, r } of rings) {
-      expect(toLine(c, nose, axis), 'on the axis').toBeLessThan(EPS);
-      // Whole units put a side's slope a little off the exact one, and the
-      // smallest golden wave sits a third of a unit inside so that the next
-      // wave's line does not fill it; half a unit off would read as a ring
-      // crossing the cone rather than touching it.
-      for (const side of ends) expect(Math.abs(toLine(c, nose, side) - r), `${id} ring ${r} against its side`).toBeLessThan(0.4);
-    }
+    const [a, b] = waveAnchors(id);
+    for (const p of [a, b]) expect(toLine(p, nose, axis), 'an anchor on the axis').toBeLessThan(EPS);
+    const centre = mid(a, b);
+    const r = len(sub(b, a)) / 2;
+    expect(waves(id, centre, r).length, 'the wave the anchors span, as the two arcs between them').toBeGreaterThanOrEqual(2);
+    for (const side of ends) expect(Math.abs(toLine(centre, nose, side) - r), `${id} against its side`).toBeLessThan(0.05);
   });
 
-  it('grows the supersonic waves in equal steps and the golden ones as Fibonacci numbers', () => {
-    // The two tools differ only in their levels: whole multiples for the
-    // one, golden ratios for the other. The glyphs show that and nothing else.
-    const plain = circles(glyph('supersonic')).map((c) => c.r).sort((a, b) => a - b);
-    const golden = circles(glyph('golden-supersonic')).map((c) => c.r).sort((a, b) => a - b);
-    expect(plain.map((r) => r / plain[0])).toEqual(plain.map((_, i) => i + 1));
-    expect(golden.length).toBeGreaterThanOrEqual(3);
-    for (let i = 2; i < golden.length; i++) expect(golden[i]).toBe(golden[i - 1] + golden[i - 2]);
+  it('draws the golden cone the narrower, which is what tells the two apart', () => {
+    // The two tools differ only in the levels of their waves, and one wave
+    // cannot show a level, so the glyphs keep the difference they have
+    // always had: the golden one sits in a narrower cone.
+    const spread = (id: string): number => {
+      const { nose, ends } = cone(glyph(id));
+      const [u, v] = [sub(ends[0], nose), sub(ends[1], nose)];
+      return Math.acos(dotp(u, v) / (len(u) * len(v)));
+    };
+    expect(spread('golden-supersonic')).toBeLessThan(spread('supersonic') - 0.1);
+  });
+});
+
+describe('the sonic pair are waves touching a wavefront', () => {
+  const GOLDEN = (1 + Math.sqrt(5)) / 2;
+
+  it.each(['sonic', 'golden-sonic'])('%s draws the wavefront across its first anchor, and its first wave between the two', (id) => {
+    // At the speed of sound the tool's cone opens flat: a line across the
+    // first anchor that every wave touches, each on the axis toward the
+    // second. Half rings standing on a line, as the pair were through 2.6.9,
+    // are concentric, which no wave the tool draws is.
+    const [a, b] = waveAnchors(id);
+    expect(a[1], 'the axis runs level').toBe(b[1]);
+    const front = lines(glyph(id)).filter(([p, q]) => p[0] === a[0] && q[0] === a[0]);
+    expect(front.some(([p, q]) => Math.max(p[1], q[1]) < a[1]) && front.some(([p, q]) => Math.min(p[1], q[1]) > a[1]),
+      'the wavefront above and below the anchor').toBe(true);
+    expect(waves(id, mid(a, b), len(sub(b, a)) / 2).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('doubles the sonic wave about its second anchor, and nests the golden one at the golden ratio', () => {
+    // What the two tools differ in: whole multiples of the first wave for the
+    // one, golden ratios of it for the other. Either wave touches the
+    // wavefront at the first anchor, so its centre is its radius along the axis.
+    const [a, b] = waveAnchors('sonic');
+    expect(waves('sonic', b, len(sub(b, a))).length, 'a wave twice the first, centred on the second anchor').toBeGreaterThanOrEqual(1);
+    const [g, h] = waveAnchors('golden-sonic');
+    const r = len(sub(h, g)) / 2 / GOLDEN;
+    expect(waves('golden-sonic', [g[0] + r, g[1]], r).length, 'a wave the golden ratio inside the first').toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -406,11 +562,12 @@ describe('the harmonic patterns are drawn to their own ratios', () => {
   } as unknown as PrimitiveRenderContext;
   const tool = (id: string): DrawingTool => PATTERN_DRAWING_TOOLS.find((t) => t.id === id)!;
 
-  /** The glyph's X, A, B, C and D: the one stroke with five vertices. */
+  /** The glyph's X, A, B, C and D: its five pivot rings, in time order, joined by its four legs. */
   function vertices(id: string): Pt[] {
-    const legs = subpaths(glyph(id)).filter((s) => s.points.length === 5);
-    expect(legs, `${id} has one five-point leg stroke`).toHaveLength(1);
-    return legs[0].points;
+    const pts = rings(id, PIVOT).sort((p, q) => p[0] - q[0]);
+    expect(pts, `${id} rings five pivots`).toHaveLength(5);
+    for (let i = 0; i < 4; i++) expect(joins(glyph(id), pts[i], pts[i + 1], PIVOT), `${id} has no leg ${i}`).toBe(true);
+    return pts;
   }
 
   /** What the pattern tool says of a drawing through the glyph's vertices. */
@@ -444,6 +601,6 @@ describe('the harmonic patterns are drawn to their own ratios', () => {
     // The tool fills XAB and BCD; their bases XB and BD are what make a
     // harmonic read as one rather than as a plain zigzag.
     const [X, , B, , D] = vertices(id);
-    expect(drawn(glyph(id), X, B) && drawn(glyph(id), B, D)).toBe(true);
+    expect(joins(glyph(id), X, B, PIVOT) && joins(glyph(id), B, D, PIVOT)).toBe(true);
   });
 });

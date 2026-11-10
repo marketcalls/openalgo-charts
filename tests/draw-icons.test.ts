@@ -101,18 +101,24 @@ interface Tier {
   hi: number;
   minSpan: number;
   maxCommands: number;
+  /**
+   * Decimal places a coordinate may carry. Chrome sits on whole units. A tool
+   * glyph is authored on half units, and a stroke cut back to the edge of an
+   * anchor ring lands wherever its angle puts it, written to two places.
+   */
+  decimals: number;
 }
 
 const TIERS: Tier[] = [
   {
     name: 'tool', entries: Object.entries(DRAWING_TOOL_ICONS), accents: Object.entries(DRAWING_TOOL_ACCENTS),
     registry: DRAWING_TOOL_ICONS, accentOf: drawingToolAccent, attrs: ICON_ATTRS,
-    viewBox: ICON_VIEWBOX, stroke: ICON_STROKE, grid: 24, lo: 2, hi: 22, minSpan: 10, maxCommands: 14,
+    viewBox: ICON_VIEWBOX, stroke: ICON_STROKE, grid: 24, lo: 2, hi: 22, minSpan: 10, maxCommands: 27, decimals: 2,
   },
   {
     name: 'chrome', entries: Object.entries(CHROME_ICONS), accents: Object.entries(CHROME_ICON_ACCENTS),
     registry: CHROME_ICONS, accentOf: chromeIconAccent, attrs: CHROME_ICON_ATTRS,
-    viewBox: CHROME_ICON_VIEWBOX, stroke: CHROME_ICON_STROKE, grid: 16, lo: 2, hi: 14, minSpan: 7, maxCommands: 14,
+    viewBox: CHROME_ICON_VIEWBOX, stroke: CHROME_ICON_STROKE, grid: 16, lo: 2, hi: 14, minSpan: 7, maxCommands: 14, decimals: 0,
   },
 ];
 
@@ -137,11 +143,24 @@ describe.each(TIERS)('the $name set shares one grid', (tier) => {
     }
   });
 
-  it.each(tier.entries)('%s lands on whole units', (_id, d) => {
-    // With a stroke of 2, an orthogonal edge centred on an integer covers
-    // exactly two device pixels at 1:1. Half units were the old set's
-    // crispness bug: nothing landed on a pixel boundary at any size.
-    for (const n of coords(d)) expect(Number.isInteger(n), `${n} in ${d}`).toBe(true);
+  it.each(tier.entries)(`%s is written to ${tier.decimals === 0 ? 'whole units' : `${tier.decimals} decimal places`}`, (_id, d) => {
+    // A 16px chrome glyph has room for whole units and no more, so the tier
+    // stays on them. The tools were held to whole units through 2.6.9, for a
+    // 2-unit line shown at 24px, where a unit was a device pixel; at 20px a
+    // unit is five sixths of one and no coordinate lands on a pixel, so the
+    // rule kept nothing sharp and kept every corner square and every line
+    // running into its marks. Two places is what a trimmed stroke needs, and
+    // a longer number is noise in a string every host ships.
+    const scale = 10 ** tier.decimals;
+    for (const n of coords(d)) expect(Math.abs(n * scale - Math.round(n * scale)), `${n} in ${d}`).toBeLessThan(1e-9);
+  });
+
+  it.each(tier.entries)('%s writes every number with its whole part', (_id, d) => {
+    // SVG reads `.5` as a half. The geometry these tests walk reads a number
+    // as digits first, so a bare fraction would be measured as a whole
+    // number, and every check built on the walk would pass on a glyph it
+    // never saw.
+    expect(d).not.toMatch(/(^|[^\d])\.\d/);
   });
 
   it.each(tier.entries)('%s carries no presentation attributes of its own', (_id, d) => {
@@ -177,8 +196,9 @@ describe.each(TIERS)('the $name set has one visual weight', (tier) => {
 describe.each(TIERS)('the $name set is balanced', (tier) => {
   it('keeps every glyph within a sane complexity band', () => {
     // A glyph far busier than the rest dominates a rail whatever its weight.
-    // Fib retracement and Gann box are the densest by nature; nothing should
-    // be denser than they are.
+    // On the tool grid a ring is four commands and a rounded box ten, so the
+    // count runs higher than the ink does: the densest are the five-point
+    // patterns, a ring at each pivot and the legs and bases between them.
     for (const [id, d] of tier.entries) {
       const commands = (d.match(/[A-Za-z]/g) ?? []).length;
       expect(commands, `${id} has ${commands} commands`).toBeLessThanOrEqual(tier.maxCommands);
@@ -283,10 +303,11 @@ describe.each(TIERS)('the $name accents', (tier) => {
     }
   });
 
-  it.each(accents)('%s lands on whole units inside the live area', (_id, a) => {
+  it.each(accents)('%s lands on its tier\'s grid inside the live area', (_id, a) => {
     // The same grid as the glyph it marks. The extent includes the arcs of a
     // dot, not only their endpoints: a dot is all arc.
-    for (const n of coords(a)) expect(Number.isInteger(n), `${n} in ${a}`).toBe(true);
+    const scale = 10 ** tier.decimals;
+    for (const n of coords(a)) expect(Math.abs(n * scale - Math.round(n * scale)), `${n} in ${a}`).toBeLessThan(1e-9);
     for (const s of subpaths(a)) {
       for (const [px, py] of s.extent) {
         expect(px, a).toBeGreaterThanOrEqual(tier.lo - 1e-9);
@@ -362,60 +383,122 @@ describe('look-alike glyphs are drawn apart', () => {
   // Read from the path data alone, which is all some hosts draw: the marks
   // that tell siblings apart have to be in it, not only in the accent.
   const tool = (id: string): string => DRAWING_TOOL_ICONS[id];
-  /** The closed marks of a glyph's path: its dots and heads. */
+  /** The radius of an anchor ring, and so the distance a stroke stops short of an anchor. */
+  const ANCHOR = 2;
+  /** The closed marks of a glyph's path: its anchor rings and heads. */
   const marks = (id: string) => subpaths(tool(id)).filter((s) => isClosed(s));
   /** The open strokes of a glyph's path. */
   const strokes = (id: string) => subpaths(tool(id)).filter((s) => !isClosed(s));
-  /** The centre of each mark, from the extent it covers. */
-  const centres = (id: string): [number, number][] => marks(id).map((s) => {
+  /** The centre of each anchor ring: a closed mark made of arcs alone, which a plate or a head is not. */
+  const centres = (id: string): [number, number][] => marks(id).filter((s) => s.segments.every((g) => g.kind === 'A')).map((s) => {
     const xs = s.extent.map((p) => p[0]);
     const ys = s.extent.map((p) => p[1]);
-    return [Math.round((Math.min(...xs) + Math.max(...xs)) / 2), Math.round((Math.min(...ys) + Math.max(...ys)) / 2)];
+    return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
   });
-  const ends = (id: string): [number, number][] => {
-    const s = strokes(id)[0];
-    return [[s.start[0], s.start[1]], [s.points[s.points.length - 1][0], s.points[s.points.length - 1][1]]];
-  };
-
-  it('starts the ray at an origin dot, with no tick across it', () => {
-    // The ray was a line with a short stroke across its start, which read as
-    // a check mark. It is one line now, from a dot, open at the far end.
-    expect(strokes('ray')).toHaveLength(1);
-    expect(centres('ray')).toEqual([ends('ray')[0]]);
+  /** Every end of every open stroke. */
+  const ends = (id: string): [number, number][] => strokes(id).flatMap((s) => {
+    const last = s.points[s.points.length - 1];
+    return [[s.start[0], s.start[1]], [last[0], last[1]]] as [number, number][];
   });
+  /** How many stroke ends stop on the edge of the ring of radius `r` centred on `c`. */
+  const meeting = (id: string, c: [number, number], r = ANCHOR): number =>
+    ends(id).filter(([x, y]) => Math.abs(Math.hypot(x - c[0], y - c[1]) - r) < 0.02).length;
+  /** True when some stroke of the glyph passes within the ring of radius `r` centred on `c`. */
+  const crossed = (id: string, c: [number, number], r = ANCHOR): boolean =>
+    strokes(id).some((s) => s.extent.some(([x, y]) => Math.hypot(x - c[0], y - c[1]) < r - 0.02));
+  /** The ends that reach the edge of the live area. */
+  const atEdge = (id: string): [number, number][] =>
+    ends(id).filter(([x, y]) => Math.min(x, y) <= 2.5 || Math.max(x, y) >= 21.5);
 
-  it('tells the line family apart by its ends', () => {
-    // Same diagonal, different ends, because the ends are what differ between
-    // the tools: a segment stops at both anchors, a ray at one, an extended
-    // line at neither, and an arrow ends in a head.
-    expect(centres('trend-line')).toEqual(ends('trend-line'));
-    const [a, b] = ends('extended-line');
-    for (const [cx, cy] of centres('extended-line')) {
-      expect(cx).toBeGreaterThan(Math.min(a[0], b[0]));
-      expect(cx).toBeLessThan(Math.max(a[0], b[0]));
-      expect(cy).toBeGreaterThan(Math.min(a[1], b[1]));
-      expect(cy).toBeLessThan(Math.max(a[1], b[1]));
+  it('draws every anchor as an open ring that no stroke enters', () => {
+    // The ring is the chart's own grab handle in miniature, and its clear
+    // centre is what makes it read as a point rather than as a blot on the
+    // end of a line. A stroke that ran on to the centre, as every line did
+    // into its dot through 2.6.9, fills the hole at 20px.
+    for (const id of ['trend-line', 'ray', 'extended-line', 'arrow', 'horizontal-line', 'horizontal-ray', 'vertical-line',
+      'cross-line', 'info-line', 'polyline', 'parallel-channel', 'rectangle', 'triangle', 'fib-retracement']) {
+      const rings = centres(id);
+      expect(rings.length, `${id} has no anchor`).toBeGreaterThan(0);
+      for (const c of rings) {
+        expect(crossed(id, c), `${id}: a stroke runs into the ring at ${c.join(',')}`).toBe(false);
+        expect(meeting(id, c), `${id}: no stroke meets the ring at ${c.join(',')}`).toBeGreaterThan(0);
+      }
     }
+  });
+
+  it('rings each pivot of a pattern, a size under an anchor, with the legs between the rings', () => {
+    // A pattern is read by its pivots, so each is a ring the legs stop at,
+    // as an anchor is on a line. Five of them share the box, so the ring is
+    // a size smaller: at an anchor's radius, neighbouring pivots closed on
+    // each other. The bare zigzags the family was through 2.6.9 showed no
+    // pivot at all.
+    const PIVOT = 1.5;
+    const pivots: Record<string, number> = {
+      'xabcd-pattern': 5, gartley: 5, bat: 5, butterfly: 5, crab: 5, shark: 5, cypher: 5,
+      'abcd-pattern': 4, 'elliott-impulse': 5, 'elliott-correction': 3, 'head-shoulders': 3,
+      // A position's three levels sit as close as a pattern's pivots, so they take the same ring.
+      'long-position': 3, 'short-position': 3,
+    };
+    for (const [id, count] of Object.entries(pivots)) {
+      const rings = centres(id);
+      expect(rings, `${id} rings ${rings.length} pivots`).toHaveLength(count);
+      for (const s of marks(id)) {
+        const xs = s.extent.map((p) => p[0]);
+        expect((Math.max(...xs) - Math.min(...xs)) / 2, `${id}: a ring of another size`).toBeCloseTo(PIVOT, 6);
+      }
+      for (const c of rings) {
+        expect(crossed(id, c, PIVOT), `${id}: a stroke runs into the ring at ${c.join(',')}`).toBe(false);
+        expect(meeting(id, c, PIVOT), `${id}: no leg meets the ring at ${c.join(',')}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('starts the ray at one anchor, with no tick across it', () => {
+    // The ray was a line with a short stroke across its start, which read as
+    // a check mark. It is one line now, from an anchor, open at the far end.
+    expect(strokes('ray')).toHaveLength(1);
+    expect(centres('ray')).toHaveLength(1);
+    expect(meeting('ray', centres('ray')[0])).toBe(1);
+    expect(atEdge('ray')).toHaveLength(1);
+  });
+
+  it('tells the line family apart by its anchors', () => {
+    // Same kind of diagonal, different anchors, because the anchors are what
+    // differ between the tools: a segment stops at both, a ray leaves one, an
+    // extended line runs through two to both edges, and an arrow leaves one
+    // and ends in a head.
+    expect(centres('trend-line')).toHaveLength(2);
+    expect(atEdge('trend-line')).toHaveLength(0);
+    for (const c of centres('trend-line')) expect(meeting('trend-line', c)).toBe(1);
     expect(centres('extended-line')).toHaveLength(2);
-    expect(marks('arrow')).toHaveLength(1);
-    const keys = ['trend-line', 'ray', 'extended-line', 'arrow'].map((id) => marks(id).map(subpathKey).sort().join(' | '));
+    expect(atEdge('extended-line')).toHaveLength(2);
+    // A stroke arrives at each of the extended line's anchors and another leaves it.
+    for (const c of centres('extended-line')) expect(meeting('extended-line', c)).toBe(2);
+    expect(centres('arrow')).toHaveLength(1);
+    expect(strokes('arrow')).toHaveLength(2);
+    const keys = ['trend-line', 'ray', 'extended-line', 'arrow'].map((id) => drawingKey(tool(id)));
     expect(new Set(keys).size).toBe(keys.length);
-    // The info line is a segment that also labels itself: a segment's ends,
-    // and a label the plain segment does not have.
-    expect(centres('info-line').filter(([x, y]) => centres('trend-line').some(([u, v]) => u === x && v === y)))
-      .toEqual(centres('trend-line'));
+    // The info line is a segment that also labels itself: a segment's two
+    // anchors, and a plate the plain segment does not have.
+    expect(centres('info-line')).toHaveLength(centres('trend-line').length);
+    expect(marks('info-line').length).toBeGreaterThan(marks('trend-line').length);
     expect(subpaths(tool('info-line')).length).toBeGreaterThan(subpaths(tool('trend-line')).length);
   });
 
-  it('starts the horizontal ray at a dot inside the grid, where the line runs edge to edge', () => {
-    // The two sat at 0.86 overlap as path data: the ray was the line with its
-    // start trimmed, and its dot lived only in the accent. The ray now leaves
-    // from an anchor a third of the way in and reaches the far edge, as the
-    // diagonal ray does, and the line keeps the full width.
-    expect(centres('horizontal-ray')).toEqual([ends('horizontal-ray')[0]]);
-    expect(ends('horizontal-ray')[0][0]).toBeGreaterThanOrEqual(8);
-    expect(ends('horizontal-ray')[1][0]).toBe(22);
-    expect(ends('horizontal-line').map(([x]) => x).sort((p, q) => p - q)).toEqual([2, 22]);
+  it('anchors the horizontal ray at its start, where the line is anchored at its middle', () => {
+    // The two sat at 0.86 overlap as path data when the ray was the line with
+    // its start trimmed and its dot only in the accent. The ray leaves its
+    // anchor for the far edge; the line runs edge to edge through its own.
+    const [ray] = centres('horizontal-ray');
+    const [line] = centres('horizontal-line');
+    expect(centres('horizontal-ray')).toHaveLength(1);
+    expect(centres('horizontal-line')).toHaveLength(1);
+    expect(ray[0]).toBeLessThan(8);
+    expect(line[0]).toBe(12);
+    expect(meeting('horizontal-ray', ray)).toBe(1);
+    expect(meeting('horizontal-line', line)).toBe(2);
+    expect(atEdge('horizontal-ray').map(([x]) => x)).toEqual([21.5]);
+    expect(atEdge('horizontal-line').map(([x]) => x).sort((p, q) => p - q)).toEqual([2.5, 21.5]);
   });
 
   it('draws a short position as the long one turned over, not as the same picture', () => {
