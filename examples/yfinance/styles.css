@@ -13,7 +13,14 @@
   --bg: #151619; --bg-glow: transparent;
   --panel: #1c1d20; --panel-2: #18191c; --elev: #2a2b2e; --elev-2: #333437; --elev-3: #404144;
   --bd: #2a2b30; --bd-soft: #232428; --bd-hover: #3d3e45;
-  --tx: #d1d4dc; --tx-strong: #f0f3fa; --mut: #868a96; --faint: #63666e;
+  /* Three greys under the text colour, each with one job. --mut is a label
+     and any control that acts (a close button, a remove mark). --faint is
+     what is read but not acted on: section heads, hints, chords. It sits
+     above 4 to 1 on a panel, because at 3 to 1 a section head and a close
+     button both read as switched off. --off is the old value of --faint and
+     is only ever a control that cannot act, so unavailable stays visibly
+     below everything that can be read or pressed. */
+  --tx: #d1d4dc; --tx-strong: #f0f3fa; --mut: #868a96; --faint: #7a7e89; --off: #63666e;
   --acc: #2962ff; --acc-2: #f0f3fa; --acc-tx: #ffffff;
   --on-bg: rgba(255,255,255,.10); --on-bd: transparent;
   --ring: #2962ff; --ring-soft: rgba(41,98,255,.28);
@@ -34,7 +41,7 @@ html[data-theme="light"] {
   --bg: #ffffff; --bg-glow: transparent;
   --panel: #ffffff; --panel-2: #f8f9fa; --elev: #f1f3f5; --elev-2: #e7e9ed; --elev-3: #d6d9df;
   --bd: #d4dae3; --bd-soft: #e3e6eb; --bd-hover: #b7bec9;
-  --tx: #1e293b; --tx-strong: #0b1220; --mut: #5f6673; --faint: #8b919c;
+  --tx: #1e293b; --tx-strong: #0b1220; --mut: #5f6673; --faint: #707784; --off: #8b919c;
   --acc: #2962ff; --acc-2: #0b1220; --acc-tx: #ffffff;
   --on-bg: rgba(30,41,59,.10); --on-bd: transparent;
   --ring: #2962ff; --ring-soft: rgba(41,98,255,.2);
@@ -62,6 +69,17 @@ html[data-theme="light"] {
   background-clip: padding-box; border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); background-clip: padding-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
+/* A strip that scrolls sideways on a phone (the toolbar, the touch bar, the
+   settings tabs) keeps its scrollbar hidden, so the edge has to say that the
+   row goes on: it fades out on each side that holds more. src/ui.js
+   (markOverflow) keeps `data-more` in step with the scroll position. */
+[data-more~="end"] { -webkit-mask-image: linear-gradient(to left, transparent, #000 44px);
+  mask-image: linear-gradient(to left, transparent, #000 44px); }
+[data-more~="start"] { -webkit-mask-image: linear-gradient(to right, transparent, #000 44px);
+  mask-image: linear-gradient(to right, transparent, #000 44px); }
+[data-more="start end"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 44px, #000 calc(100% - 44px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 44px, #000 calc(100% - 44px), transparent); }
 
 /* ── focus ──────────────────────────────────────────────────────
    One ring for everything that can take the keyboard, drawn only for
@@ -101,7 +119,7 @@ input[type=checkbox]:checked::after {
   border: solid var(--acc-tx); border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 input[type=checkbox]:disabled { opacity: .4; cursor: not-allowed; }
-#toolbar-fit:disabled, #fit:disabled { opacity: .45; color: var(--faint); cursor: not-allowed; }
+#toolbar-fit:disabled, #fit:disabled { opacity: .45; color: var(--off); cursor: not-allowed; }
 input[type=checkbox]:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* Radios in the same vocabulary: the checkbox's box made round, and a dot
    in the accent rather than a filled plate, so a choice of two reads apart
@@ -156,6 +174,13 @@ input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px va
 input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--ring-soft); }
 
 html, body { margin: 0; height: 100%; }
+/* The page never scrolls: the chart fills what the bars leave. Said on the
+   root as well as the body, because a body's `overflow` alone is handed to
+   the viewport and then clips nothing of its own: one floating control a few
+   pixels past the edge widened a phone's layout viewport, and every dialog
+   opened after it was laid out to that wider page with its close button and
+   footer off the screen. */
+html { overflow: hidden; }
 body {
   background: radial-gradient(1100px 500px at 78% -12%, var(--bg-glow), transparent), var(--bg);
   background-color: var(--bg);
@@ -179,7 +204,6 @@ body {
   max-width: 0; opacity: 0; overflow: hidden;
   transition: max-width .28s cubic-bezier(.22,.61,.36,1), opacity .2s ease, padding-left .28s cubic-bezier(.22,.61,.36,1); }
 .brand:hover .brand-name, .brand:focus-visible .brand-name { max-width: 220px; opacity: 1; padding-left: 8px; }
-@media (prefers-reduced-motion: reduce) { .brand-name { transition: none; } }
 .brand em { color: var(--acc-2); font-style: normal; font-weight: 700; font-size: 11px; letter-spacing: .8px;
   border: 1px solid var(--on-bd); background: var(--on-bg); padding: 1px 6px; border-radius: 5px; }
 .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 8px var(--acc); }
@@ -272,7 +296,7 @@ select.field { cursor: pointer; padding-right: 24px; }
 .set-head { display: flex; align-items: center; justify-content: space-between;
   padding: 9px 10px 9px 14px; border-bottom: 1px solid var(--bd-soft); font-weight: 650; color: var(--tx); }
 .set-head button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 6px;
-  background: transparent; color: var(--faint); font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }
+  background: transparent; color: var(--mut); font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }
 .set-head button:hover { color: var(--tx); background: var(--elev-2); }
 .set-tabs { display: flex; gap: 4px; padding: 8px 14px 0; border-bottom: 1px solid var(--bd-soft); }
 .set-tab { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 0;
@@ -341,10 +365,10 @@ select.field { cursor: pointer; padding-right: 24px; }
    still readable, and its tooltip says what is missing. `pointer-events`
    goes on the input because a disabled input swallows the hover that would
    otherwise show that tooltip; the row keeps it. */
-.set-row--off > label { color: var(--faint); cursor: not-allowed; }
+.set-row--off > label { color: var(--off); cursor: not-allowed; }
 .set-row--off .set-ctl { cursor: not-allowed; }
 .set-row input:disabled, .set-row select:disabled { opacity: .45; pointer-events: none; }
-.set-ctl option:disabled { color: var(--faint); }
+.set-ctl option:disabled { color: var(--off); }
 .set-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding: 9px 14px; border-top: 1px solid var(--bd-soft); }
 /* Dialog buttons are one notch shorter than the toolbar's, so the furniture
@@ -360,7 +384,7 @@ select.field { cursor: pointer; padding-right: 24px; }
   color: var(--mut); font-size: 12px; }
 .chip b { color: var(--tx); font-weight: 600; }
 .chip .sw { width: 8px; height: 8px; border-radius: 50%; }
-.chip button { border: 0; background: transparent; color: var(--faint); cursor: pointer;
+.chip button { border: 0; background: transparent; color: var(--mut); cursor: pointer;
   font-size: 13px; line-height: 1; padding: 2px 3px; border-radius: 4px; }
 .chip button:hover { background: var(--elev-3); color: var(--danger-tx); }
 /* A study the host protects: no remove button, a dashed edge in its place. */
@@ -385,7 +409,6 @@ select.field { cursor: pointer; padding-right: 24px; }
 #tip .tip-chord { color: var(--mut); margin-left: 10px; font-variant-numeric: tabular-nums; }
 /* Second line: a gesture the control also answers to, dimmer than its name. */
 #tip .tip-sub { display: block; margin-top: 2px; color: var(--faint); font-size: 11px; }
-@media (prefers-reduced-motion: reduce) { #tip { transition: none; } }
 
 /* ── drawing: the left tool rail ────────────────────────────── */
 .rail { position: absolute; top: 0; left: 0; bottom: 0; width: 42px; z-index: 20;
@@ -409,8 +432,19 @@ select.field { cursor: pointer; padding-right: 24px; }
 
 
 /* ── Terminal shell bar ─────────────────────────────── */
-.shellbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; flex-wrap: wrap;
+/* A row of clusters (.tgroup), each one box: the bar wraps between clusters
+   and never inside one, so the same actions always sit together whatever the
+   window's width. The rule between two clusters is drawn by the later one,
+   one pixel further out than the bar's side padding. Between neighbours that
+   lands mid-gap; on the first cluster of a wrapped row it lands outside the
+   bar, where `overflow: hidden` drops it, so no row starts with a rule. The
+   three lengths below are tied together by --bar-pad for that reason. */
+.shellbar { --bar-pad: 10px; display: flex; align-items: center; flex-wrap: wrap; overflow: hidden;
+  gap: 4px calc(2 * var(--bar-pad) + 1px); padding: 6px var(--bar-pad);
   background: linear-gradient(180deg, var(--panel), var(--panel-2)); border-bottom: 1px solid var(--bd-soft); }
+.tgroup { position: relative; display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.tgroup::before { content: ''; position: absolute; left: calc(-1px - var(--bar-pad)); top: 5px; bottom: 5px;
+  width: 1px; background: var(--bd); }
 .legacy { display: none !important; }
 .tbtn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px;
   background: transparent; border: 1px solid transparent; border-radius: 7px;
@@ -423,8 +457,15 @@ select.field { cursor: pointer; padding-right: 24px; }
 .tbtn.is-on { background: var(--on-bg); border-color: var(--on-bd); color: var(--acc-2); }
 .tbtn b { font-weight: 700; letter-spacing: .3px; }
 .tbtn--icon { padding: 0; width: 30px; justify-content: center; }
+/* An action with nothing to act on yet (a chart type while history loads)
+   reads as unavailable, not as a live button that ignores the click. */
+.tbtn:disabled { opacity: .45; cursor: not-allowed; }
+.tbtn:disabled:hover { background: transparent; }
 .shellbar svg, .menu svg { width: 17px; height: 17px; fill: none; stroke: currentColor;
   stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+/* A chart-type glyph is the draw tier's, on its 16 grid: its own line weight
+   lands where the 20 grid icons' 1.6 does at this size. */
+.shellbar svg.tglyph, .menu svg.tglyph { stroke-width: 1.3; }
 .pills { display: inline-flex; background: var(--elev); border: 1px solid var(--bd-soft); border-radius: 8px; padding: 2px; }
 .pills button { height: 24px; padding: 0 9px; background: transparent; border: 0; border-radius: 6px;
   color: var(--mut); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
@@ -534,7 +575,7 @@ select.field { cursor: pointer; padding-right: 24px; }
 .toast--error { border-left-color: var(--sell); }
 .toast__msg { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; padding-top: 2px; }
 .toast__x { flex: none; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent;
-  color: var(--faint); font-size: 17px; line-height: 1; cursor: pointer; padding: 0; }
+  color: var(--mut); font-size: 17px; line-height: 1; cursor: pointer; padding: 0; }
 .toast__x:hover { background: var(--elev-2); color: var(--tx); }
 .toast.is-out { opacity: 0; transform: translateY(6px); transition: opacity .16s, transform .16s; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
@@ -568,6 +609,11 @@ body[data-fullscreen-pane="2"] main.stage { display: none; }
 body[data-fullscreen-pane="2"] #pane2 { flex: 1 1 auto; }
 body[data-fullscreen-pane="2"] #chart2 { left: 42px; }
 .shellbar .tbtn--chart { position: sticky; left: 0; z-index: 5; background: var(--panel); }
+/* The selector stays pinned to the bar's left edge, so that edge does not fade under it. */
+.shellbar:has(> .tbtn--chart)[data-more="start"] { -webkit-mask-image: none; mask-image: none; }
+.shellbar:has(> .tbtn--chart)[data-more="start end"] {
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 44px);
+  mask-image: linear-gradient(to left, transparent, #000 44px); }
 .fsexit { position: absolute; top: 8px; right: 10px; z-index: 40; width: 30px; height: 30px;
   display: grid; place-items: center; border: 1px solid var(--bd-soft); border-radius: 7px;
   background: var(--elev); color: var(--mut); cursor: pointer; opacity: .35; transition: opacity .15s; }
@@ -716,7 +762,7 @@ body[data-fullscreen-pane="2"] #chart2 { left: 42px; }
 .cmp-row b { color: var(--tx); font-weight: 600; }
 .cmp-row .cmp-cov { margin-left: auto; min-width: 0; overflow-wrap: anywhere; color: var(--faint); font-size: 11px; }
 .cmp-row .btn { flex-shrink: 0; }
-.cmp-row .cmp-del { border: 0; background: transparent; color: var(--faint); font-size: 14px;
+.cmp-row .cmp-del { border: 0; background: transparent; color: var(--mut); font-size: 14px;
   line-height: 1; cursor: pointer; padding: 2px 5px; border-radius: 4px; }
 .cmp-row .cmp-del:hover { background: var(--elev-3); color: var(--danger-tx); }
 
@@ -816,7 +862,7 @@ body[data-fullscreen-pane="2"] #chart2 { left: 42px; }
   font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .axrow:hover:not(:disabled) { background: var(--elev-2); }
 .axrow:focus-visible { outline-offset: -2px; }
-.axrow:disabled { color: var(--faint); cursor: default; }
+.axrow:disabled { color: var(--off); cursor: default; }
 .axrow .axname { flex: 1 1 auto; }
 .axrow .chord { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums;
   letter-spacing: .2px; }
@@ -829,7 +875,7 @@ body[data-fullscreen-pane="2"] #chart2 { left: 42px; }
 /* A greyed row still shows the state it is in: the tick dims with the label
    rather than disappearing, so "off and unavailable" and "on but
    unavailable" do not read the same. */
-.axrow:disabled .axmark svg { stroke: var(--faint); }
+.axrow:disabled .axmark svg { stroke: var(--off); }
 .axrow .axdot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--bd);
   background: var(--elev); }
 .axrow.is-on .axdot { border-color: var(--acc); background:
@@ -867,7 +913,6 @@ body:has(.stage.has-bottombar) #goto { display: none; }
    40px frame, so the standard's small swatch and the finger's target are
    the same control. */
 @media (max-width: 900px) {
-  .shellbar { padding: 6px 8px; gap: 4px; }
   .status { flex-basis: 100%; max-width: none; justify-content: flex-start; }
   .rail { top: auto; right: 0; bottom: 0; width: auto; height: 52px; flex-direction: row;
     overflow-x: auto; overflow-y: hidden; padding: 0 6px; gap: 4px;
@@ -897,7 +942,7 @@ body:has(.stage.has-bottombar) #goto { display: none; }
 }
 @media (max-width: 900px), (pointer: coarse) and (max-width: 960px) and (max-height: 599px) {
   body[data-fullscreen-pane="2"] #chart2 { left: 0; bottom: 50px; }
-  .shellbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px 8px; }
+  .shellbar { --bar-pad: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px var(--bar-pad); }
   .shellbar::-webkit-scrollbar { width: 0; height: 0; }
   .shellbar > * { flex: none; }
   .shellbar .status { flex: 0 0 180px; max-width: 180px; }
@@ -920,7 +965,7 @@ body:has(.stage.has-bottombar) #goto { display: none; }
     font: inherit; font-weight: 600; }
   .mobilebar select { width: 142px; padding: 0 28px 0 10px; }
   .mobilebar button { padding: 0 12px; cursor: pointer; }
-  .mobilebar button:disabled { color: var(--faint); cursor: default; }
+  .mobilebar button:disabled { color: var(--off); cursor: default; }
   .mobilebar button[aria-pressed="true"] { color: var(--acc-2); border-color: var(--on-bd); background: var(--on-bg); }
 }
 @media (max-width: 900px), (pointer: coarse) {
@@ -944,10 +989,14 @@ body:has(.stage.has-bottombar) #goto { display: none; }
   input[type=range]::-moz-range-thumb { width: 16px; height: 16px; }
 }
 
-/* ── motion ─────────────────────────────────────────────────── */
+/* ── motion ───────────────────────────────────────────────────
+   Every element of the page, the way the widget tier's sheet says it for
+   its own parts, and not a list of selectors: the list named the buttons,
+   the toasts and the wordmark, and left the tick boxes, the fields and the
+   menu rows easing their colours for 0.12s under a preference that asks
+   for none. A rule a module injects later is covered too. */
 @media (prefers-reduced-motion: reduce) {
-  .chartstate[data-state="loading"] .chartstate__dots i, .toast { animation: none; }
-  .toast.is-out, .btn, .splitbar { transition: none; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
 }
 
 /* Symbol arithmetic keypad: small square keys beside the symbol field, muted
@@ -990,14 +1039,26 @@ body[data-fullscreen-pane="2"] .p2plot .inspect-layout { left: 42px; }
 .gridbar { flex: none; }
 .gridbar .brand { gap: 8px; padding: 0 4px; }
 .gridbar__name { white-space: nowrap; }
+/* A link among the bar's buttons is one of them, not a line of underlined text. */
+.gridbar a.tbtn { text-decoration: none; }
 .gridbar__status { margin-left: auto; color: var(--mut); font-size: 12px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 42ch; }
 .gridbar svg { width: 16px; height: 16px; }
 .grid-stage { position: relative; flex: 1 1 0; min-height: 0; }
 .grid-stage > .oac-grid { position: absolute; inset: 0; }
+/* On a phone this bar is one short row above the grid's own bars, and every
+   pixel of it comes off the charts: the wordmark drops its tag so the way
+   back and the two file actions fit without scrolling, and the row stands a
+   step shorter than the main page's toolbar, at the height of the grid's
+   bar under it. On the narrowest screens the mark alone is the brand. */
 @media (max-width: 900px) {
-  .gridbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .gridbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-block: 0; }
+  .gridbar .brand em { display: none; }
+  .gridbar .tbtn { height: 36px; min-height: 36px; }
   .gridbar__status { display: none; }
+}
+@media (max-width: 380px) {
+  .gridbar__name { display: none; }
 }
 
 /* Inline rows in the generated settings form: the lead input's label, then
@@ -1008,7 +1069,7 @@ body[data-fullscreen-pane="2"] .p2plot .inspect-layout { left: 42px; }
 .set-row--inline .set-ctl { flex-wrap: wrap; row-gap: 4px; }
 .set-inline { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .set-inline > label { color: var(--mut); font-size: 12px; white-space: nowrap; cursor: pointer; }
-.set-inline--off > label { color: var(--faint); cursor: not-allowed; }
+.set-inline--off > label { color: var(--off); cursor: not-allowed; }
 .set-row--inline .set-ctl input[type=number] { flex: 0 0 64px; width: 64px; }
 .set-row--inline .set-ctl select { flex: 0 1 auto; }
 /* A condition hides these through the hidden attribute, which a display rule

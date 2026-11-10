@@ -41,10 +41,15 @@ const DEFAULT_COLOR = '#2962ff';
 // so the bar renders wherever it is mounted; the page may move the block
 // into styles.css and drop the injection.
 export const PROPERTIES_CSS = `
-.propbar { position: absolute; z-index: 40; display: flex; align-items: center; gap: 2px; padding: 4px 6px;
+.propbar { position: absolute; z-index: 40; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 4px 6px;
+  box-sizing: border-box; width: max-content; max-width: calc(100% - 8px);
   background: var(--panel); border: 1px solid var(--bd); border-radius: 9px;
   box-shadow: var(--shadow, 0 10px 30px rgba(0,0,0,.5)); user-select: none; white-space: nowrap; }
 .propbar[hidden] { display: none; }
+/* Wider than the plot (a phone): the separator becomes the break, so the
+   drawing's own settings take the first row and the actions every drawing
+   has take the second, instead of the bar running off the screen. */
+.propbar.is-stacked .vsep { flex: 0 0 100%; width: auto; height: 1px; margin: 2px 0; }
 .propbar .grip { display: grid; place-items: center; width: 14px; height: 28px; cursor: grab; color: var(--faint); flex: none; }
 .propbar .grip:active { cursor: grabbing; }
 .propbar .pb-name { color: var(--mut); font-size: 11px; padding: 0 6px 0 2px; max-width: 110px;
@@ -68,7 +73,8 @@ export const PROPERTIES_CSS = `
 .propbar select.pb-select { height: 26px; background-color: var(--elev); color: var(--tx); border: 1px solid var(--bd);
   border-radius: 6px; padding: 0 22px 0 7px; font: inherit; font-size: 12px; outline: none; cursor: pointer; max-width: 96px; }
 .propbar select.pb-select:focus { border-color: var(--acc); }
-.pb-pop { position: absolute; z-index: 41; min-width: 160px; padding: 8px; background: var(--panel);
+.pb-pop { position: absolute; z-index: 41; box-sizing: border-box; min-width: 160px; max-width: calc(100% - 8px);
+  padding: 8px; overflow: auto; background: var(--panel);
   border: 1px solid var(--bd); border-radius: 10px; box-shadow: var(--shadow, 0 14px 40px rgba(0,0,0,.55));
   font-size: 12px; color: var(--tx); }
 .pb-pop .pb-grid { display: grid; grid-template-columns: repeat(10, 22px); gap: 4px; }
@@ -104,6 +110,15 @@ export const PROPERTIES_CSS = `
 .pb-pop .pb-step svg { width: 14px; height: 14px; }
 .pb-pop input[type=color].swatch { width: 26px; height: 26px; }
 .pb-pop hr { border: 0; border-top: 1px solid var(--bd-soft); margin: 7px 0; }
+/* Under a finger the bar's buttons and the popover's rows grow a step, on the
+   page's own condition. The colour square is restated because the 26px rule
+   above outranks the page's 40px frame and left a face a few pixels across. */
+@media (max-width: 900px), (pointer: coarse) {
+  .propbar button { height: 34px; min-width: 34px; }
+  .propbar .grip { height: 34px; }
+  .pb-pop .pb-item { min-height: 36px; }
+  .pb-pop input[type=color].swatch { width: 40px; height: 40px; }
+}
 `;
 
 // Glyphs the tier's chrome set does not carry, on the same 16 grid and stroke.
@@ -290,15 +305,52 @@ export function mountPropertiesBar(app, anchorEl) {
     const cr = c.getBoundingClientRect();
     return { x: cr.left - hr.left, y: cr.top - hr.top };
   }
-  function clampPos(x, y) {
+  /**
+   * The plot's box inside the host, in host px. The bar and its popovers stay
+   * within it: clear of the rail beside the chart and of the strip under it,
+   * and never past the host's edge, where they would widen the page itself.
+   */
+  function plotBox() {
     const hr = host.getBoundingClientRect();
-    const o = chartOffset();
+    const c = chartEl();
+    if (!c) return { x: 0, y: 0, w: hr.width, h: hr.height };
+    const cr = c.getBoundingClientRect();
+    return { x: cr.left - hr.left, y: cr.top - hr.top, w: cr.width, h: cr.height };
+  }
+  let fitted = -1;     // the room the bar was last laid out for; -1 lays it out again
+  /**
+   * Lay the bar out for the room it has. It keeps one row while that fits; a
+   * bar wider than the plot stacks at its separator and is then sized to its
+   * longest row, since a wrapped flex box would otherwise claim the full width.
+   */
+  function fit() {
+    const room = Math.max(0, plotBox().w - 8);
+    if (room === fitted) return;
+    fitted = room;
+    bar.classList.remove('is-stacked');
+    bar.style.maxWidth = 'none';
+    bar.style.width = '';
+    const stacked = bar.offsetWidth > room;
+    bar.style.maxWidth = room + 'px';
+    if (!stacked) return;
+    bar.classList.add('is-stacked');
+    // Client rects, not offsets: a readout's width is fractional, and a row
+    // sized to the rounded sum is a pixel short and wraps once more.
+    const left = bar.getBoundingClientRect().left;
+    let right = 0;
+    for (const c of bar.children) if (!c.classList.contains('vsep')) right = Math.max(right, c.getBoundingClientRect().right - left);
+    const cs = getComputedStyle(bar);
+    bar.style.width = Math.min(room, Math.ceil(right + parseFloat(cs.paddingRight) + parseFloat(cs.borderRightWidth))) + 'px';
+  }
+  function clampPos(x, y) {
+    const box = plotBox();
     return {
-      x: clamp(x, o.x + 4, Math.max(o.x + 4, hr.width - bar.offsetWidth - 4)),
-      y: clamp(y, 4, Math.max(4, hr.height - bar.offsetHeight - 4)),
+      x: clamp(x, box.x + 4, Math.max(box.x + 4, box.x + box.w - bar.offsetWidth - 4)),
+      y: clamp(y, box.y + 4, Math.max(box.y + 4, box.y + box.h - bar.offsetHeight - 4)),
     };
   }
   function place(x, y) {
+    fit();
     const p = clampPos(x, y);
     bar.style.left = p.x + 'px';
     bar.style.top = p.y + 'px';
@@ -327,6 +379,8 @@ export function mountPropertiesBar(app, anchorEl) {
     if (bar.hidden) return;
     if (pinned) { place(pinned.x, pinned.y); return; }
     const b = bounds(drawingsOf());
+    // Laid out first: a bar that stacks is taller, and the height decides the side.
+    fit();
     const h = bar.offsetHeight || 36;
     let x = b ? b.x0 : 60;
     let y = b ? b.y0 - h - 10 : 60;
@@ -342,7 +396,11 @@ export function mountPropertiesBar(app, anchorEl) {
     pop.el.remove();
     pop = null;
   }
-  /** One popover at a time, under its button (above the bar when that runs off the host). */
+  /**
+   * One popover at a time, under its button, above the bar when there is no
+   * room below, and over the bar when the plot is too short for either. It is
+   * never wider or taller than the plot: its own box scrolls instead.
+   */
   function openPop(btn, build) {
     closePop();
     const p = document.createElement('div');
@@ -354,12 +412,19 @@ export function mountPropertiesBar(app, anchorEl) {
     host.appendChild(p);
     const hr = host.getBoundingClientRect();
     const br = btn.getBoundingClientRect();
+    const box = plotBox();
+    p.style.maxWidth = Math.max(0, box.w - 8) + 'px';
+    p.style.maxHeight = Math.max(0, box.h - 8) + 'px';
     const w = p.offsetWidth || 200;
     const hgt = p.offsetHeight || 100;
+    const top = box.y + 4, bottom = box.y + box.h - 4;
     let x = br.left - hr.left;
     let y = bar.offsetTop + bar.offsetHeight + 6;
-    if (y + hgt > hr.height - 4) y = Math.max(4, bar.offsetTop - hgt - 6);
-    p.style.left = clamp(x, 4, Math.max(4, hr.width - w - 4)) + 'px';
+    if (y + hgt > bottom) {
+      const above = bar.offsetTop - hgt - 6;
+      y = above >= top ? above : clamp(y, top, Math.max(top, bottom - hgt));
+    }
+    p.style.left = clamp(x, box.x + 4, Math.max(box.x + 4, box.x + box.w - w - 4)) + 'px';
     p.style.top = y + 'px';
     pop = { el: p, for: btn };
   }
@@ -1129,6 +1194,7 @@ export function mountPropertiesBar(app, anchorEl) {
     schema = withIntervalFields(commonSchema(live.map((d) => d.tool)));
     build(live);
     bar.hidden = false;
+    fitted = -1;
     reposition();
   }
   /** Refresh every control from the model, then park the bar. */
@@ -1139,7 +1205,12 @@ export function mountPropertiesBar(app, anchorEl) {
     // The host made the selection read-only, or lifted that: the controls
     // on the bar are the wrong set, so it is built again rather than synced.
     if (live.every(isReadOnly) !== shownReadOnly) { ids = []; show(); return; }
+    const shown = bar.textContent;
     for (const s of syncers) s();
+    // A readout that changed (a width, a font size) changes the bar's own
+    // width. Only then: this runs on every step of a drag, and laying the
+    // bar out again measures it twice.
+    if (bar.textContent !== shown) fitted = -1;
     reposition();
   }
   function hide() {

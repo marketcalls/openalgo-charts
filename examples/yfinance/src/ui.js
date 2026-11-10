@@ -54,6 +54,38 @@ export function onEscape(fn, target = window) {
 /** Whether a key event came from a text control, where the page's chords stay out of the way. */
 export const inTextField = (e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable === true;
 
+// ── scrolling strips ───────────────────────────────────────────────────
+// On a phone the toolbar, the touch bar and the settings tabs are each one
+// row that scrolls sideways with its scrollbar hidden, so nothing said that
+// most of the row was off screen. The strip is marked with the ends that
+// hold more (`data-more`: "start", "end", or both) and the stylesheet fades
+// those edges.
+const overflowSync = new WeakMap();
+
+/**
+ * Keep `node`'s `data-more` in step with its scroll position. The first call
+ * wires the strip; every call reads it again, which is what a caller that
+ * has just rebuilt the strip's contents needs.
+ */
+export function markOverflow(node) {
+  if (!node || typeof node.addEventListener !== 'function') return;
+  let sync = overflowSync.get(node);
+  if (!sync) {
+    sync = () => {
+      const hidden = node.scrollWidth - node.clientWidth;
+      const at = Math.abs(node.scrollLeft);
+      const more = hidden > 1 ? [at > 1 ? 'start' : '', at < hidden - 1 ? 'end' : ''].filter(Boolean).join(' ') : '';
+      // Written only on a change: this runs on every scroll event.
+      if (node.dataset.more !== more) node.dataset.more = more;
+    };
+    overflowSync.set(node, sync);
+    node.addEventListener('scroll', sync, { passive: true });
+    // The strip's own box changes when the window does, or when a dialog that holds it opens.
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(sync).observe(node);
+  }
+  sync();
+}
+
 // The app the shell was wired to. Read at call time, never captured, for
 // the same reason every other module does it: the chart is rebuilt on a
 // chart-type switch and a copy would go stale.
@@ -75,9 +107,10 @@ export function announce(text) {
 
 // ── toasts ─────────────────────────────────────────────────────────────
 // The status readout is one line and is overwritten by the next thing that
-// happens, so anything a user should not miss (a failed load, a saved
-// layout) also gets a toast. Errors stay until dismissed; the rest go on
-// their own.
+// happens, so anything a user should not miss and nothing else on screen
+// is saying (a saved layout, a study that could not be added) also gets a
+// toast. A failed load does not: the card on the stage already says it and
+// holds the retry. Errors stay until dismissed; the rest go on their own.
 
 /** How long each kind stays, in ms. 0 keeps it until it is dismissed. */
 export const TOAST_MS = { info: 4000, success: 3500, error: 0 };

@@ -21,7 +21,7 @@ export const LEVEL_CSS = `
 .lved__row input[type=color].swatch { width: 26px; height: 26px; }
 .lved__row.is-off input[type=number], .lved__row.is-off input[type=text], .lved__row.is-off input[type=color] { opacity: .45; }
 .lved__x { width: 22px; height: 22px; display: grid; place-items: center; background: transparent; border: 0;
-  border-radius: 5px; color: var(--faint); cursor: pointer; padding: 0; }
+  border-radius: 5px; color: var(--mut); cursor: pointer; padding: 0; }
 .lved__x:hover { background: var(--elev-3, #2a3348); color: #ff9b9b; }
 .lved__x svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 .lved__foot { display: flex; gap: 6px; margin-top: 8px; }
@@ -30,6 +30,13 @@ export const LEVEL_CSS = `
 .lved__foot button:hover { border-color: var(--bd-hover, #3a4761); }
 .lved__reset { margin-left: auto; color: var(--mut); }
 .lved__empty { color: var(--faint); padding: 6px 0; }
+/* Under a finger the page grows a tick box to 22px and a colour square to a
+   40px frame around its 26px face; the columns make room for both, or the
+   26px rule above leaves the face a few pixels across. */
+@media (max-width: 900px), (pointer: coarse) {
+  .lved__row { grid-template-columns: 22px 68px 40px 1fr 22px; }
+  .lved__row input[type=color].swatch { width: 40px; height: 40px; }
+}
 `;
 
 /** The ladder a new level is drawn from: the conventional ratios, in order. */

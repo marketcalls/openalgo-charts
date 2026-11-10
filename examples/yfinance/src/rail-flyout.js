@@ -365,7 +365,7 @@ export const RAIL_FLYOUT_CSS = `
 .fly__chord { min-width: 40px; text-align: right; color: var(--faint);
   font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .fly__star { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 0;
-  border-radius: 5px; background: transparent; color: var(--faint); cursor: pointer; opacity: 0;
+  border-radius: 5px; background: transparent; color: var(--mut); cursor: pointer; opacity: 0;
   transition: opacity .1s, color .1s; }
 .fly__row:hover .fly__star, .fly__row:focus-within .fly__star, .fly__star[aria-pressed="true"] { opacity: 1; }
 .fly__star:hover { background: var(--elev); color: var(--tx); }
@@ -382,7 +382,7 @@ export const RAIL_FLYOUT_CSS = `
   font-size: 12.5px; text-align: left; cursor: pointer; }
 .rail-menu button:hover, .rail-menu button:focus-visible { background: var(--elev-2); outline: none; }
 .rail-menu button.danger:hover { color: var(--danger-tx); }
-.rail-menu button.is-off, .rail-menu button.is-off:hover { color: var(--faint); background: transparent; cursor: default; }
+.rail-menu button.is-off, .rail-menu button.is-off:hover { color: var(--off); background: transparent; cursor: default; }
 .rail-menu button > svg { width: 16px; height: 16px; flex: none; stroke: currentColor;
   stroke-linecap: round; stroke-linejoin: round; }
 /* A tool glyph at 16px here, so its stroke is scaled to keep the tier's line. */

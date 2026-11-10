@@ -1771,6 +1771,53 @@ async function openDemo(page: Page): Promise<void> {
   }
 }
 
+test('a phone drawing bar and the settings opened after it stay inside the screen', async ({ browser, browserName }, info) => {
+  // The bar was one row 473 px wide on a 390 px screen. It widened the page's
+  // layout viewport, so the chart settings opened after it were 469 by 1013
+  // px and their close button and footer sat off the screen.
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, ...(browserName === 'firefox' ? {} : { isMobile: true }) });
+  const page = await context.newPage();
+  try {
+    await openDemo(page);
+    const fits = (selectors: string[]) => page.evaluate((selectors) => {
+      const vv = window.visualViewport;
+      const w = vv ? vv.width : window.innerWidth, h = vv ? vv.height : window.innerHeight;
+      const off: string[] = [];
+      for (const s of selectors) {
+        const el = document.querySelector(s);
+        if (!el) { off.push(`${s} missing`); continue; }
+        const r = el.getBoundingClientRect();
+        if (r.left < -0.5 || r.top < -0.5 || r.right > w + 0.5 || r.bottom > h + 0.5) off.push(`${s} at ${Math.round(r.left)},${Math.round(r.top)} to ${Math.round(r.right)},${Math.round(r.bottom)}`);
+      }
+      return { scrollWidth: document.documentElement.scrollWidth, off };
+    }, selectors);
+    await page.locator('#mobile-draw').selectOption('trend-line');
+    const box = await page.locator('#chart').boundingBox();
+    if (!box) throw new Error('the chart has no layout box');
+    const a = { x: box.x + box.width * 0.2, y: box.y + box.height * 0.6 }, b = { x: box.x + box.width * 0.65, y: box.y + box.height * 0.4 };
+    await page.touchscreen.tap(a.x, a.y);
+    await page.touchscreen.tap(b.x, b.y);
+    await expect.poll(() => page.evaluate(() => (window as any).__oac.draw.drawings().length)).toBe(1);
+    const bar = page.locator('#propbar');
+    if (await bar.isHidden()) await page.touchscreen.tap((a.x + b.x) / 2, (a.y + b.y) / 2);
+    await expect(bar).toBeVisible();
+    expect(await fits(['#propbar'])).toEqual({ scrollWidth: 390, off: [] });
+    await bar.locator('[data-path="style.lineWidth"]').click();
+    await page.locator('.pb-pop [data-preset="3"]').click();
+    expect(await fits(['#propbar'])).toEqual({ scrollWidth: 390, off: [] });
+    await page.evaluate(() => {
+      const open = [...document.querySelectorAll('#shellbar button')].find((n) => /^Chart settings/.test(n.getAttribute('aria-label') || ''));
+      (open as HTMLElement).scrollIntoView({ inline: 'center' });
+    });
+    await page.getByRole('button', { name: /^Chart settings/ }).first().click();
+    await expect(page.locator('#chartset .cset-card')).toBeVisible();
+    expect(await fits(['#chartset .cset-card', '#cset-x', '#cset-ok'])).toEqual({ scrollWidth: 390, off: [] });
+    await page.screenshot({ path: info.outputPath('phone-settings-after-drawing.png') });
+  } finally {
+    await context.close();
+  }
+});
+
 test('compact touch controls draw, undo and navigate in portrait and landscape', async ({ page }) => {
   const errors: string[] = [];
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
