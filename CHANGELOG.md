@@ -2,6 +2,190 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.7.0
+
+2026-11-11
+
+The drawing tool icons are redrawn, and the widget and the reference host are
+finished where an interface audit found them unfinished. No tool, indicator,
+chart type, option or public export is added or removed, and a saved chart
+loads as it did. A host that draws the shipped icons gets the new ones with no
+change to its code.
+
+### Changed
+
+- **The drawing tool icons are drawn around their anchors.** A tool icon is
+  now its drawing as the chart shows it selected, in miniature: every point
+  the user places is an open ring, the grab handle at this scale, and a line
+  stops at the ring's edge. A trend line has a ring at each end, a ray one at
+  its start, an extended line two inside a line that runs on, a rectangle one
+  on each of two opposite corners, a channel on both rails, and a pattern or a
+  position one at each pivot. Through 2.6.9 an anchor was a dot three pixels
+  across with the line run into it, and the patterns, channels and Fibonacci
+  and Gann studies showed none. 94 of the 95 icons are redrawn; the chrome
+  cursor and text icons follow them.
+- **Icons for the tools that have no anchors to show.** The brush is a brush
+  and the highlighter a marker, where both were squiggles; measure is a rule;
+  text is a letter with its serifs, where it was an I-beam; a note is a sheet
+  with its corner turned; the arrow marks are the block arrows the tool
+  stamps. Anchored VWAP is two candles with the average running between them
+  from its anchor, and a long or short position is its three levels with the
+  direction as an arrow in the reward.
+- **Six harmonic patterns that read as six.** Each harmonic is still drawn to
+  its own ratios, and its own pattern tool still accepts it and rejects the
+  other five. Each now sits at the end of its valid range that its neighbours
+  do not share, so the closest pair overlaps by 0.58 at 20px where the first
+  ringed drawing overlapped by 0.69.
+- **Corners are rounded.** A box, a bubble or a tag turns its corners on a
+  radius of 1.5 to 2 units.
+- **The tool icons are authored on half units.** They sat on whole units
+  through 2.6.9, a rule made for a 2-unit line shown at 24px. At the 20px they
+  are shown at, no coordinate lands on a pixel, so the rule kept nothing sharp
+  and cost every icon its proportions. A stroke cut back to a ring is written
+  to two decimals. The chrome icons stay on whole units.
+- **`DRAWING_TOOL_ACCENTS` fills only the magnet's poles.** A ring takes no
+  fill, so `drawingToolAccent(id)` now returns `undefined` for every other
+  tool, as it always could. `DRAWING_TOOL_ICONS`, `iconSvg`, `iconSprite`,
+  `iconUse`, `toolCursor`, the viewBox, the stroke and the display size are
+  unchanged, so a host that renders the path data or calls the builders needs
+  no change. A host that hard-coded the accent of a particular tool gets no
+  fill for it.
+- **Reference host: the top bar is grouped.** The example's top bar was 41
+  controls in one run that wrapped wherever the width ran out, so a wrap could
+  split chart setup from its own options. It is now seven labelled clusters
+  (symbol and time, chart setup, view, inspection, session tools, simulated
+  trading, settings and layouts) and wraps only between them. On a phone the bar, the touch bar and the settings tabs fade at the
+  edge that holds more.
+- **Reference host: the chart type menu uses the library's icon for each
+  type.** Line, line with markers and step line shared one glyph, as did
+  several candle and transform variants; seven local glyphs are deleted.
+- **Reference host: contrast.** One faint token served section heads, close
+  buttons and disabled controls alike. Section heads now read at 4.15 to 1
+  against the dark panel, and the controls that act (close, dismiss, remove)
+  use the muted colour: the dark dialog close was 2.93 to 1 and is 4.89 to 1.
+  Disabled controls keep the old value under their own token, and disabled
+  toolbar buttons now look disabled.
+
+### Fixed
+
+- **Widget: the drawing tools of a short chart.** The rail's controls (magnet
+  to collapse) are about 280px tall, the whole rail of one chart in a two by
+  two grid on a laptop. Pinned to the foot of the rail they covered every
+  tool, so a new grid showed no way to draw until a chart was maximized. A
+  rail that cannot show five tools above them now scrolls as one column, tools
+  first; a rail with room keeps them pinned.
+- **Widget: a failed load is reported once.** One failure was told three
+  times per chart: a row over the chart with Retry, a toast with the reason,
+  and the status line. The reason now sits in the row that carries the retry
+  and the toast is gone, so a grid of four failing charts shows four notices
+  where it showed twelve. The `data` event is unchanged.
+- **Widget: reduced motion stops everything.** Under
+  `prefers-reduced-motion` the widget turned off the transitions of six named
+  selectors and missed the form controls, which went on easing their colours.
+  Every transition and animation in the widget now stops.
+- **Widget: a rail button that opens a flyout says so.** Each carries a small
+  notch in its corner at rest. The caret that opens the flyout showed only on
+  hover, so nothing told a new user which buttons held more tools.
+- **Widget: menus, flyouts and dialogs fade in** over a tenth of a second,
+  where they cut in on the next frame.
+- **Reference host: the phone drawing bar stays on screen.** The bar was one
+  row, 473 px wide for a trend line on a 390 px phone. It widened the page's
+  layout viewport, so the chart settings opened after it measured 469 by 1013
+  px, with their close button, right-hand controls and footer off the screen,
+  and a phone turned to landscape stayed zoomed. The bar now stacks at its
+  separator when it is wider than the plot, and it and its popovers are kept
+  inside the plot. At 390x844 in Chromium, Firefox and WebKit, dark and light,
+  at device scale 1 and 2, no control is outside the visual viewport, where
+  there were 22.
+- **Reference host: a failed load is said once,** on the card on the chart
+  with its cause and Try again, and in the status readout with its cause, which
+  stays after the card is dismissed. The toast that repeated it is gone.
+- **Reference host: reduced motion** is one rule for the page. Three partial
+  lists left 53 elements still transitioning.
+- **Reference host: the grid example fits a phone.** Its header was 45 px tall
+  with 428 px of content in a 390 px screen, and clipped the link back to the
+  single chart; it is 37 px and fits, link first.
+- **Reference host: touch sizes.** Colour squares in the property popovers and
+  the level editor rendered a few pixels across under a coarse pointer, and the
+  drawing bar's buttons were 28 px. They are 40 px, the page's own touch size.
+
+### Security
+
+- Development dependencies only: the published package still has no runtime
+  dependencies, and `npm audit --omit=dev` reports none. GitHub code scanning
+  reports no open alert.
+- `rimraf` 6.0.1 to 6.1.4, which takes `glob` 11.1.0 to 14.0.4 and out of
+  GHSA-3g3m-2fjr-6pw4 (an AbortSignal cancellation bypass).
+- `minimatch` 11.0.6 under `@typescript-eslint/typescript-estree`, through an
+  override, out of GHSA-g3hv-75wg-m249 (denial of service through glob part
+  amplification). Every typescript-eslint release still asks for minimatch 10,
+  and lint passes on 11.
+- **Not fixed: `typedoc` and its `minimatch` 9.0.9** (the same advisory).
+  typedoc, its latest 0.28.20 included, calls a minimatch function that 11
+  removed, so the API reference build stops when 11 is forced in, and no 9.x or
+  10.x release carries the fix. typedoc only reads the globs in `typedoc.json`,
+  so the patterns the advisory needs an attacker to supply never reach it.
+- **Not fixed: zod in the documentation site (GHSA-mrhx-c7xc-m3w5),** for the
+  reason given in 2.6.9: nextra 3 needs zod 3, and the published site contains
+  no zod.
+
+### Compatibility
+
+- No public export, type, option or event is added or removed. Saved charts,
+  workspaces and layouts load and round-trip as before.
+- `DRAWING_TOOL_ICONS` keeps every id with new path data, and
+  `drawingToolAccent(id)` returns `undefined` for every tool but the magnet.
+  A host that copies the path data into its own code has a copy to refresh: in a
+  dry run, OpenAlgo's generated drawing metadata
+  (`frontend/scripts/generate-drawing-tools.mjs`) differs from 2.7.0 in 87
+  paths, and its test that compares the two is the one that fails until the
+  generator is run again. After it, OpenAlgo's 1,248 trading tests, its
+  typecheck, its production build and the 14 checks of
+  `scripts/check-openalgo-compat.mjs` in Chromium, Firefox and WebKit pass on
+  the packed candidate, as they do on the 2.6.9 it pins.
+- The widget no longer raises a toast when a chart fails to load with no bars
+  to keep; the reason is in the data status row, and the `data` event still
+  carries `error`. A failed refresh that keeps its bars still raises one.
+
+### Size
+
+The draw tier is 59.60 kB Brotli, 1.16 kB more than 2.6.9, all of it the
+redrawn path data and the small helpers that write it. The widget tier is
+129.56 kB, 0.58 kB more for the short rail, the flyout notch, the motion rules
+and the reason in the data status row. The widget terminal is 374.10 kB, all
+tiers 436.91 kB, the nine classic scripts 450.64 kB, the base classic script
+140.27 kB and the widget classic script 142.92 kB. The base engine is the
+2.6.9 code, and the new version string alone codes 39 bytes smaller at
+140.10 kB; base + trade is 156.98 kB. Every other tier keeps its size, and so
+does the chart-only import (89,611 bytes), since a plain chart draws no glyph.
+Budgets rise only where the measured bundle needs it.
+
+### Performance
+
+Five runs per version on one dedicated 4-vCPU Linux runner (AMD EPYC 7763),
+headless Chromium 149.0.7827.55 and software GL (SwiftShader), under the
+unchanged render budgets. At 200,000 bars, the lowest Canvas 2D p95 pan, full
+zoom-out and ten-study tick are 7.5, 119.7 and 300.0 ms against 7.4, 122.8
+and 307.2 ms for 2.6.9 in the same session. The chart draws with the same
+engine code in both builds, so the differences are variation between runs.
+The page marks one cell slower, full zoom-out at 10,000 bars (22.4 to 24.3
+ms), and there the 2.6.9 figure is one outlying run: its other four runs took
+23.6 to 28.5 ms, against 24.3 to 30.9 for 2.7.0. See the
+[same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#270).
+
+### Tests
+
+12,042 engine tests across 527 files and 740 reference-host tests across 69
+files. New tests hold that no stroke of a tool glyph enters an anchor ring and
+that a pattern rings each pivot; that a short chart in a two by two grid shows
+at least five tools at rest and reaches its controls by scrolling; that a
+stale refresh still gives its reason; and that a phone drawing bar and the
+settings opened after it stay inside a 390 px screen in Chromium, Firefox and
+WebKit. Each failed on the code before its fix. The construction checks of the
+Fibonacci, Gann and wave glyphs read each glyph with its anchors healed, the
+strokes run back to the ring centres, so they still hold each figure to what
+its tool draws.
+
 ## 2.6.9
 
 2026-10-28
