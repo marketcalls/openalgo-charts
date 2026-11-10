@@ -479,6 +479,42 @@ test('one PNG of the whole grid puts each chart own pixels at its place, from th
   expect(errors).toEqual([]);
 });
 
+test('a short chart shows its drawing tools, and its rail scrolls on to the controls', async ({ page }, info) => {
+  // The rail's controls (magnet to collapse) are about 280px tall, the whole
+  // rail of one chart in a two by two grid on a laptop. Pinned to the foot of
+  // the rail, they covered every tool, so a new grid showed no way to draw
+  // until a chart was maximized. Short rails scroll as one column instead.
+  const errors = await mount(page, '2x2', { width: 1440, height: 860 }, '&rail=1');
+  const rail = page.locator('.oac-grid__cell').first().locator('.oac-rail');
+  await expect(rail).toBeVisible();
+  // A button is in view when the point at its centre is the button itself.
+  const inView = (): Promise<{ height: number; tools: number; controls: number }> => rail.evaluate((el) => {
+    const shown = (b: Element): boolean => {
+      const r = b.getBoundingClientRect();
+      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return at !== null && (at === b || b.contains(at));
+    };
+    const all = [...el.querySelectorAll('.oac-rail__btn')];
+    const controls = all.filter((b) => b.closest('.oac-rail__ctl') !== null);
+    return { height: el.clientHeight, tools: all.filter((b) => !controls.includes(b) && shown(b)).length, controls: controls.filter(shown).length };
+  });
+  const top = await inView();
+  expect(top.height, 'a rail too short for tools above pinned controls').toBeLessThan(450);
+  expect(top.tools, 'tools in view at rest').toBeGreaterThanOrEqual(5);
+  await rail.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  const end = await inView();
+  expect(end.controls, 'the controls, reached by scrolling').toBeGreaterThanOrEqual(5);
+  await page.screenshot({ path: info.outputPath('grid-short-rail.png') });
+  // A chart with room keeps them pinned: maximized, the tools and the controls are both in view at rest.
+  await page.setViewportSize({ width: 1440, height: 1700 });
+  await rail.evaluate((el) => { el.scrollTop = 0; });
+  const tall = await inView();
+  expect(tall.height).toBeGreaterThan(450);
+  expect(tall.tools).toBeGreaterThanOrEqual(5);
+  expect(tall.controls).toBe(8);
+  expect(errors).toEqual([]);
+});
+
 test('at phone width the bar stays usable: menus fit, maximize and capture say why they wait', async ({ page }, info) => {
   const errors = await mount(page, '2x2', { width: 400, height: 780 }, '&toolbar=1&theme=light');
   await readyEvery(page);

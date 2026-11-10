@@ -1337,10 +1337,8 @@ class WidgetImpl implements Widget {
     else if (state.status === 'refreshing') this.context.status(widgetText(this.context, 'History is stale. Refreshing {symbol} {interval}', { symbol, interval }));
     else if (state.status === 'error' || state.status === 'stale') {
       this.context.status(state.status === 'stale' ? widgetText(this.context, 'History is stale for {symbol} {interval}', { symbol, interval }) : widgetText(this.context, 'Could not load {symbol} {interval}', { symbol, interval }), 'error');
-      if (state.error && state.error !== previous?.error) {
-        this._toasts.toast(widgetText(this.context, 'Could not load {symbol} {interval}: {error}', { symbol, interval, error: state.error.message }), 'error');
-        this._bus.emit('data', { symbol, interval, bars: 0, error: state.error.message });
-      }
+      // No toast: the status row over the chart says why and carries the retry.
+      if (state.error && state.error !== previous?.error) this._bus.emit('data', { symbol, interval, bars: 0, error: state.error.message });
     } else if (state.status === 'ready' || state.status === 'empty') {
       this.context.status(state.bars.length === 0 ? widgetText(this.context, 'No bars for {symbol} {interval}', { symbol, interval }) : widgetText(this.context, state.bars.length === 1 ? '{count} bar' : '{count} bars', { count: state.bars.length }));
       this._bus.emit('data', { symbol, interval, bars: state.bars.length });

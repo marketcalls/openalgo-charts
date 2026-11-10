@@ -467,7 +467,7 @@ describe('the feed', () => {
     expect(unsub).toHaveBeenCalledTimes(2);
   });
 
-  it('reports a failed load on the status line, as a toast and as an event, and leaves the chart alone', async () => {
+  it('reports a failed load on the status line, once over the chart with its reason, and as an event', async () => {
     const feed = feedOf(async () => { throw new Error('rate limited'); });
     const { w, root } = make({ feed, symbol: 'X' });
     const data = vi.fn();
@@ -476,7 +476,10 @@ describe('the feed', () => {
     const msg = root.querySelector('.oac-statusline__msg') as FakeElement;
     expect(msg.textContent).toBe('Could not load X 1d');
     expect(msg.classList.contains('is-error')).toBe(true);
-    expect(root.querySelector('.oac-toast--error')?.textContent).toContain('rate limited');
+    // The reason sits in the row that carries the retry, and nowhere else over
+    // the chart: as a toast as well, one failure was three notices.
+    expect(root.querySelector('.oac-data-status__text')?.textContent).toBe('Could not load X 1d: rate limited');
+    expect(root.querySelector('.oac-toast--error')).toBeNull();
     expect(data).toHaveBeenCalledWith({ symbol: 'X', interval: '1d', bars: 0, error: 'rate limited' });
   });
 
