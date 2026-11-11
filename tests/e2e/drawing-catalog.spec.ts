@@ -13,9 +13,9 @@ async function settle(page: Page) {
 test('the gallery exposes every registered drawing in both its picker and rail', async ({ page }) => {
   await mount(page);
   const ids = await page.evaluate(() => (window as any).drawingGallery.tools.map((t: any) => t.id));
-  expect(ids.length).toBe(87);
-  expect(new Set(ids).size).toBe(87);
-  expect(await page.locator('#tool option').count()).toBe(87);
+  expect(ids.length).toBe(90);
+  expect(new Set(ids).size).toBe(90);
+  expect(await page.locator('#tool option').count()).toBe(90);
   const missing = await page.evaluate(async () => {
     const path = '/dist/openalgo-charts.widget.mjs';
     const module = await import(path);

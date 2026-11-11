@@ -4,7 +4,8 @@
  * each with its own undo history. A shared drawing carries a lineage mark in
  * its props, so the link finds it again after a restore.
  */
-import { DRAWING_LINK_METADATA_KEY, type DrawingController, type DrawingChartHost } from './controller';
+import type { DrawingController, DrawingChartHost } from './controller';
+import { DRAWING_LINK_METADATA_KEY } from './drawing-input';
 import type { Drawing } from './types';
 import { cloneDrawing } from './clipboard';
 

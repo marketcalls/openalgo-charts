@@ -1,6 +1,6 @@
 ---
 title: Drawing Tools
-description: 87 drawing tools, a headless controller, undo/redo, and persistence.
+description: 90 drawing tools, a headless controller, undo/redo, and persistence.
 ---
 
 import { Callout } from 'nextra/components'
@@ -8,7 +8,7 @@ import DrawingToolsDemo from '../../components/DrawingToolsDemo'
 
 # Drawing Tools
 
-`openalgo-charts/draw` is a lazy tier (**59.60 kB** Brotli in 2.7.0) with 87 tools and a headless
+`openalgo-charts/draw` is a lazy tier (**60.44 kB** Brotli in 2.7.1) with 90 tools and a headless
 controller. It ships **no UI**: no toolbar, no dialogs. It owns the model and the
 interactions; your app supplies the buttons.
 
@@ -42,7 +42,7 @@ draw.setTool('trend-line');   // the next two clicks place it
 
 ## The tools
 
-**87 built-in tools**, all registered when the tier is imported.
+**90 built-in tools**, all registered when the tier is imported.
 
 | Group | `id` | Anchors |
 |---|---|---|
@@ -59,7 +59,8 @@ draw.setTool('trend-line');   // the next two clicks place it
 | Gann | `gann-fan`, `gann-box`, `gann-square` | 2 |
 | Geometric studies | `dedekind-tessellation`, `sonic`, `supersonic`, `golden-sonic`, `golden-supersonic` | 2 |
 | Harmonic patterns | `xabcd-pattern`, `gartley`, `bat`, `butterfly`, `crab`, `shark`, `cypher`; `abcd-pattern` | 5; 4 |
-| Wave patterns | `elliott-impulse`; `elliott-correction`; `head-shoulders` | 5; 3; 7 |
+| Elliott waves | `elliott-impulse`, `elliott-triangle`, `elliott-triple-combo`; `elliott-correction`, `elliott-double-combo` | 6; 4 |
+| Chart patterns | `head-shoulders` | 7 |
 | Forecasting | `long-position`, `short-position`; `forecast` | 3; 2 |
 | Measurers | `price-range`, `date-range`, `measure` | 2 |
 | Marks | `arrow-up`, `arrow-down`, `arrow-left`, `arrow-right`, `icon-stamp` | 1 |
@@ -104,6 +105,33 @@ the ellipse that differing axis scales would otherwise produce. `arc` passes *th
 middle anchor; `curve` treats that anchor as a control handle, so the path only leans toward
 it. `highlighter` is `path` with a fat translucent stroke, and is grabbable anywhere across
 its width.
+
+## Elliott wave counts
+
+Five tools label a wave count from the origin it starts at, the end of the wave before
+it: `elliott-impulse` (0 1 2 3 4 5, six anchors), `elliott-correction` (0 A B C, four),
+`elliott-triangle` (0 A B C D E, six), `elliott-double-combo` (0 W X Y, four) and
+`elliott-triple-combo` (0 W X Y X Z, six).
+
+Two settings choose how the labels read. **Degree** (`props.degree`) runs from Grand
+Supercycle to Subminuette: the three largest degrees count in upper Roman numerals, the
+middle three in Arabic and the three smallest in lower Roman, each family circled, in
+parentheses and plain from its largest degree down, so a count reads apart from the one it
+subdivides. Minor, the default, is plain `1 2 3 4 5` and `A B C`. **Label style**
+(`props.labelStyle`) keeps the degree's own form or forces plain, parentheses or circled.
+
+```ts
+draw.add({
+  tool: 'elliott-impulse', paneIndex: 0, style: {},
+  points: [p0, p1, p2, p3, p4, p5],          // the origin first
+  props: { degree: 'intermediate' },         // (0) (1) (2) (3) (4) (5)
+});
+```
+
+Through 2.7.0 the impulse took five anchors and the correction three, with no origin, so
+the first wave was never drawn. A saved count of that shape is given an origin on its first
+anchor when it loads, and when a host adds one: it draws no label and no leg there, so the
+count looks as it did, and dragging that point away draws the first wave.
 
 ## Anchored analysis
 

@@ -156,9 +156,9 @@ function sampleFor(field: SettingsField): unknown {
 // ── every tool ────────────────────────────────────────────────────────────
 
 describe('every built-in tool declares a settings schema', () => {
-  it('registers 87 tools, each with at least one field', () => {
+  it('registers 90 tools, each with at least one field', () => {
     const tools = registeredDrawingTools();
-    expect(tools.length).toBe(87);
+    expect(tools.length).toBe(90);
     for (const t of tools) {
       expect(t.settings, t.id).toBeDefined();
       expect(t.settings?.fields.length, t.id).toBeGreaterThan(0);

@@ -74,9 +74,11 @@ export const RAIL_GROUPS: readonly RailGroup[] = [
     { tool: 'cyclic-lines' }, { tool: 'time-cycles' }, { tool: 'sine-line' },
   ] },
   { id: 'patterns', title: 'Patterns', items: [
-    { head: 'Patterns and waves' },
+    { head: 'Patterns' },
     { tool: 'xabcd-pattern' }, { tool: 'abcd-pattern' }, { tool: 'head-shoulders' },
-    { tool: 'elliott-impulse' }, { tool: 'elliott-correction' },
+    { head: 'Elliott waves' },
+    { tool: 'elliott-impulse' }, { tool: 'elliott-correction' }, { tool: 'elliott-triangle' },
+    { tool: 'elliott-double-combo' }, { tool: 'elliott-triple-combo' },
     { head: 'Harmonic patterns' },
     { tool: 'gartley' }, { tool: 'bat' }, { tool: 'butterfly' }, { tool: 'crab' }, { tool: 'shark' }, { tool: 'cypher' },
   ] },

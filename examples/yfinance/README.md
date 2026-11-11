@@ -1010,9 +1010,9 @@ window is wide again. The page runs on a neutral palette: a near-black chart
 and a selected tool shows as a light wash with bright ink rather than a coloured
 frame.
 
-The drawing rail includes 87 tools: the existing annotations plus pitchforks,
-regression and disjoint channels, advanced Fibonacci and Gann geometry, wavefronts
-and harmonic or Elliott patterns. Open a rail group's chevron to choose a tool; edit
+The drawing rail includes 90 tools: the existing annotations plus pitchforks,
+regression and disjoint channels, advanced Fibonacci and Gann geometry, wavefronts,
+harmonic patterns and five Elliott wave counts labelled by degree. Open a rail group's chevron to choose a tool; edit
 its settings from the selected drawing's properties. Mobile drawing controls use
 the same catalogue and saved document format.
 

@@ -37,8 +37,11 @@ for (const tool of tools) picker.add(new Option(tool.name, tool.id));
 const patternPrices = {
   'xabcd-pattern': [0, 100, 38.2, 69.1, 21.4],
   'abcd-pattern': [100, 38.2, 69.1, 21.4],
-  'elliott-impulse': [30, 10, 65, 40, 100],
-  'elliott-correction': [10, 70, 0],
+  'elliott-impulse': [0, 30, 10, 65, 40, 100],
+  'elliott-correction': [100, 30, 70, 0],
+  'elliott-triangle': [100, 0, 80, 20, 60, 35],
+  'elliott-double-combo': [100, 20, 80, 15],
+  'elliott-triple-combo': [100, 20, 85, 25, 80, 15],
   'head-shoulders': [0, 65, 25, 100, 30, 65, 0],
   gartley: [0, 100, 38.2, 69.1, 21.4],
   bat: [0, 100, 55, 82, 11.4],

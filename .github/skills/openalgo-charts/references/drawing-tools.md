@@ -17,7 +17,7 @@ const draw = new DrawingController(chart, { magnet: 'weak' });   // or 'strong',
 draw.setTool('trend-line');   // the next two clicks place it
 ```
 
-Importing `openalgo-charts/draw` calls `registerBuiltinDrawingTools()` as a side effect, registering all 87 tools into the tier's own tool registry. No separate registration call is needed.
+Importing `openalgo-charts/draw` calls `registerBuiltinDrawingTools()` as a side effect, registering all 90 tools into the tier's own tool registry. No separate registration call is needed.
 
 **The controller is headless: it ships no toolbar, no dialogs, no key listener.** It owns the model (`Drawing[]`), placement, selection, dragging, undo, and serialisation. Every button, flyout, colour picker, and text prompt is the host's.
 
@@ -317,7 +317,7 @@ list in the unit test, since hosts name these ids in their own code.
 
 ## Tool catalogue
 
-87 built-in tools. `Clicks` is what the user does; `Anchors` is what ends up in `drawing.points` (they differ only where `expand` is involved).
+90 built-in tools. `Clicks` is what the user does; `Anchors` is what ends up in `drawing.points` (they differ only where `expand` is involved).
 
 | Family | `id` | Clicks | Anchors | Shortcut |
 |---|---|---|---|---|
@@ -354,8 +354,8 @@ list in the unit test, since hosts name these ids in their own code.
 | Marks | `icon-stamp` | 1 | 1 | |
 | Patterns | `xabcd-pattern`, `gartley`, `bat`, `butterfly`, `crab`, `shark`, `cypher` | 5 | 5 | |
 | Patterns | `abcd-pattern` | 4 | 4 | |
-| Patterns | `elliott-correction` | 3 | 3 | |
-| Patterns | `elliott-impulse` | 5 | 5 | |
+| Patterns | `elliott-correction`, `elliott-double-combo` | 4 | 4 | |
+| Patterns | `elliott-impulse`, `elliott-triangle`, `elliott-triple-combo` | 6 | 6 | |
 | Patterns | `head-shoulders` | 7 | 7 | |
 | Analysis | `anchored-vwap` | 1 | 1 | |
 | Analysis | `fixed-range-volume-profile` | 2 | 2 | |
@@ -813,7 +813,7 @@ Individual tools are exported too, under the UPPER_SNAKE form of the id:
 `NOTE`, `BALLOON`, `COMMENT`, `SIGNPOST`, `PRICE_NOTE`, `TABLE`, `CALLOUT`,
 `FLAG_MARK`, `ARROW_UP`, `ARROW_DOWN`, `ARROW_LEFT`, `ARROW_RIGHT`.
 
-As with the indicator tier, importing `openalgo-charts/draw` registers all 87 tools,
+As with the indicator tier, importing `openalgo-charts/draw` registers all 90 tools,
 but each descriptor is also exported by name for selective registration:
 
 ```ts
@@ -914,6 +914,53 @@ Golden variants use all enabled Fibonacci levels. Supersonic tools also read
 Dense labels on advanced geometry use bounded vertical spacing. Labels with no
 room in a tiny plot are omitted without changing saved anchors, level values or
 hit regions. Zoom in or disable unneeded levels to inspect crowded values.
+
+## Elliott wave counts (2.7.1)
+
+Five wave tools label a count from the origin it starts at:
+
+| Tool | Anchors | Labels in the default degree |
+| --- | --- | --- |
+| `elliott-impulse` | 6 | 0 1 2 3 4 5 |
+| `elliott-correction` | 4 | 0 A B C |
+| `elliott-triangle` | 6 | 0 A B C D E |
+| `elliott-double-combo` | 4 | 0 W X Y |
+| `elliott-triple-combo` | 6 | 0 W X Y X Z |
+
+Each reads two `props` through its settings schema:
+
+- `props.degree`: one of `grand-supercycle`, `supercycle`, `cycle`, `primary`,
+  `intermediate`, `minor` (default), `minute`, `minuette`, `subminuette`. The
+  three largest write waves in upper Roman numerals, the middle three in Arabic
+  and the three smallest in lower Roman, each family circled, in parentheses and
+  plain from its largest degree down; letters are capitals except in the lower
+  Roman family. Minor is plain `1 2 3 4 5` and `A B C`, the labels the impulse
+  and the correction always drew.
+- `props.labelStyle`: `degree` (default, the degree's own form), `plain`,
+  `parentheses` or `circled`. It changes the form, never the numerals. A circled
+  label is painted with a solid ring round it, whatever the line's dash.
+
+An unknown value in either reads as the default.
+
+**The origin anchor.** Through 2.7.0 the impulse took 5 anchors (labelled 1 to
+5) and the correction 3 (A to C), so wave 1 or wave A was never drawn. Since
+2.7.1 they take 6 and 4. A drawing with fewer anchors than its tool takes is
+neither painted nor hit, so the older shape is upgraded wherever a drawing
+enters the engine:
+
+- `migrateDrawings` (every restore, paste and undo step) and
+  `DrawingController.add` give an impulse with exactly 5 anchors, or a
+  correction with exactly 3, an origin that is a copy of its first anchor.
+  Anything else is left as it is, so the upgrade is idempotent.
+- While the origin sits on wave 1's anchor (same time and price) the tool draws
+  no origin label and no leg to it, so the drawing looks as it did. Dragging
+  the origin away draws the first wave and its `0`. The origin is handle 0, so
+  it is the handle a click on that spot picks up.
+- The document version does not change. A 2.7.0 build reading a saved 2.7.1
+  count draws its first five anchors with the old labels and ignores the sixth.
+
+Write a count from code with the full anchor list, origin first. A host that
+still adds a 5-anchor impulse gets the origin added for it.
 
 
 ## Named drawing groups (2.5.3)

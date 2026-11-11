@@ -44,7 +44,7 @@ export function Hero() {
         <span>More ways to see the market</span>
         <div><strong>13</strong> chart types</div>
         <div><strong>112</strong> indicators</div>
-        <div><strong>87</strong> drawing tools</div>
+        <div><strong>90</strong> drawing tools</div>
       </div>
     </section>
   );
@@ -148,7 +148,7 @@ export function Features() {
         </Reveal>
         <Reveal className="oac-feature">
           <FeatureArt type="drawings" />
-          <div className="oac-feature__copy"><span className="oac-feature__index">02 / EXPRESS</span><h3>Give your ideas a shape.</h3><p>Mark a level. Map a scenario. Tell the story you see with 87 drawing tools that put your thinking right on the chart.</p><Link href="/examples#drawing-tools" className="oac-text-link">Try the drawing tools <Arrow /></Link></div>
+          <div className="oac-feature__copy"><span className="oac-feature__index">02 / EXPRESS</span><h3>Give your ideas a shape.</h3><p>Mark a level. Map a scenario. Tell the story you see with 90 drawing tools that put your thinking right on the chart.</p><Link href="/examples#drawing-tools" className="oac-text-link">Try the drawing tools <Arrow /></Link></div>
         </Reveal>
         <Reveal className="oac-feature">
           <FeatureArt type="views" />
@@ -341,8 +341,8 @@ const widget = createWidget('#terminal', {
 // Brotli sizes and release-bench frame times shown on the home page. They change
 // with every release: CLAUDE.md lists them among the files a size change or a
 // release benchmark updates.
-const STATS = { release: '2.7.0', base: '140.10 kB', terminal: '374.10 kB' } as const;
-const BENCH = { release: '2.7.0', pan: '7.5 ms', zoomOut: '119.7 ms', tick: '300.0 ms' } as const;
+const STATS = { release: '2.7.1', base: '140.06 kB', terminal: '374.92 kB' } as const;
+const BENCH = { release: '2.7.1', pan: '6.4 ms', zoomOut: '129.0 ms', tick: '258.3 ms' } as const;
 
 export function Integrate() {
   return (

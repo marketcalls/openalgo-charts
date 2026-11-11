@@ -1,8 +1,8 @@
 # Getting started
 
 OpenAlgo Charts is a dependency-free, canvas-based financial charting engine.
-The base engine is **140.10 kB Brotli**; all nine tiers total **436.91 kB Brotli**,
-measured with `size-limit` on the 2.7.0 build. Optional tiers are separate imports.
+The base engine is **140.06 kB Brotli**; all nine tiers total **437.73 kB Brotli**,
+measured with `size-limit` on the 2.7.1 build. Optional tiers are separate imports.
 
 ## Install
 
@@ -64,7 +64,7 @@ Only pay for what you use: each of the nine tiers is a separate entry point.
 | `openalgo-charts/transform` | Renko, Range, Point &amp; Figure, Kagi, Line Break, Heikin Ashi |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow |
 | `openalgo-charts/indicators` | 112 built-in indicators (SMA/EMA/MACD/Bollinger/RSI/ADX/...) + the Tier-2 contract |
-| `openalgo-charts/draw` | 87 drawing tools, including Anchored VWAP and fixed-range Volume Profile, a headless controller and opt-in drawing linking |
+| `openalgo-charts/draw` | 90 drawing tools, including Anchored VWAP and fixed-range Volume Profile, a headless controller and opt-in drawing linking |
 | `openalgo-charts/webgl` | the WebGL2 series backend behind `renderer: 'auto'` |
 | `openalgo-charts/workspace` | portable layouts, indicator templates, revisioned catalogs and asynchronous storage |
 | `openalgo-charts/widget` | the chart with its chrome in one `createWidget` call: top bar, drawing rail, status line, dialogs, shortcuts, persistence. The only tier that supplies application controls |

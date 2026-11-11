@@ -8,6 +8,142 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.7.1
+
+2026-11-11
+
+Five Elliott wave counts, each started from its origin and labelled by degree.
+Three of the tools are new; the impulse and the correction gain the origin they
+lacked, and a count saved by 2.7.0 loads as it was drawn.
+
+### Added
+
+- **Three Elliott wave tools.** `elliott-triangle` labels a contracting or
+  expanding triangle 0 A B C D E, `elliott-double-combo` a double combination
+  0 W X Y and `elliott-triple-combo` a triple combination 0 W X Y X Z. With the
+  impulse and the correction they sit under an Elliott waves heading in the
+  Patterns group of the widget's rail and the reference host's. The registry
+  holds 90 drawing tools, from 87.
+- **Degree.** Every wave count has a Degree setting (`props.degree`), from
+  Grand Supercycle down to Subminuette. The three largest degrees count in
+  upper Roman numerals, the middle three in Arabic and the three smallest in
+  lower Roman, and within each family the degrees are circled, in parentheses
+  and plain from the largest down, so a count reads apart from the one it
+  subdivides. Letters are capitals except in the lower Roman family. Minor is
+  the default: plain 1 to 5 and A to C, the labels the two original tools
+  always drew.
+- **Label style.** `props.labelStyle` keeps the degree's own form or makes
+  every label plain, in parentheses or circled. A circled label is drawn inside
+  a solid ring whatever the line's dash, and the ring moves with the label
+  when labels crowd and it takes another line.
+
+### Changed
+
+- **A wave count starts at its origin.** The impulse now takes six anchors,
+  0 to 5, and the correction four, 0 A B C, where they took five and three: the
+  first anchor was the end of wave 1 or of wave A, and that wave was never
+  drawn. A count is placed from the point it starts at, as the three new tools
+  are.
+- **A count saved by 2.7.0 keeps its shape.** The engine neither paints nor
+  hit-tests a drawing with fewer anchors than its tool takes, so a saved
+  impulse or correction would have disappeared. Every restore, paste and undo
+  step, and `DrawingController.add`, now gives an impulse of exactly five
+  anchors, or a correction of exactly three, an origin on its first anchor.
+  While the origin sits there the tool draws no origin label and no leg to it,
+  so the count looks as it did, labels and all; drag that point away and the
+  first wave and its 0 appear. The origin is the handle a click on that point
+  picks up.
+- **The wave glyphs.** Each of the five icons rings every pivot, origin included,
+  and they are told apart by how the count moves: the impulse climbs in five
+  waves, the correction falls corner to corner in three, the triangle narrows
+  in five, and the two combinations run sideways between level highs and lows,
+  in three waves and in five.
+
+### Breaking, despite the patch version
+
+- **A wave count's anchors start at its origin.**
+  `getDrawingTool('elliott-impulse').points` is 6 and
+  `getDrawingTool('elliott-correction').points` is 4, where they were 5 and 3,
+  and a count's first anchor is now its origin, not the end of wave 1 or of
+  wave A. A host that reads a count's anchors by position finds each wave one
+  place later than before (wave 1's end is `points[1]`, not `points[0]`), and
+  one that sizes its placement prompts from `points` reads the new counts.
+  Saved counts, and a count a host adds with the old number of anchors, are
+  upgraded for it, so neither a saved chart nor such a host loses a drawing.
+
+### Compatibility
+
+- Three tool ids are added, and no export, type, option or event is removed.
+- The drawing document version does not change. A 2.7.0 build that opens a
+  layout saved by 2.7.1 draws a count's first five anchors with the old labels
+  and ignores the rest, so a layout with wave counts is best kept away from an
+  older build.
+- **OpenAlgo.** In a dry run on OpenAlgo's main branch, which pins 2.7.0, the
+  packed candidate passes its 1,711 trading tests, its typecheck and
+  production build, its chart-indicator skill coverage (438 names) and the 14
+  checks of `scripts/check-openalgo-compat.mjs` in Chromium, Firefox and
+  WebKit. Its migration is two steps: run
+  `frontend/scripts/generate-drawing-tools.mjs`, whose output changes in five
+  paths (the two redrawn wave glyphs and the three new tools), and list the
+  three new tools in its own rail (`frontend/src/lib/trading/drawTools.tsx`)
+  for them to appear in `/trading`. The impulse and the correction it already
+  lists gain their origin with no change. One of two runs of its trading tests
+  on 2.7.0, before the candidate went in, had three failures that the second
+  run did not repeat; every run on the candidate passed.
+
+### Security
+
+- Unchanged from 2.7.0: the published package has no runtime dependencies,
+  and the two open advisories are the development-only `minimatch` under
+  `typedoc` and zod in the documentation site, for the reasons given there.
+
+### Size
+
+The draw tier is 60.44 kB Brotli, 0.84 kB more than 2.7.0: the three
+descriptors and their glyphs, the degree notation, the ring painted round a
+circled label and the origin upgrade. The widget tier is 129.58 kB, 22 bytes
+more for the rail's Elliott waves heading. The widget terminal is 374.92 kB,
+all tiers 437.73 kB, the nine classic scripts 451.45 kB and the widget classic
+script 142.97 kB. The base engine is the 2.7.0 code, and the new version string
+alone codes 44 bytes smaller at 140.06 kB (base + trade 156.93 kB, base classic
+script 140.19 kB). Every other tier keeps its size, and so does the chart-only
+import (89,611 bytes), since a plain chart draws no drawing. Budgets rise only
+where the measured bundle needs it.
+
+### Performance
+
+Five runs per version on one 4-vCPU Linux runner (AMD EPYC 9V74), headless
+Chromium 149.0.7827.55 and software GL (SwiftShader), under the unchanged
+render budgets. At 200,000 bars, the lowest Canvas 2D p95 pan, full zoom-out
+and ten-study tick are 6.4, 129.0 and 258.3 ms against 5.9, 102.7 and
+243.6 ms for 2.7.0 in the same session, and the page marks most Canvas 2D
+cells slower, the full zoom-out at 200,000 bars by 1.3x. Neither build changes
+what the bench runs: the base engine, indicators and WebGL bundles of 2.7.1
+are byte for byte the 2.7.0 files apart from the version string. The
+difference is the session: the 2.7.1 runs came first and slowed early, their
+200,000-bar zoom-outs taking 174.7, 161.3, 158.1, 169.9 and 129.0 ms where
+2.7.0's five took 102.7 to 109.2. Re-timed with the two builds alternating,
+twelve passes each on one machine (AMD Ryzen 7 7700, Windows, Chromium from
+Playwright 1.61.1), that cell's full zoom-out p95 is 52.9 to 68.7 ms (median
+56.3) for 2.7.1 against 52.8 to 65.9 ms (median 55.0) for 2.7.0, the pan 2.2
+to 2.6 against 2.3 to 2.9 ms, and the tick 157.3 to 202.0 against 152.4 to
+197.4 ms. See the
+[same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#271).
+
+### Tests
+
+12,108 engine tests across 528 files and 740 reference-host tests across 69
+files. New tests hold the label of every degree for an impulse and a
+correction, the letter case of the triangle and the combinations, the label
+style override, the fallback for an unknown degree, the ring round a circled
+label and the room it reserves, the hidden origin of an upgraded count and the
+shown origin of a count placed with one, and the upgrade itself through the
+migration, a controller restore and `add`. With the upgrade disabled, four of
+them fail; the ring's room and the shown origin each failed on the code before
+their fix. In Chromium, Firefox and WebKit, each of the five tools was placed
+in the drawing gallery, labelled in several degrees and styles, a 2.7.0 impulse
+was restored and the settings dialog opened, with no page error.
+
 ## 2.7.0
 
 2026-11-11
