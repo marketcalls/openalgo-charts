@@ -54,7 +54,7 @@ try {
   await expect(demo.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
 
   const catalogue = demo.getByLabel('All drawing tools');
-  await expect(catalogue.locator('option')).toHaveCount(88);
+  await expect(catalogue.locator('option')).toHaveCount(91);
   await catalogue.selectOption('pitchfork');
   await expect(status).toContainText('Pitchfork');
   for (const [x, y] of [[.2, .55], [.4, .25], [.6, .65]]) {
@@ -94,7 +94,7 @@ try {
 
   await page.goto(`${base}/demos/drawings/index.html`);
   await page.waitForFunction(() => window.drawingGallery);
-  await expect(page.locator('#tool option')).toHaveCount(87);
+  await expect(page.locator('#tool option')).toHaveCount(90);
   await page.selectOption('#tool', 'gartley');
   await expect(page.locator('#status')).toContainText('Gartley');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Drawing gallery fits a phone');
