@@ -360,7 +360,8 @@
             324.1
           ]
         }
-      ]
+      ],
+      "note": "The bundles this bench loads (the base engine, indicators and WebGL tiers) are byte for byte the 2.7.0 files apart from the version string, so the slower cells are the session: the 2.7.1 runs came first and slowed early, their 200,000-bar Canvas 2D zoom-outs taking 174.7, 161.3, 158.1, 169.9 and 129.0 ms where the 2.7.0 runs took 102.7 to 109.2. Re-timed with the two builds alternating, twelve passes each on one other machine (AMD Ryzen 7 7700, Windows), that cell reads the same: full zoom-out p95 median 56.3 ms for 2.7.1 and 55.0 ms for 2.7.0, pan 2.5 ms for both, and the ten-study tick 181.6 against 176.4 ms within a spread of 152 to 202 ms."
     },
     {
       "version": "2.7.0",

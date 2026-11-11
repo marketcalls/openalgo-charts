@@ -53,19 +53,27 @@ lacked, and a count saved by 2.7.0 loads as it was drawn.
   so the count looks as it did, labels and all; drag that point away and the
   first wave and its 0 appear. The origin is the handle a click on that point
   picks up.
-- **The wave glyphs.** Each of the five rings every pivot, origin included,
+- **The wave glyphs.** Each of the five icons rings every pivot, origin included,
   and they are told apart by how the count moves: the impulse climbs in five
   waves, the correction falls corner to corner in three, the triangle narrows
   in five, and the two combinations run sideways between level highs and lows,
   in three waves and in five.
 
+### Breaking, despite the patch version
+
+- **A wave count's anchors start at its origin.**
+  `getDrawingTool('elliott-impulse').points` is 6 and
+  `getDrawingTool('elliott-correction').points` is 4, where they were 5 and 3,
+  and a count's first anchor is now its origin, not the end of wave 1 or of
+  wave A. A host that reads a count's anchors by position finds each wave one
+  place later than before (wave 1's end is `points[1]`, not `points[0]`), and
+  one that sizes its placement prompts from `points` reads the new counts.
+  Saved counts, and a count a host adds with the old number of anchors, are
+  upgraded for it, so neither a saved chart nor such a host loses a drawing.
+
 ### Compatibility
 
-- Three tool ids are added; no export, type, option or event is removed or
-  narrowed. `getDrawingTool('elliott-impulse').points` is 6 and
-  `getDrawingTool('elliott-correction').points` is 4, where they were 5 and 3.
-  A host that reads those counts to size its own placement prompts reads the
-  new ones.
+- Three tool ids are added, and no export, type, option or event is removed.
 - The drawing document version does not change. A 2.7.0 build that opens a
   layout saved by 2.7.1 draws a count's first five anchors with the old labels
   and ignores the rest, so a layout with wave counts is best kept away from an
