@@ -947,14 +947,14 @@ exact version, never a range or no version at all (see
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.7.0 build, decimal
+Budgets from `.size-limit.json` and measurements from the 2.7.1 build, decimal
 Brotli kB, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 129.56 kB | 129.56 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 129.58 kB | 129.58 kB |
 | Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.00 kB | 21.00 kB |
-| Widget terminal | base + draw + indicators + widget | 374.10 kB | 374.10 kB |
+| Widget terminal | base + draw + indicators + widget | 374.93 kB | 374.92 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.
