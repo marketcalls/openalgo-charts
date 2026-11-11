@@ -232,6 +232,12 @@ test('the grid view offers the in-chart transforms in the chart type menu, and a
   // The chart forms the bricks from the fed bars itself.
   expect(await grid(page, g => g.cells().map((cell: any) => cell.widget.chart.primaryBars().length))).not.toContain(0);
   await page.screenshot({ path: info.outputPath('yfinance-grid-renko.png') });
+  // The pick is saved to IndexedDB after it is shown. A reload sent first
+  // restores the grid as it was before the pick, which on the mobile Firefox
+  // runner happened in 3 of the release merges' runs (2.6.9, 2.7.0, 2.7.1):
+  // the restored cell had no Renko. Reload once the save holds it, as the
+  // pane test above does.
+  await expect.poll(async () => JSON.parse((await savedGrid(page)) ?? '{}').panes?.[index]?.chartType).toBe('renko');
   await page.reload();
   await page.waitForFunction(() => (window as any).__grid?.cells().length === 4);
   await expect.poll(() => loaded(page), { timeout: 20_000 }).toBe(true);
