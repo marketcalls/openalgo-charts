@@ -102,7 +102,7 @@ boxes, and the chart grid, bottom bar and saved layouts inside the widget tier, 
 names them; the release adds no box or arrow.
 
 Rechecked on 2.6.4 with `npx size-limit` on the release build: base 137.65 kB, indicators 43.02 kB, draw 58.44 kB, profile 20.83 kB, transform 6.23 kB, trade 16.88 kB on its own (base + trade 154.52 kB), workspace 11.73 kB, WebGL2 6.97 kB, widget 124.94 kB, and 426.67 kB for all tiers. Registry
-counts: 112 indicators (Trend 40, Momentum 31, Volatility 23, Volume 18), 90 drawing tools
+counts: 112 indicators (Trend 40, Momentum 31, Volatility 23, Volume 18), 87 drawing tools
 and 15 chart types with the transform tier loaded, which also registers six series
 transforms the chart applies itself. The `/indicators` chip says 112 built-in studies, and
 the title and version label name 2.6.4. In-chart transforms, the study bar source and the

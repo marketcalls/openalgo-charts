@@ -239,23 +239,29 @@ export function paintGeometry(c: DrawContext, geometry: DrawingGeometry): void {
   ctx.font = fontOf(textOf(c.drawing), size);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
-  const occupied: { x: number; y: number; width: number }[] = [];
+  const occupied: { x: number; y: number; width: number; height: number }[] = [];
   const lineHeight = size / dpr * 1.3;
   for (const label of geometry.labels ?? []) {
     if (!finiteDevicePoint(label.at, dpr)) continue;
     let { x, y } = label.at;
+    const width = drawingTextWidth(ctx, label.text) / dpr;
+    // A ring rounds the text's box, whose cap height is about seven tenths of
+    // the size, and stands past it on every side: it takes that much room.
+    const radius = label.ring === true ? Math.max(width, size / dpr * 0.7) / 2 + 3 : 0;
+    const pad = Math.max(0, radius - width / 2);
+    const height = Math.max(lineHeight, 2 * radius);
     // Keep nearby levels readable at ordinary zoom and on narrow panes. The
     // bounded search changes text placement only; saved anchors stay exact.
     if (x >= 0 && x <= rc.plotWidth && y >= 0 && y <= rc.plotHeight) {
-      const width = drawingTextWidth(ctx, label.text) / dpr;
-      x = Math.max(0, Math.min(x, rc.plotWidth - width));
+      x = Math.max(pad, Math.min(x, rc.plotWidth - width - pad));
       let placed = false;
       for (const lane of [0, -1, 1, -2, 2, -3, 3, -4]) {
         const candidateY = y + lane * lineHeight;
         if (candidateY < size / dpr || candidateY > rc.plotHeight) continue;
-        if (occupied.some(box => x < box.x + box.width + 3 && x + width + 3 > box.x && Math.abs(candidateY - box.y) < lineHeight - 0.01)) continue;
+        if (occupied.some(box => x - pad < box.x + box.width + 3 && x + width + pad + 3 > box.x
+          && Math.abs(candidateY - box.y) < Math.max(height, box.height) - 0.01)) continue;
         y = candidateY;
-        occupied.push({ x, y, width });
+        occupied.push({ x: x - pad, y, width: width + 2 * pad, height });
         placed = true;
         break;
       }
@@ -264,16 +270,13 @@ export function paintGeometry(c: DrawContext, geometry: DrawingGeometry): void {
     ctx.fillStyle = text?.color ?? label.color ?? style.color;
     ctx.fillText(label.text, x * dpr, y * dpr);
     if (label.ring === true) {
-      // Round the text's box: the baseline is the bottom, and the cap height
-      // is about seven tenths of the size. Solid whatever the line's dash.
-      const width = drawingTextWidth(ctx, label.text);
-      const radius = Math.max(width, size * 0.7) / 2 + 3 * dpr;
+      // Solid whatever the line's dash.
       ctx.save();
       ctx.setLineDash([]);
       ctx.lineWidth = dpr;
       ctx.strokeStyle = ctx.fillStyle;
       ctx.beginPath();
-      ctx.arc(x * dpr + width / 2, y * dpr - size * 0.4, radius, 0, 2 * Math.PI);
+      ctx.arc((x + width / 2) * dpr, y * dpr - size * 0.4, radius * dpr, 0, 2 * Math.PI);
       ctx.stroke();
       ctx.restore();
     }

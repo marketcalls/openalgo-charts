@@ -6,7 +6,7 @@ import {
   clippedLine, clipPolygon, finitePoint, geometryTool, midpoint,
   type DrawingGeometry, type GeometryLabel, type GeometryPath,
 } from './advanced-shared';
-import { ELLIOTT_FIELDS, originUnmoved, elliottLabels, type ElliottLabel } from './elliott';
+import { ELLIOTT_FIELDS, upgradedOrigin, elliottLabels, type ElliottLabel } from './elliott';
 
 interface RatioBand { min: number; max: number }
 interface HarmonicBands { ab: RatioBand; bc: RatioBand; cd: RatioBand; ad: RatioBand }
@@ -182,8 +182,8 @@ function patternGeometry(spec: PatternSpec, c: HitContext): DrawingGeometry {
       }
     }
   }
-  // An origin still on wave 1's end (an older count, upgraded) has no leg and no label of its own.
-  const from = spec.wave === true && originUnmoved(dataPoints) ? 1 : 0;
+  // An origin a 2.7.0 count was given, still on wave 1's end, has no leg and no label of its own.
+  const from = upgradedOrigin(spec.id, dataPoints) ? 1 : 0;
   for (let index = from + 1; index < points.length; index++) paths.push(leg(points[index - 1]!, points[index]!, c)); // in range
   if (spec.neckline !== undefined && points.length >= spec.labels.length) {
     const [leftIndex, rightIndex] = spec.neckline;

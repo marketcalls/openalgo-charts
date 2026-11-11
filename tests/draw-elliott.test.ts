@@ -12,6 +12,7 @@ import { DrawingController, getDrawingTool } from '../src/draw/index';
 import { migrateDrawings } from '../src/draw/migrate';
 import { ELLIOTT_FIELDS, elliottLabels, withWaveOrigin } from '../src/draw/elliott';
 import { PATTERN_DRAWING_TOOLS } from '../src/draw/pattern-tools';
+import { paintGeometry } from '../src/draw/advanced-shared';
 import { RecordingContext } from './helpers/fake-ctx';
 import type { Bar } from '../src/model/bar';
 import type { Drawing, DrawingPoint } from '../src/draw/types';
@@ -30,7 +31,7 @@ const texts = (degree: string, tokens: readonly string[], labelStyle?: string): 
 describe('wave labels by degree', () => {
   it.each([
     // Three numeral families, each circled, in parentheses and plain, largest degree first.
-    ['grand-supercycle', ['0', '[I]', '[II]', '[III]', '[IV]', '[V]'], ['0', '[A]', '[B]', '[C]']],
+    ['grand-supercycle', ['[0]', '[I]', '[II]', '[III]', '[IV]', '[V]'], ['[0]', '[A]', '[B]', '[C]']],
     ['supercycle', ['(0)', '(I)', '(II)', '(III)', '(IV)', '(V)'], ['(0)', '(A)', '(B)', '(C)']],
     ['cycle', ['0', 'I', 'II', 'III', 'IV', 'V'], ['0', 'A', 'B', 'C']],
     ['primary', ['[0]', '[1]', '[2]', '[3]', '[4]', '[5]'], ['[0]', '[A]', '[B]', '[C]']],
@@ -40,10 +41,9 @@ describe('wave labels by degree', () => {
     ['minuette', ['(0)', '(i)', '(ii)', '(iii)', '(iv)', '(v)'], ['(0)', '(a)', '(b)', '(c)']],
     ['subminuette', ['0', 'i', 'ii', 'iii', 'iv', 'v'], ['0', 'a', 'b', 'c']],
   ])('%s', (degree, impulse, correction) => {
-    // The ring stands for a circled label: grand supercycle's 0 is circled too.
-    const fix = (labels: string[]): string[] => degree === 'grand-supercycle' ? labels.map(l => l === '0' ? '[0]' : l) : labels;
-    expect(texts(degree, IMPULSE)).toEqual(fix(impulse));
-    expect(texts(degree, CORRECTION)).toEqual(fix(correction));
+    // [x] is a label drawn inside a ring.
+    expect(texts(degree, IMPULSE)).toEqual(impulse);
+    expect(texts(degree, CORRECTION)).toEqual(correction);
   });
 
   it('writes the combinations and the triangle in the degree\'s letter case', () => {
@@ -110,6 +110,27 @@ describe('a wave count on the chart', () => {
   it('labels the degree it is given', () => {
     expect(labelsOf(paint(wave('elliott-correction', IMPULSE_POINTS.slice(0, 4), { degree: 'minuette' }))))
       .toEqual(['(0)', '(a)', '(b)', '(c)']);
+  });
+
+  it('keeps two circled labels that land close together from overlapping', () => {
+    // Text widths alone kept these apart, but their rings, which stand past
+    // the text on every side, crossed.
+    const rec = new RecordingContext();
+    const context = rc();
+    paintGeometry({
+      ctx: rec as unknown as CanvasRenderingContext2D, rc: context, pts: [],
+      drawing: wave('elliott-impulse', []), style: { color: '#3366cc', lineWidth: 2 }, selected: false, formatPrice: String,
+    }, { paths: [], labels: [{ at: { x: 100, y: 100 }, text: '1', ring: true }, { at: { x: 112, y: 100 }, text: '2', ring: true }] });
+    const rings = rec.ops.filter(op => op.type === 'arc').map(op => op.args as number[]);
+    expect(rings).toHaveLength(2);
+    const [a, b] = rings as [number[], number[]];
+    expect(Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!)).toBeGreaterThanOrEqual(a[2]! + b[2]!);
+  });
+
+  it('shows the origin of a count placed with one, even on its first wave\'s end', () => {
+    // Only a tool that had no origin through 2.7.0 can carry one that stands for none.
+    const points = [point(100, 100), point(100, 100), point(300, 200), point(400, 50), point(500, 150), point(600, 100)];
+    expect(labelsOf(paint(wave('elliott-triangle', points)))).toEqual(['0', 'A', 'B', 'C', 'D', 'E']);
   });
 
   it('hides the origin of an upgraded count until it is moved off wave one', () => {

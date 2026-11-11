@@ -85,8 +85,13 @@ export function withWaveOrigin(tool: string, points: DrawingPoint[]): DrawingPoi
   return before !== undefined && points.length === before && first !== undefined ? [{ ...first }, ...points] : points;
 }
 
-/** Whether a count's origin still sits on its first wave's end: a drawing upgraded by {@link withWaveOrigin}, not yet moved. */
-export function originUnmoved(points: readonly DrawingPoint[]): boolean {
+/**
+ * Whether a count's origin is the one {@link withWaveOrigin} gave it, not yet
+ * moved: a tool that had no origin through 2.7.0, with the origin still on its
+ * first wave's end. A count placed with an origin always shows it.
+ */
+export function upgradedOrigin(tool: string, points: readonly DrawingPoint[]): boolean {
   const origin = points[0], first = points[1];
-  return origin !== undefined && first !== undefined && origin.time === first.time && origin.price === first.price;
+  return BEFORE_ORIGIN.has(tool) && origin !== undefined && first !== undefined
+    && origin.time === first.time && origin.price === first.price;
 }
