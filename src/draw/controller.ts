@@ -38,6 +38,7 @@ import { magnetModeOf, magnetPoint, type SnapBar } from './snap';
 import { DrawingGestures, type GestureKeys } from './gestures';
 import { contextInterval, drawingsDocumentVersion, intervalFilter, passingContext, readIntervalRange } from './intervals';
 import { changedAnchor } from './patches';
+import { drawingFromInput } from './drawing-input';
 import { DrawingHistory, type DrawingHistoryEntry, type HistoryHost } from './drawing-history';
 import { DrawingDrag, type DragHost } from './drawing-drag';
 import { PaneLayerSet, slotOf, type LayerSetHost } from './pane-layers';
@@ -132,9 +133,6 @@ type ControllerOptions = Required<Omit<DrawingControllerOptions, 'defaultStyle' 
 const gesturesOf = (base: Required<DrawingGestureOptions>, patch: DrawingGestureOptions = {}): Required<DrawingGestureOptions> =>
   ({ ...base, ...Object.fromEntries(Object.entries(patch).filter(([key, on]) => key in base && typeof on === 'boolean')) });
 const ALL_GESTURES: Required<DrawingGestureOptions> = { snapModifier: true, measure: true, boxSelect: true, dragCopy: true };
-
-/** @internal Reserved persistence metadata; a duplicate is a new drawing lineage. */
-export const DRAWING_LINK_METADATA_KEY = 'openalgo-charts/drawing-link';
 
 export class DrawingController {
   private readonly _chart: DrawingChartHost;
@@ -773,37 +771,7 @@ export class DrawingController {
     let id = drawing.id ?? this._mintId();
     // A restored layout can hold an id the counter has not reached yet.
     while (drawing.id === undefined && this.get(id) !== undefined) id = this._mintId();
-    const { id: _dropped, ...rest } = drawing;
-    void _dropped;
-    const created: Drawing = {
-      ...rest,
-      id,
-      style: { ...this._opts.defaultStyle, ...tool.defaultStyle, ...drawing.style },
-      zIndex: Number.isFinite(drawing.zIndex) ? (drawing.zIndex as number) : 0,
-      createdAt: drawing.createdAt ?? Date.now(),
-    };
-    // A copy: the object the caller keeps is not a switch on this drawing.
-    if (drawing.policy) created.policy = { ...drawing.policy };
-    // One space, one set of anchors: a viewport drawing keeps no data anchors
-    // that could be mistaken for its position, and data is never written out.
-    if (drawing.space === 'viewport') {
-      created.points = [];
-      created.viewportPoints = readViewportPoints(drawing.viewportPoints) ?? [];
-    } else {
-      delete created.space;
-      delete created.viewportPoints;
-    }
-    // A copy, and only a range that names a bound: an empty one limits nothing.
-    const intervals = readIntervalRange(drawing.intervals);
-    if (intervals === null) delete created.intervals;
-    else created.intervals = intervals;
-    if (created.props?.[DRAWING_LINK_METADATA_KEY] !== undefined) {
-      created.props = { ...created.props };
-      delete created.props[DRAWING_LINK_METADATA_KEY];
-    }
-    if (drawing.text !== undefined || tool.defaultText !== undefined) {
-      created.text = { value: '', ...tool.defaultText, ...drawing.text };
-    }
+    const created = drawingFromInput(drawing, id, tool, this._opts.defaultStyle);
     this._drawings.push(created);
     return created;
   }

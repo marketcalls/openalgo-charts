@@ -29,7 +29,15 @@ interface GeometryArc {
   /** Close a filled arc through its center, for a circular sector. */
   sector?: boolean;
 }
-export interface GeometryLabel { at: ScreenPoint; text: string; color?: string | undefined }
+export interface GeometryLabel {
+  at: ScreenPoint; text: string; color?: string | undefined;
+  /**
+   * Drawn inside a ring, as a circled wave label is. Painted with the text,
+   * where it lands after the collision search, because a ring worked out
+   * from `at` would stay behind when the label moves to another lane.
+   */
+  ring?: boolean;
+}
 export interface DrawingGeometry { paths: GeometryPath[]; labels?: GeometryLabel[] }
 /** Builds from media-px anchors, as many as the tool declares (`ToolAnchors`). */
 type GeometryBuilder<N extends number = number> = (c: HitContext & ToolAnchors<N>) => DrawingGeometry;
@@ -255,6 +263,20 @@ export function paintGeometry(c: DrawContext, geometry: DrawingGeometry): void {
     }
     ctx.fillStyle = text?.color ?? label.color ?? style.color;
     ctx.fillText(label.text, x * dpr, y * dpr);
+    if (label.ring === true) {
+      // Round the text's box: the baseline is the bottom, and the cap height
+      // is about seven tenths of the size. Solid whatever the line's dash.
+      const width = drawingTextWidth(ctx, label.text);
+      const radius = Math.max(width, size * 0.7) / 2 + 3 * dpr;
+      ctx.save();
+      ctx.setLineDash([]);
+      ctx.lineWidth = dpr;
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.beginPath();
+      ctx.arc(x * dpr + width / 2, y * dpr - size * 0.4, radius, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
   ctx.restore();
 }

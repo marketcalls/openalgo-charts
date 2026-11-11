@@ -39,6 +39,12 @@
  * later version is read the same lenient way: what this build knows is kept
  * and the rest dropped, since refusing it would empty the chart on load.
  *
+ * 2.7.1 gave the Elliott impulse and correction an origin anchor. One saved
+ * before has an anchor fewer, and gains an origin on its first anchor, where
+ * it draws nothing (see elliott.ts); the document version stays as it was,
+ * since the shape of a drawing did not change, only how many anchors a tool
+ * takes.
+ *
  * Idempotent on a version 2 or 3 document, so a host can call it on every load.
  */
 import type {
@@ -47,6 +53,7 @@ import type {
 import { cycleColor, levelColor } from './levels';
 import { readViewportPoints } from './viewport';
 import { drawingsDocumentVersion, readIntervalRange } from './intervals';
+import { withWaveOrigin } from './elliott';
 import {
   isNum, isRecord, isString, isUnsafeKey, legacyTextFields, oneOf, readPoints, readText,
   LINE_STYLES, STYLE_FLAGS, STYLE_NUMBERS, STYLE_STRINGS,
@@ -134,7 +141,8 @@ function migrateEntry(raw: unknown): Drawing | null {
     // A numeric id is a host's own scheme, not corruption: keep its identity.
     id: typeof raw.id === 'string' ? raw.id : isNum(raw.id) ? String(raw.id) : '',
     tool,
-    points,
+    // An impulse or a correction saved before the wave tools had an origin gains one.
+    points: withWaveOrigin(tool, points),
     ...(viewport === undefined ? {} : { space: 'viewport' as const, viewportPoints: viewport }),
     style: migrateStyle(style, tool),
     paneIndex,

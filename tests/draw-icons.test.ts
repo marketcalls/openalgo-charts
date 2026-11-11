@@ -113,7 +113,7 @@ const TIERS: Tier[] = [
   {
     name: 'tool', entries: Object.entries(DRAWING_TOOL_ICONS), accents: Object.entries(DRAWING_TOOL_ACCENTS),
     registry: DRAWING_TOOL_ICONS, accentOf: drawingToolAccent, attrs: ICON_ATTRS,
-    viewBox: ICON_VIEWBOX, stroke: ICON_STROKE, grid: 24, lo: 2, hi: 22, minSpan: 10, maxCommands: 27, decimals: 2,
+    viewBox: ICON_VIEWBOX, stroke: ICON_STROKE, grid: 24, lo: 2, hi: 22, minSpan: 10, maxCommands: 29, decimals: 2,
   },
   {
     name: 'chrome', entries: Object.entries(CHROME_ICONS), accents: Object.entries(CHROME_ICON_ACCENTS),
@@ -198,8 +198,9 @@ describe.each(TIERS)('the $name set is balanced', (tier) => {
   it('keeps every glyph within a sane complexity band', () => {
     // A glyph far busier than the rest dominates a rail whatever its weight.
     // On the tool grid a ring is four commands and a rounded box ten, so the
-    // count runs higher than the ink does: the densest are the five-point
-    // patterns, a ring at each pivot and the legs and bases between them.
+    // count runs higher than the ink does: the densest are the wave counts
+    // of six pivots, an origin and five waves, a ring at each and the legs
+    // between them, about the ink of a harmonic with its two bases.
     for (const [id, d] of tier.entries) {
       const commands = (d.match(/[A-Za-z]/g) ?? []).length;
       expect(commands, `${id} has ${commands} commands`).toBeLessThanOrEqual(tier.maxCommands);
@@ -436,7 +437,10 @@ describe('look-alike glyphs are drawn apart', () => {
     const PIVOT = 1.5;
     const pivots: Record<string, number> = {
       'xabcd-pattern': 5, gartley: 5, bat: 5, butterfly: 5, crab: 5, shark: 5, cypher: 5,
-      'abcd-pattern': 4, 'elliott-impulse': 5, 'elliott-correction': 3, 'head-shoulders': 3,
+      'abcd-pattern': 4, 'head-shoulders': 3,
+      // An Elliott count rings its origin as well as its waves.
+      'elliott-impulse': 6, 'elliott-correction': 4, 'elliott-triangle': 6,
+      'elliott-double-combo': 4, 'elliott-triple-combo': 6,
       // A position's three levels sit as close as a pattern's pivots, so they take the same ring.
       'long-position': 3, 'short-position': 3,
     };

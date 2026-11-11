@@ -21,9 +21,9 @@
     "brotli": true
   },
   {
-    "name": "Draw tier (87 drawing tools + controller)",
+    "name": "Draw tier (90 drawing tools + controller)",
     "path": "dist/openalgo-charts.draw.mjs",
-    "limit": "59.60 kB",
+    "limit": "60327 B",
     "brotli": true
   },
   {
@@ -47,7 +47,7 @@
   {
     "name": "Widget tier (shell, top bar, drawing rail, status line, dialogs, keymap, styles)",
     "path": "dist/openalgo-charts.widget.mjs",
-    "limit": "129555 B",
+    "limit": "129577 B",
     "brotli": true
   },
   {
@@ -64,7 +64,7 @@
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "374.10 kB",
+    "limit": "374853 B",
     "brotli": true
   },
   {
@@ -86,7 +86,7 @@
       "dist/openalgo-charts.widget.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "436.91 kB",
+    "limit": "437658 B",
     "brotli": true
   },
   {
@@ -102,7 +102,7 @@
       "dist/openalgo-charts.widget.standalone.js",
       "dist/openalgo-charts.workspace.standalone.js"
     ],
-    "limit": "450.64 kB",
+    "limit": "451486 B",
     "brotli": true
   },
   {
@@ -114,7 +114,7 @@
   {
     "name": "Widget classic script (widget first-use parts inlined)",
     "path": "dist/openalgo-charts.widget.standalone.js",
-    "limit": "142.92 kB",
+    "limit": "142967 B",
     "brotli": true
   }
 ]

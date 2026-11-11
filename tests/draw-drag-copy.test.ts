@@ -7,7 +7,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Chart } from '../src/core/chart';
 import { fakeDocument } from './helpers/fake-dom';
 import { DrawingController, createDrawingLinkGroup } from '../src/draw/index';
-import { DRAWING_LINK_METADATA_KEY } from '../src/draw/controller';
+import { DRAWING_LINK_METADATA_KEY } from '../src/draw/drawing-input';
 import type { Bar } from '../src/model/bar';
 import type { DrawingInput, DrawingPoint } from '../src/draw/types';
 

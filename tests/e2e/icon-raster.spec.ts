@@ -88,6 +88,7 @@ const SIBLINGS: Record<Tier, [string, string][]> = {
     ['horizontal-line', 'horizontal-ray'], ['callout', 'balloon'], ['callout', 'comment'], ['balloon', 'comment'],
     ...allPairs(['pitchfork', 'schiff-pitchfork', 'modified-schiff-pitchfork', 'inside-pitchfork']),
     ...allPairs(['xabcd-pattern', 'gartley', 'bat', 'butterfly', 'crab', 'shark', 'cypher']),
+    ...allPairs(['elliott-impulse', 'elliott-correction', 'elliott-triangle', 'elliott-double-combo', 'elliott-triple-combo']),
     ['supersonic', 'golden-supersonic'], ['sonic', 'supersonic'], ['golden-sonic', 'golden-supersonic'],
     ['fib-speed-resistance-fan', 'fib-speed-fan'], ['fib-speed-resistance-fan', 'gann-box'],
     ['fib-speed-resistance-fan', 'gann-square'], ['fib-wedge', 'fib-speed-resistance-arcs'],
