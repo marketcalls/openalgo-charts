@@ -60,7 +60,7 @@ Import only what you use. Each tier is a separate entry point, so a feature you 
 |---|---|---|
 | `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking with appearance adapters, grouped timeline events, shared loading controller, request pool, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators, vector SVG export, the render backend port | 140.10 kB |
 | `openalgo-charts/indicators` | 112 built-in indicators + the Tier-2 external-data contract | 44.85 kB |
-| `openalgo-charts/draw` | 87 drawing tools, including Anchored VWAP and fixed-range Volume Profile, opt-in drawing links and a headless `DrawingController` with multi-select, z-order, a per-tool settings schema, the 1.9.x migration, the clipboard and the icon builders | 59.60 kB |
+| `openalgo-charts/draw` | 90 drawing tools, including Anchored VWAP and fixed-range Volume Profile, opt-in drawing links and a headless `DrawingController` with multi-select, z-order, a per-tool settings schema, the 1.9.x migration, the clipboard and the icon builders | 59.60 kB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point and Figure, Kagi | 6.38 kB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 20.83 kB |
 | `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 156.98 kB with base |
@@ -126,7 +126,7 @@ Detailed reference for each topic is in `references/`. Read the one that matches
 | [alerts](references/alerts.md) | Headless trader alerts, confirmed versus intrabar timing, lifecycle, expiry and host delivery |
 | [indicators](references/indicators.md) | The 112 built-ins with exact ids, placements and input defaults, the settings model, levels/ranges/fills, signal markers, `registerIndicator`, the Tier-2 external-data contract |
 | [transforms](references/transforms.md) | Heikin Ashi, Renko, Range, Line Break, Point and Figure, Kagi |
-| [drawing-tools](references/drawing-tools.md) | The 87 tools, `DrawingController`, anchors, magnet, undo, copy/cut/paste and the clipboard payload, persistence, shortcuts, custom tools |
+| [drawing-tools](references/drawing-tools.md) | The 90 tools, `DrawingController`, anchors, magnet, undo, copy/cut/paste and the clipboard payload, persistence, shortcuts, custom tools |
 | [primitives-and-plugins](references/primitives-and-plugins.md) | `IPrimitive`, z-order, hit-testing, the dpr contract, built-in primitives including the `PriceLevels` reference-level family, `registerChartType` |
 | [replay-and-compare](references/replay-and-compare.md) | `ReplayController` and its transport events, `addComparison`, the overlay-scale mechanism, timestamp alignment |
 | [chart-linking](references/chart-linking.md) | `createLinkGroup`, the sync-by-instant rule, `followerIndex` / `followerRange`, the linked crosshair, host-driven symbol, interval and chart type sync, appearance adapters, the drawings channel over `DrawingLinkGroup`, and saved link groups (`WorkspaceSync`) |

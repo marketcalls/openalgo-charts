@@ -128,7 +128,7 @@
 <text x="370" y="1095" class="tier-title" >/draw</text>
 <text x="608" y="1095" class="tier-size" text-anchor="end">59.60 kB</text>
 <path d="M370 1111h238" stroke="#d4d1e8"/>
-<text x="370" y="1144" class="tier-body" >87 drawing tools</text>
+<text x="370" y="1144" class="tier-body" >90 drawing tools</text>
 <text x="370" y="1172" class="tier-body" >AVWAP + range volume profile</text>
 <text x="370" y="1200" class="tier-body" >Linked drawings + undo</text>
 </g>
