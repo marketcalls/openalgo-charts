@@ -41,6 +41,35 @@ describe('multi-point drawing placement guides', () => {
     expect(cleared.rec.count('arc')).toBe(0);
   });
 
+  it('paints a wave count as it is placed, its waves labelled from the second click', () => {
+    // The origin and the cursor: the first wave and its label, not a dashed guide.
+    const layer = new DrawingLayer();
+    const count: Drawing = { ...partial, tool: 'elliott-impulse', points: [{ time: 100, price: 300 }, { time: 200, price: 150 }] };
+    layer.setPreview(count);
+    const { ctx, rec } = makeCtx();
+    layer.draw(ctx, rc);
+    expect(rec.ops.filter(op => op.type === 'fillText').map(op => op.text)).toEqual(['(1)']);
+    expect(rec.count('stroke')).toBeGreaterThan(0);
+    expect(rec.ops.some(op => op.type === 'setLineDash' && op.args.length > 0)).toBe(false);
+    // Three clicks in: two waves, each named.
+    layer.setPreview({ ...count, points: [...count.points, { time: 300, price: 250 }] });
+    const next = makeCtx();
+    layer.draw(next.ctx, rc);
+    expect(next.rec.ops.filter(op => op.type === 'fillText').map(op => op.text)).toEqual(['(1)', '(2)']);
+    // The origin alone has no leg yet, so it shows as the guide's ring.
+    layer.setPreview({ ...count, points: count.points.slice(0, 1) });
+    const first = makeCtx();
+    layer.draw(first.ctx, rc);
+    expect(first.rec.count('arc')).toBe(1);
+    expect(first.rec.ops.some(op => op.type === 'fillText')).toBe(false);
+    // A saved count with too few anchors is still not painted.
+    layer.setPreview(null);
+    layer.setDrawings([count]);
+    const saved = makeCtx();
+    layer.draw(saved.ctx, rc);
+    expect(saved.rec.count('stroke')).toBe(0);
+  });
+
   it('keeps incomplete saved drawings invisible and never mutates draft anchors', () => {
     const layer = new DrawingLayer();
     layer.setDrawings([partial]);

@@ -6,16 +6,17 @@
  * with one of three numeral families (upper Roman, Arabic, lower Roman) in one
  * of three forms (circled, in parentheses, plain), largest degree first, so a
  * count of one degree reads apart from the count it subdivides. The default
- * degree, Minor, is plain Arabic numerals and capital letters: the labels the
- * two original wave tools always drew, so a drawing that has never been given
- * a degree looks as it did.
+ * degree is Intermediate, Arabic numerals and capital letters in parentheses:
+ * a count reads (1) to (5) or (A) to (C) until it is given another.
  *
  * Every wave starts where the one before it ended, so a count starts at an
- * origin, labelled 0. Through 2.7.0 the impulse and the correction had none:
- * their first anchor was the end of wave 1 or of wave A, and that wave was
- * never drawn. {@link withWaveOrigin} gives an older drawing an origin on its
- * first anchor, where it adds no leg and no label, so it looks as it did and
- * the origin can then be dragged out to draw the first wave.
+ * origin: the first point placed, the start of wave 1 or of wave A. It is a
+ * point, not a wave, so it carries no label, and the count is numbered from
+ * the second point on. Through 2.7.0 the impulse and the correction had no
+ * origin: their first anchor was the end of wave 1 or of wave A, and that
+ * wave was never drawn. {@link withWaveOrigin} gives an older drawing an
+ * origin on its first anchor, where it adds no leg, so the origin can then be
+ * dragged out to draw the first wave.
  */
 import type { DrawingPoint, SettingsField } from './types';
 
@@ -32,7 +33,7 @@ const DEGREES: ReadonlyArray<{ value: string; label: string }> = [
 ];
 const FAMILIES: readonly Family[] = ['upper', 'arabic', 'lower'];
 const FORMS: readonly Form[] = ['circled', 'parentheses', 'plain'];
-const DEFAULT_DEGREE = 'minor';
+const DEFAULT_DEGREE = 'intermediate';
 /** `degree` follows the degree's own form; the others override it. */
 const LABEL_STYLES: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'degree', label: 'By degree' }, { value: 'plain', label: 'Plain' },
@@ -51,10 +52,11 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 export interface ElliottLabel { text: string; ring: boolean }
 
 /**
- * The labels of a count, from its tokens (`'0'` for the origin, digits for an
- * impulse's waves, letters for a corrective one's) and the drawing's degree
- * and label style. An unknown degree or style reads as the default, so a
- * value a later build wrote never leaves a count unlabelled.
+ * The labels of a count, from its tokens (`''` for the origin, which is not
+ * labelled, digits for an impulse's waves, letters for a corrective one's)
+ * and the drawing's degree and label style. An unknown degree or style reads
+ * as the default, so a value a later build wrote never leaves a count
+ * unlabelled.
  */
 export function elliottLabels(tokens: readonly string[], props: Readonly<Record<string, unknown>> | undefined): ElliottLabel[] {
   const found = DEGREES.findIndex(d => d.value === props?.degree);
@@ -63,6 +65,7 @@ export function elliottLabels(tokens: readonly string[], props: Readonly<Record<
   const style = props?.labelStyle;
   const form: Form = style === 'plain' || style === 'parentheses' || style === 'circled' ? style : FORMS[degree % 3]!;
   return tokens.map(token => {
+    if (token === '') return { text: '', ring: false };
     const digit = /^[1-5]$/.test(token) ? Number(token) : 0;
     const word = digit === 0 ? (family === 'lower' ? token.toLowerCase() : token)
       : family === 'arabic' ? token : family === 'upper' ? ROMAN[digit]! : ROMAN[digit]!.toLowerCase();
@@ -88,7 +91,7 @@ export function withWaveOrigin(tool: string, points: DrawingPoint[]): DrawingPoi
 /**
  * Whether a count's origin is the one {@link withWaveOrigin} gave it, not yet
  * moved: a tool that had no origin through 2.7.0, with the origin still on its
- * first wave's end. A count placed with an origin always shows it.
+ * first wave's end, where the leg to it has no length to draw.
  */
 export function upgradedOrigin(tool: string, points: readonly DrawingPoint[]): boolean {
   const origin = points[0], first = points[1];

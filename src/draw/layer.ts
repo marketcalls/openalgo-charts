@@ -330,9 +330,13 @@ export class DrawingLayer implements IPrimitive {
       if (media.length === 0 || !media.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
       if (anchorCount(d) < Math.max(1, tool.points)) {
         // A multi-point tool cannot paint its final geometry yet. Keep the
-        // chosen anchors visible so each click has immediate feedback.
-        if (d === this._preview) this._drawPlacementGuide(ctx, rc, media, d);
-        continue;
+        // chosen anchors visible so each click has immediate feedback; a
+        // progressive one paints what it has once it has a leg to paint.
+        if (d !== this._preview) continue;
+        if (tool.progressive !== true || media.length < 2) {
+          this._drawPlacementGuide(ctx, rc, media, d);
+          continue;
+        }
       }
 
       const style = {

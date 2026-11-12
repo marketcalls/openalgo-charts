@@ -456,6 +456,14 @@ export interface DrawingTool {
    */
   freehand?: boolean;
   /**
+   * Paint the tool itself while it is placed, from its second anchor on, in
+   * place of the dashed guide every other multi-anchor tool shows. Declare it
+   * only when `draw` paints whatever anchors it is given, from two up to
+   * `points`: a wave count does, so each click shows the wave it ends and that
+   * wave's label, and the first click reads as the origin it is.
+   */
+  progressive?: boolean;
+  /**
    * Hold Shift to snap the free end of a two-anchor tool to 45 degree steps
    * on screen, while placing and while dragging a handle. The line family
    * sets it; a tool whose second anchor is not the far end of a line (a

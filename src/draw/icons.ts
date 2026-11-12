@@ -187,6 +187,40 @@ function zigzag(points: readonly (readonly [number, number])[]): string {
 }
 
 /**
+ * The characters an Elliott glyph is captioned with, as polylines of x, y
+ * pairs from the character's top left, five units tall. Each polyline is one
+ * command however often it turns, which keeps a captioned count in the set's
+ * complexity band. `width` is where the character's middle falls, doubled:
+ * the stem of a 1 is its middle, not the middle of its flag and stem.
+ */
+const CAPTION: Readonly<Record<string, { width: number; strokes: readonly (readonly number[])[] }>> = {
+  1: { width: 2, strokes: [[0, 1, 1, 0, 1, 5]] },
+  5: { width: 3, strokes: [[3, 0, 0, 0, 0, 2.5, 2.5, 2.5, 3, 3, 3, 4.5, 2.5, 5, 0, 5]] },
+  A: { width: 3, strokes: [[0, 5, 1.5, 0, 3, 5], [0.5, 3.5, 2.5, 3.5]] },
+  C: { width: 3, strokes: [[3, 0, 1, 0, 0, 1, 0, 4, 1, 5, 3, 5]] },
+  E: { width: 3, strokes: [[3, 0, 0, 0, 0, 5, 3, 5], [0, 2.5, 2.5, 2.5]] },
+  W: { width: 4, strokes: [[0, 0, 1, 5, 2, 1.5, 3, 5, 4, 0]] },
+  Y: { width: 3, strokes: [[0, 0, 1.5, 2.5, 3, 0], [1.5, 2.5, 1.5, 5]] },
+  Z: { width: 3, strokes: [[0, 0, 3, 0, 0, 5, 3, 5]] },
+};
+
+/** `char` across the top of the live area, centred on column `x`. */
+function caption(x: number, char: string): string {
+  const glyph = CAPTION[char]!; // only the counts below caption, with characters the table has
+  const left = x - glyph.width / 2;
+  return glyph.strokes.map(s => 'M' + s.map((v, i) => num(i % 2 === 0 ? left + v : 2 + v)).join(' ')).join('');
+}
+
+/**
+ * An Elliott count: its pivots from the origin, ringed and joined, with its
+ * first wave and its last named above the figure. The origin is a point, not
+ * a wave, so it is not named, as the chart does not label it either.
+ */
+function count(points: readonly (readonly [number, number])[], first: string, last: string): string {
+  return zigzag(points) + caption(points[1]![0], first) + caption(points[points.length - 1]![0], last); // two pivots or more
+}
+
+/**
  * A harmonic pattern through X, A, B, C and D, given as heights on five
  * evenly spaced columns, with a ring at each pivot, then the bases XB and BD
  * of the two triangles its tool fills. Price runs up the grid, so a smaller
@@ -423,20 +457,22 @@ export const DRAWING_TOOL_ICONS: Readonly<Record<string, string>> = {
   // trader reads a pattern by. The general five-point pattern also joins A
   // to C, as its tool does to measure that leg; the four-point one joins A
   // to C and B to D. An Elliott count is its pivots from the origin it
-  // starts at, and the five counts are told apart by how they move: the
-  // impulse climbs in five waves, the correction falls corner to corner in
-  // three, the triangle narrows in five, and the two combinations run
-  // sideways between level highs and lows, in three waves and in five. Head and shoulders
+  // starts at, under a caption naming its first wave and its last, and the
+  // five counts are told apart by how they move as well: the impulse climbs
+  // in five waves, the correction falls in three, the triangle narrows in
+  // five, and the two combinations run sideways between level highs and
+  // lows, in three waves and in five. The caption takes the top of the box,
+  // so a count's pivots share the rest of it. Head and shoulders
   // rings the three pivots its tool names, over the neckline: all seven
   // would be a row of rings with no figure left between them.
   'xabcd-pattern': harmonic(18.5, 3.5, 16.5, 6.5, 20.5) + link(7.75, 3.5, 16.25, 6.5, PIVOT, PIVOT),
   'abcd-pattern': zigzag([[3.5, 4], [9, 15], [15, 8], [20.5, 20]])
     + link(3.5, 4, 15, 8, PIVOT, PIVOT) + link(9, 15, 20.5, 20, PIVOT, PIVOT),
-  'elliott-impulse': zigzag([[3.5, 20.5], [7, 12.5], [10.5, 17.5], [13.5, 5], [17, 10.5], [20.5, 3.5]]),
-  'elliott-correction': zigzag([[3.5, 3.5], [9, 15], [15, 9], [20.5, 20.5]]),
-  'elliott-triangle': zigzag([[3.5, 3.5], [7, 20.5], [10.5, 7], [13.5, 17.5], [17, 10], [20.5, 15]]),
-  'elliott-double-combo': zigzag([[3.5, 5.5], [9, 18], [15, 5.5], [20.5, 18]]),
-  'elliott-triple-combo': zigzag([[3.5, 5.5], [7, 18], [10.5, 5.5], [13.5, 18], [17, 5.5], [20.5, 18]]),
+  'elliott-impulse': count([[3.5, 20.5], [7, 16], [10.5, 19], [13.5, 12], [17, 15.5], [20.5, 11.5]], '1', '5'),
+  'elliott-correction': count([[3.5, 11.5], [9, 18], [15, 14], [20.5, 20.5]], 'A', 'C'),
+  'elliott-triangle': count([[3.5, 11.5], [7, 20.5], [10.5, 13], [13.5, 19], [17, 14.5], [20.5, 17.5]], 'A', 'E'),
+  'elliott-double-combo': count([[3.5, 12], [9, 20], [15, 12], [20.5, 20]], 'W', 'Y'),
+  'elliott-triple-combo': count([[3.5, 12], [7, 20], [10.5, 12], [13.5, 20], [17, 12], [20.5, 20]], 'W', 'Z'),
   'head-shoulders': link(2.5, 20, 6, 11.5, 0, PIVOT) + link(6, 11.5, 9, 16.5, PIVOT) + link(9, 16.5, 12, 4, 0, PIVOT)
     + link(12, 4, 15, 16.5, PIVOT) + link(15, 16.5, 18, 11.5, 0, PIVOT) + link(18, 11.5, 21.5, 20, PIVOT) + 'M2.5 16.5h19'
     + ring(6, 11.5, PIVOT) + ring(12, 4, PIVOT) + ring(18, 11.5, PIVOT),

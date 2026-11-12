@@ -113,7 +113,7 @@ const TIERS: Tier[] = [
   {
     name: 'tool', entries: Object.entries(DRAWING_TOOL_ICONS), accents: Object.entries(DRAWING_TOOL_ACCENTS),
     registry: DRAWING_TOOL_ICONS, accentOf: drawingToolAccent, attrs: ICON_ATTRS,
-    viewBox: ICON_VIEWBOX, stroke: ICON_STROKE, grid: 24, lo: 2, hi: 22, minSpan: 10, maxCommands: 29, decimals: 2,
+    viewBox: ICON_VIEWBOX, stroke: ICON_STROKE, grid: 24, lo: 2, hi: 22, minSpan: 10, maxCommands: 33, decimals: 2,
   },
   {
     name: 'chrome', entries: Object.entries(CHROME_ICONS), accents: Object.entries(CHROME_ICON_ACCENTS),
@@ -200,7 +200,8 @@ describe.each(TIERS)('the $name set is balanced', (tier) => {
     // On the tool grid a ring is four commands and a rounded box ten, so the
     // count runs higher than the ink does: the densest are the wave counts
     // of six pivots, an origin and five waves, a ring at each and the legs
-    // between them, about the ink of a harmonic with its two bases.
+    // between them, with their first and last wave named above the figure.
+    // The triangle's A and E take two strokes each.
     for (const [id, d] of tier.entries) {
       const commands = (d.match(/[A-Za-z]/g) ?? []).length;
       expect(commands, `${id} has ${commands} commands`).toBeLessThanOrEqual(tier.maxCommands);
@@ -456,6 +457,47 @@ describe('look-alike glyphs are drawn apart', () => {
         expect(meeting(id, c, PIVOT), `${id}: no leg meets the ring at ${c.join(',')}`).toBeGreaterThan(0);
       }
     }
+  });
+
+  it('names the first and last wave of each Elliott count above its figure, and not its origin', () => {
+    // The chart labels a count's waves and leaves its origin bare, so the
+    // glyph does too: 1 and 5 over an impulse, A and C over a correction.
+    for (const id of ['elliott-impulse', 'elliott-correction', 'elliott-triangle', 'elliott-double-combo', 'elliott-triple-combo']) {
+      const rings = centres(id).sort((p, q) => p[0] - q[0]);
+      const top = Math.min(...rings.map((c) => c[1])) - 1.5;
+      const caption = strokes(id).filter((s) => s.extent.every((p) => p[1] <= top - 2));
+      const spans = (x: number) => caption.some((s) => {
+        const xs = s.extent.map((p) => p[0]);
+        return Math.min(...xs) <= x && x <= Math.max(...xs);
+      });
+      expect(caption.length, `${id} has no caption`).toBeGreaterThanOrEqual(2);
+      expect(spans(rings[1]![0]), `${id}: nothing names its first wave`).toBe(true);
+      expect(spans(rings[rings.length - 1]![0]), `${id}: nothing names its last wave`).toBe(true);
+      expect(spans(rings[0]![0]), `${id}: its origin is named`).toBe(false);
+      // Every stroke is the caption or a leg: nothing else crosses the figure.
+      expect(strokes(id).length - caption.length, id).toBe(rings.length - 1);
+    }
+  });
+
+  it('captions each count with the characters of its waves, each drawn alike wherever it appears', () => {
+    // Pinned as drawn and checked at rail size, five units tall across the
+    // top: a 1 and a 5, an A and a C, an A and an E, a W and a Y, a W and a Z.
+    const captions: Record<string, string[]> = {
+      'elliott-impulse': ['M6 3 7 2 7 7', 'M22 2 19 2 19 4.5 21.5 4.5 22 5 22 6.5 21.5 7 19 7'],
+      'elliott-correction': ['M7.5 7 9 2 10.5 7', 'M8 5.5 10 5.5', 'M22 2 20 2 19 3 19 6 20 7 22 7'],
+      'elliott-triangle': ['M5.5 7 7 2 8.5 7', 'M6 5.5 8 5.5', 'M22 2 19 2 19 7 22 7', 'M19 4.5 21.5 4.5'],
+      'elliott-double-combo': ['M7 2 8 7 9 3.5 10 7 11 2', 'M19 2 20.5 4.5 22 2', 'M20.5 4.5 20.5 7'],
+      'elliott-triple-combo': ['M5 2 6 7 7 3.5 8 7 9 2', 'M19 2 22 2 19 7 22 7'],
+    };
+    for (const [id, expected] of Object.entries(captions)) {
+      const subs = tool(id).split(/(?=M)/);
+      for (const s of expected) expect(subs, `${id} lacks ${s}`).toContain(s);
+    }
+    // The A of the correction and the triangle, and the W of the two
+    // combinations, are one character moved along the row.
+    const moved = (s: string, dx: number) => 'M' + s.slice(1).split(' ').map((v, i) => String(i % 2 === 0 ? Number(v) + dx : Number(v))).join(' ');
+    expect(moved(captions['elliott-correction']![0]!, -2)).toBe(captions['elliott-triangle']![0]);
+    expect(moved(captions['elliott-double-combo']![0]!, -2)).toBe(captions['elliott-triple-combo']![0]);
   });
 
   it('starts the ray at one anchor, with no tick across it', () => {

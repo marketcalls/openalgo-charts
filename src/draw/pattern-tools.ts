@@ -124,17 +124,27 @@ function inBand(rule: RatioRule): boolean {
   return rule.value !== null && rule.band !== undefined && rule.value >= rule.band.min && rule.value <= rule.band.max;
 }
 
-/** Each named pivot's label, from `from` on, above a peak and below a trough. */
-function vertexLabels(names: readonly ElliottLabel[], points: readonly ScreenPoint[], from: number): GeometryLabel[] {
+/**
+ * The size a wave label is drawn at, in CSS px. A count is read by its labels,
+ * so they stand a size over the chart's other drawing text.
+ */
+const WAVE_LABEL_PX = 14;
+
+/** Each named pivot's label, above a peak and below a trough. */
+function vertexLabels(names: readonly ElliottLabel[], points: readonly ScreenPoint[], wave: boolean): GeometryLabel[] {
   return points.flatMap((point, index) => {
     const name = names[index];
-    if (index < from || !name?.text || !finitePoint(point)) return [];
+    if (!name?.text || !finitePoint(point)) return [];
     const before = points[index - 1]?.y ?? point.y;
     const after = points[index + 1]?.y ?? point.y;
     const above = point.y <= (before + after) / 2;
-    // A ringed label stands further off, so its ring clears the pivot's handle.
-    const clear = name.ring ? 3 : 0;
-    return [{ at: { x: point.x + 4, y: point.y + (above ? -6 - clear : 14 + clear) }, text: name.text, ...(name.ring ? { ring: true } : {}) }];
+    if (!wave) return [{ at: { x: point.x + 4, y: point.y + (above ? -6 : 14) }, text: name.text }];
+    // A wave label names its pivot: centred on it and clear of its handle,
+    // ring and all, which the painter measures.
+    return [{
+      at: point, side: above ? 'above' : 'below', gap: 8,
+      text: name.text, size: WAVE_LABEL_PX, ...(name.ring ? { ring: true } : {}),
+    }];
   });
 }
 
@@ -182,7 +192,7 @@ function patternGeometry(spec: PatternSpec, c: HitContext): DrawingGeometry {
       }
     }
   }
-  // An origin a 2.7.0 count was given, still on wave 1's end, has no leg and no label of its own.
+  // An origin a 2.7.0 count was given, still on wave 1's end, has no leg to draw.
   const from = upgradedOrigin(spec.id, dataPoints) ? 1 : 0;
   for (let index = from + 1; index < points.length; index++) paths.push(leg(points[index - 1]!, points[index]!, c)); // in range
   if (spec.neckline !== undefined && points.length >= spec.labels.length) {
@@ -196,7 +206,7 @@ function patternGeometry(spec: PatternSpec, c: HitContext): DrawingGeometry {
   }
   if (c.drawing.style.showLabels === false) return { paths };
   const names = spec.wave === true ? elliottLabels(spec.labels, c.drawing.props) : spec.labels.map(text => ({ text, ring: false }));
-  const labels = vertexLabels(names, points, from);
+  const labels = vertexLabels(names, points, spec.wave === true);
   const rules = spec.harmonic !== undefined ? harmonicRules(dataPoints, spec.harmonic)
     : spec.ratios !== undefined ? genericRules(dataPoints, spec.ratios) : [];
   labels.push(...ratioLabels(rules, points));
@@ -215,7 +225,7 @@ function patternGeometry(spec: PatternSpec, c: HitContext): DrawingGeometry {
 
 function descriptor(spec: PatternSpec): DrawingTool {
   return geometryTool({
-    id: spec.id, name: spec.name, points: spec.labels.length,
+    id: spec.id, name: spec.name, points: spec.labels.length, ...(spec.wave === true ? { progressive: true } : {}),
     defaultStyle: spec.fill === true ? { fill: true, fillOpacity: 0.12, showLabels: true } : { showLabels: true },
     settings: spec.fill === true ? FILLED_PATTERN_SETTINGS : spec.wave === true ? WAVE_SETTINGS : LINE_AND_LABEL_SETTINGS,
   }, c => patternGeometry(spec, c));
@@ -227,13 +237,14 @@ const XABCD_LABELS = ['X', 'A', 'B', 'C', 'D'] as const;
 export const PATTERN_DRAWING_TOOLS: readonly DrawingTool[] = [
   descriptor({ id: 'xabcd-pattern', name: 'XABCD Pattern', labels: XABCD_LABELS, fill: true, ratios: 'xabcd' }),
   descriptor({ id: 'abcd-pattern', name: 'ABCD Pattern', labels: ['A', 'B', 'C', 'D'], ratios: 'abcd' }),
-  // Each count starts at its origin, 0. The tokens are named in the default
-  // degree; elliottLabels writes them in the drawing's own.
-  descriptor({ id: 'elliott-impulse', name: 'Elliott Impulse', labels: ['0', '1', '2', '3', '4', '5'], wave: true }),
-  descriptor({ id: 'elliott-correction', name: 'Elliott Correction', labels: ['0', 'A', 'B', 'C'], wave: true }),
-  descriptor({ id: 'elliott-triangle', name: 'Elliott Triangle', labels: ['0', 'A', 'B', 'C', 'D', 'E'], wave: true }),
-  descriptor({ id: 'elliott-double-combo', name: 'Elliott Double Combo', labels: ['0', 'W', 'X', 'Y'], wave: true }),
-  descriptor({ id: 'elliott-triple-combo', name: 'Elliott Triple Combo', labels: ['0', 'W', 'X', 'Y', 'X', 'Z'], wave: true }),
+  // Each count starts at its origin, the first point placed, which is not
+  // labelled: the waves are named from the second point on. The tokens are
+  // named in Arabic numerals; elliottLabels writes them in the drawing's degree.
+  descriptor({ id: 'elliott-impulse', name: 'Elliott Impulse', labels: ['', '1', '2', '3', '4', '5'], wave: true }),
+  descriptor({ id: 'elliott-correction', name: 'Elliott Correction', labels: ['', 'A', 'B', 'C'], wave: true }),
+  descriptor({ id: 'elliott-triangle', name: 'Elliott Triangle', labels: ['', 'A', 'B', 'C', 'D', 'E'], wave: true }),
+  descriptor({ id: 'elliott-double-combo', name: 'Elliott Double Combo', labels: ['', 'W', 'X', 'Y'], wave: true }),
+  descriptor({ id: 'elliott-triple-combo', name: 'Elliott Triple Combo', labels: ['', 'W', 'X', 'Y', 'X', 'Z'], wave: true }),
   descriptor({ id: 'head-shoulders', name: 'Head and Shoulders', labels: ['', 'LS', '', 'H', '', 'RS', ''], neckline: [2, 4] }),
   descriptor({ id: 'gartley', name: 'Gartley', labels: XABCD_LABELS, fill: true, harmonic: NAMED.gartley }),
   descriptor({ id: 'bat', name: 'Bat', labels: XABCD_LABELS, fill: true, harmonic: NAMED.bat }),

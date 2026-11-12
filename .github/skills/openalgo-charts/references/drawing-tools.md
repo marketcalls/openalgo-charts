@@ -734,11 +734,12 @@ registerDrawingTool({
 
 Exported geometry helpers: `distToSegment`, `distToLine`, `distToPolyline`, `distToRect`, `distToEllipse`, `rectOf`, `boundsOf`, `extendSegment`. Freehand geometry, pure and DOM-free, for a custom tool or a host that captures its own trail: `rdpSimplify(points, epsilonPx)` thins a `ScreenPoint[]` to the corners its shape needs; `catmullRom(ctx, points, tension = 0.5)` traces a smooth spline through them (it neither begins nor strokes the path, so the caller sets the style); `pressureWidth(baseWidth, pressure, range = 0.6)` swells or thins a width by a 0..1 pressure around the 0.5 mouse stand-in. The built-in brush and highlighter use all three.
 
-Three optional descriptor fields change *placement*, not rendering:
+Five optional descriptor fields change *placement*; `progressive` also changes what is drawn while a tool is placed:
 
 | Field | Effect |
 |---|---|
 | `freehand: true` | Sample the cursor while held, commit on release. Requires `points: 0`. Only the end anchors get handles. |
+| `progressive: true` | Paint the tool itself while it is placed, from its second anchor on, in place of the dashed guide. Only for a `draw` that paints whatever anchors it is given, from two up to `points`; the finished tool may take any number. The Elliott counts set it. |
 | `angleLock: true` | Shift snaps the free end of a two-anchor tool to 45 degree steps on screen, while placing and while dragging a handle. The line family sets it; a rectangle's opposite corner is not a line end, so shapes leave it off. |
 | `expand(clicked, { barSeconds, visibleBars, toPixel?, fromPixel? })` | Turn the clicked anchors into the full anchor set, so fewer clicks can drop a complete editable default. Every returned point stays a draggable handle. `toPixel` / `fromPixel` are present only when the host can map coordinates; a tool that sizes in pixels falls back to chart units without them. |
 | `constrain(points, handle)` | The anchors to keep after one moved: `handle` is the dragged index, or `null` for a `points` patch. Pure. The position tools reflect the level that was NOT moved across the entry when both land on one side, so the one under the hand stays put. |
@@ -915,27 +916,34 @@ Dense labels on advanced geometry use bounded vertical spacing. Labels with no
 room in a tiny plot are omitted without changing saved anchors, level values or
 hit regions. Zoom in or disable unneeded levels to inspect crowded values.
 
-## Elliott wave counts (2.7.1)
+## Elliott wave counts (2.7.1, labels 2.7.2)
 
-Five wave tools label a count from the origin it starts at:
+Five wave tools draw a count from the origin it starts at. The origin is the
+first anchor, point 0, and has no label; each anchor after it ends a wave and
+is labelled:
 
 | Tool | Anchors | Labels in the default degree |
 | --- | --- | --- |
-| `elliott-impulse` | 6 | 0 1 2 3 4 5 |
-| `elliott-correction` | 4 | 0 A B C |
-| `elliott-triangle` | 6 | 0 A B C D E |
-| `elliott-double-combo` | 4 | 0 W X Y |
-| `elliott-triple-combo` | 6 | 0 W X Y X Z |
+| `elliott-impulse` | 6 | (1) (2) (3) (4) (5) |
+| `elliott-correction` | 4 | (A) (B) (C) |
+| `elliott-triangle` | 6 | (A) (B) (C) (D) (E) |
+| `elliott-double-combo` | 4 | (W) (X) (Y) |
+| `elliott-triple-combo` | 6 | (W) (X) (Y) (X) (Z) |
+
+Labels are centred over their anchor, above a peak and below a trough, at
+14px. The tools are `progressive`: while one is placed the layer paints the
+count as far as it goes, so the second click already shows wave 1 and its
+label.
 
 Each reads two `props` through its settings schema:
 
 - `props.degree`: one of `grand-supercycle`, `supercycle`, `cycle`, `primary`,
-  `intermediate`, `minor` (default), `minute`, `minuette`, `subminuette`. The
+  `intermediate` (default), `minor`, `minute`, `minuette`, `subminuette`. The
   three largest write waves in upper Roman numerals, the middle three in Arabic
   and the three smallest in lower Roman, each family circled, in parentheses and
   plain from its largest degree down; letters are capitals except in the lower
-  Roman family. Minor is plain `1 2 3 4 5` and `A B C`, the labels the impulse
-  and the correction always drew.
+  Roman family. Intermediate is `(1)` to `(5)` and `(A)` to `(C)`; Minor, the
+  default through 2.7.1, is the same plain.
 - `props.labelStyle`: `degree` (default, the degree's own form), `plain`,
   `parentheses` or `circled`. It changes the form, never the numerals. A circled
   label is painted with a solid ring round it, whatever the line's dash.
@@ -953,9 +961,8 @@ enters the engine:
   correction with exactly 3, an origin that is a copy of its first anchor.
   Anything else is left as it is, so the upgrade is idempotent.
 - While the origin sits on wave 1's anchor (same time and price) the tool draws
-  no origin label and no leg to it, so the drawing looks as it did. Dragging
-  the origin away draws the first wave and its `0`. The origin is handle 0, so
-  it is the handle a click on that spot picks up.
+  no leg to it. Dragging the origin away draws the first wave. The origin is
+  handle 0, so it is the handle a click on that spot picks up.
 - The document version does not change. A 2.7.0 build reading a saved 2.7.1
   count draws its first five anchors with the old labels and ignores the sixth.
 
