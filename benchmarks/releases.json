@@ -2,6 +2,368 @@
   "schema": 1,
   "releases": [
     {
+      "version": "2.7.2",
+      "date": "2026-11-12",
+      "comparedWith": "2.7.1",
+      "runs": {
+        "release": 5,
+        "previous": 5
+      },
+      "machine": {
+        "cpu": "AMD EPYC 7763 64-Core Processor",
+        "logicalCpus": 4,
+        "os": "Linux 7.0.0-1019-azure",
+        "browser": "headless Chromium 149.0.7827.55",
+        "gl": "software GL (SwiftShader)",
+        "dpr": 1
+      },
+      "cells": [
+        {
+          "renderer": "canvas2d",
+          "bars": 10000,
+          "metric": "pan",
+          "releaseP95": [
+            8.3,
+            10.2,
+            10.9,
+            11.1,
+            13.1
+          ],
+          "previousP95": [
+            11.6,
+            11.2,
+            10.4,
+            10,
+            10.6
+          ]
+        },
+        {
+          "renderer": "canvas2d",
+          "bars": 10000,
+          "metric": "zoomOut",
+          "releaseP95": [
+            25.5,
+            25.2,
+            21.3,
+            26.8,
+            22.8
+          ],
+          "previousP95": [
+            23.2,
+            30.8,
+            33.2,
+            30.9,
+            20.6
+          ]
+        },
+        {
+          "renderer": "canvas2d",
+          "bars": 10000,
+          "metric": "tick",
+          "releaseP95": [
+            58.3,
+            56.3,
+            53.7,
+            45.8,
+            48
+          ],
+          "previousP95": [
+            51.8,
+            48.7,
+            43.7,
+            49.8,
+            49.4
+          ]
+        },
+        {
+          "renderer": "canvas2d",
+          "bars": 50000,
+          "metric": "pan",
+          "releaseP95": [
+            13.9,
+            12.4,
+            14.7,
+            12.2,
+            11.8
+          ],
+          "previousP95": [
+            10.7,
+            8.9,
+            11.5,
+            10.9,
+            12.9
+          ]
+        },
+        {
+          "renderer": "canvas2d",
+          "bars": 50000,
+          "metric": "zoomOut",
+          "releaseP95": [
+            54.5,
+            43.4,
+            49.3,
+            42.5,
+            47.3
+          ],
+          "previousP95": [
+            43.2,
+            43,
+            43.1,
+            52.9,
+            42.7
+          ]
+        },
+        {
+          "renderer": "canvas2d",
+          "bars": 50000,
+          "metric": "tick",
+          "releaseP95": [
+            130.5,
+            123,
+            122.4,
+            158,
+            126.7
+          ],
+          "previousP95": [
+            125,
+            121.2,
+            132.3,
+            122.2,
+            130.6
+          ]
+        },
+        {
+          "renderer": "canvas2d",
+          "bars": 200000,
+          "metric": "pan",
+          "releaseP95": [
+            14.4,
+            12.7,
+            12.6,
+            13.4,
+            10.1
+          ],
+          "previousP95": [
+            12.4,
+            9.6,
+            9.9,
+            8.5,
+            11.1
+          ]
+        },
+        {
+          "renderer": "canvas2d",
+          "bars": 200000,
+          "metric": "zoomOut",
+          "releaseP95": [
+            175.4,
+            156.9,
+            141.1,
+            172.8,
+            144.6
+          ],
+          "previousP95": [
+            139.8,
+            145.6,
+            165,
+            160.3,
+            138.3
+          ]
+        },
+        {
+          "renderer": "canvas2d",
+          "bars": 200000,
+          "metric": "tick",
+          "releaseP95": [
+            318.6,
+            338.5,
+            318.2,
+            321.9,
+            325.3
+          ],
+          "previousP95": [
+            326.1,
+            307.3,
+            307.9,
+            317,
+            329.4
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 10000,
+          "metric": "pan",
+          "releaseP95": [
+            48.8,
+            47.1,
+            46.4,
+            47.2,
+            47.2
+          ],
+          "previousP95": [
+            47.1,
+            46.6,
+            47.8,
+            48.1,
+            47.2
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 10000,
+          "metric": "zoomOut",
+          "releaseP95": [
+            59.1,
+            58.3,
+            56.9,
+            58.1,
+            57.2
+          ],
+          "previousP95": [
+            60.1,
+            58.6,
+            57.3,
+            58.7,
+            57.9
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 10000,
+          "metric": "tick",
+          "releaseP95": [
+            130.9,
+            112,
+            110.5,
+            134.9,
+            110.3
+          ],
+          "previousP95": [
+            112,
+            140.3,
+            109.1,
+            111.3,
+            137.3
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 50000,
+          "metric": "pan",
+          "releaseP95": [
+            59.5,
+            47.4,
+            46.3,
+            47.4,
+            49.4
+          ],
+          "previousP95": [
+            48.2,
+            47,
+            46.7,
+            47.4,
+            46.7
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 50000,
+          "metric": "zoomOut",
+          "releaseP95": [
+            83.9,
+            73,
+            69.8,
+            72,
+            73.7
+          ],
+          "previousP95": [
+            72.6,
+            71,
+            68.4,
+            70.1,
+            69.1
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 50000,
+          "metric": "tick",
+          "releaseP95": [
+            162.6,
+            161.4,
+            157.9,
+            159.2,
+            181.8
+          ],
+          "previousP95": [
+            161.5,
+            161.2,
+            156.6,
+            156.2,
+            157.8
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 200000,
+          "metric": "pan",
+          "releaseP95": [
+            48.1,
+            47.5,
+            59.1,
+            47.4,
+            46.9
+          ],
+          "previousP95": [
+            47,
+            48,
+            47.1,
+            47.2,
+            46.9
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 200000,
+          "metric": "zoomOut",
+          "releaseP95": [
+            170.3,
+            151.7,
+            162.2,
+            151.9,
+            153.9
+          ],
+          "previousP95": [
+            151.8,
+            156.7,
+            142.2,
+            156.6,
+            146.6
+          ]
+        },
+        {
+          "renderer": "webgl2",
+          "bars": 200000,
+          "metric": "tick",
+          "releaseP95": [
+            369.3,
+            383.4,
+            352.7,
+            374.9,
+            394.5
+          ],
+          "previousP95": [
+            395,
+            381.5,
+            365.7,
+            375.8,
+            402.5
+          ]
+        }
+      ],
+      "note": "The bundles this bench loads (the base engine, indicators and WebGL tiers) are byte for byte the 2.7.1 files apart from the version string, so the slower Canvas 2D pan cells are the session: across the five runs of each build the 50,000-bar pan p95 was 11.8 to 14.7 ms for 2.7.2 and 8.9 to 12.9 ms for 2.7.1, and the 200,000-bar pan 10.1 to 14.4 against 8.5 to 12.4, ranges that overlap, with the lowest of five read from each. Re-timed with the two builds alternating, twelve passes each on one other machine (AMD Ryzen 7 7700, Windows), both cells read the same: pan p95 median 2.5 ms for both builds at 50,000 and at 200,000 bars, the full zoom-out 21.6 against 21.3 ms and 58.4 against 58.2 ms, and the ten-study tick 61.2 against 66.4 ms and 192.6 against 186.8 ms within spreads of 44 to 87 and 158 to 224 ms."
+    },
+    {
       "version": "2.7.1",
       "date": "2026-11-11",
       "comparedWith": "2.7.0",

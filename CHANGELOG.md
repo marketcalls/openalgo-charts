@@ -2,6 +2,111 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.7.2
+
+2026-11-12
+
+Elliott wave counts are numbered the way a count is read: the first point is
+the origin, where wave 1 or wave A starts, and the waves are named from the
+point after it. Labels are centred on their points, a count is drawn as it is
+placed, and each count's icon names its first and last wave.
+
+### Changed
+
+- **The origin is not labelled.** A count's first point is point 0, the end
+  of the wave before it, and ends no wave of its own. 2.7.1 drew a 0 there,
+  so an impulse read 0 1 2 3 4 5; it now reads 1 to 5 from its second point,
+  and the correction A to C, the triangle A to E, the double combination W to
+  Y and the triple combination W X Y X Z. Place the origin first, then the end
+  of each wave.
+- **Intermediate is the default degree.** A count reads (1) to (5) or (A) to
+  (C), in parentheses, until it is given another degree. Minor, the default
+  through 2.7.1, is the same in plain numerals and letters, and a count that
+  was given a degree keeps it.
+- **Wave labels are centred on their points.** Each sits over the point it
+  names, above a peak and below a trough, at 14px. They started 4px to the
+  right of the point at 11px, the size of the chart's other drawing text, and
+  read as belonging to the leg beside them.
+- **A count is drawn as it is placed.** Through 2.7.1 every multi-point tool
+  showed a dashed guide until its last click. The wave counts now draw
+  themselves from the second click on, each wave with its label, so the
+  second click already shows wave 1 and the first reads as the origin it is.
+- **The wave icons name their waves.** Each glyph carries its first and last
+  wave above its figure, 1 and 5 over the impulse, A and C over the
+  correction, A and E over the triangle, W and Y over the double combination
+  and W and Z over the triple, with its pivots ringed below as before.
+
+### Added
+
+- **`DrawingTool.progressive`.** An optional flag for a tool whose `draw`
+  reads the anchors it is given and needs no more than two: while it is
+  placed, the layer paints the tool itself from its second anchor on, in
+  place of the dashed guide. The five Elliott counts set it.
+
+### Compatibility
+
+- One optional field is added to `DrawingTool`, and no export, type, option
+  or event is removed. `check-compat` finds every tier additive.
+- Saved drawings load unchanged and the document version does not change. A
+  count saved without a degree reads in the new default, (1) rather than 1;
+  set `props.degree` to `'minor'` to keep plain labels.
+- **OpenAlgo.** No migration: regenerating its drawing metadata
+  (`frontend/scripts/generate-drawing-tools.mjs`) picks up the five redrawn
+  wave glyphs, and `/trading`, which has no degree control, draws counts in
+  the new default.
+
+### Security
+
+- Unchanged from 2.7.1: the published package has no runtime dependencies,
+  and the two open advisories are the development-only `minimatch` under
+  `typedoc` and zod in the documentation site, for the reasons given there.
+
+### Size
+
+The draw tier is 60.79 kB Brotli, 342 bytes more than 2.7.1: the glyph
+captions, label placement measured to a label's ink, and the progressive
+preview. The widget terminal (375.27 kB) and all tiers (438.07 kB) carry the
+same 342 bytes, and the nine classic scripts 204 of them (451.66 kB). The base
+engine keeps 140.06 kB with the new version string (base + trade 156.93 kB),
+the base classic script is 82 bytes smaller at 140.11 kB, and the widget
+classic script keeps 142.97 kB. Every other tier keeps its size, and so does
+the chart-only import (89,611 bytes), since a plain chart draws no drawing.
+Budgets rise only where the measured bundle needs it.
+
+### Performance
+
+Five runs per version on one 4-vCPU Linux runner (AMD EPYC 7763), headless
+Chromium 149.0.7827.55 and software GL (SwiftShader), under the unchanged
+render budgets. At 200,000 bars, the lowest Canvas 2D p95 pan, full zoom-out
+and ten-study tick are 10.1, 141.1 and 318.2 ms against 8.5, 138.3 and
+307.3 ms for 2.7.1 in the same session, and the page marks the Canvas 2D pan
+slower at 50,000 and 200,000 bars, by 1.3x and 1.2x, and faster at 10,000.
+Neither build changes what the bench runs: the base engine, indicators and
+WebGL bundles of 2.7.2 are byte for byte the 2.7.1 files apart from the
+version string. Across the five runs the 50,000-bar pan took 11.8 to 14.7 ms
+for 2.7.2 and 8.9 to 12.9 ms for 2.7.1, ranges that overlap. Re-timed with
+the two builds alternating, twelve passes each on one machine (AMD Ryzen 7
+7700, Windows, Chromium from Playwright 1.61.1), the pan p95 median is 2.5 ms
+for both builds at 50,000 and at 200,000 bars, the full zoom-out 21.6 against
+21.3 ms and 58.4 against 58.2 ms, and the ten-study tick 61.2 against 66.4 ms
+and 192.6 against 186.8 ms. See the
+[same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#272).
+
+### Tests
+
+12,117 engine tests across 528 files and 740 reference-host tests across 69
+files. New tests hold the unlabelled origin in every degree, the Intermediate
+default, each label centred over its point at two pixel ratios, a circled
+label standing as far off its point however wide its ring, the label of a
+point past the plot's edge left beside it, a crowded label kept on its own
+side of its point, a count drawn as it is placed through a real chart and
+controller and through the drawing layer, and each wave glyph's caption
+characters. Each failed on the code before its fix. The pattern suites now
+measure text by its font size, as a canvas does. In Chromium, Firefox and
+WebKit, each of the five counts was placed from the reference host's rail by
+real clicks, with its labels checked after each click and on the finished
+count, and no page error.
+
 ## 2.7.1
 
 2026-11-11
