@@ -108,7 +108,8 @@ export function makeCtx(): { ctx: CanvasRenderingContext2D; rec: RecordingContex
  */
 export class FontMeasuringContext extends RecordingContext {
   public override measureText(t: string): { width: number } {
-    const size = Number(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? 10);
+    // The size is the token that ends in px; read without a pattern, so no input can make it slow.
+    const size = Number.parseFloat(this.font.split(' ').find(token => token.endsWith('px')) ?? '10');
     return { width: t.length * size * 0.6 };
   }
 }
