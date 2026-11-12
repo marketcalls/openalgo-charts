@@ -120,9 +120,18 @@ test('a newly visible extreme eases on canvas and settles on the full price rang
     return { values };
   });
   const travel = Math.abs(samples.values.at(-1)! - samples.values[0]);
-  const steps = samples.values.slice(1).map((y, i) => Math.abs(y - samples.values[i]));
   expect(travel).toBeGreaterThan(100);
-  expect(Math.max(...steps)).toBeLessThan(travel * 0.5);
+  // Eased, not jumped: some frame shows the price partway between where it
+  // started and where it settles. The step a single frame takes is not the
+  // measure: the ease runs on elapsed time, each frame closing 1 - e^(-dt/80)
+  // of the gap, so one frame that arrives 55 ms late on a loaded runner covers
+  // half the travel, and a cap on the largest step failed WebKit in 6 of 22
+  // runs. A jump shows no frame partway at all.
+  const partway = samples.values.filter(y => {
+    const done = Math.abs(y - samples.values[0]) / travel;
+    return done > 0.1 && done < 0.9;
+  });
+  expect(partway.length).toBeGreaterThan(0);
   // A wall-clock sample can end before the animation's final render frame.
   await expect.poll(() => page.evaluate(() => (window as any).chart.panes()[0].priceScale.priceRange()))
     .toEqual({ min: 23738.75, max: 24251.25 });
