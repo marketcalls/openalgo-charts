@@ -45,17 +45,19 @@ placed, and each count's icon names its first and last wave.
 ### Added
 
 - **`DrawingTool.progressive`.** An optional flag for a tool whose `draw`
-  reads the anchors it is given and needs no more than two: while it is
-  placed, the layer paints the tool itself from its second anchor on, in
-  place of the dashed guide. The five Elliott counts set it.
+  paints whatever anchors it is given, from two up to its `points`: while it
+  is placed, the layer paints the tool itself from its second anchor on, in
+  place of the dashed guide. The five Elliott counts set it, with four to six
+  anchors each.
 
 ### Compatibility
 
 - One optional field is added to `DrawingTool`, and no export, type, option
   or event is removed. `check-compat` finds every tier additive.
-- Saved drawings load unchanged and the document version does not change. A
-  count saved without a degree reads in the new default, (1) rather than 1;
-  set `props.degree` to `'minor'` to keep plain labels.
+- Saved drawings keep their points and the document version does not
+  change, but a count's labels change on load: its origin loses its label,
+  and a count saved without a degree reads in the new default, (1) rather
+  than 1. Set `props.degree` to `'minor'` to keep plain labels.
 - **OpenAlgo.** No migration: regenerating its drawing metadata
   (`frontend/scripts/generate-drawing-tools.mjs`) picks up the five redrawn
   wave glyphs, and `/trading`, which has no degree control, draws counts in
@@ -71,8 +73,9 @@ placed, and each count's icon names its first and last wave.
 
 The draw tier is 60.79 kB Brotli, 342 bytes more than 2.7.1: the glyph
 captions, label placement measured to a label's ink, and the progressive
-preview. The widget terminal (375.27 kB) and all tiers (438.07 kB) carry the
-same 342 bytes, and the nine classic scripts 204 of them (451.66 kB). The base
+preview. The widget terminal (375.27 kB) and all tiers (438.07 kB), which
+include it, grow by the same 342 bytes, and the nine classic scripts grow
+204 bytes, to 451.66 kB. The base
 engine keeps 140.06 kB with the new version string (base + trade 156.93 kB),
 the base classic script is 82 bytes smaller at 140.11 kB, and the widget
 classic script keeps 142.97 kB. Every other tier keeps its size, and so does
@@ -93,9 +96,11 @@ version string. Across the five runs the 50,000-bar pan took 11.8 to 14.7 ms
 for 2.7.2 and 8.9 to 12.9 ms for 2.7.1, ranges that overlap. Re-timed with
 the two builds alternating, twelve passes each on one machine (AMD Ryzen 7
 7700, Windows, Chromium from Playwright 1.61.1), the pan p95 median is 2.5 ms
-for both builds at 50,000 and at 200,000 bars, the full zoom-out 21.6 against
-21.3 ms and 58.4 against 58.2 ms, and the ten-study tick 61.2 against 66.4 ms
-and 192.6 against 186.8 ms. See the
+for both builds at 50,000 and at 200,000 bars. At 50,000 bars the full
+zoom-out median is 21.6 ms for 2.7.2 and 21.3 ms for 2.7.1, and the ten-study
+tick 61.2 ms for 2.7.2 and 66.4 ms for 2.7.1; at 200,000 bars the zoom-out is
+58.4 ms for 2.7.2 and 58.2 ms for 2.7.1, and the tick 192.6 ms for 2.7.2 and
+186.8 ms for 2.7.1. See the
 [same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#272).
 
 ### Tests

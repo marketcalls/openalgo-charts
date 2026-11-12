@@ -113,6 +113,8 @@ Rechecked on 2.6.5 with `npm run size` on the final versioned release build: bas
 
 Rechecked on 2.6.6 with `npm run size`: base 137.94 kB, base + trade 154.82 kB, widget 125.84 kB, all tiers 427.86 kB, and eight widget first-use parts 21.00 kB, all decimal Brotli sizes. The title, visible labels and accessibility description identify this build. Legend actions stay before changing readings; widget settings requests use the registered indicator dialog. The release adds no box or arrow.
 
+Rechecked on 2.7.1 with `npx size-limit` on the final versioned release build: base 140.06 kB, indicators 44.85 kB, draw 60.44 kB, profile 20.83 kB, transform 6.38 kB, trade 16.88 kB on its own (base + trade 156.93 kB), workspace 11.73 kB, WebGL2 6.99 kB, widget 129.58 kB, and 437.73 kB for all tiers. Registry counts are 112 indicators, 90 drawing tools (the five Elliott wave counts among them), 13 base chart types, 15 with the transform tier, and six series transforms. The diagram shows the 2.7.1 title, version label, base, draw, widget and all-tier sizes, and the 90 drawing tools.
+
 Rechecked on 2.7.2 with `npx size-limit` on the final versioned release build: base 140.06 kB, indicators 44.85 kB, draw 60.79 kB, profile 20.83 kB, transform 6.38 kB, trade 16.88 kB on its own (base + trade 156.93 kB), workspace 11.73 kB, WebGL2 6.99 kB, widget 129.58 kB, and 438.07 kB for all tiers. Registry counts are 112 indicators, 90 drawing tools (the five Elliott wave counts among them), 13 base chart types, 15 with the transform tier, and six series transforms. The diagram shows the 2.7.2 title, version label, base, draw, widget and all-tier sizes, and the 90 drawing tools.
 
 Source references: `src/index.ts`, `src/feed/data-controller.ts`,
