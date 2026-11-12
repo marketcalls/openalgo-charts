@@ -734,12 +734,12 @@ registerDrawingTool({
 
 Exported geometry helpers: `distToSegment`, `distToLine`, `distToPolyline`, `distToRect`, `distToEllipse`, `rectOf`, `boundsOf`, `extendSegment`. Freehand geometry, pure and DOM-free, for a custom tool or a host that captures its own trail: `rdpSimplify(points, epsilonPx)` thins a `ScreenPoint[]` to the corners its shape needs; `catmullRom(ctx, points, tension = 0.5)` traces a smooth spline through them (it neither begins nor strokes the path, so the caller sets the style); `pressureWidth(baseWidth, pressure, range = 0.6)` swells or thins a width by a 0..1 pressure around the 0.5 mouse stand-in. The built-in brush and highlighter use all three.
 
-Four optional descriptor fields change *placement*, not rendering:
+Five optional descriptor fields change *placement*; `progressive` also changes what is drawn while a tool is placed:
 
 | Field | Effect |
 |---|---|
 | `freehand: true` | Sample the cursor while held, commit on release. Requires `points: 0`. Only the end anchors get handles. |
-| `progressive: true` | Paint the tool itself while it is placed, from its second anchor on, in place of the dashed guide. Only for a `draw` that reads the anchors it is given and needs no more than two. The Elliott counts set it. |
+| `progressive: true` | Paint the tool itself while it is placed, from its second anchor on, in place of the dashed guide. Only for a `draw` that paints whatever anchors it is given, from two up to `points`; the finished tool may take any number. The Elliott counts set it. |
 | `angleLock: true` | Shift snaps the free end of a two-anchor tool to 45 degree steps on screen, while placing and while dragging a handle. The line family sets it; a rectangle's opposite corner is not a line end, so shapes leave it off. |
 | `expand(clicked, { barSeconds, visibleBars, toPixel?, fromPixel? })` | Turn the clicked anchors into the full anchor set, so fewer clicks can drop a complete editable default. Every returned point stays a draggable handle. `toPixel` / `fromPixel` are present only when the host can map coordinates; a tool that sizes in pixels falls back to chart units without them. |
 | `constrain(points, handle)` | The anchors to keep after one moved: `handle` is the dragged index, or `null` for a `points` patch. Pure. The position tools reflect the level that was NOT moved across the entry when both land on one side, so the one under the hand stays put. |

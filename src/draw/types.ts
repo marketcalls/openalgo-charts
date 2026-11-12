@@ -458,8 +458,8 @@ export interface DrawingTool {
   /**
    * Paint the tool itself while it is placed, from its second anchor on, in
    * place of the dashed guide every other multi-anchor tool shows. Declare it
-   * only when `draw` reads the anchors it is given and asks for no more than
-   * two: a wave count does, so each click shows the wave it ends and that
+   * only when `draw` paints whatever anchors it is given, from two up to
+   * `points`: a wave count does, so each click shows the wave it ends and that
    * wave's label, and the first click reads as the origin it is.
    */
   progressive?: boolean;

@@ -6,10 +6,10 @@
  * than its tool takes, so without the upgrade every saved impulse and
  * correction would vanish from the chart it was drawn on.
  */
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { Chart } from '../src/core/chart';
-import { fakeDocument } from './helpers/fake-dom';
-import { DrawingController, getDrawingTool } from '../src/draw/index';
+import { fakeDocument, pointer, type FakeElement } from './helpers/fake-dom';
+import { DrawingController, DrawingLayer, getDrawingTool } from '../src/draw/index';
 import { migrateDrawings } from '../src/draw/migrate';
 import { ELLIOTT_FIELDS, elliottLabels, withWaveOrigin } from '../src/draw/elliott';
 import { PATTERN_DRAWING_TOOLS } from '../src/draw/pattern-tools';
@@ -171,6 +171,72 @@ describe('a wave count on the chart', () => {
     expect(rings).toHaveLength(2);
     const [a, b] = rings as [number[], number[]];
     expect(Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!)).toBeGreaterThanOrEqual(a[2]! + b[2]!);
+  });
+
+  it('stands a circled label off its point by the same gap however wide its ring', () => {
+    // A fixed offset let the ring round a wide numeral, III, reach its pivot.
+    for (const degree of ['primary', 'cycle']) {
+      const rings = paint(wave('elliott-impulse', IMPULSE_POINTS, { degree, labelStyle: 'circled' })).ops.filter(op => op.type === 'arc');
+      expect(rings).toHaveLength(5);
+      rings.forEach((op, i) => {
+        const [cx, cy, r] = op.args as [number, number, number];
+        const pivot = IMPULSE_POINTS[i + 1]!;
+        expect(cx, degree).toBeCloseTo(pivot.time, 6);
+        const gap = Math.abs(cy - (600 - pivot.price)) - r;
+        expect(gap, `${degree} wave ${i + 1}`).toBeGreaterThanOrEqual(8 - 1e-9);
+        expect(gap, `${degree} wave ${i + 1}`).toBeLessThan(9);
+      });
+    }
+  });
+
+  it('leaves the label of a point off the plot beside its point, not pinned inside', () => {
+    // Wave 5 ends just past the right edge of the 800px plot.
+    const points = [...IMPULSE_POINTS.slice(0, 5), point(803, 500)];
+    const texts = paint(wave('elliott-impulse', points)).ops.filter(op => op.type === 'fillText');
+    const last = texts[texts.length - 1]!;
+    expect(last.text).toBe('(5)');
+    expect(last.args[0]! + last.text!.length * 14 * 0.6 / 2).toBeCloseTo(803, 6);
+  });
+
+  it('is drawn as it is placed from the chart, wave 1 named on the second click', () => {
+    const doc = fakeDocument();
+    const el = doc.createElement('div') as unknown as FakeElement;
+    const chart = new Chart(el as unknown as HTMLElement, { document: doc, raf: { schedule: () => 0 }, shortcuts: false, timeNavigator: false });
+    chart.applySize(800, 600);
+    const bars: Bar[] = Array.from({ length: 100 }, (_, i) => ({ time: 1700000000 + i * 60, open: 100, high: 104, low: 96, close: 100 + (i % 7) - 3 }));
+    chart.addSeries('candlestick').setData(bars);
+    chart.setVisibleLogicalRange({ from: 0, to: 100 });
+    const draw = new DrawingController(chart);
+    const spy = vi.spyOn(DrawingLayer.prototype, 'setPreview');
+    try {
+      draw.setTool('elliott-impulse');
+      el.dispatch('pointermove', pointer('move', 200, 300, { buttons: 0 }));
+      el.dispatch('pointerdown', pointer('down', 200, 300));
+      el.dispatch('pointerup', pointer('up', 200, 300));
+      el.dispatch('pointermove', pointer('move', 320, 220, { buttons: 0 }));
+      const previews = spy.mock.calls.map(call => call[0]).filter((d): d is Drawing => d !== null);
+      const preview = previews[previews.length - 1]!;
+      expect(preview.tool).toBe('elliott-impulse');
+      expect(preview.points).toHaveLength(2);
+      expect(draw.drawings()).toHaveLength(0);
+      // The layer the controller hands it to paints the first wave and names it.
+      const layer = new DrawingLayer();
+      layer.setPreview(preview);
+      const rec = new RecordingContext();
+      const first = bars[0]!.time;
+      layer.draw(rec as unknown as CanvasRenderingContext2D, {
+        ...rc(), theme: { lineColor: '#888', background: '#000' },
+        dataLayer: { timeToIndexFloat: (t: number) => (t - first) / 60 },
+        timeScale: { indexToX: (i: number) => i * 8 },
+        priceScale: { priceToY: (p: number) => 300 - (p - 100) * 10, format: String },
+      } as unknown as PrimitiveRenderContext);
+      expect(labelsOf(rec)).toEqual(['(1)']);
+      expect(rec.count('stroke')).toBeGreaterThan(0);
+    } finally {
+      spy.mockRestore();
+      draw.destroy();
+      chart.destroy();
+    }
   });
 
   it('draws the first wave of a count placed with an origin, even on its first wave\'s end', () => {

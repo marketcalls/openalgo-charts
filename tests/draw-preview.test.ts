@@ -49,6 +49,7 @@ describe('multi-point drawing placement guides', () => {
     const { ctx, rec } = makeCtx();
     layer.draw(ctx, rc);
     expect(rec.ops.filter(op => op.type === 'fillText').map(op => op.text)).toEqual(['(1)']);
+    expect(rec.count('stroke')).toBeGreaterThan(0);
     expect(rec.ops.some(op => op.type === 'setLineDash' && op.args.length > 0)).toBe(false);
     // Three clicks in: two waves, each named.
     layer.setPreview({ ...count, points: [...count.points, { time: 300, price: 250 }] });

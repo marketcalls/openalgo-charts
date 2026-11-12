@@ -139,13 +139,11 @@ function vertexLabels(names: readonly ElliottLabel[], points: readonly ScreenPoi
     const after = points[index + 1]?.y ?? point.y;
     const above = point.y <= (before + after) / 2;
     if (!wave) return [{ at: { x: point.x + 4, y: point.y + (above ? -6 : 14) }, text: name.text }];
-    // A wave label is centred on its pivot, clear of the pivot's handle, and
-    // a ringed one stands further off so that its ring clears it too. The
-    // text's bottom edge is its anchor, so one below drops by its own size.
-    const clear = 8 + (name.ring ? 3 : 0);
+    // A wave label names its pivot: centred on it and clear of its handle,
+    // ring and all, which the painter measures.
     return [{
-      at: { x: point.x, y: point.y + (above ? -clear : clear + WAVE_LABEL_PX) },
-      text: name.text, centered: true, size: WAVE_LABEL_PX, ...(name.ring ? { ring: true } : {}),
+      at: point, side: above ? 'above' : 'below', gap: 8,
+      text: name.text, size: WAVE_LABEL_PX, ...(name.ring ? { ring: true } : {}),
     }];
   });
 }

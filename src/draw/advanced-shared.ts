@@ -37,8 +37,14 @@ export interface GeometryLabel {
    * from `at` would stay behind when the label moves to another lane.
    */
   ring?: boolean;
-  /** Centred on `at` rather than starting there: a label that names a point. */
-  centered?: boolean;
+  /**
+   * A label that names the point `at`: centred on it, on this side of it, and
+   * `gap` px clear of it measured to the label's ink, its ring included, so a
+   * wide label's ring stands as far off as a narrow one's. Without it the
+   * label's bottom left corner is `at`.
+   */
+  side?: 'above' | 'below';
+  gap?: number;
   /** The text size in CSS px, where the drawing's own text sets none. */
   size?: number;
 }
@@ -241,32 +247,42 @@ export function paintGeometry(c: DrawContext, geometry: DrawingGeometry): void {
   const text = c.drawing.text, font = textOf(c.drawing);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
-  const occupied: { x: number; y: number; width: number; height: number }[] = [];
+  const occupied: { x: number; width: number; top: number; bottom: number }[] = [];
   for (const label of geometry.labels ?? []) {
     if (!finiteDevicePoint(label.at, dpr)) continue;
-    const size = (text?.fontSize ?? label.size ?? 11) * dpr;
+    const size = (text?.fontSize ?? label.size ?? 11) * dpr, em = size / dpr;
     ctx.font = fontOf(font, size);
-    const lineHeight = size / dpr * 1.3;
+    const lineHeight = em * 1.3;
     let { x, y } = label.at;
+    // Whether the point the label belongs to is on the plot, before the label
+    // is moved off it: one whose point is off the plot is not pulled back on.
+    const inside = x >= 0 && x <= rc.plotWidth && y >= 0 && y <= rc.plotHeight;
     const width = drawingTextWidth(ctx, label.text) / dpr;
-    if (label.centered === true) x -= width / 2;
     // A ring rounds the text's box, whose cap height is about seven tenths of
     // the size, and stands past it on every side: it takes that much room.
-    const radius = label.ring === true ? Math.max(width, size / dpr * 0.7) / 2 + 3 : 0;
+    const radius = label.ring === true ? Math.max(width, em * 0.7) / 2 + 3 : 0;
     const pad = Math.max(0, radius - width / 2);
-    const height = Math.max(lineHeight, 2 * radius);
+    // The ink above and below the text's bottom edge: the text box, or a ring
+    // centred four tenths of the size up, whichever reaches further.
+    const ink = Math.max(em, em * 0.4 + radius), drop = Math.max(0, radius - em * 0.4);
+    if (label.side !== undefined) {
+      x -= width / 2;
+      y = label.side === 'above' ? y - (label.gap ?? 0) - drop : y + (label.gap ?? 0) + ink;
+    }
     // Keep nearby levels readable at ordinary zoom and on narrow panes. The
     // bounded search changes text placement only; saved anchors stay exact.
-    if (x >= 0 && x <= rc.plotWidth && y >= 0 && y <= rc.plotHeight) {
+    if (inside) {
       x = Math.max(pad, Math.min(x, rc.plotWidth - width - pad));
       let placed = false;
       for (const lane of [0, -1, 1, -2, 2, -3, 3, -4]) {
         const candidateY = y + lane * lineHeight;
-        if (candidateY < size / dpr || candidateY > rc.plotHeight) continue;
+        // A lane that would cut the text or its ring at the plot's edge is not one.
+        if (candidateY - ink < 0 || candidateY + drop > rc.plotHeight) continue;
+        const top = candidateY - Math.max(lineHeight, ink), bottom = candidateY + drop;
         if (occupied.some(box => x - pad < box.x + box.width + 3 && x + width + pad + 3 > box.x
-          && Math.abs(candidateY - box.y) < Math.max(height, box.height) - 0.01)) continue;
+          && top < box.bottom - 0.01 && box.top < bottom - 0.01)) continue;
         y = candidateY;
-        occupied.push({ x: x - pad, y, width: width + 2 * pad, height });
+        occupied.push({ x: x - pad, width: width + 2 * pad, top, bottom });
         placed = true;
         break;
       }

@@ -1062,12 +1062,12 @@ draw.setTool('zigzag');
 Geometry helpers are exported: `distToSegment`, `distToLine`, `distToPolyline`,
 `distToRect`, `distToEllipse`, `rectOf`, `extendSegment`.
 
-Three optional fields change how a tool is *placed*:
+Four optional fields change how a tool is *placed*, and `progressive` also what is drawn while it is:
 
 | Field | Effect |
 |---|---|
 | `freehand: true` | Sample the cursor while the pointer is held and commit on release: one press-drag-release is one stroke. Only the first and last anchors get grab handles. Requires `points: 0`. |
-| `progressive: true` | Paint the tool itself while it is placed, from its second anchor on, in place of the dashed guide other multi-anchor tools show. Declare it only when `draw` reads the anchors it is given and asks for no more than two. The Elliott counts set it, so each click shows the wave it ends and its label. |
+| `progressive: true` | Paint the tool itself while it is placed, from its second anchor on, in place of the dashed guide other multi-anchor tools show. Declare it only when `draw` paints whatever anchors it is given, from two up to `points`. The Elliott counts set it, so each click shows the wave it ends and its label. |
 | `expand(clicked, ctx)` | Turn the anchors actually clicked into the tool's full anchor set, so it can place a complete, editable default from fewer clicks. `ctx` carries `barSeconds` and `visibleBars`, and `toPixel` / `fromPixel` when the host can map coordinates, so a default can be sized in pixels and fall back to chart units when it cannot. |
 | `constrain(points, handle)` | Keep the anchors consistent after one moves: a handle drag (`handle` is its index) or a `points` patch (`handle` is `null`). Returns the anchors to store. Pure. The position tools use it to hold the stop and the target on opposite sides of the entry. |
 

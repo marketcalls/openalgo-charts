@@ -479,6 +479,27 @@ describe('look-alike glyphs are drawn apart', () => {
     }
   });
 
+  it('captions each count with the characters of its waves, each drawn alike wherever it appears', () => {
+    // Pinned as drawn and checked at rail size, five units tall across the
+    // top: a 1 and a 5, an A and a C, an A and an E, a W and a Y, a W and a Z.
+    const captions: Record<string, string[]> = {
+      'elliott-impulse': ['M6 3 7 2 7 7', 'M22 2 19 2 19 4.5 21.5 4.5 22 5 22 6.5 21.5 7 19 7'],
+      'elliott-correction': ['M7.5 7 9 2 10.5 7', 'M8 5.5 10 5.5', 'M22 2 20 2 19 3 19 6 20 7 22 7'],
+      'elliott-triangle': ['M5.5 7 7 2 8.5 7', 'M6 5.5 8 5.5', 'M22 2 19 2 19 7 22 7', 'M19 4.5 21.5 4.5'],
+      'elliott-double-combo': ['M7 2 8 7 9 3.5 10 7 11 2', 'M19 2 20.5 4.5 22 2', 'M20.5 4.5 20.5 7'],
+      'elliott-triple-combo': ['M5 2 6 7 7 3.5 8 7 9 2', 'M19 2 22 2 19 7 22 7'],
+    };
+    for (const [id, expected] of Object.entries(captions)) {
+      const subs = tool(id).split(/(?=M)/);
+      for (const s of expected) expect(subs, `${id} lacks ${s}`).toContain(s);
+    }
+    // The A of the correction and the triangle, and the W of the two
+    // combinations, are one character moved along the row.
+    const moved = (s: string, dx: number) => 'M' + s.slice(1).split(' ').map((v, i) => String(i % 2 === 0 ? Number(v) + dx : Number(v))).join(' ');
+    expect(moved(captions['elliott-correction']![0]!, -2)).toBe(captions['elliott-triangle']![0]);
+    expect(moved(captions['elliott-double-combo']![0]!, -2)).toBe(captions['elliott-triple-combo']![0]);
+  });
+
   it('starts the ray at one anchor, with no tick across it', () => {
     // The ray was a line with a short stroke across its start, which read as
     // a check mark. It is one line now, from an anchor, open at the far end.
