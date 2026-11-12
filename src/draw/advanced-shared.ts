@@ -213,6 +213,13 @@ export function geometryDistance(x: number, y: number, geometry: DrawingGeometry
   return Number.isFinite(best) ? best : null;
 }
 
+/**
+ * The lanes a crowded label may move to, in line heights from where it was
+ * put: either way for a free label, and only away from its point for one that
+ * names a point, since a lane past the gap would set it across the point.
+ */
+const LANES = { free: [0, -1, 1, -2, 2, -3, 3, -4], above: [0, -1, -2, -3, -4], below: [0, 1, 2, 3, 4] } as const;
+
 export function paintGeometry(c: DrawContext, geometry: DrawingGeometry): void {
   const { ctx, rc, style } = c, dpr = rc.dpr;
   ctx.save();
@@ -274,7 +281,7 @@ export function paintGeometry(c: DrawContext, geometry: DrawingGeometry): void {
     if (inside) {
       x = Math.max(pad, Math.min(x, rc.plotWidth - width - pad));
       let placed = false;
-      for (const lane of [0, -1, 1, -2, 2, -3, 3, -4]) {
+      for (const lane of LANES[label.side ?? 'free']) {
         const candidateY = y + lane * lineHeight;
         // A lane that would cut the text or its ring at the plot's edge is not one.
         if (candidateY - ink < 0 || candidateY + drop > rc.plotHeight) continue;

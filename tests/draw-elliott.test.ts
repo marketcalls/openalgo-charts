@@ -189,6 +189,23 @@ describe('a wave count on the chart', () => {
     }
   });
 
+  it('moves a crowded label further from its point, never across it', () => {
+    // Three labels over one point: the third, with the lanes nearest above
+    // taken, once went to the lane below and sat across the point.
+    const rec = new FontMeasuringContext();
+    paintGeometry({
+      ctx: rec as unknown as CanvasRenderingContext2D, rc: rc(), pts: [],
+      drawing: wave('elliott-impulse', []), style: { color: '#3366cc', lineWidth: 2 }, selected: false, formatPrice: String,
+    }, {
+      paths: [],
+      labels: [1, 2, 3].map(n => ({ at: { x: 300, y: 300 }, side: 'above' as const, gap: 8, size: 14, text: `(${n})` })),
+    });
+    const ys = rec.ops.filter(op => op.type === 'fillText').map(op => op.args[1]!);
+    expect(ys).toHaveLength(3);
+    for (const y of ys) expect(y).toBeLessThanOrEqual(300 - 8);
+    expect(new Set(ys).size).toBe(3);
+  });
+
   it('leaves the label of a point off the plot beside its point, not pinned inside', () => {
     // Wave 5 ends just past the right edge of the 800px plot.
     const points = [...IMPULSE_POINTS.slice(0, 5), point(803, 500)];
