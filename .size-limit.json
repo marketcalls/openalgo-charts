@@ -23,7 +23,7 @@
   {
     "name": "Draw tier (90 drawing tools + controller)",
     "path": "dist/openalgo-charts.draw.mjs",
-    "limit": "60.45 kB",
+    "limit": "60.73 kB",
     "brotli": true
   },
   {
@@ -64,7 +64,7 @@
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "374.93 kB",
+    "limit": "375.21 kB",
     "brotli": true
   },
   {
@@ -86,7 +86,7 @@
       "dist/openalgo-charts.widget.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "437.73 kB",
+    "limit": "438.01 kB",
     "brotli": true
   },
   {
@@ -102,7 +102,7 @@
       "dist/openalgo-charts.widget.standalone.js",
       "dist/openalgo-charts.workspace.standalone.js"
     ],
-    "limit": "451.46 kB",
+    "limit": "451.75 kB",
     "brotli": true
   },
   {
