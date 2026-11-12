@@ -113,7 +113,7 @@ const TIERS: Tier[] = [
   {
     name: 'tool', entries: Object.entries(DRAWING_TOOL_ICONS), accents: Object.entries(DRAWING_TOOL_ACCENTS),
     registry: DRAWING_TOOL_ICONS, accentOf: drawingToolAccent, attrs: ICON_ATTRS,
-    viewBox: ICON_VIEWBOX, stroke: ICON_STROKE, grid: 24, lo: 2, hi: 22, minSpan: 10, maxCommands: 29, decimals: 2,
+    viewBox: ICON_VIEWBOX, stroke: ICON_STROKE, grid: 24, lo: 2, hi: 22, minSpan: 10, maxCommands: 33, decimals: 2,
   },
   {
     name: 'chrome', entries: Object.entries(CHROME_ICONS), accents: Object.entries(CHROME_ICON_ACCENTS),
@@ -200,7 +200,8 @@ describe.each(TIERS)('the $name set is balanced', (tier) => {
     // On the tool grid a ring is four commands and a rounded box ten, so the
     // count runs higher than the ink does: the densest are the wave counts
     // of six pivots, an origin and five waves, a ring at each and the legs
-    // between them, about the ink of a harmonic with its two bases.
+    // between them, with their first and last wave named above the figure.
+    // The triangle's A and E take two strokes each.
     for (const [id, d] of tier.entries) {
       const commands = (d.match(/[A-Za-z]/g) ?? []).length;
       expect(commands, `${id} has ${commands} commands`).toBeLessThanOrEqual(tier.maxCommands);
@@ -455,6 +456,26 @@ describe('look-alike glyphs are drawn apart', () => {
         expect(crossed(id, c, PIVOT), `${id}: a stroke runs into the ring at ${c.join(',')}`).toBe(false);
         expect(meeting(id, c, PIVOT), `${id}: no leg meets the ring at ${c.join(',')}`).toBeGreaterThan(0);
       }
+    }
+  });
+
+  it('names the first and last wave of each Elliott count above its figure, and not its origin', () => {
+    // The chart labels a count's waves and leaves its origin bare, so the
+    // glyph does too: 1 and 5 over an impulse, A and C over a correction.
+    for (const id of ['elliott-impulse', 'elliott-correction', 'elliott-triangle', 'elliott-double-combo', 'elliott-triple-combo']) {
+      const rings = centres(id).sort((p, q) => p[0] - q[0]);
+      const top = Math.min(...rings.map((c) => c[1])) - 1.5;
+      const caption = strokes(id).filter((s) => s.extent.every((p) => p[1] <= top - 2));
+      const spans = (x: number) => caption.some((s) => {
+        const xs = s.extent.map((p) => p[0]);
+        return Math.min(...xs) <= x && x <= Math.max(...xs);
+      });
+      expect(caption.length, `${id} has no caption`).toBeGreaterThanOrEqual(2);
+      expect(spans(rings[1]![0]), `${id}: nothing names its first wave`).toBe(true);
+      expect(spans(rings[rings.length - 1]![0]), `${id}: nothing names its last wave`).toBe(true);
+      expect(spans(rings[0]![0]), `${id}: its origin is named`).toBe(false);
+      // Every stroke is the caption or a leg: nothing else crosses the figure.
+      expect(strokes(id).length - caption.length, id).toBe(rings.length - 1);
     }
   });
 

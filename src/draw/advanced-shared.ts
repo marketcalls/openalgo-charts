@@ -37,6 +37,10 @@ export interface GeometryLabel {
    * from `at` would stay behind when the label moves to another lane.
    */
   ring?: boolean;
+  /** Centred on `at` rather than starting there: a label that names a point. */
+  centered?: boolean;
+  /** The text size in CSS px, where the drawing's own text sets none. */
+  size?: number;
 }
 export interface DrawingGeometry { paths: GeometryPath[]; labels?: GeometryLabel[] }
 /** Builds from media-px anchors, as many as the tool declares (`ToolAnchors`). */
@@ -234,17 +238,18 @@ export function paintGeometry(c: DrawContext, geometry: DrawingGeometry): void {
     }
     if (path.stroke !== false) { ctx.strokeStyle = path.color ?? style.color; ctx.stroke(); }
   }
-  const text = c.drawing.text;
-  const size = (text?.fontSize ?? 11) * dpr;
-  ctx.font = fontOf(textOf(c.drawing), size);
+  const text = c.drawing.text, font = textOf(c.drawing);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
   const occupied: { x: number; y: number; width: number; height: number }[] = [];
-  const lineHeight = size / dpr * 1.3;
   for (const label of geometry.labels ?? []) {
     if (!finiteDevicePoint(label.at, dpr)) continue;
+    const size = (text?.fontSize ?? label.size ?? 11) * dpr;
+    ctx.font = fontOf(font, size);
+    const lineHeight = size / dpr * 1.3;
     let { x, y } = label.at;
     const width = drawingTextWidth(ctx, label.text) / dpr;
+    if (label.centered === true) x -= width / 2;
     // A ring rounds the text's box, whose cap height is about seven tenths of
     // the size, and stands past it on every side: it takes that much room.
     const radius = label.ring === true ? Math.max(width, size / dpr * 0.7) / 2 + 3 : 0;

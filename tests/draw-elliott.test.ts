@@ -1,9 +1,10 @@
 /**
- * The Elliott wave counts: labels in a degree's notation, and the origin the
- * impulse and the correction gained in 2.7.1. A count saved by 2.7.0 has one
- * anchor fewer, and the engine neither paints nor hit-tests a drawing with
- * fewer anchors than its tool takes, so without the upgrade every saved
- * impulse and correction would vanish from the chart it was drawn on.
+ * The Elliott wave counts: labels in a degree's notation, the origin every
+ * count starts at, which is not labelled, and the origin the impulse and the
+ * correction gained in 2.7.1. A count saved by 2.7.0 has one anchor fewer,
+ * and the engine neither paints nor hit-tests a drawing with fewer anchors
+ * than its tool takes, so without the upgrade every saved impulse and
+ * correction would vanish from the chart it was drawn on.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Chart } from '../src/core/chart';
@@ -13,7 +14,7 @@ import { migrateDrawings } from '../src/draw/migrate';
 import { ELLIOTT_FIELDS, elliottLabels, withWaveOrigin } from '../src/draw/elliott';
 import { PATTERN_DRAWING_TOOLS } from '../src/draw/pattern-tools';
 import { paintGeometry } from '../src/draw/advanced-shared';
-import { RecordingContext } from './helpers/fake-ctx';
+import { FontMeasuringContext, RecordingContext } from './helpers/fake-ctx';
 import type { Bar } from '../src/model/bar';
 import type { Drawing, DrawingPoint } from '../src/draw/types';
 import type { PrimitiveRenderContext } from '../src';
@@ -23,49 +24,52 @@ beforeAll(() => {
   g.window ??= {};
 });
 
-const IMPULSE = ['0', '1', '2', '3', '4', '5'];
-const CORRECTION = ['0', 'A', 'B', 'C'];
+// The tokens the tools name their pivots with: the origin is not labelled.
+const IMPULSE = ['', '1', '2', '3', '4', '5'];
+const CORRECTION = ['', 'A', 'B', 'C'];
 const texts = (degree: string, tokens: readonly string[], labelStyle?: string): string[] =>
   elliottLabels(tokens, { degree, ...(labelStyle === undefined ? {} : { labelStyle }) }).map(l => l.ring ? `[${l.text}]` : l.text);
 
 describe('wave labels by degree', () => {
   it.each([
     // Three numeral families, each circled, in parentheses and plain, largest degree first.
-    ['grand-supercycle', ['[0]', '[I]', '[II]', '[III]', '[IV]', '[V]'], ['[0]', '[A]', '[B]', '[C]']],
-    ['supercycle', ['(0)', '(I)', '(II)', '(III)', '(IV)', '(V)'], ['(0)', '(A)', '(B)', '(C)']],
-    ['cycle', ['0', 'I', 'II', 'III', 'IV', 'V'], ['0', 'A', 'B', 'C']],
-    ['primary', ['[0]', '[1]', '[2]', '[3]', '[4]', '[5]'], ['[0]', '[A]', '[B]', '[C]']],
-    ['intermediate', ['(0)', '(1)', '(2)', '(3)', '(4)', '(5)'], ['(0)', '(A)', '(B)', '(C)']],
+    ['grand-supercycle', ['', '[I]', '[II]', '[III]', '[IV]', '[V]'], ['', '[A]', '[B]', '[C]']],
+    ['supercycle', ['', '(I)', '(II)', '(III)', '(IV)', '(V)'], ['', '(A)', '(B)', '(C)']],
+    ['cycle', ['', 'I', 'II', 'III', 'IV', 'V'], ['', 'A', 'B', 'C']],
+    ['primary', ['', '[1]', '[2]', '[3]', '[4]', '[5]'], ['', '[A]', '[B]', '[C]']],
+    ['intermediate', ['', '(1)', '(2)', '(3)', '(4)', '(5)'], ['', '(A)', '(B)', '(C)']],
     ['minor', IMPULSE, CORRECTION],
-    ['minute', ['[0]', '[i]', '[ii]', '[iii]', '[iv]', '[v]'], ['[0]', '[a]', '[b]', '[c]']],
-    ['minuette', ['(0)', '(i)', '(ii)', '(iii)', '(iv)', '(v)'], ['(0)', '(a)', '(b)', '(c)']],
-    ['subminuette', ['0', 'i', 'ii', 'iii', 'iv', 'v'], ['0', 'a', 'b', 'c']],
+    ['minute', ['', '[i]', '[ii]', '[iii]', '[iv]', '[v]'], ['', '[a]', '[b]', '[c]']],
+    ['minuette', ['', '(i)', '(ii)', '(iii)', '(iv)', '(v)'], ['', '(a)', '(b)', '(c)']],
+    ['subminuette', ['', 'i', 'ii', 'iii', 'iv', 'v'], ['', 'a', 'b', 'c']],
   ])('%s', (degree, impulse, correction) => {
-    // [x] is a label drawn inside a ring.
+    // [x] is a label drawn inside a ring, and the origin has no label in any degree.
     expect(texts(degree, IMPULSE)).toEqual(impulse);
     expect(texts(degree, CORRECTION)).toEqual(correction);
   });
 
   it('writes the combinations and the triangle in the degree\'s letter case', () => {
-    expect(texts('minute', ['0', 'W', 'X', 'Y', 'X', 'Z'])).toEqual(['[0]', '[w]', '[x]', '[y]', '[x]', '[z]']);
-    expect(texts('cycle', ['0', 'A', 'B', 'C', 'D', 'E'])).toEqual(['0', 'A', 'B', 'C', 'D', 'E']);
+    expect(texts('minute', ['', 'W', 'X', 'Y', 'X', 'Z'])).toEqual(['', '[w]', '[x]', '[y]', '[x]', '[z]']);
+    expect(texts('cycle', ['', 'A', 'B', 'C', 'D', 'E'])).toEqual(['', 'A', 'B', 'C', 'D', 'E']);
   });
 
   it('lets the label style override the degree\'s own form, never its numerals', () => {
     expect(texts('primary', IMPULSE, 'plain')).toEqual(IMPULSE);
-    expect(texts('minor', IMPULSE, 'circled')).toEqual(IMPULSE.map(t => `[${t}]`));
-    expect(texts('cycle', CORRECTION, 'parentheses')).toEqual(['(0)', '(A)', '(B)', '(C)']);
-    expect(texts('subminuette', IMPULSE, 'degree')).toEqual(['0', 'i', 'ii', 'iii', 'iv', 'v']);
+    expect(texts('minor', IMPULSE, 'circled')).toEqual(IMPULSE.map(t => t && `[${t}]`));
+    expect(texts('cycle', CORRECTION, 'parentheses')).toEqual(['', '(A)', '(B)', '(C)']);
+    expect(texts('subminuette', IMPULSE, 'degree')).toEqual(['', 'i', 'ii', 'iii', 'iv', 'v']);
   });
 
-  it('reads an unknown degree or style, or none at all, as plain Minor', () => {
-    expect(texts('nonsense', IMPULSE, 'nonsense')).toEqual(IMPULSE);
-    expect(elliottLabels(IMPULSE, undefined).map(l => l.text)).toEqual(IMPULSE);
+  it('reads an unknown degree or style, or none at all, as Intermediate', () => {
+    const intermediate = ['', '(1)', '(2)', '(3)', '(4)', '(5)'];
+    expect(texts('nonsense', IMPULSE, 'nonsense')).toEqual(intermediate);
+    expect(elliottLabels(IMPULSE, undefined).map(l => l.text)).toEqual(intermediate);
+    expect(elliottLabels(CORRECTION, {}).map(l => l.text)).toEqual(['', '(A)', '(B)', '(C)']);
     expect(elliottLabels(CORRECTION, {}).every(l => !l.ring)).toBe(true);
   });
 
-  it('defaults its settings to the labels the wave tools always drew', () => {
-    expect(ELLIOTT_FIELDS.map(f => [f.path, f.defaultValue])).toEqual([['props.degree', 'minor'], ['props.labelStyle', 'degree']]);
+  it('defaults its settings to Intermediate, numbered in parentheses', () => {
+    expect(ELLIOTT_FIELDS.map(f => [f.path, f.defaultValue])).toEqual([['props.degree', 'intermediate'], ['props.labelStyle', 'degree']]);
     expect(ELLIOTT_FIELDS[0]!.options).toHaveLength(9);
   });
 });
@@ -79,7 +83,7 @@ const rc = (dpr = 1): PrimitiveRenderContext => ({
 const point = (time: number, price: number): DrawingPoint => ({ time, price });
 const tool = (id: string) => PATTERN_DRAWING_TOOLS.find(t => t.id === id)!;
 function paint(d: Drawing, context = rc()): RecordingContext {
-  const rec = new RecordingContext();
+  const rec = new FontMeasuringContext();
   tool(d.tool).draw({
     ctx: rec as unknown as CanvasRenderingContext2D, rc: context,
     pts: d.points.map(p => ({ x: p.time * context.dpr, y: (600 - p.price) * context.dpr })),
@@ -90,26 +94,68 @@ function paint(d: Drawing, context = rc()): RecordingContext {
 const wave = (id: string, points: DrawingPoint[], props?: Record<string, unknown>): Drawing =>
   ({ id: 'w', tool: id, points, style: { showLabels: true }, paneIndex: 0, zIndex: 0, ...(props ? { props } : {}) });
 const labelsOf = (rec: RecordingContext): string[] => rec.ops.filter(op => op.type === 'fillText').map(op => op.text!);
+const MINOR = { degree: 'minor' };
 const IMPULSE_POINTS = [point(100, 100), point(200, 300), point(300, 200), point(400, 450), point(500, 350), point(600, 500)];
 
 describe('a wave count on the chart', () => {
   it('draws a ring round each circled label, solid whatever the line\'s dash', () => {
     const plain = paint(wave('elliott-impulse', IMPULSE_POINTS));
     const circled = paint(wave('elliott-impulse', IMPULSE_POINTS, { degree: 'primary' }));
-    expect(labelsOf(circled)).toEqual(IMPULSE);
-    expect(circled.count('arc') - plain.count('arc')).toBe(6);
+    expect(labelsOf(circled)).toEqual(['1', '2', '3', '4', '5']);
+    expect(circled.count('arc') - plain.count('arc')).toBe(5);
     const dashed = wave('elliott-impulse', IMPULSE_POINTS, { labelStyle: 'circled' });
     dashed.style.lineStyle = 'dashed';
     const rec = paint(dashed);
     // The legs are dashed, and each ring sets the dash back to solid before it strokes.
     const dashes = rec.ops.filter(op => op.type === 'setLineDash');
     expect(dashes.some(op => op.args.length > 0)).toBe(true);
-    expect(dashes.filter(op => op.args.length === 0)).toHaveLength(6);
+    expect(dashes.filter(op => op.args.length === 0)).toHaveLength(5);
   });
 
   it('labels the degree it is given', () => {
     expect(labelsOf(paint(wave('elliott-correction', IMPULSE_POINTS.slice(0, 4), { degree: 'minuette' }))))
-      .toEqual(['(0)', '(a)', '(b)', '(c)']);
+      .toEqual(['(a)', '(b)', '(c)']);
+  });
+
+  it('numbers the waves from the second point placed, and leaves the origin unlabelled', () => {
+    // The first point is where wave 1 starts, so the first label is on the second point.
+    const rec = paint(wave('elliott-impulse', IMPULSE_POINTS));
+    expect(labelsOf(rec)).toEqual(['(1)', '(2)', '(3)', '(4)', '(5)']);
+    expect(labelsOf(paint(wave('elliott-impulse', IMPULSE_POINTS, MINOR)))).toEqual(['1', '2', '3', '4', '5']);
+    for (const [id, labels] of [
+      ['elliott-correction', ['(A)', '(B)', '(C)']],
+      ['elliott-triangle', ['(A)', '(B)', '(C)', '(D)', '(E)']],
+      ['elliott-double-combo', ['(W)', '(X)', '(Y)']],
+      ['elliott-triple-combo', ['(W)', '(X)', '(Y)', '(X)', '(Z)']],
+    ] as const) {
+      const n = getDrawingTool(id).points;
+      expect(labelsOf(paint(wave(id, IMPULSE_POINTS.slice(0, n)))), id).toEqual(labels);
+    }
+    // While it is placed, the point after the origin is already wave 1.
+    expect(labelsOf(paint(wave('elliott-impulse', IMPULSE_POINTS.slice(0, 2))))).toEqual(['(1)']);
+  });
+
+  it('centres each label on its pivot, above a peak and below a trough, a size over other drawing text', () => {
+    for (const dpr of [1, 2]) {
+      const texts = paint(wave('elliott-impulse', IMPULSE_POINTS), rc(dpr)).ops.filter(op => op.type === 'fillText');
+      expect(texts).toHaveLength(5);
+      texts.forEach((op, i) => {
+        const pivot = IMPULSE_POINTS[i + 1]!;
+        const [x, y] = (op.args as [number, number]).map(v => v / dpr) as [number, number];
+        // The text's middle is on the pivot's column, at every ratio.
+        expect(x + op.text!.length * 14 * 0.6 / 2).toBeCloseTo(pivot.time, 6);
+        // Waves 1, 3 and 5 end on peaks, 2 and 4 on troughs. The text's bottom
+        // edge is its anchor, so a label below stands its own size further down.
+        const pivotY = 600 - pivot.price;
+        if (i % 2 === 0) expect(y).toBe(pivotY - 8);
+        else expect(y).toBe(pivotY + 8 + 14);
+        expect(op.font).toContain(`${14 * dpr}px`);
+      });
+    }
+    // A pattern's labels keep the size and the place they had.
+    const xabcd = paint(wave('xabcd-pattern', IMPULSE_POINTS.slice(0, 5))).ops.filter(op => op.type === 'fillText');
+    expect(xabcd[0]!.args).toEqual([IMPULSE_POINTS[0]!.time + 4, 600 - IMPULSE_POINTS[0]!.price + 14]);
+    expect(xabcd[0]!.font).toContain('11px');
   });
 
   it('keeps two circled labels that land close together from overlapping', () => {
@@ -127,21 +173,23 @@ describe('a wave count on the chart', () => {
     expect(Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!)).toBeGreaterThanOrEqual(a[2]! + b[2]!);
   });
 
-  it('shows the origin of a count placed with one, even on its first wave\'s end', () => {
+  it('draws the first wave of a count placed with an origin, even on its first wave\'s end', () => {
     // Only a tool that had no origin through 2.7.0 can carry one that stands for none.
     const points = [point(100, 100), point(100, 100), point(300, 200), point(400, 50), point(500, 150), point(600, 100)];
-    expect(labelsOf(paint(wave('elliott-triangle', points)))).toEqual(['0', 'A', 'B', 'C', 'D', 'E']);
+    const rec = paint(wave('elliott-triangle', points, MINOR));
+    expect(labelsOf(rec)).toEqual(['A', 'B', 'C', 'D', 'E']);
+    expect(rec.count('stroke')).toBe(5);
   });
 
-  it('hides the origin of an upgraded count until it is moved off wave one', () => {
+  it('draws no first wave for an upgraded count until its origin is moved off wave one', () => {
     // A 2.7.0 impulse, upgraded: its origin is a copy of its first anchor.
-    const upgraded = wave('elliott-impulse', withWaveOrigin('elliott-impulse', IMPULSE_POINTS.slice(1)));
+    const upgraded = wave('elliott-impulse', withWaveOrigin('elliott-impulse', IMPULSE_POINTS.slice(1)), MINOR);
     const rec = paint(upgraded);
     expect(labelsOf(rec)).toEqual(['1', '2', '3', '4', '5']);
     // Four legs, as 2.7.0 drew: no zero-length leg from the origin to wave one.
     expect(rec.count('stroke')).toBe(4);
-    const moved = paint(wave('elliott-impulse', IMPULSE_POINTS));
-    expect(labelsOf(moved)).toEqual(IMPULSE);
+    const moved = paint(wave('elliott-impulse', IMPULSE_POINTS, MINOR));
+    expect(labelsOf(moved)).toEqual(['1', '2', '3', '4', '5']);
     expect(moved.count('stroke')).toBe(5);
   });
 });

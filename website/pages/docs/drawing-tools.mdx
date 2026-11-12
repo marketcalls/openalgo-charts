@@ -108,30 +108,34 @@ its width.
 
 ## Elliott wave counts
 
-Five tools label a wave count from the origin it starts at, the end of the wave before
-it: `elliott-impulse` (0 1 2 3 4 5, six anchors), `elliott-correction` (0 A B C, four),
-`elliott-triangle` (0 A B C D E, six), `elliott-double-combo` (0 W X Y, four) and
-`elliott-triple-combo` (0 W X Y X Z, six).
+Five tools draw a wave count from the origin it starts at, point 0, the end of the wave
+before it. The first click places the origin, which has no label of its own, and each click
+after it ends a wave and names it: `elliott-impulse` (1 2 3 4 5, six anchors),
+`elliott-correction` (A B C, four), `elliott-triangle` (A B C D E, six),
+`elliott-double-combo` (W X Y, four) and `elliott-triple-combo` (W X Y X Z, six). While a
+count is placed it is drawn as far as it goes, so the second click already shows wave 1 and
+its label. Each label is centred over the point it names, above a peak and below a trough.
 
 Two settings choose how the labels read. **Degree** (`props.degree`) runs from Grand
 Supercycle to Subminuette: the three largest degrees count in upper Roman numerals, the
 middle three in Arabic and the three smallest in lower Roman, each family circled, in
 parentheses and plain from its largest degree down, so a count reads apart from the one it
-subdivides. Minor, the default, is plain `1 2 3 4 5` and `A B C`. **Label style**
+subdivides. Intermediate, the default since 2.7.2, is `(1) (2) (3) (4) (5)` and
+`(A) (B) (C)`; Minor is the same in plain numerals and letters. **Label style**
 (`props.labelStyle`) keeps the degree's own form or forces plain, parentheses or circled.
 
 ```ts
 draw.add({
   tool: 'elliott-impulse', paneIndex: 0, style: {},
-  points: [p0, p1, p2, p3, p4, p5],          // the origin first
-  props: { degree: 'intermediate' },         // (0) (1) (2) (3) (4) (5)
+  points: [p0, p1, p2, p3, p4, p5],          // the origin first, unlabelled
+  props: { degree: 'minor' },                // 1 2 3 4 5
 });
 ```
 
 Through 2.7.0 the impulse took five anchors and the correction three, with no origin, so
 the first wave was never drawn. A saved count of that shape is given an origin on its first
-anchor when it loads, and when a host adds one: it draws no label and no leg there, so the
-count looks as it did, and dragging that point away draws the first wave.
+anchor when it loads, and when a host adds one: it draws no leg there, and dragging that
+point away draws the first wave.
 
 ## Anchored analysis
 
@@ -1058,11 +1062,12 @@ draw.setTool('zigzag');
 Geometry helpers are exported: `distToSegment`, `distToLine`, `distToPolyline`,
 `distToRect`, `distToEllipse`, `rectOf`, `extendSegment`.
 
-Two optional fields change how a tool is *placed*:
+Three optional fields change how a tool is *placed*:
 
 | Field | Effect |
 |---|---|
 | `freehand: true` | Sample the cursor while the pointer is held and commit on release: one press-drag-release is one stroke. Only the first and last anchors get grab handles. Requires `points: 0`. |
+| `progressive: true` | Paint the tool itself while it is placed, from its second anchor on, in place of the dashed guide other multi-anchor tools show. Declare it only when `draw` reads the anchors it is given and asks for no more than two. The Elliott counts set it, so each click shows the wave it ends and its label. |
 | `expand(clicked, ctx)` | Turn the anchors actually clicked into the tool's full anchor set, so it can place a complete, editable default from fewer clicks. `ctx` carries `barSeconds` and `visibleBars`, and `toPixel` / `fromPixel` when the host can map coordinates, so a default can be sized in pixels and fall back to chart units when it cannot. |
 | `constrain(points, handle)` | Keep the anchors consistent after one moves: a handle drag (`handle` is its index) or a `points` patch (`handle` is `null`). Returns the anchors to store. Pure. The position tools use it to hold the stop and the target on opposite sides of the entry. |
 
