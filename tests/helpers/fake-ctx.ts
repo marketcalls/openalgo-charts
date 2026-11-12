@@ -98,3 +98,18 @@ export function makeCtx(): { ctx: CanvasRenderingContext2D; rec: RecordingContex
   const rec = new RecordingContext();
   return { ctx: rec as unknown as CanvasRenderingContext2D, rec };
 }
+
+/**
+ * A recording context that measures text by the size of its font, six tenths
+ * of the size a character, as a canvas does: a font twice the size measures
+ * twice as wide. Placement that depends on a measured width (a centred label)
+ * then lands at the same CSS position at every device pixel ratio, as it does
+ * in a browser; the flat six px a character above would move it.
+ */
+export class FontMeasuringContext extends RecordingContext {
+  public override measureText(t: string): { width: number } {
+    // The size is the token that ends in px; read without a pattern, so no input can make it slow.
+    const size = Number.parseFloat(this.font.split(' ').find(token => token.endsWith('px')) ?? '10');
+    return { width: t.length * size * 0.6 };
+  }
+}
