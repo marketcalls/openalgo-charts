@@ -8,12 +8,23 @@ const controllers: DataLoadingController[] = [];
 afterEach(() => { controllers.splice(0).forEach(controller => controller.destroy()); });
 
 describe('controller independent lifecycle review', () => {
-  it('lets authoritative refresh replace a live close observed before the request', async () => {
+  it('keeps a live close observed before the request over the refresh snapshot', async () => {
     let calls = 0;
     const controller = new DataLoadingController({ getBars: async () => [bar(200, ++calls === 1 ? 10 : 20)] }, { now: () => 300 });
     controllers.push(controller);
     await controller.load(req);
     controller.pushBar(bar(200, 15));
+    await controller.refresh();
+    // The extremes are the union; the close stays with the stream, which is
+    // ahead of a history snapshot of the forming bar.
+    expect(controller.bars()[0]).toMatchObject({ high: 20, close: 15 });
+  });
+
+  it('takes the refresh close for a forming bar the stream has not delivered', async () => {
+    let calls = 0;
+    const controller = new DataLoadingController({ getBars: async () => [bar(200, ++calls === 1 ? 10 : 20)] }, { now: () => 300 });
+    controllers.push(controller);
+    await controller.load(req);
     await controller.refresh();
     expect(controller.bars()[0].close).toBe(20);
   });

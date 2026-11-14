@@ -146,7 +146,7 @@ describe('managed chart data loading', () => {
     expect(options?.seedFrom).toEqual(bar(300, 23825, 20));
   });
 
-  it('keeps stale history visible after recovery fails and supports retry', async () => {
+  it('keeps stale history visible after recovery fails, follows live bars, and supports retry', async () => {
     let loads = 0;
     const controller = make({ getBars: async () => {
       if (++loads === 2) throw new Error('offline');
@@ -156,6 +156,10 @@ describe('managed chart data loading', () => {
     await controller.refresh();
     expect(controller.getState().status).toBe('stale');
     expect(controller.bars()[0].close).toBe(23802);
+    // A failed refresh holds nothing back: a live bar after it is displayed.
+    controller.pushBar(bar(200, 23805));
+    expect(controller.getState()).toMatchObject({ status: 'stale', reason: 'live' });
+    expect(controller.getState().bars.map(value => value.time)).toEqual([100, 200]);
     await controller.refresh();
     expect(controller.getState().status).toBe('ready');
     expect(controller.bars()[0].close).toBe(23810);

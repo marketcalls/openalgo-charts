@@ -87,19 +87,22 @@ export function intervalToSeconds(interval: string): number {
 }
 
 /**
- * Per-tick quantity for the aggregator path, honouring the configured volume
- * mode. `day-delta` feeds arrive as a cumulative day total, so the bar wants
- * the difference; a total that went backwards is the daily reset, and the new
- * value is then the first delta of the new day.
+ * Per-tick quantity for the aggregator path. A frame's own quantity counts in
+ * `ltq-sum`; otherwise a cumulative day total gives the difference, where a
+ * total that went backwards is the daily reset and the new value is the first
+ * delta of the new day. A frame with neither adds nothing and leaves the
+ * running total alone, rather than reading as a reset to zero.
  */
 function volumeDeltaReader(mode: VolumeMode, cumSoFar?: number): (e: LtpEvent) => number {
-  if (mode === 'ltq-sum') return (e) => e.ltq ?? 0;
   let lastCum: number | null = cumSoFar ?? null;
   return (e) => {
-    const cum = e.volume ?? 0;
-    const delta = lastCum === null ? 0 : cum < lastCum ? cum : cum - lastCum;
-    lastCum = cum;
-    return Math.max(0, delta);
+    const cum = e.volume;
+    let delta = 0;
+    if (cum !== undefined) {
+      delta = lastCum === null ? 0 : cum < lastCum ? cum : cum - lastCum;
+      lastCum = cum;
+    }
+    return mode === 'ltq-sum' && e.ltq !== undefined ? e.ltq : Math.max(0, delta);
   };
 }
 
@@ -123,10 +126,10 @@ export class OpenAlgoLiveDataFeed implements DataFeed {
     this._volumeMode = config.volumeMode ?? 'ltq-sum';
     this._timezone = config.timezone;
     this._depthLevel = config.depthLevel;
-    // LTP frames carry a price and a last-traded quantity, nothing else, so a
-    // day-delta builder subscribed to LTP diffs a volume that never arrives and
-    // every bar comes out at zero. The cumulative day total is a Quote-mode
-    // field, which is what the documented option always meant.
+    // LTP frames carry a price and a time, and a last-traded quantity only
+    // where the broker adds one, so a day-delta builder subscribed to LTP
+    // diffs a volume that never arrives. The cumulative day total is a
+    // Quote-mode field, which is what the documented option always meant.
     this._tickMode = this._volumeMode === 'day-delta' ? 'Quote' : 'LTP';
     this._ws.connect();
   }
@@ -235,21 +238,31 @@ export class OpenAlgoLiveDataFeed implements DataFeed {
     // session-anchored code back on the epoch grid: hourly bars anchored to a
     // 09:15 open then formed at 03:00 UTC live and 03:45 UTC in history, one
     // interval disagreeing with itself. Same rule `bucketStartOf` applies to
-    // the codes the aggregator path handles.
+    // the codes the aggregator path handles. A code that declares no anchor
+    // takes the grid of the history it continues, whose bars open on it: an
+    // NSE hour at 09:15 IST, a day at IST midnight and a week on Monday are
+    // all off the epoch grid, and a day at 00:00 UTC is on it as before.
     const builder = new CandleBuilder({
       intervalSec: bucketing.seconds,
-      sessionAnchorSec: bucketing.anchorSec ?? 0,
+      sessionAnchorSec: bucketing.anchorSec ?? opts?.seedFrom?.time ?? 0,
       volumeMode: this._volumeMode,
     });
     if (opts?.seedFrom) builder.seed(opts.seedFrom, opts.cumDayVolumeSoFar);
+    // The bar a frame last measured volume on. OpenAlgo's LTP frames carry a
+    // price and a time and often nothing else, and a bar built from those alone
+    // has unknown volume, not a confirmed zero; the seeded bar keeps history's.
+    let measured = opts?.seedFrom?.time;
     return (e) => {
-      // cumDayVolume is only consumed in 'day-delta' mode; harmless otherwise.
       const u = builder.onTick({ // a quantity the frame lacks is undefined, which the builder reads as absent
         time: OpenAlgoLiveDataFeed._tickTime(e), price: e.ltp, ltq: e.ltq, cumDayVolume: e.volume,
       } satisfies LooseOptional<Tick> as Tick);
+      if (u === null) return;
+      if (e.volume !== undefined || (e.ltq !== undefined && this._volumeMode === 'ltq-sum')) measured = u.bar.time;
+      const { volume: _unknown, ...unmeasured } = u.bar;
+      const bar = measured === u.bar.time ? u.bar : unmeasured;
       // A bucket the builder opened without having streamed the one before it
       // carries only the ticks it saw; the consumer holds history for the rest.
-      if (u !== null) onBar(u.bar, u.provisional ? { provisional: true } : undefined);
+      onBar(bar, u.provisional ? { provisional: true } : undefined);
     };
   }
 
