@@ -14,6 +14,12 @@
  *  - `'atr'`: `ATR(period) × multiplier` (Wilder), re-resolved per column.
  *  - `'atrPercent'`: `ATR(period) × percent / 100`, a box that is a share of the ATR.
  *
+ * A box is a price level, the lower edge of its glyph: an X column fills each
+ * level its high reaches and an O column each level its low reaches, so a low
+ * of 17.99 under an X column at 20 has not reached 17 and is no three-box
+ * reversal. Levels are counted on the box grid, so a price that touches one
+ * exactly reaches it on a decimal box too (100.3 / 0.1 is 1002.9999999999999).
+ *
  * Each emitted column is a Bar spanning the column's price range, with up =
  * close ≥ open (X) and down = close < open (O). A column's `high` is the
  * **exclusive top edge** of its highest box, so `[low, high)` is exactly the
@@ -22,7 +28,8 @@
  * is the only way variable-box modes can render correctly).
  */
 import type { Bar } from '../model/bar';
-import { addVolume, copyState, withVolume, type ISeriesTransform } from './transform';
+import { addVolume, copyState, isPriced, withVolume, type ISeriesTransform } from './transform';
+import { nearWhole } from '../helpers/math';
 
 export type PointFigureMethod = 'hl' | 'close';
 export type PointFigureBoxMode = 'fixed' | 'percent' | 'atr' | 'atrPercent';
@@ -52,7 +59,11 @@ export interface PointFigureColumn extends Bar {
   boxes: number;
 }
 
-/** Streaming Wilder ATR. Reports the running TR mean during warmup. Shared with Renko; tier-internal. */
+/**
+ * Streaming Wilder ATR. Reports the running TR mean during warmup. Shared with
+ * Renko; tier-internal. It is pushed priced bars only: both transforms skip a
+ * gap first (`isPriced`), as one NaN range would hold it at NaN for good.
+ */
 export class WilderAtr {
   private readonly _period: number;
   private _prevClose = NaN;
@@ -186,6 +197,7 @@ export class PointFigureTransform implements ISeriesTransform {
   }
 
   public push(bar: Bar): Bar[] {
+    if (!isPriced(bar)) return [];
     if (this._mode === 'atr' || this._mode === 'atrPercent') this._atr.push(bar);
 
     // The bar that reverses opens the next column, so its volume is held back
@@ -201,7 +213,7 @@ export class PointFigureTransform implements ISeriesTransform {
     // emit a phantom zero-height column when the first move was down.
     if (Number.isNaN(this._top)) {
       this._box = this._resolveBox(bar.close);
-      const b = Math.floor(bar.close / this._box);
+      const b = Math.floor(nearWhole(bar.close / this._box));
       this._top = b;
       this._bot = b;
       this._dir = 0;
@@ -209,8 +221,9 @@ export class PointFigureTransform implements ISeriesTransform {
       return [];
     }
 
-    const hb = Math.floor(upPrice / this._box);
-    const lb = Math.floor(downPrice / this._box);
+    // The highest level the high reached and the lowest the low reached.
+    const hb = Math.floor(nearWhole(upPrice / this._box));
+    const lb = Math.ceil(nearWhole(downPrice / this._box));
 
     // Direction not established yet: the first real move sets it, still with no
     // column emitted. Ties (an outside bar) resolve up, the classic convention.
@@ -235,8 +248,10 @@ export class PointFigureTransform implements ISeriesTransform {
         out.push(withVolume(this._column(), before));
         this._volume = addVolume(NaN, bar);
         this._box = this._resolveBox(downPrice);
-        this._top = Math.ceil(boundary / this._box) - 1;
-        this._bot = Math.floor(downPrice / this._box);
+        this._top = Math.ceil(nearWhole(boundary / this._box)) - 1;
+        // A larger new box can put the low's level above that start: the
+        // reversal is still one box down at least.
+        this._bot = Math.min(Math.ceil(nearWhole(downPrice / this._box)), this._top);
         this._dir = -1;
         this._time = bar.time;
       }
@@ -249,8 +264,8 @@ export class PointFigureTransform implements ISeriesTransform {
         out.push(withVolume(this._column(), before));
         this._volume = addVolume(NaN, bar);
         this._box = this._resolveBox(upPrice);
-        this._bot = Math.floor(boundary / this._box);
-        this._top = Math.floor(upPrice / this._box);
+        this._bot = Math.floor(nearWhole(boundary / this._box));
+        this._top = Math.floor(nearWhole(upPrice / this._box));
         this._dir = 1;
         this._time = bar.time;
       }

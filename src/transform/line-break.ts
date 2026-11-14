@@ -4,7 +4,7 @@
  * candlestick renderer (each line = a body). Incremental.
  */
 import type { Bar } from '../model/bar';
-import { addVolume, copyState, withVolume, type ISeriesTransform } from './transform';
+import { addVolume, copyState, isPriced, withVolume, type ISeriesTransform } from './transform';
 
 export interface LineBreakOptions {
   /** Prior lines a close must break to draw a new one. Below 1 counts as 1. */
@@ -38,6 +38,7 @@ export class LineBreakTransform implements ISeriesTransform {
   }
 
   public push(bar: Bar): Bar[] {
+    if (!isPriced(bar)) return [];
     const p = bar.close;
     this._volume = addVolume(this._volume, bar);
     if (this._lines.length === 0) {

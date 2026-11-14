@@ -2,6 +2,9 @@
  * Profile data model (ARCHITECTURE.md §6A, Family C). Price-bucketed
  * distributions: volume-at-price, time-at-price (TPO), and bid/ask footprint.
  */
+import type { Bar } from '../model/bar';
+import { gridPrice, gridScale, nearWhole } from '../helpers/math';
+
 export interface VolumeProfileResult {
   /** Volume per price bucket, sorted high to low price. */
   buckets: { price: number; volume: number }[];
@@ -69,9 +72,35 @@ export function sessionsPriceRange(sessions: readonly { readonly levels: readonl
   return Number.isFinite(min) ? { min, max } : null;
 }
 
-/** Bucket a price to the tick grid. */
+/**
+ * A bar's volume for a profile: 0 when it has none to give, absent or not a
+ * finite number of at least zero. One NaN added into a row made every total
+ * NaN and moved the POC to whichever row compared last.
+ */
+export function barVolume(bar: Bar): number {
+  const v = bar.volume;
+  return v !== undefined && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/**
+ * The row holding `price`, in whole steps from zero. Rows are centred on
+ * multiples of the step and a price exactly between two centres belongs to
+ * the upper one, so every row spans `[centre - step / 2, centre + step / 2)`
+ * and holds as many ticks as the next. Halves are found on the doubled
+ * quotient with the float noise taken off: a plain round sent 100.15 and
+ * 100.45 on 0.1 rows opposite ways, so rows held 1, 2 or 3 ticks at random.
+ * The footprint splits such a tick to the even row instead (footprint.ts).
+ */
+function rowIndex(price: number, step: number): number {
+  return Math.floor((nearWhole((price / step) * 2) + 1) / 2);
+}
+
+/**
+ * Bucket a price to the row grid of `step`: the centre of the row holding it,
+ * the upper row for a price exactly between two.
+ */
 export function bucketPrice(price: number, step: number): number {
-  return Math.round((Math.round(price / step) * step) * 1e8) / 1e8;
+  return gridPrice(rowIndex(price, step), step);
 }
 
 /**
@@ -83,15 +112,16 @@ export function bucketPrice(price: number, step: number): number {
 export function priceBuckets(low: number, high: number, step: number): number[] {
   // A negative step would walk away from `high` and never stop.
   if (!(step > 0) || step === Infinity) return [];
-  const lo = bucketPrice(low, step);
-  const hi = bucketPrice(high, step);
-  // Counted before the walk, which takes the same steps as ever: a step that
-  // no longer moves the price, or a price that overflows, would leave a walk
-  // that never passes `hi`.
-  const count = Math.round((hi - lo) / step) + 1;
-  if (!Number.isFinite(count) || lo + step === lo || hi + step === hi) return [];
+  const first = rowIndex(low, step);
+  const last = rowIndex(high, step);
+  const scale = gridScale(step);
+  const lo = gridPrice(first, step, scale);
+  const hi = gridPrice(last, step, scale);
+  // A step that no longer moves the price, or a price that overflows, has no
+  // rows a walk could tell apart.
+  if (!Number.isFinite(last - first) || lo + step === lo || hi + step === hi) return [];
   const out: number[] = [];
-  for (let i = 0, p = lo; i < count; i++, p += step) out.push(bucketPrice(p, step));
+  for (let i = first; i <= last; i++) out.push(gridPrice(i, step, scale));
   return out;
 }
 

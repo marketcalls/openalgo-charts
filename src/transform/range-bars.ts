@@ -2,9 +2,11 @@
  * Range bars (ARCHITECTURE.md §6A). A new bar completes when its high−low
  * reaches the configured range. Built from the close sequence; renders with the
  * candlestick renderer. Incremental: the in-progress bar is emitted by flush().
+ * The range is a threshold, not a fixed span: a close that jumps past it
+ * completes one bar covering the whole jump, never invented bars inside it.
  */
 import type { Bar } from '../model/bar';
-import { addVolume, copyState, settleVolume, withVolume, type ISeriesTransform } from './transform';
+import { addVolume, copyState, isPriced, settleVolume, withVolume, type ISeriesTransform } from './transform';
 
 export interface RangeOptions {
   /** High-to-low span that closes a bar. The constructor throws unless it is above 0. */
@@ -35,6 +37,7 @@ export class RangeBarsTransform implements ISeriesTransform {
   }
 
   public push(bar: Bar): Bar[] {
+    if (!isPriced(bar)) return [];
     const p = bar.close;
     this._volume = addVolume(this._volume, bar);
     const out: Bar[] = [];

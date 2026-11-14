@@ -11,7 +11,7 @@
  * unit-testable and derivable from intraday OHLCV bars alone.
  */
 import type { Bar } from '../model/bar';
-import { bucketPrice, priceBuckets, valueArea } from './profile-model';
+import { barVolume, bucketPrice, priceBuckets, valueArea } from './profile-model';
 import { partsIn, minuteOfDay, sessionKey } from './profile-calendar';
 import { DEFAULT_TIMEZONE, zonedWallClockToUtcSeconds } from '../feed/time';
 
@@ -504,7 +504,7 @@ function buildSession(g: readonly Bar[], r: Resolved): MarketProfileSessionResul
     if (period < r.ibPeriods) { ibHigh = Math.max(ibHigh, b.high); ibLow = Math.min(ibLow, b.low); }
     high = Math.max(high, b.high);
     low = Math.min(low, b.low);
-    const vol = b.volume ?? 0;
+    const vol = barVolume(b);
     totalVolume += vol;
 
     let p = byPeriod.get(period);

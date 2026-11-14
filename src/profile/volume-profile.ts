@@ -6,7 +6,7 @@
  */
 import type { Bar } from '../model/bar';
 import type { VolumeProfileResult } from './profile-model';
-import { priceBuckets, valueArea } from './profile-model';
+import { barVolume, priceBuckets, valueArea } from './profile-model';
 
 /**
  * @deprecated Removed in 3.0.0. No function takes this type:
@@ -37,7 +37,7 @@ export function computeVolumeProfile(
   const vol = new Map<number, number>();
   for (const bar of bars) {
     const buckets = priceBuckets(bar.low, bar.high, tickSize);
-    const share = (bar.volume ?? 0) / buckets.length;
+    const share = barVolume(bar) / buckets.length;
     for (const b of buckets) vol.set(b, (vol.get(b) ?? 0) + share);
   }
   const buckets = Array.from(vol.entries())

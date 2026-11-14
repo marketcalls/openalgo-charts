@@ -1,15 +1,15 @@
 /**
  * Renko bricks (ARCHITECTURE.md §6A). Each box-size move emits one brick.
- * Renders with the candlestick renderer (brick = a body). Simplified
- * single-box step (no 2× reversal rule): deterministic and incremental for
- * live updates.
+ * Renders with the candlestick renderer (brick = a body). A reversal is a
+ * single box like any other step, so the first brick against the trend is
+ * drawn back over the last one rather than after a two-box move from its far
+ * side: deterministic and incremental for live updates.
  *
  * Brick sizing (`mode`), the same choices as point and figure:
  *  - `'fixed'` (default): a constant `boxSize`.
  *  - `'percent'`: `price × percent / 100`, re-resolved as each brick forms.
  *  - `'atr'`: `ATR(atrPeriod) × atrMultiplier` (Wilder), re-resolved as each
  *    brick forms.
- *    multiplier divided by 100.
  *  - `'atrPercent'`: `ATR(atrPeriod) × percent / 100`, a brick that is a share of the ATR.
  *
  * Prices (`method`): `'close'` (default) moves bricks on the close alone;
@@ -18,7 +18,8 @@
  * form bricks the close never reaches.
  */
 import type { Bar } from '../model/bar';
-import { addVolume, copyState, settleVolume, type ISeriesTransform } from './transform';
+import { addVolume, copyState, isPriced, settleVolume, type ISeriesTransform } from './transform';
+import { gridPrice, nearWhole } from '../helpers/math';
 import { WilderAtr, type PointFigureBoxMode } from './point-figure';
 
 export interface RenkoOptions {
@@ -88,27 +89,42 @@ export class RenkoTransform implements ISeriesTransform {
     return pct > 0 ? pct : 1;
   }
 
+  /**
+   * Boxes `p` has moved from the edge. Both are counted on the box grid, so a
+   * move of exactly one decimal box is one: compared as prices, 200 one-box
+   * moves of 0.05 formed 199 bricks.
+   */
+  private _moved(p: number): number {
+    return nearWhole(p / this._box) - nearWhole(this._edge / this._box);
+  }
+
+  /** The edge `dir` boxes on, computed on the grid rather than added, so a run of bricks never drifts off it. */
+  private _next(dir: 1 | -1): number {
+    return gridPrice(nearWhole(this._edge / this._box) + dir, this._box);
+  }
+
   public push(bar: Bar): Bar[] {
+    if (!isPriced(bar)) return [];
     if (this._mode === 'atr' || this._mode === 'atrPercent') this._atr.push(bar);
     this._volume = addVolume(this._volume, bar);
     const out: Bar[] = [];
     if (Number.isNaN(this._edge)) {
       this._box = this._resolve(bar.close);
-      this._edge = Math.floor(bar.close / this._box) * this._box; // anchor, no brick yet
+      this._edge = gridPrice(Math.floor(nearWhole(bar.close / this._box)), this._box); // anchor, no brick yet
       return out;
     }
     const path = this._method === 'close' ? [bar.close] : bar.close >= bar.open ? [bar.low, bar.high] : [bar.high, bar.low];
     for (const p of path) {
-      while (p >= this._edge + this._box) {
+      while (this._moved(p) >= 1) {
         const lo = this._edge;
-        const hi = this._edge + this._box;
+        const hi = this._next(1);
         out.push({ time: bar.time, open: lo, high: hi, low: lo, close: hi }); // up brick (close>open)
         this._edge = hi;
         this._box = this._resolve(hi);
       }
-      while (p <= this._edge - this._box) {
+      while (this._moved(p) <= -1) {
         const hi = this._edge;
-        const lo = this._edge - this._box;
+        const lo = this._next(-1);
         out.push({ time: bar.time, open: hi, high: hi, low: lo, close: lo }); // down brick (close<open)
         this._edge = lo;
         this._box = this._resolve(lo);

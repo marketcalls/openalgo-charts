@@ -7,7 +7,7 @@
  * The kagi renderer connects vertices with a stepped line of varying width.
  */
 import type { Bar } from '../model/bar';
-import { copyState, type ISeriesTransform } from './transform';
+import { copyState, isPriced, type ISeriesTransform } from './transform';
 
 export interface KagiOptions {
   /** Price move that turns the line. The constructor throws unless it is above 0. */
@@ -47,6 +47,7 @@ export class KagiTransform implements ISeriesTransform {
   }
 
   public push(bar: Bar): Bar[] {
+    if (!isPriced(bar)) return [];
     const p = bar.close;
     this._time = bar.time;
     if (Number.isNaN(this._ext)) {
@@ -54,6 +55,10 @@ export class KagiTransform implements ISeriesTransform {
       return [];
     }
     const out: Bar[] = [];
+    // The bar that turns the line also starts the new leg, so it is judged
+    // against the shoulder or waist like any bar extending one: otherwise a
+    // level broken on the turn and the same level broken a bar later drew
+    // different lines.
     if (this._dir >= 0) {
       if (p > this._ext) {
         this._ext = p;
@@ -63,6 +68,7 @@ export class KagiTransform implements ISeriesTransform {
         this._prevShoulder = this._ext;
         this._dir = -1;
         this._ext = p;
+        if (p < this._prevWaist) this._thick = false;
       }
     } else {
       if (p < this._ext) {
@@ -73,6 +79,7 @@ export class KagiTransform implements ISeriesTransform {
         this._prevWaist = this._ext;
         this._dir = 1;
         this._ext = p;
+        if (p > this._prevShoulder) this._thick = true;
       }
     }
     return out;

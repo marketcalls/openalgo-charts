@@ -42,6 +42,17 @@ export function copyState<T extends object>(transform: T): T {
 }
 
 /**
+ * Whether a bar has four finite prices. One without is a gap (a whitespace
+ * point reaches a transform as a NaN bar): the price-driven transforms skip it
+ * as if it were not there, and Heikin Ashi keeps its slot as an empty candle.
+ * One NaN taken into a running ATR, a range bar's extremes or a first line
+ * stays in every element after it.
+ */
+export function isPriced(bar: Bar): boolean {
+  return Number.isFinite(bar.open) && Number.isFinite(bar.high) && Number.isFinite(bar.low) && Number.isFinite(bar.close);
+}
+
+/**
  * The volume traded while an element formed. A price-driven element is many
  * source bars, or a part of one, so a study reading volume on it needs the sum
  * of the bars pushed since the element before it. Without it every volume study

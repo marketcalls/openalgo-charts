@@ -7,7 +7,7 @@
  */
 import type { Bar } from '../model/bar';
 import type { LooseOptional } from '../helpers/types';
-import { copyState, type ISeriesTransform } from './transform';
+import { copyState, isPriced, type ISeriesTransform } from './transform';
 
 export class HeikinAshiTransform implements ISeriesTransform {
   private _prevOpen = NaN;
@@ -23,6 +23,9 @@ export class HeikinAshiTransform implements ISeriesTransform {
   }
 
   public push(bar: Bar): Bar[] {
+    // A gap keeps its slot, one candle per bar, as an empty one, and leaves the
+    // chain alone: averaged in, its NaN close emptied the candle after it too.
+    if (!isPriced(bar)) return [{ time: bar.time, open: NaN, high: NaN, low: NaN, close: NaN }];
     const haClose = (bar.open + bar.high + bar.low + bar.close) / 4;
     const haOpen = Number.isNaN(this._prevOpen)
       ? (bar.open + bar.close) / 2
