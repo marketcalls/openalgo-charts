@@ -140,6 +140,12 @@ export class DataLoadingController {
   private _provisionalTime: number | null = null;
   /** Bucket the stream last delivered, whose close is newer than a history snapshot of it. */
   private _liveTime: number | null = null;
+  /**
+   * The last refresh failed, so what the stream delivered since is newer than
+   * any history this controller holds. Through 2.7.2 those ticks waited in the
+   * buffer and a retry kept them; the buffer is shown now, and this keeps the retry's answer.
+   */
+  private _ahead = false;
   private _repairTimer: ReturnType<typeof setTimeout> | null = null;
   private _repairRetries = 0;
   private _pendingRepair: Repair | null = null;
@@ -188,6 +194,7 @@ export class DataLoadingController {
     this._before = undefined;
     this._provisionalTime = null;
     this._liveTime = null;
+    this._ahead = false;
     const found = tryResolveInterval(req.interval);
     this._seconds = found?.bucketing.mode === 'interval' ? found.bucketing.seconds : null;
     const request = { ...req, signal: undefined, timeoutMs: req.timeoutMs ?? this._options.timeoutMs } satisfies LooseOptional<BarsRequest> as BarsRequest;
@@ -269,7 +276,16 @@ export class DataLoadingController {
     return this._bars;
   }
 
+  /**
+   * Refresh the window from history. A refresh asked for here is
+   * authoritative for the forming bar's close too: a host asks after its
+   * stream reconnected or its page came back, when the stream's last close is
+   * the stale one. The controller's own poll and bar-close repair run while
+   * the stream is live, so they keep the close the stream delivered, and so
+   * does a retry after a failed refresh.
+   */
   public refresh(): Promise<readonly Bar[]> {
+    if (!this._ahead) this._liveTime = null;
     return this._refresh();
   }
 
@@ -301,6 +317,7 @@ export class DataLoadingController {
       if (fresh.length === 0 && this._bars.length) throw new Error('History refresh returned no bars');
       const newest = this._mergeRefresh(fresh, from, to, held, ticked);
       this._buffer = null;
+      this._ahead = false;
       this._limit();
       this._publish('refresh', { status: this._bars.length ? 'ready' : 'empty', error: undefined });
       this._startStream(generation);
@@ -316,6 +333,7 @@ export class DataLoadingController {
       // the stream is followed from here, explicitly stale. Holding it all for
       // a retry that nothing schedules froze the chart and blinded alerts.
       this._buffer = null;
+      this._ahead = true;
       this._limit();
       this._publish('refresh', { status: this._bars.length ? 'stale' : 'error', error: asError(error) });
     } finally {
@@ -584,7 +602,7 @@ export class DataLoadingController {
       }, { seedFrom: this._bars[this._bars.length - 1], onResync: () => {
         if (!this._current(generation) || stream !== this._stream) return;
         // The stream missed something, so its last close is no longer newer than history's.
-        this._liveTime = null;
+        this._ahead = false;
         void this.refresh();
       } } satisfies LooseOptional<BarSubscriptionOptions> as BarSubscriptionOptions);
       if (this._current(generation) && stream === this._stream) this._unsubscribe = unsubscribe;
@@ -607,7 +625,7 @@ export class DataLoadingController {
   private _schedulePoll(): void {
     this._clearPoll();
     if (!this._destroyed && this._visible && this._options.pollIntervalMs! > 0) {
-      this._poll = setTimeout(() => { this._poll = null; void this.refresh(); }, this._options.pollIntervalMs);
+      this._poll = setTimeout(() => { this._poll = null; void this._refresh(); }, this._options.pollIntervalMs);
     }
   }
   private _cancel(): void {

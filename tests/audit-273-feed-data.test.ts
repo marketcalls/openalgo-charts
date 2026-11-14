@@ -4,7 +4,7 @@
  * lags the stream, a derived timeframe fed stale frames, and a warm load whose
  * tail request comes back empty.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAlgoLiveDataFeed } from '../src/feed/openalgo-live';
 import { CandleBuilder } from '../src/feed/candle-builder';
 import { DataLoadingController } from '../src/feed/data-controller';
@@ -137,22 +137,35 @@ const bar = (time: number, close: number): Bar => ({ time, open: 10, high: Math.
 const req: BarsRequest = { symbol: 'AAA', exchange: 'NSE', interval: '1m', from: 100, to: 300 };
 
 describe('a refresh of the forming bar', () => {
-  function streamed(history: () => Bar[]) {
+  function streamed(history: () => Bar[], pollIntervalMs = 0) {
     let push!: (value: Bar) => void;
     let options!: BarSubscriptionOptions;
     const controller = new DataLoadingController({ getBars: async () => history(),
-      subscribeBars: (_request, callback, opts) => { push = callback; options = opts!; return () => {}; } }, { now: () => 300 });
+      subscribeBars: (_request, callback, opts) => { push = callback; options = opts!; return () => {}; } }, { now: () => 300, pollIntervalMs });
     cleanup.push(() => controller.destroy());
     return { controller, push: (value: Bar) => push(value), resync: () => options.onResync!() };
   }
 
-  it('keeps the close the stream showed over a history snapshot that lags it', async () => {
+  it('keeps the close the stream showed over a polled history snapshot that lags it', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const { controller, push } = streamed(() => [bar(200, ++calls === 1 ? 10 : 9)], 100);
+      await controller.load(req);
+      push(bar(200, 15));
+      await vi.advanceTimersByTimeAsync(150);
+      expect(calls).toBe(2);
+      expect(controller.bars()[0]).toMatchObject({ open: 10, high: 15, low: 9, close: 15 });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('takes the history close on a refresh the host asks for', async () => {
     let calls = 0;
     const { controller, push } = streamed(() => [bar(200, ++calls === 1 ? 10 : 9)]);
     await controller.load(req);
     push(bar(200, 15));
     await controller.refresh();
-    expect(controller.bars()[0]).toMatchObject({ open: 10, high: 15, low: 9, close: 15 });
+    expect(controller.bars()[0]).toMatchObject({ high: 15, low: 9, close: 9 });
   });
 
   it('takes the history close after the stream asked to resynchronise', async () => {

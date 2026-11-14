@@ -8,16 +8,16 @@ const controllers: DataLoadingController[] = [];
 afterEach(() => { controllers.splice(0).forEach(controller => controller.destroy()); });
 
 describe('controller independent lifecycle review', () => {
-  it('keeps a live close observed before the request over the refresh snapshot', async () => {
+  it('lets authoritative refresh replace a live close observed before the request', async () => {
     let calls = 0;
     const controller = new DataLoadingController({ getBars: async () => [bar(200, ++calls === 1 ? 10 : 20)] }, { now: () => 300 });
     controllers.push(controller);
     await controller.load(req);
     controller.pushBar(bar(200, 15));
     await controller.refresh();
-    // The extremes are the union; the close stays with the stream, which is
-    // ahead of a history snapshot of the forming bar.
-    expect(controller.bars()[0]).toMatchObject({ high: 20, close: 15 });
+    // A refresh a host asks for is authoritative for the close (OpenAlgo asks
+    // after its stream reconnects); the extremes are still the union.
+    expect(controller.bars()[0]).toMatchObject({ high: 20, close: 20 });
   });
 
   it('takes the refresh close for a forming bar the stream has not delivered', async () => {

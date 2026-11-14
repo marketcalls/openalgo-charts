@@ -323,16 +323,15 @@ describe('provisional bars', () => {
     expect(controller.bars()[1]).toEqual({ time: 120, open: 100, high: 105, low: 99, close: 105, volume: 30 });
   });
 
-  it('a refresh keeps the extremes and the close the stream saw on the forming bar', async () => {
+  it('a refresh keeps the extremes the stream saw on the forming bar', async () => {
     let answers: Bar[] = [bar(60), bar(120)];
     const { feed } = recording(() => answers);
     const controller = make(feed);
     await controller.load(req);
     controller.pushBar({ time: 120, open: 100, high: 110, low: 90, close: 100, volume: 20 });
-    // REST's snapshot of the forming bar predates the spike the stream showed,
-    // so its close is older than the stream's too.
+    // REST's snapshot of the forming bar predates the spike the stream showed.
     answers = [bar(60), { time: 120, open: 100, high: 102, low: 98, close: 101, volume: 25 }];
     await controller.refresh();
-    expect(controller.bars()[1]).toEqual({ time: 120, open: 100, high: 110, low: 90, close: 100, volume: 25 });
+    expect(controller.bars()[1]).toEqual({ time: 120, open: 100, high: 110, low: 90, close: 101, volume: 25 });
   });
 });

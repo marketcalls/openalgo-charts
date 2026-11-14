@@ -507,8 +507,9 @@ refreshes history on `onResync`. Recovery buffers live bars during the fetch,
 bypasses `withBarCache`, merges the observations and preserves the viewport.
 Overlapping volumes use the maximum snapshot. Whole-bar merging can retain seed
 extrema corrected by history; unseen trades are not replayed.
-The forming bar keeps the stream's close once the stream has delivered it, except
-after a resync. A failed refresh keeps visible history marked stale, shows the bars
+On the controller's own poll and bar-close repair the forming bar keeps the close
+the stream delivered; a reconnect, a tab return or `reload()` takes history's close.
+A failed refresh keeps visible history marked stale, shows the bars
 delivered during the request and follows the stream while reconnect monitoring continues. Call `reload()` to retry with fresh history;
 manual reload keeps its usual fit/saved-view behavior. Custom hosts reconcile through
 the optional `BarSubscriptionOptions` contract. See the

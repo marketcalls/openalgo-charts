@@ -744,8 +744,9 @@ Responses and live callbacks from a superseded symbol or interval are ignored.
 
 At matching timestamps, the merge keeps the history open, combines high/low extremes,
 uses the latest buffered close, and takes the maximum volume instead of adding two
-snapshots. The forming bar keeps the stream's close once the stream has delivered it,
-except after a resync, when history's close wins. This repairs the available bars; it does not replay unseen trades.
+snapshots. For the forming bar, the controller's own poll and bar-close repair keep the
+close the stream delivered (2.7.3); a reconnect, a tab return or `widget.reload()` takes
+history's close, unless the previous refresh failed. This repairs the available bars; it does not replay unseen trades.
 Bars without buffered updates retain the authoritative history values. The overlap
 merge is conservative: a buffered candle can retain a seed extreme that history has
 corrected. Exact snapshot/tick reconciliation requires a host-specific protocol.
