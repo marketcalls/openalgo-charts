@@ -324,6 +324,19 @@ describe('drawing linking', () => {
     expect(b.draw.get(d.id)).toBeUndefined();
   });
 
+  it('reads the chart\'s own context on a symbol event for a member added without a source', () => {
+    const a = host(); const b = host(); const group = new DrawingLinkGroup({ enabled: true });
+    a.chart.getDataContext = () => identity;
+    b.chart.getDataContext = () => identity;
+    group.add(a.chart, a.draw); group.add(b.chart, b.draw);
+    const d = add(a.draw); expect(b.draw.get(d.id)).toBeDefined();
+    // A widget publishes the context first, then announces the symbol.
+    b.chart.emit('data:context', identity);
+    b.chart.emit('symbol', identity);
+    expect(b.draw.get(d.id)).toBeDefined();
+    add(a.draw); expect(b.draw.drawings()).toHaveLength(2);
+  });
+
   it('treats missing or failed resolver identity as ineligible', () => {
     const a = host(); const b = host(); const group = new DrawingLinkGroup({ enabled: true });
     let fail = false;

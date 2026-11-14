@@ -113,6 +113,9 @@ export class WidgetStorage {
   private readonly _heard = new Map<string, string | null>();
   private _unsubscribe: (() => void) | null = null;
   private _closed = false;
+  private readonly _listeners = new Set<(name: string) => void>();
+  /** Stops hearing the page's storage events, over a synchronous store someone subscribed to. */
+  private _offPage: (() => void) | null = null;
 
   public constructor(namespace: string, store: StorageLike | AsyncStorageLike | null, options: WidgetStorageOptions = {}) {
     this._ns = STORAGE_PREFIX + namespace + ':';
@@ -150,10 +153,15 @@ export class WidgetStorage {
     try { this._store.setItem(this.key(name), JSON.stringify(value)); return true; } catch { return false; }
   }
 
-  public remove(name: string): void {
-    if (this._async !== null) { this._queue(this.key(name), null); return; }
-    if (this._store === null) return;
-    try { this._store.removeItem(this.key(name)); } catch { /* nothing to remove, or no store */ }
+  /**
+   * True when the removal landed; over an asynchronous store, when it was
+   * taken to be sent. A refused removal reads as false, as a refused write
+   * does, so the caller can keep what it deleted rather than see it return.
+   */
+  public remove(name: string): boolean {
+    if (this._async !== null) { this._queue(this.key(name), null); return true; }
+    if (this._store === null) return false;
+    try { this._store.removeItem(this.key(name)); return true; } catch { return false; }
   }
 
   /** Whether writes can land at all. */
@@ -180,9 +188,28 @@ export class WidgetStorage {
    */
   public close(): void {
     this._closed = true;
+    this._listeners.clear();
+    this._offPage?.();
+    this._offPage = null;
     const off = this._unsubscribe;
     this._unsubscribe = null;
     try { off?.(); } catch { /* a store that fails to let go holds only a listener that now does nothing */ }
+  }
+
+  /**
+   * Hear each change another user of the store makes to a key of this
+   * namespace, by the key's name, once reads answer with it, for a caller
+   * that keeps a state of its own read from the store: what the copy of an
+   * asynchronous store follows (`AsyncStorageLike.subscribe`), or the storage
+   * event the page fires when its own `localStorage` is the store. A key this
+   * copy has changed and not seen land is not heard, since its own value goes
+   * out after. Returns the call that stops listening; `close` stops every
+   * listener. Since 2.7.3.
+   */
+  public subscribe(listener: (name: string) => void): () => void {
+    this._listeners.add(listener);
+    if (this._store !== null && this._offPage === null && !this._closed) this._offPage = storageEvents(this._store, this._ns, key => this._tell(key));
+    return () => { this._listeners.delete(listener); };
   }
 
   /**
@@ -278,8 +305,7 @@ export class WidgetStorage {
         });
       }
       if (this._journaled && !this._memoryOnly && this._pending.size === 0 && this._sending.size === 0 && this._refused.size === 0) {
-        this._journaled = false;
-        try { store.journal?.removeItem(this._journalKey); } catch { /* a journal that stays is replayed once more, harmlessly */ }
+        this._dropJournal(store.journal);
       }
     })();
     this._drain = drain;
@@ -303,6 +329,13 @@ export class WidgetStorage {
     if (!this._loaded) { this._heard.set(key, text); return; }
     if (text === null) this._mirror.delete(key);
     else this._mirror.set(key, text);
+    this._tell(key);
+  }
+
+  private _tell(key: string): void {
+    for (const listener of [...this._listeners]) {
+      try { listener(key.slice(this._ns.length)); } catch { /* one listener's failure is not the copy's */ }
+    }
   }
 
   private _writeJournal(journal: StorageLike | null | undefined): void {
@@ -318,6 +351,19 @@ export class WidgetStorage {
       journal.setItem(this._journalKey, JSON.stringify({ version: 1, entries }));
       this._journaled = true;
     } catch { /* a full or blocked journal leaves the writes to land or not */ }
+  }
+
+  /**
+   * Everything the journal held has landed. One that cannot be removed is
+   * emptied instead: left whole, the next page would replay its values over
+   * every newer write that landed since. One that can be neither is tried
+   * again when the next send settles.
+   */
+  private _dropJournal(journal: StorageLike | null | undefined): void {
+    try { journal?.removeItem(this._journalKey); } catch {
+      try { journal?.setItem(this._journalKey, JSON.stringify({ version: 1, entries: {} })); } catch { return; }
+    }
+    this._journaled = false;
   }
 
   private _report(operation: WidgetStorageError['operation'], key: string, error: unknown): void {
@@ -337,6 +383,23 @@ function readJournal(journal: StorageLike | null | undefined, key: string, prefi
     return Object.entries(parsed.entries).filter((entry): entry is [string, string | null] =>
       entry[0].startsWith(prefix) && (typeof entry[1] === 'string' || entry[1] === null));
   } catch { return []; }
+}
+
+/**
+ * Another tab's change to `storage` under `prefix`, from the storage event
+ * the page fires for it, which only the page's own web storage does: a
+ * synchronous store has no other way to say so. Returns the call that stops
+ * listening. Internal, shared with storage-idb.ts.
+ */
+export function storageEvents(storage: StorageLike, prefix: string, heard: (key: string, value: string | null) => void): () => void {
+  const win = globalThis as { addEventListener?: Window['addEventListener']; removeEventListener?: Window['removeEventListener'] };
+  const changed = (event: StorageEvent): void => {
+    if (event.storageArea === storage && event.key?.startsWith(prefix) === true) heard(event.key, event.newValue);
+  };
+  try { win.addEventListener?.('storage', changed); } catch { /* no other tab to hear from */ }
+  return () => {
+    try { win.removeEventListener?.('storage', changed); } catch { /* never added */ }
+  };
 }
 
 /** `work`, or a rejection after `ms`. */

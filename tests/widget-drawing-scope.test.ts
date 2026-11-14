@@ -130,22 +130,26 @@ describe('the widget keeps drawings per instrument', () => {
     expect(JSON.parse(store.map.get(`${STORAGE_PREFIX}blank:${DRAWINGS_KEY_PREFIX}NSE:AAA`)!).drawings).toHaveLength(1);
   });
 
-  it('restores a layout for another symbol with its drawings and alerts on their own instruments', () => {
+  it('restores a layout for another symbol with its alerts, and the drawings that symbol has stored since', () => {
     const w = make();
     const onA = w.draw.add(line(101));
     const alertA = w.alerts.add({ source: { kind: 'drawing', drawingId: onA.id } });
     show(w, 'BBB');
     const onB = w.draw.add(line(99));
     const alertB = w.alerts.add({ source: { kind: 'drawing', drawingId: onB.id } });
-    // A layout saved on A: A's drawings, and every alert the chart held.
+    // A layout saved on A before its level moved to 101: every alert the
+    // chart held, and an older copy of A's drawings, which A's own document
+    // outranks (a layout's copy only seeds an instrument with none stored).
     const state = w.getState();
-    const layout = { ...state, symbol: 'AAA', chart: { ...state.chart, drawings: { version: 2, drawings: [{ ...onA }] } } };
+    const older = { ...onA, points: [{ ...onA.points[0], price: 95 }] };
+    const layout = { ...state, symbol: 'AAA', chart: { ...state.chart, drawings: { version: 2, drawings: [older] } } };
     const removed: AlertRemovedPayload[] = [];
     w.chart.on('alert:removed', event => removed.push(event as AlertRemovedPayload));
     expect(w.restoreState(layout).applied).toBe(true);
     expect(w.symbol()).toBe('AAA');
     w.series.setData(bars());
     expect(w.draw.drawings().map(d => d.id)).toEqual([onA.id]);
+    expect(prices(w)).toEqual([101]);
     // B's alert was judged against B's drawings, which were on screen, and A's against A's.
     expect(removed).toEqual([]);
     expect(w.alerts.list().map(a => a.id).sort()).toEqual([alertA.id, alertB.id].sort());

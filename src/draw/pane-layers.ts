@@ -105,17 +105,27 @@ export class PaneLayerSet {
     return this._host._drag._lifted.has(d.id) || slotOf(d, entries) === 'above';
   }
 
-  /** Each drawing placed in the series band, with the slot it resolves to now. */
+  /**
+   * Each drawing placed in the series band, with the slot it resolves to now,
+   * and each on a pane the chart does not have, which is listed once it does.
+   */
   public _slotSignature(): string {
     const stacks = new Map<number, readonly string[]>();
+    const panes = this._paneCount();
     let key = '';
     for (const d of this._host._drawings) {
+      if (d.paneIndex >= panes) key += d.id + '\u0001';
       if (d.stackAbove === undefined) continue;
       let entries = stacks.get(d.paneIndex);
       if (entries === undefined) stacks.set(d.paneIndex, entries = this._host._entries(d.paneIndex));
       key += d.id + '\u0000' + slotOf(d, entries) + '\u0000';
     }
     return key;
+  }
+
+  /** How many panes the chart has, or no limit for a host that does not say. */
+  private _paneCount(): number {
+    return this._host._chart.panes?.().length ?? Infinity;
   }
 
   /** List every drawing on the layer of the slot it paints in. */
@@ -144,7 +154,13 @@ export class PaneLayerSet {
         if (list) list.push(d); else lists.series.set(slot.slice('entry:'.length), [d]);
       }
     }
+    // Adding a primitive makes the pane it names, so a drawing kept for a pane
+    // the chart does not have (another instrument's document, saved under a
+    // layout with more panes) gets no layer: it would conjure an empty pane,
+    // which the next save writes into the layout.
+    const panes = this._paneCount();
     for (const [pane, lists] of byPane) {
+      if (pane >= panes) { byPane.delete(pane); continue; }
       const l = this._layerFor(pane);
       l.bottom.setDrawings(lists.below);
       l.top.setDrawings(lists.above);

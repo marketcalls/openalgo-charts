@@ -19,16 +19,18 @@ export type ChartDrawings = Map<string, Map<string, DrawingsDocument>>;
 /**
  * One cell's store, inside `docs`. The documents are copied on the way in,
  * so a later change on the chart never edits one the grid is about to save.
+ * `changed` hears the key of each document the chart writes.
  */
-export function cellDrawingStore(id: string, docs: ChartDrawings): DrawingDocumentStore {
+export function cellDrawingStore(id: string, docs: ChartDrawings, changed: (key: string) => void): DrawingDocumentStore {
   return {
     get: key => docs.get(id)?.get(key) ?? null,
     set: (key, document) => {
       let mine = docs.get(id);
       if (mine === undefined) docs.set(id, mine = new Map());
       mine.set(key, JSON.parse(JSON.stringify(document)) as DrawingsDocument);
+      changed(key);
     },
-    remove: key => { docs.get(id)?.delete(key); },
+    remove: key => { docs.get(id)?.delete(key); changed(key); },
   };
 }
 

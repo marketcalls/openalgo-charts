@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { Chart } from '../src/core/chart';
 import { fakeDocument } from './helpers/fake-dom';
 import { DrawingController } from '../src/draw/index';
+import { DrawingLayer } from '../src/draw/layer';
 import type { DrawingChartHost } from '../src/draw/controller';
 import type { Bar } from '../src/model/bar';
 import type { DataLayer } from '../src/model/data-layer';
@@ -276,7 +277,9 @@ describe('multi-drag', () => {
     const chart = makeChart();
     const draw = new DrawingController(chart);
     // The second pane goes in first: adding it shrinks pane 0, and every price
-    // below is read off the settled layout.
+    // below is read off the settled layout. The pane is made here, because a
+    // drawing on a slot the chart does not have no longer creates one.
+    chart.addPrimitive(new DrawingLayer('bottom'), 1);
     const other = line(draw, { paneIndex: 1, points: [{ time: 1000, price: 0.25 }, { time: 2000, price: 0.5 }] });
     const p0 = chart.coordinateToPrice(300, 0) as number;
     const p1 = chart.coordinateToPrice(200, 0) as number;
