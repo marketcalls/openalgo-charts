@@ -32,7 +32,7 @@ import { isPlainObject } from '../helpers/validate';
 import { isInvisible, withAlpha } from '../render/pill';
 import { DEFAULT_TIMEZONE } from '../feed/time';
 import { nextBucketStart, tryResolveInterval } from '../feed/intervals';
-import { precisionForStep } from '../scale/ticks';
+import { tickPrecision } from '../scale/ticks';
 import {
   indicatorDefaults,
   indicatorStyleInputs,
@@ -142,7 +142,7 @@ function styleDefaults(descriptor: IndicatorDescriptor): IndicatorSettings {
  * 12.35M and the trailing paise are noise.
  */
 function formatValue(v: number, tick?: number): string {
-  if (tick !== undefined && tick > 0) return v.toFixed(precisionForStep(tick));
+  if (tick !== undefined && tick > 0) return v.toFixed(tickPrecision(tick));
   const a = Math.abs(v);
   if (a >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
   if (a >= 1e6) return `${(v / 1e6).toFixed(2)}M`;

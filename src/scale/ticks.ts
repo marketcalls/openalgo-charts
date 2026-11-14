@@ -47,12 +47,33 @@ function tickCount(min: number, max: number, step: number): number {
   return Math.round((end - start) / step) + 1;
 }
 
+/** Whether `x` is a whole number, to the noise a product of decimals carries. */
+function isWhole(x: number): boolean {
+  return Math.abs(x - Math.round(x)) <= 1e-9 * Math.max(1, Math.abs(x));
+}
+
+/**
+ * The step for an instrument quoted in `tick`s: the tick when `step` is finer,
+ * `step` when it is already a whole number of ticks, else the next 1 / 2 / 5
+ * count of ticks above it (0.025 on a 0.01 tick is 0.05). Every rung is then a
+ * price the instrument trades at and prints as itself: a 0.005 step on a 0.01
+ * tick printed 8.095 as "8.10" beside a real 8.10.
+ */
+function tickStep(step: number, tick: number): number {
+  return step <= tick ? tick : isWhole(step / tick) ? step : tick * niceNum(step / tick, false);
+}
+
 /**
  * Generate up to ~`maxTicks` nicely-rounded tick values spanning [min, max].
  * Returns ascending values aligned to the chosen step (may sit slightly inside
  * the range). Returns a single midpoint when the range is degenerate.
+ *
+ * `tick` is the instrument's price increment. Given one, the step is a whole
+ * number of ticks and never finer than one, so a tight range thins its rungs
+ * (to none, on a range narrower than a tick) rather than print prices the
+ * instrument cannot trade at. 0 leaves the step to the span alone.
  */
-export function niceTicks(min: number, max: number, maxTicks = 6): number[] {
+export function niceTicks(min: number, max: number, maxTicks = 6, tick = 0): number[] {
   if (!isFinite(min) || !isFinite(max) || max <= min) {
     return [Number.isFinite(min) ? min : 0];
   }
@@ -69,6 +90,7 @@ export function niceTicks(min: number, max: number, maxTicks = 6): number[] {
   for (let guard = 0; guard < 20 && tickCount(min, max, step) > maxTicks; guard++) {
     step = nextNiceStep(step);
   }
+  if (tick > 0) step = tickStep(step, tick);
   const start = Math.ceil(min / step) * step;
   const end = Math.floor(max / step) * step;
   const ticks: number[] = [];
@@ -82,9 +104,70 @@ export function niceTicks(min: number, max: number, maxTicks = 6): number[] {
   return ticks;
 }
 
+/**
+ * The roundest price in [a, b]: the first multiple of the largest 1 / 2 / 5
+ * step that has one there. Steps down to a fraction of the window always do;
+ * a window too narrow or too far out to measure is `a` itself, as the search
+ * would never end.
+ */
+function roundestIn(a: number, b: number): number {
+  if (!(b - a > 0 && b < Infinity)) return a;
+  for (let e = Math.floor(Math.log10(b)); e >= Math.floor(Math.log10(b - a)) - 1; e--) {
+    for (const m of [5, 2, 1]) {
+      const s = m * Math.pow(10, e), v = Math.ceil(a / s) * s;
+      if (v <= b) return v;
+    }
+  }
+  return a;
+}
+
+/**
+ * The ladder for a logarithmic axis. Equal price steps bunch at the top of a
+ * log axis and spread apart at its foot: the linear ladder over 2 to 3000 put
+ * every label in the top 178 px of 600. Here a slot is an equal share of the
+ * log span, one price ratio, and each rung is the roundest price between one
+ * and two slots above the rung below, so the labels keep their spacing down
+ * every decade on screen: 1, 2, 5, 10 across decades, 100, 120, 150, 200
+ * within one, and much the linear ladder on a narrow range. A range a log
+ * cannot read, or too narrow for one slot to resolve, keeps the linear ladder.
+ */
+export function logTicks(min: number, max: number, maxTicks = 6, tick = 0): number[] {
+  const ratio = Math.pow(max / min, 1 / Math.max(1, maxTicks - 1));
+  if (!(ratio > 1 + 1e-9 && ratio < Infinity)) return niceTicks(min, max, maxTicks, tick);
+  const ticks: number[] = [];
+  for (let low = min; ticks.length < maxTicks;) {
+    let rung = roundestIn(low, low * ratio);
+    // Up to a tick, never down, so the rung keeps its slot above the last. The
+    // margin is relative: an absolute one rounded a rung a billionth of a tick
+    // up to zero.
+    if (tick > 0) rung = Math.ceil((rung / tick) * (1 - 1e-12)) * tick;
+    if (!(rung <= max)) break;
+    ticks.push(rung);
+    low = rung * ratio;
+  }
+  return ticks;
+}
+
+/**
+ * Most decimals a label carries. Eight printed every price under about 1e-7
+ * as 0.00000001; twelve still reads a price of 1e-10 to two figures.
+ */
+const MAX_PRECISION = 12;
+
 /** Decimal places implied by a price step / tick size (for label formatting). */
 export function precisionForStep(step: number): number {
   if (step <= 0 || !isFinite(step)) return 2;
   if (step >= 1) return 0;
-  return Math.min(8, Math.ceil(-Math.log10(step)));
+  return Math.min(MAX_PRECISION, Math.ceil(-Math.log10(step)));
+}
+
+/**
+ * Decimals that print every multiple of `tick` exactly. `precisionForStep`
+ * reads a step's magnitude, right for a span and wrong for a tick: it gives
+ * 0.25 one decimal and 2.5 none, so a valid 100.25 printed as "100.3".
+ */
+export function tickPrecision(tick: number): number {
+  let digits = precisionForStep(tick);
+  while (digits < MAX_PRECISION && !isWhole(tick * Math.pow(10, digits))) digits++;
+  return digits;
 }

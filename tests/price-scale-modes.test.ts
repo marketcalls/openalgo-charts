@@ -383,7 +383,11 @@ describe('linear and logarithmic are unchanged', () => {
   const ranges: [number, number][] = [[90, 110], [0.0001, 0.0009], [19800, 20450], [1, 1000]];
   const prices = [0.0005, 1, 95, 100.05, 110, 20000, 999];
 
-  it('matches the pre-change transform, precision, format and ladder', () => {
+  it('matches the pre-change transform, and the linear precision, format and ladder', () => {
+    // The transform is pinned in both modes. The labels are pinned where they
+    // were right: a linear axis, and its ladder where no tick is declared. A
+    // declared tick now keeps the ladder on tradable prices, and a log axis has
+    // a ladder and decimals of its own: see tests/audit-273-scales-*.test.ts.
     for (const mode of ['linear', 'logarithmic'] as const) {
       for (const [min, max] of ranges) {
         for (const inverted of [false, true]) {
@@ -395,11 +399,12 @@ describe('linear and logarithmic are unchanged', () => {
             ps.setBaseline(100);
             const ref = new ReferenceScale(mode, 400, min, max, inverted, minMove);
             const where = `${mode} [${min},${max}] inv=${inverted} mm=${minMove}`;
-            expect(ps.precision(), where).toBe(ref.precision());
-            expect(ps.ticks(6), where).toEqual(ref.ticks(6));
+            const linear = mode === 'linear';
+            if (linear) expect(ps.precision(), where).toBe(ref.precision());
+            if (linear && minMove === 0) expect(ps.ticks(6), where).toEqual(ref.ticks(6));
             for (const price of prices) {
               expect(ps.priceToY(price), `${where} @ ${price}`).toBe(ref.priceToY(price));
-              expect(ps.format(price), `${where} @ ${price}`).toBe(ref.format(price));
+              if (linear) expect(ps.format(price), `${where} @ ${price}`).toBe(ref.format(price));
             }
             for (const y of [0, 1, 133.5, 400]) {
               expect(ps.yToPrice(y), `${where} @ y${y}`).toBe(ref.yToPrice(y));
