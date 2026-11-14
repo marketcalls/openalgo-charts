@@ -40,9 +40,27 @@ import {
 } from '../model/chart-state';
 import { validateIndicatorInputs } from '../model/indicator-inputs';
 import type { ChartSettingsState } from '../model/chart-settings';
+import type { AxisChromeOptions } from './chart-types';
 import { isValidTimezone } from '../feed/time';
 import type { LooseOptional } from '../helpers/types';
 import { hasOnlyDataProperties, isPlainObject } from '../helpers/validate';
+
+/**
+ * The most panes a restore lays out, and so one more than the last slot a
+ * restored study may name. A portable workspace stops at 32; a host's own
+ * state may hold more, but every pane costs a relayout as it is made and
+ * another as it is pruned, so a saved state asking for thousands stalls the
+ * page for seconds before anything is shown.
+ */
+const MAX_PANES = 256;
+
+/**
+ * The axis-strip switches of a saved state, never its clock. `getState` does
+ * not write the clock, since a callback is not data; one a document supplied
+ * anyway would replace the host's and throw on every frame that reads it.
+ */
+const chromeSwitches = ({ sessionClock, barCountdown }: AxisChromeOptions): AxisChromeOptions =>
+  ({ sessionClock, barCountdown } satisfies LooseOptional<AxisChromeOptions> as AxisChromeOptions);
 
 interface PreparedIndicatorRestore {
   specs: IndicatorState[];
@@ -260,7 +278,7 @@ export class ChartPersistence {
         }
       }
       if (s.panes !== undefined) {
-        if (!Array.isArray(s.panes)) throw new Error('Invalid pane list');
+        if (!Array.isArray(s.panes) || s.panes.length > MAX_PANES) throw new Error(`Invalid pane list, or more than ${MAX_PANES} panes`);
         panes = s.panes.map(pane => parsePaneState(pane, true));
       }
       // Checked with the rest, before anything is applied: a slot that names no
@@ -288,10 +306,10 @@ export class ChartPersistence {
           }
           if (spec.priceScaleId !== undefined && !isPriceScaleId(spec.priceScaleId)) throw new Error('Invalid indicator price scale');
           if (spec.barSource !== undefined) parseIndicatorBarSource(spec.barSource);
+          // Here, not when the study is made: by then the studies it replaces are gone.
+          if (spec.paneIndex !== undefined && !(Number.isInteger(spec.paneIndex) && spec.paneIndex >= 0 && spec.paneIndex < MAX_PANES)) throw new Error('Invalid indicator pane');
           if (spec.instanceId === undefined) continue;
-          if (typeof spec.instanceId !== 'string' || !spec.instanceId.trim() || reservedIds.has(spec.instanceId)) {
-            throw new Error('Invalid or duplicate indicator instance id');
-          }
+          if (typeof spec.instanceId !== 'string' || !spec.instanceId.trim() || reservedIds.has(spec.instanceId)) throw new Error('Invalid or duplicate indicator instance id');
           reservedIds.add(spec.instanceId);
         }
         this._host._reserveAlertStudyIds(alerts, reservedIds);
@@ -382,7 +400,7 @@ export class ChartPersistence {
     if (s.statusLine) this._host.setStatusLineOptions(s.statusLine);
     if (s.watermark) this._host.setWatermarkOptions(s.watermark);
     if (s.trading) this._host.setTradingSettings(s.trading);
-    if (s.axisChrome) this._host.setAxisChromeOptions(s.axisChrome);
+    if (s.axisChrome) this._host.setAxisChromeOptions(chromeSwitches(s.axisChrome));
     if (s.navigation && typeof s.navigation === 'object') this._host._input._patchNavigation(s.navigation);
     if (s.events) this._host.setEventOptions(s.events);
     if (s.crosshairMode) this._host._crosshairMode = s.crosshairMode;

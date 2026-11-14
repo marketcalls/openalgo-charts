@@ -14,7 +14,7 @@
  * lock, a pane): those are the drawing's, not its look.
  */
 import { CatalogQueue, createMemoryCatalogStorage, randomId, type CatalogKind } from './catalog';
-import { list, number, readJson, record, string, WorkspaceDocumentError, type Json } from './json';
+import { CATALOG, list, number, readJson, record, string, WorkspaceDocumentError, type Json } from './json';
 import { createIndexedDbCatalogStorage, type IndexedDbCatalogStorage } from './indexed-db';
 
 /** Named templates per namespace, and values per template. A template is a look, not a library. */
@@ -161,7 +161,7 @@ function parseDefault(input: Json): DrawingToolDefault {
 
 /** Parse the complete catalog before any mutation; corrupt storage is never replaced. */
 export function parseDrawingTemplateCatalog(input: unknown): DrawingTemplateCatalog {
-  const source = record(readJson(input), 'drawing template catalog');
+  const source = record(readJson(input, CATALOG), 'drawing template catalog');
   if (source.version !== 1) throw new WorkspaceDocumentError('Unsupported drawing template catalog version');
   const templates = list(source.templates, 'drawing templates', MAX_TEMPLATES).map(parseTemplate);
   if (new Set(templates.map(item => item.id)).size !== templates.length) throw new WorkspaceDocumentError('Duplicate template ID');

@@ -2,10 +2,10 @@ import type { Chart } from 'openalgo-charts';
 import {
   parseIndicatorTemplatePayload, parseIndicatorTemplate, parseWorkspaceDocument, parseWorkspacePayload,
   type IndicatorTemplateDocument, type IndicatorTemplateInput, type IndicatorTemplatePayload, type WorkspaceDocument, type WorkspaceKind,
-  type WorkspacePayload,
+  type WorkspacePayload, type WorkspaceParseOptions,
 } from './documents';
 import { CatalogQueue, randomId, type CatalogKind } from './catalog';
-import { boolean, list, number, readJson, record, string, WorkspaceDocumentError } from './json';
+import { boolean, CATALOG, list, number, readJson, record, string, WorkspaceDocumentError } from './json';
 import { captureIndicatorTemplate, planIndicatorTemplateState, type IndicatorTemplateApplyOptions, type IndicatorTemplatePlan } from './template-layout';
 import type { IndicatorTemplateMode } from './templates';
 
@@ -92,9 +92,9 @@ export const WORKSPACE_CATALOG: CatalogKind<WorkspaceCatalog> = { parse: parseWo
 
 /** Parse the complete catalog before any mutation; corrupt storage is never replaced. */
 export function parseWorkspaceCatalog(input: unknown): WorkspaceCatalog {
-  const source = record(readJson(input), 'workspace catalog');
+  const source = record(readJson(input, CATALOG), 'workspace catalog');
   if (source.version !== 1) throw new WorkspaceDocumentError('Unsupported workspace catalog version');
-  const workspaces = list(source.workspaces, 'workspaces', 100).map(parseWorkspaceDocument);
+  const workspaces = list(source.workspaces, 'workspaces', 100).map(doc => parseWorkspaceDocument(doc));
   const templates = list(source.templates, 'templates', 100).map(parseIndicatorTemplate);
   const ids = [...workspaces, ...templates].map(item => item.id);
   if (new Set(ids).size !== ids.length) throw new WorkspaceDocumentError('Duplicate document ID');
@@ -113,9 +113,9 @@ function emptyCatalog(): WorkspaceCatalog {
   return { version: 1, revision: 0, workspaces: [], templates: [], recentWorkspaceIds: [], activeWorkspaceId: null, autosave: false };
 }
 
-function documentOf(input: unknown): Document {
+function documentOf(input: unknown, options?: WorkspaceParseOptions): Document {
   const source = record(readJson(input), 'document');
-  if (source.kind === 'workspace') return parseWorkspaceDocument(source);
+  if (source.kind === 'workspace') return parseWorkspaceDocument(source, options);
   if (source.kind === 'indicator-template') return parseIndicatorTemplate(source);
   throw new WorkspaceDocumentError('Unsupported document kind');
 }
@@ -229,8 +229,13 @@ export class WorkspaceRepository implements WorkspaceStore {
     return this._catalog.transact(catalog => { catalog.autosave = value; }, options);
   }
 
+  /**
+   * Store a document from outside the catalog: a file, a link, another
+   * account. Each drawing's and study's policy is dropped (since 2.7.3), so
+   * what it places is the user's own to select, change or delete.
+   */
   async importDocument(input: unknown, options?: WorkspaceOperationOptions): Promise<WorkspaceDocument | IndicatorTemplateDocument> {
-    const doc = documentOf(input);
+    const doc = documentOf(input, { keepPolicy: false });
     return this._catalog.transact(catalog => this._insert(catalog, doc, doc.name), options);
   }
 

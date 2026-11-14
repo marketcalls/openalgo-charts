@@ -61,6 +61,19 @@ import {
 
 const POLICY_FLAGS = ['selectable', 'editable', 'persistent', 'listed'] as const;
 
+/**
+ * A colour as CSS writes one: hex digits, a keyword, or one colour function
+ * over numbers, units and keywords. A colour is painted on a canvas, which
+ * ignores anything else, but a host or the widget may also put it in a
+ * stylesheet value, where text that closes a bracket could add a `url()` the
+ * browser fetches. So the one pair of brackets is the function's own, and no
+ * quote, semicolon or comment gets past this.
+ */
+const COLOR = /^\s*(?:#[\da-f]{3,8}|[a-z]+|(?:rgba?|hsla?|hwb|(?:ok)?l(?:ab|ch)|color(?:-mix)?)\([\w\s.,%/+-]*\))\s*$/i;
+
+/** Whether `v` is a colour a drawing may keep. Internal: the clipboard's gate shares it. */
+export const isColor = (v: unknown): v is string => typeof v === 'string' && COLOR.test(v);
+
 /** Deep enough for anything a tool stores in `props`, shallow enough to stop a cycle. */
 const MAX_PROPS_DEPTH = 8;
 
@@ -177,9 +190,10 @@ function migrateEntry(raw: unknown): Drawing | null {
  */
 function migrateStyle(value: Record<string, unknown>, tool: string): DrawingStyle {
   const out: DrawingStyle = {};
+  // Both string keys are colours, and a colour that is not one goes like any mistyped field.
   for (const key of STYLE_STRINGS) {
     const v = value[key];
-    if (typeof v === 'string') out[key] = v;
+    if (isColor(v)) out[key] = v;
   }
   for (const key of STYLE_NUMBERS) {
     const v = value[key];
@@ -216,7 +230,7 @@ function migrateLevels(value: unknown, tool: string): FibLevel[] | null {
       out.push(upgradeLevel(tool, v, i));
     } else if (isRecord(v) && isNum(v.ratio)) {
       const l: FibLevel = { ratio: v.ratio };
-      if (typeof v.color === 'string') l.color = v.color;
+      if (isColor(v.color)) l.color = v.color;
       if (typeof v.enabled === 'boolean') l.enabled = v.enabled;
       if (typeof v.label === 'string') l.label = v.label;
       out.push(l);

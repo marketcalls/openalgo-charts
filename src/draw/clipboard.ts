@@ -32,7 +32,7 @@
 import type { Drawing, DrawingIntervalRange, DrawingPoint, DrawingStyle, DrawingText, FibLevel } from './types';
 import { DRAWING_STATE_VERSION } from './types';
 import { hasDrawingTool, viewportDrawingTool } from './registry';
-import { migrateDrawings } from './migrate';
+import { isColor, migrateDrawings } from './migrate';
 import { readViewportPoints } from './viewport';
 import { drawingsDocumentVersion, readIntervalRange } from './intervals';
 import {
@@ -194,7 +194,7 @@ function sanitizeLevels(value: unknown): FibLevel[] | null {
       out.push({ ratio: v });
     } else if (isRecord(v) && isNum(v.ratio)) {
       const l: FibLevel = { ratio: v.ratio };
-      if (isShortString(v.color)) l.color = v.color;
+      if (isShortString(v.color) && isColor(v.color)) l.color = v.color;
       if (typeof v.enabled === 'boolean') l.enabled = v.enabled;
       if (isShortString(v.label)) l.label = v.label;
       out.push(l);
@@ -227,7 +227,8 @@ function sanitizeStyle(value: unknown): DrawingStyle | null {
     if (++n > MAX_KEYS) return null;
     if ((LEGACY_TEXT_KEYS as readonly string[]).includes(key)) continue;
     if (oneOf(key, STYLE_STRINGS)) {
-      if (isShortString(v)) out[key] = v;
+      // Both are colours, checked as the migration checks them (see `isColor`).
+      if (isShortString(v) && isColor(v)) out[key] = v;
     } else if (oneOf(key, STYLE_NUMBERS)) {
       if (isNum(v)) out[key] = v;
     } else if (oneOf(key, STYLE_FLAGS)) {
