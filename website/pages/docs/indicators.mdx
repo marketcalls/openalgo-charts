@@ -355,6 +355,13 @@ extreme invalidates that period until the next existing session or calendar
 boundary; a complete subsequent period recovers. Only the final close is used.
 This does not change the existing schedule, display controls or pivot formulas.
 
+Since 2.7.3, `cpr` also needs the prior period's start inside the loaded history. The
+first session, week or month the chart holds may be a slice of the real one (history
+that opens at 12:35, on a Thursday, on the 20th), and nothing before its first bar
+says which, so it never sets a frame: each frame shows no levels through its first two
+loaded periods, as 52 Week High/Low shows nothing until the history covers its window.
+Loading older history then adds levels and never moves one already drawn.
+
 A missing input costs the running studies only the bars it covers, except where a row says
 otherwise:
 
@@ -368,6 +375,8 @@ otherwise:
 | `obv` | A NaN or infinite volume counts as nothing traded, so the bar prints the carried total. A missing close adds nothing on its own bar or on the next, which compares with it; both print the carried total. |
 | `adl` | A NaN or infinite volume counts as nothing traded, so the bar prints the carried total. A bar missing its high, low or close, or whose span or term overflows, is absent and the total stays where it was. |
 | `parabolic-sar` | A bar missing its high, low or close is skipped with the stop, trend and acceleration unchanged. The seed is the first two complete bars, and the clamp reads the two complete bars before each step. |
+| `kama` | A bar with no source value is read as if it were not there: it has no reading, the efficiency window counts the values either side of it, and the average carries on from the last one. Before 2.7.3 one missing close ended the line for good. |
+| `halftrend` | Its level seeds from the first bar with both a high and a low; earlier bars have no reading. Before 2.7.3 a first bar without them left the study blank for the whole chart. |
 | `tema` | Absent when any of its three averages is, or when `3 * ema1 - 3 * ema2 + ema3`, added left to right, is not finite. |
 
 `vwap` and `twap` still restart on a missing bar that opens a new anchor period.
@@ -1200,7 +1209,9 @@ The chart state saves only the restrictions, as `IndicatorState.policy` (`{ remo
 so an unrestricted study saves exactly what it always did and a layout from an older
 release restores its studies unrestricted. A malformed policy refuses the whole restore
 before anything changes; `parseIndicatorPolicy(input)` is the same validation for a host
-of its own, and keeps only the four boolean flags. Workspace documents keep policies.
+of its own, and keeps only the four boolean flags. The workspace repository and the workspace
+document parsers keep policies; `importDocument`, and a parser given `{ keepPolicy: false }`, drop them
+(since 2.7.3).
 
 A portable indicator template is the user's own copy of the user's own studies. It
 leaves out every study the host keeps from the user, one that is not `removable` or
@@ -2110,6 +2121,7 @@ its buckets at 09:30, and a market that trades round the clock at midnight.
 | Case | What happens |
 |---|---|
 | A timeframe no coarser than the chart's interval | The chart's own timeframe: nothing is folded. |
+| A timeframe the chart's interval does not divide into: 5m on a 3m chart, 15m on 10m, a week on 2-day bars, a month on weekly bars | Refused since 2.7.3, as a bar is folded into the bucket it opens in and would carry minutes of the next one into it. The study draws nothing and its data status is `error` with the reason, and the next good setting clears it. A warmup-capable provider is not affected: it requests that timeframe's own bars. Whole multiples fold as before, and so do a day, week or month on intraday bars and a week or month on daily bars. |
 | An unknown code, a tick or volume interval, or a chart whose bars close on trade flow | Refused. `addIndicator` throws; a later `setSettings` sets the study's data status to `error` with the reason, and the next good setting clears it. A layout saved that way restores the study in that status. |
 | The `source` set to another study's output | Refused while a timeframe is set: an output is not a bar that can be folded. |
 | A live tick inside a bucket | The held values stand. The bar that opens a new bucket recomputes the fold once. |

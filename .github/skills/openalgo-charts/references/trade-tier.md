@@ -37,12 +37,14 @@ type OrderStatus = 'pending' | 'working' | 'partial' | 'filled' | 'cancelled' | 
 type OrderRole = 'entry' | 'sl' | 'tp';
 
 interface Order {
-  id: string; symbol: string; side: OrderSide; type: OrderType;
+  id: string; symbol: string; exchange?: string; product?: string; side: OrderSide; type: OrderType;
   qty: number; filledQty: number; price: number;
   triggerPrice?: number; status: OrderStatus; parentId?: string; role?: OrderRole;
 }
-interface Position { symbol: string; netQty: number; avgPrice: number; accountId?: string }  // netQty signed
+interface Position { symbol: string; exchange?: string; product?: string; netQty: number; avgPrice: number; accountId?: string }  // netQty signed
 ```
+
+`exchange` and `product` are set when the provider reports them (since 2.7.3 `OpenAlgoTradeFeed` keeps both from every book row). Symbol and exchange together name a contract, and a book holds one position row per symbol, exchange and product.
 
 `isWorking(o)` is true for `pending | working | partial`, the canonical "still live in the book" filter. Note these are *broker* statuses, distinct from the engine's `ClientOrderState` below.
 
@@ -97,8 +99,8 @@ interface PlaceResult { ok: boolean; clientId?: string; state?: ClientOrderState
 |---|---|
 | `placeOrder(req)` | validate -> idempotency -> gate -> `feed.place` -> `ack`/`reject`. Returns `PlaceResult` |
 | `placeMarket(symbol, side, qty)` | `placeOrder({ symbol, side, type: 'MARKET', qty })` |
-| `requestModify(clientId, price)` | Validates, coalesces, sends at most every `minModifyIntervalMs` |
-| `commitModify(clientId)` | Force-flushes the pending modify. Call on drag end |
+| `requestModify(clientId, price)` | Validates, coalesces, sends at most every `minModifyIntervalMs`. It writes to the broker: call it on release, never from a drag's move callback |
+| `commitModify(clientId)` | Force-flushes the pending modify. Call on release, after `requestModify` |
 | `cancelOrder(clientId)` | `submitCancel` -> `feed.cancel` -> `cancelled`, then cancels the OCO peer |
 | `linkOco(clientIdA, clientIdB)` | Mutual peer link |
 | `onFill(brokerId, full)` | Broker fill in. `full: true` also cancels the peer |
@@ -118,7 +120,9 @@ There is **no `placeLimit`** despite what `website/pages/docs/trading.mdx` shows
 
 ### Idempotency and modify throttling
 
-`clientToken` (or a generated id) is recorded before the network call; a repeat returns `{ ok: false, reason: 'duplicate clientToken (idempotent skip)' }` with no second send. On a thrown `feed.place` the token is **released**, so the same request is retryable after a transient transport failure.
+`clientToken` (or a generated id) is recorded before the network call; a repeat returns `{ ok: false, reason: 'duplicate clientToken (idempotent skip)' }` with no second send. A thrown `feed.place` releases the token only when the error is pre-flight (`isPreflightFailure`: the request provably never left). Any other failure keeps it and leaves the order `AMBIGUOUS`, because a lost answer says nothing about whether the order reached the broker; reconcile with the book before retrying.
+
+**A host that calls `OpenAlgoTradeFeed.place` directly gets the feed's duplicate guard only when it passes a `clientToken`.** Without one, two identical calls are two orders. The engine always sends one, generating it when the request has none.
 
 `requestModify` validates first: an invalid price is neither queued nor sent, and surfaces through `onValidationError(reason)` so the UI can snap the line back. Only the latest price survives coalescing, and the flush no-ops until `place` has acked (it needs the broker id).
 
@@ -200,11 +204,13 @@ interface BracketState { symbol: string; side: OrderSide; entry: number; stop: n
 interface TradeHost { addPrimitive(p: IPrimitive): void; removePrimitive(p: IPrimitive): void }
 
 const tc = new TradeController(chart.tradeHost());  // the price pane; tradeHost(n) for another pane
-tc.reconcile(orders, positions);   // full snapshot; idempotent, safe on every update and reconnect
+tc.reconcile(orders, positions, { symbol: 'RELIANCE', exchange: 'NSE' });  // full snapshot, this chart's instrument only
 tc.onLtp('RELIANCE', 2950);        // pushes into every bound primitive
 ```
 
-`reconcile` diffs by `Order.id` and `Position.symbol`: new -> add, existing -> `update`, missing -> remove. Reconnect needs no special path, a fresh snapshot without a stale order removes its line. Rules: orders failing `isWorking` are skipped; orders with `role: 'sl' | 'tp'` are **excluded from standalone lines** and folded into a `BracketGroup`; a bracket only appears when a non-flat position exists for that symbol (SL uses `triggerPrice ?? price`, TP uses `price`). Introspection: `orderLineCount()`, `positionCount()`, `bracketCount()`.
+**Pass the chart's instrument (`InstrumentKey`, since 2.7.3).** A book covers the whole account. Without the third argument every working order is drawn on this chart and joins its autoscale: a futures order at 52000 stretches an equity chart to 52000, and an order on another exchange sits at a plausible price where a drag would modify it. A row that names no exchange matches on its symbol (the provider did not say); `OpenAlgoTradeFeed.modify` refuses such an order rather than guess its venue. Omitting the argument draws everything, as before 2.7.3.
+
+`reconcile` diffs orders by `Order.id` and positions by symbol, exchange and product (before 2.7.3 by symbol alone, so the last row of a symbol replaced the others): new -> add, existing -> `update`, missing -> remove. Brackets pair with the position of the same key. Two positions of one symbol still share the hit id `position:<symbol>`. Reconnect needs no special path, a fresh snapshot without a stale order removes its line. Rules: orders failing `isWorking` are skipped; orders with `role: 'sl' | 'tp'` are **excluded from standalone lines** and folded into a `BracketGroup`; a bracket only appears when a non-flat position exists for that symbol, exchange and product (SL uses `triggerPrice ?? price`, TP uses `price`). Introspection: `orderLineCount()`, `positionCount()`, `bracketCount()`.
 
 ## `DomLadder`
 
@@ -222,7 +228,7 @@ Pure helpers, exported for custom rendering and tests:
 | Function | Signature | Notes |
 |---|---|---|
 | `ladderCapability` | `(depth) => LadderTier` | `0` levels -> `'none'`; `<= 5` -> `'compact'`; else `'deep'` |
-| `buildRows` | `(depth, tickSize: number \| TickSchedule, groupBy = 1) => LadderRow[]` | Merges bids+asks into `{ price, bidQty, askQty }`, bucketed to `tickSize * groupBy`, sorted high->low. Total qty is preserved across aggregation. With a `TickSchedule` (any non-null object takes this path; a number or numeric string keeps the constant one), each level lands on its band's nearest valid price and a group spans `groupBy` whole ticks of that band, a fraction rounding down, never labelled past a boundary |
+| `buildRows` | `(depth, tickSize: number \| TickSchedule, groupBy = 1) => LadderRow[]` | Merges bids+asks into `{ price, bidQty, askQty }`, bucketed to `tickSize * groupBy`, sorted high->low. Since 2.7.3 a grouped bid lands on the group at or below its price and an ask on the one at or above, so no row shows a better price than the book holds (both used to round to the nearest). Total qty is preserved across aggregation. With a `TickSchedule` (any non-null object takes this path; a number or numeric string keeps the constant one), each level lands on its band's nearest valid price and a group spans `groupBy` whole ticks of that band, a fraction rounding down, never labelled past a boundary |
 | `visibleRows` | `(rows, priceToY, plotHeight, rowHeight, maxRows) => LadderRow[]` | Culls off-screen rows (±1 row), then keeps the `maxRows` nearest the vertical centre, re-sorted high->low |
 
 Depth arrives through the feed's optional `subscribeDepth(req, onDepth)`, `OpenAlgoLiveDataFeed` implements it over WS mode `'Depth'`.
@@ -320,10 +326,25 @@ const controller = new TradeController(chart.tradeHost());
 // Chart hit ids are 'order:<brokerId>'; the engine is addressed by clientId.
 const clientOf = new Map<string, string>();
 const knownBrokerIds = new Set<string>();
+const instrument = { symbol, exchange };   // the one contract this chart shows
+let book = { orders: [], positions: [] };  // the last book read, which a drag previews on
+const drafts = new Map<string, number>();  // 'order:<id>' -> dragged price, local until release
+
+function draw() {
+  const orders = book.orders.map((o) => {
+    const price = drafts.get(`order:${o.id}`);
+    if (price === undefined) return o;
+    return o.triggerPrice !== undefined ? { ...o, triggerPrice: price } : { ...o, price };
+  });
+  controller.reconcile(orders, book.positions, instrument);
+}
 
 async function refreshBook() {
+  // Either read throws when the book cannot be read. That is unknown, not
+  // empty or flat, so the lines already drawn stay until a read succeeds.
   const [orders, positions] = await Promise.all([feed.getOrders(), feed.getPositions()]);
-  controller.reconcile(orders, positions);   // fills, cancels and stale orders all resolve here
+  book = { orders, positions };
+  draw();   // fills, cancels and stale orders all resolve here
 }
 
 async function placeFromChart(side: 'BUY' | 'SELL', type: 'LIMIT' | 'SL', price: number) {
@@ -331,17 +352,30 @@ async function placeFromChart(side: 'BUY' | 'SELL', type: 'LIMIT' | 'SL', price:
   if (!r.ok) return setStatus(`blocked: ${r.reason}`);
   const before = new Set(knownBrokerIds);
   const orders = await feed.getOrders();
-  const fresh = orders.find((o) => !before.has(o.id));
+  const fresh = orders.find((o) => !before.has(o.id) && o.symbol === symbol && o.exchange === exchange);
   if (fresh) { clientOf.set(`order:${fresh.id}`, r.clientId!); knownBrokerIds.add(fresh.id); }
   await refreshBook();
 }
 
-// Drag a working-order line -> throttled modify; release -> commit.
+// A drag moves the line locally; only the release writes to the broker.
+// requestModify sends whenever its interval has passed, so calling it on a
+// move would rest the live order at every price the pointer crosses.
+chart.on('drag:cancel', (payload) => {
+  const { id } = payload as { id: string };
+  if (drafts.delete(id)) draw();   // back to the broker's level
+});
 chart.subscribeDrag(
-  (id, price) => { const c = clientOf.get(id); if (c) engine.requestModify(c, price); },
   (id, price) => {
-    const c = clientOf.get(id);
-    if (c) { engine.requestModify(c, price); void engine.commitModify(c).then(refreshBook); }
+    if (!clientOf.has(id)) return;
+    drafts.set(id, price);
+    draw();
+  },
+  (id) => {
+    const c = clientOf.get(id), price = drafts.get(id);
+    drafts.delete(id);
+    if (c === undefined || price === undefined) return;   // cancelled, or never moved
+    engine.requestModify(c, price);
+    void engine.commitModify(c).finally(refreshBook);
   },
 );
 
@@ -358,6 +392,13 @@ setInterval(refreshBook, 8000);
 Reconciling the fill back onto the chart *is* `refreshBook()`, the filled order drops out of `getOrders()`, `TradeController` removes its line, and the new `Position` grows a `PositionMarker`. Call `controller.onLtp(symbol, ltp)` on every tick so the P&L band and distance labels stay current.
 
 `OpenAlgoTradeFeed.modify` needs the full order context, which it caches on `place()` and `getOrders()`. **Calling `modify()` for an order it has never seen throws** `cannot modify <id>, unknown order context`; call `getOrders()` after a page reload before allowing drags.
+
+What the adapter refuses to read as an answer (2.7.3):
+
+- `getOrders`, `getOrderBook` and `getPositions` throw on an HTTP-success body that says `status: 'error'` or carries no list. Only a list the server sent, empty or not, is a book. Keep what is drawn when a read throws.
+- `getPositions` and `mapPosition` throw on a row with no symbol, an unreadable quantity, or an open quantity with an unreadable average price, naming the field (`positions[3].quantity`). Such a row used to read as flat. A flat row's blank average price reads 0.
+- `cancel` rejects unless the answer says `status: 'success'` or echoes the order id, as `modify` does. That rejection is not pre-flight: the request left, so the order may be gone or still working.
+- `modify` refuses pre-flight, before anything is sent and without touching the cached context, a price or trigger that is not finite and a quantity `place` would refuse (NaN, zero, negative, fractional, off the configured lot grid or over the freeze limit).
 
 ## Foot-guns
 

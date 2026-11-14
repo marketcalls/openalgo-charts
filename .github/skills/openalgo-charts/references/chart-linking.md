@@ -338,7 +338,10 @@ Explicit sharing also reuses matching copies without replacing unrelated local I
 Duplication and paste discard old lineage.
 Preserve the reserved property through host persistence. A changed instrument removes received copies from the member,
 while the host owns its local per-instrument drawing persistence. `data:context`
-updates identity; a `symbol` event invalidates it until complete context arrives.
+updates identity. A `symbol` event reads it again: from the resolver when the member
+has one, and otherwise from the chart's own `getDataContext()`, which a widget has
+published by then (since 2.7.3; before, a member added without a resolver lost its
+identity on `symbol`, dropped the copies it had received and stopped sharing).
 Use `setContext` for another host identity source, or pass a resolver as the third
 `add` argument. The resolver runs on registration and `data:context`/`symbol` events;
 null, undefined, missing identity or a thrown error makes the chart ineligible. For

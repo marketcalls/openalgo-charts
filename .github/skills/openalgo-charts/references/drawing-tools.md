@@ -1130,7 +1130,7 @@ chart.setDataContext({ symbol: 'TCS', exchange: 'NSE', interval: '5m' });   // s
 
 | Export | What it is |
 |---|---|
-| `InstrumentDrawings(chart, controller, options?)` | The helper. `chart` is `InstrumentDrawingsChart`: `on`, and `getDataContext` to read the instrument at the start. |
+| `InstrumentDrawings(chart, controller, options?)` | The helper. `chart` is `InstrumentDrawingsChart`: `on`, and `getDataContext` to read the instrument at the start; optional `panes`, `indicators` and `primaryPaneIndex` (since 2.7.3) let it store which pane each drawing was drawn on. |
 | `createInstrumentDrawings(chart, controller, options?)` | The same, as a function. |
 | `instrumentDrawingsKey(instrument)` | The default key: `NSE:INFY`, or `AAPL` with no exchange; each part URI-encoded; null without a symbol. Case is kept. |
 | `memoryDrawingStore()` | The default store, in memory for the life of the page, a copy per entry. |

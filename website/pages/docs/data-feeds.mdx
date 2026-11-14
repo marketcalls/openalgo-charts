@@ -140,9 +140,10 @@ timestamps. The widget retains the history open, combines high/low extremes, use
 latest buffered close, and takes the maximum volume. This does not reconstruct unseen
 trades. A buffered whole candle can retain a seed extreme that history corrected;
 exact reconciliation needs snapshot/tick ordering the bar contract does not provide.
-Bars without buffered observations keep their authoritative history values. If recovery
-fails, keep the previous display marked stale and offer a retry while continuing to
-collect live observations.
+Bars without buffered observations keep their authoritative history values, and the forming
+bar keeps the stream's close once the stream has delivered it (history's close wins again
+after a resync). If recovery fails, mark the display stale, show the observations collected
+during the request, keep following the stream and offer a retry.
 
 `onBar` is for tail updates. Do not send older gap-fill bars through `series.update()`;
 they need the history replacement path. [The widget](/docs/widget) handles this recovery

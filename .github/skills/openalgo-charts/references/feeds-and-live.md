@@ -29,7 +29,10 @@ it, and keeps the final OI reading. Derived reads require finite ascending dates
 and expand to whole buckets. Pages use explicit source cursors or declared date
 limits; 512 calls / 100,000 observations is an error, not exhausted history.
 Live aggregation bootstraps the active bucket, replaces contributions, propagates
-provisional state and requests resync for older corrections or reconnects.
+provisional state and requests resync when the source stream reconnects. Since
+2.7.3 a source bar from an older bucket, or outside every session, is dropped as
+the native stream drops a bar older than its tail; it no longer refetches history
+and resubscribes, which a quiet contract repeating its last trade time did per frame.
 `CandleBuilderOptions.bucketStart(time)` optionally uses the same calendar rules;
 custom candles preserve accumulated volume across daily counter resets. Hosts
 must filter closed-session ticks before calling the builder.
@@ -212,12 +215,13 @@ const off = live.subscribeBars(req, (bar) => series.update(bar), {
 - The constructor connects the socket immediately.
 - `subscribeBars` resolves the interval code **once, up front** through `resolveInterval`, then creates a **per-subscription** aggregator: a `CandleBuilder` for a fixed-length interval, a `TickBarAggregator` for a calendar, tick-count or volume one. It filters WS ticks by symbol **and** exchange and forwards the bar to `onBar`. Unsubscribing detaches the callback and sends the WS unsubscribe.
 - Resolving up front is deliberate: a bad interval code throws at subscribe time, where the mistake is, instead of silently on every tick for the life of the subscription.
-- `opts.seedFrom` seeds the aggregator with the last history bar so the first tick continues that bucket. It applies to **time-bucketed intervals only**: a count-driven bar cannot resume one whose trades were never counted here. `opts.cumDayVolumeSoFar` gives a `day-delta` builder the right baseline.
+- `opts.seedFrom` seeds the aggregator with the last history bar so the first tick continues that bucket. It applies to **time-bucketed intervals only**: a count-driven bar cannot resume one whose trades were never counted here. `opts.cumDayVolumeSoFar` gives a `day-delta` builder the right baseline. Since 2.7.3 a fixed-length code with no registered `anchorSec` buckets on the seed bar's grid rather than the epoch's, so live bars match history stamped at 09:15 IST (hourly, 30-minute), at IST midnight (daily) or on Monday (weekly). History on the epoch grid, such as a daily bar at 00:00 UTC, buckets exactly as before. The seed must be a bucket-open time, as history bars are.
+- Volume under the default `'ltq-sum'`: a frame's `ltq` is summed when present; a frame without one but with a cumulative day `volume` contributes the change in that total; a frame with neither (OpenAlgo's LTP mode documents only price and time) leaves volume unknown. Since 2.7.3 a bar opened by such frames has no `volume` rather than `0`, and a seeded bar keeps its history volume. Under `'day-delta'` a frame missing the day total no longer reads as a reset.
 - `opts.onResync` is called without arguments when the socket emits `client_warning` with code `STREAM_RESYNC` after reconnect. Replayed subscriptions resume delivery but do not repair missed history. Handle this callback with the history replacement sequence above; unsubscribing also removes this control listener.
 - A tick with no usable timestamp (`timeSec` absent or `<= 0`) is bucketed at `Date.now()`, never at the epoch.
 - `subscribeDepth` subscribes `Depth` and filters the same way.
 
-`createWidget` handles seeding and `onResync` automatically: it requests fresh history with `noCache: true`, merges buffered live bars, replaces the series while preserving the visible logical range, and resubscribes. At matching timestamps it preserves the history open, combines high/low extrema, uses the latest buffered close, and takes the maximum volume to avoid counting overlapping snapshots twice. It does not reconstruct unseen trades. An automatic refresh failure or empty response leaves the existing chart visible with stale-history status and a `data` error; display updates pause while buffering and reconnect monitoring continue. `widget.reload()` retries and keeps the cache bypass until a load succeeds; same-context manual reload preserves the current time anchor and viewport. See [widget](widget.md#live-history-and-reconnect-recovery).
+`createWidget` handles seeding and `onResync` automatically: it requests fresh history with `noCache: true`, merges buffered live bars, replaces the series while preserving the visible logical range, and resubscribes. At matching timestamps it preserves the history open, combines high/low extrema, uses the latest buffered close, and takes the maximum volume to avoid counting overlapping snapshots twice. For the bar that was forming when the request went out, the close also stays with the stream once the stream has delivered that bar (2.7.3), since a history snapshot lags the stream; after `onResync` history's close is taken. It does not reconstruct unseen trades. Display updates pause while the request is out. An automatic refresh failure or empty response leaves the existing chart visible with stale-history status and a `data` error; since 2.7.3 the bars the stream delivered meanwhile are then shown and the display follows the stream, still stale, instead of staying frozen until the next successful refresh. Reconnect monitoring continues. A warm load whose tail request returns no bars is reported the same way (stale, cached bars kept) rather than deleting cached bars and reporting ready. `widget.reload()` retries and keeps the cache bypass until a load succeeds; same-context manual reload preserves the current time anchor and viewport. See [widget](widget.md#live-history-and-reconnect-recovery).
 
 Only buffered timestamps are merged; other bars retain authoritative history. Whole-bar buffers can carry seed extrema that history corrected, so overlapping bars use conservative reconciliation rather than exact snapshot/tick ordering.
 
@@ -232,7 +236,7 @@ Only buffered timestamps are merged; other bars retain authoritative history. Wh
 | Option | Default | Meaning |
 |---|---|---|
 | `intervalSec` | `60` | Bucket size. |
-| `volumeMode` | `'ltq-sum'` | `'ltq-sum'` accumulates `tick.ltq`; `'day-delta'` diffs `tick.cumDayVolume`. |
+| `volumeMode` | `'ltq-sum'` | `'ltq-sum'` accumulates `tick.ltq`, falling back to the change in `tick.cumDayVolume` for a tick without one; `'day-delta'` diffs `tick.cumDayVolume`. A tick with neither adds nothing, as before: a host on such a stream fills the volume from history. (The packaged OpenAlgo live feed reports such a bar's volume as unknown instead, since 2.7.3.) |
 | `lateTickPolicy` | `'foldIntoBar'` | `'foldIntoBar'` merges a tick older than the current bar into it; `'dropOlderThanPrevBar'` returns `null`. |
 | `sessionAnchorSec` | `0` | Bucket alignment origin, in UTC seconds. |
 
@@ -242,7 +246,7 @@ Only buffered timestamps are merged; other bars retain authoritative history. Wh
 
 **Seed the builder from the last history bar, and seed it again after every reconnect.** History normally ends *inside* the forming bucket. An unseeded builder opens a fresh bar for that same bucket at whatever tick arrived first, wrong open, volume restarted at zero, and (if you also keep your own array) a duplicate entry for that time. `seed(lastBar, cumDayVolumeSoFar?)` is the fix; the optional second argument sets the `day-delta` baseline to `cumDayVolumeSoFar - (lastBar.volume ?? 0)`.
 
-**Set `sessionAnchorSec` for any interval that does not divide the trading day evenly.** The default anchors buckets to the epoch, so 5-minute bars start at :00/:05 rather than at the session open: 09:15 in Mumbai, 09:30 in New York. The anchor is UTC seconds and knows nothing about the chart's `timezone`, so compute it from the session open you actually want. `zonedWallClockToUtcSeconds(y, m, d, 9, 30, 0, 'America/New_York')` resolves one on a changeover day without an offset table.
+**Set `sessionAnchorSec` for any interval that does not divide the trading day evenly.** (`OpenAlgoLiveDataFeed.subscribeBars` derives it from `seedFrom` when the interval declares none; a builder used directly does not.) The default anchors buckets to the epoch, so 5-minute bars start at :00/:05 rather than at the session open: 09:15 in Mumbai, 09:30 in New York. The anchor is UTC seconds and knows nothing about the chart's `timezone`, so compute it from the session open you actually want. `zonedWallClockToUtcSeconds(y, m, d, 9, 30, 0, 'America/New_York')` resolves one on a changeover day without an offset table.
 
 ```ts
 import { CandleBuilder } from 'openalgo-charts';
@@ -427,12 +431,14 @@ const trade = new OpenAlgoTradeFeed({
 | `place(req)` | `POST /api/v1/placeorder` -> `{ orderId }` (reads `orderid` or `order_id`) |
 | `modify(orderId, patch)` | `POST /api/v1/modifyorder` |
 | `cancel(orderId)` | `POST /api/v1/cancelorder` |
-| `getOrders()` | `POST /api/v1/orderbook` -> `Order[]` |
-| `getPositions()` | `POST /api/v1/positionbook` -> `Position[]` |
+| `getOrders()` | `POST /api/v1/orderbook` -> `Order[]`; throws on an error body or one with no list |
+| `getPositions()` | `POST /api/v1/positionbook` -> `Position[]`; throws on an error body or a row it cannot read |
 
 Every request sends `apikey` in the body. Non-OK responses surface OpenAlgo's own `message` text (RMS rules, square-off windows) rather than a bare status code.
 
 **`modify` requires the full order context, so it throws for an order this feed has never seen.** OpenAlgo's `modifyorder` needs symbol/action/exchange/pricetype/product/quantity, not just the delta. The feed caches that context on `place` and on `getOrders`; modifying an order placed elsewhere means calling `getOrders()` first.
+
+Since 2.7.3 orders and positions keep `exchange` and `product`, and `mapPosition` throws on a row with no symbol, an unreadable quantity or an open quantity with an unreadable average price: a position that cannot be read is unknown, never flat.
 
 `decodeOrder` / `mapPosition` (exported) coerce OpenAlgo's string-or-number fields and map `order_status` into the chart's vocabulary (`open`/`trigger pending` -> `working`, `pending` -> `pending`, `complete` -> `filled`, `cancelled`, `rejected`; anything else is `'unknown'` with the broker's text in `rawStatus`). `decodeOrder` returns `{ ok: true, order }` or `{ ok: false, issue }` instead of guessing a side or a number. A `trigger_price` of 0 is normalized to `undefined` so an order line does not render at zero. `mapOrder` is deprecated (removed in 3.0.0): it hands back a placeholder row marked `status: 'unknown'` where `decodeOrder` reports the issue, so new code should not call it.
 
@@ -519,6 +525,8 @@ returns `{ bars, hasMore?, nextBefore? }`. Custom cursor values must move backwa
 `getCachedBars(req)` returns an optional closed-bar snapshot without fetching.
 The controller paints it as refreshing and fetches authoritative history; cache
 peek time is bounded to 500 ms. Never treat a warm snapshot as a live forming bar.
+An empty reply to that history request, while cached bars are shown, is a failure
+(status `stale`, cached bars kept) as it is for `refresh()`.
 
 The cache validates entries and writes `CachedBars.version = BAR_CACHE_VERSION`
 (currently 1), accepting valid unversioned legacy entries. Storage failures fall

@@ -250,8 +250,9 @@ instead can reveal a completed candle while replay is still forming it.
 closes on the primary and all visible comparisons. `baselineTime()` returns that
 timestamp, or null when no shared start is available. Comparisons then draw gaps;
 prices are never carried forward. Hiding a source removes it from the anchor
-requirement. Panning and data changes recompute the anchor. Common mode expands
-an automatic primary range to fit relative moves; a manually set range is kept.
+requirement. Panning and data changes recompute the anchor. Both baselines (the default
+first-visible one since 2.7.3) expand an automatic primary range to
+fit relative moves; a manually set range is kept.
 
 ### How the two lines become comparable
 

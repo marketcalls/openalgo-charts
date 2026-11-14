@@ -507,8 +507,9 @@ refreshes history on `onResync`. Recovery buffers live bars during the fetch,
 bypasses `withBarCache`, merges the observations and preserves the viewport.
 Overlapping volumes use the maximum snapshot. Whole-bar merging can retain seed
 extrema corrected by history; unseen trades are not replayed.
-A failed refresh retains visible history marked stale while live buffering and
-reconnect monitoring continue. Call `reload()` to retry with fresh history;
+The forming bar keeps the stream's close once the stream has delivered it, except
+after a resync. A failed refresh keeps visible history marked stale, shows the bars
+delivered during the request and follows the stream while reconnect monitoring continues. Call `reload()` to retry with fresh history;
 manual reload keeps its usual fit/saved-view behavior. Custom hosts reconcile through
 the optional `BarSubscriptionOptions` contract. See the
 [live data guide](https://marketcalls.github.io/openalgo-charts/docs/live-data/).

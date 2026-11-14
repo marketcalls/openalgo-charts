@@ -25,9 +25,11 @@ import { computeMarketProfile, MarketProfile } from 'openalgo-charts/profile';
 
 ### Price bucketing (shared by every compute)
 
-`bucketPrice(price, step)` snaps to the **nearest** multiple of `step`, rounded to 8 dp against float drift: `bucketPrice(100.003, 0.05) === 100`. `priceBuckets(low, high, step)` is inclusive at both ends: `priceBuckets(100, 100.2, 0.05)` is `[100, 100.05, 100.1, 100.15, 100.2]`.
+`bucketPrice(price, step)` snaps to the **nearest** multiple of `step`: `bucketPrice(100.003, 0.05) === 100`. `priceBuckets(low, high, step)` is inclusive at both ends: `priceBuckets(100, 100.2, 0.05)` is `[100, 100.05, 100.1, 100.15, 100.2]`.
 
-**Rows are `tickSize * rowTicks`, and the two are deliberately separate.** `tickSize` is the instrument's real tick; `rowTicks` widens the visual row without lying about it. `rowTicksFor(rowSize, tickSize)` does the division and floors at 1, `rowTicksFor(2, 0.1) === 20`. `computeMarketProfile`, `computeFootprint` and `FootprintAggregator` all take that multiplier, so bricks and TPO rows can share one grid. `computeVolumeProfile` / `computeVolumeProfileSessions` have **no** `rowTicks`; pass a coarser `tickSize`.
+**A price exactly between two row centres goes to the upper row**, so every row spans `[centre - step / 2, centre + step / 2)` and holds the same number of ticks: on 0.1 rows, 100.15 is in 100.2 and 100.25 in 100.3. Since 2.7.3 the half is recognised however binary rounds the division; before, `Math.round(price / step)` sent 100.15 up and 100.35 down (100.15 / 0.1 is 1001.4999999999999), so 0.1 rows of a 0.05 tape held 1, 2 or 3 ticks and moved the POC. Row prices are rounded to 8 decimals, or more for a step finer than 1e-5, so rows of 1e-9 stay apart (through 2.7.2 every row under 1e-8 printed 0).
+
+**Rows are `tickSize * rowTicks`, and the two are deliberately separate.** `tickSize` is the instrument's real tick; `rowTicks` widens the visual row without lying about it. `rowTicksFor(rowSize, tickSize)` does the division and floors at 1, `rowTicksFor(2, 0.1) === 20`. `computeMarketProfile`, `computeFootprint` and `FootprintAggregator` all take that multiplier, so bricks and TPO rows can share one grid. They agree on every price except a tick exactly between two row centres (only possible with an even `rowTicks`): the profile puts it in the upper row, the footprint in the even row (see Row alignment below). `computeVolumeProfile` / `computeVolumeProfileSessions` have **no** `rowTicks`; pass a coarser `tickSize`.
 
 **Bucketing rounds to nearest, so a profile can extend up to half a row past the bar's true high/low.**
 
@@ -41,7 +43,7 @@ import { computeMarketProfile, MarketProfile } from 'openalgo-charts/profile';
 
 Semantics, identical in `computeVolumeProfile`, `computeTpo` and the session family (one shared expansion, which the footprint statistics use too):
 
-- Each bar's volume is spread **uniformly** across `priceBuckets(bar.low, bar.high, tickSize)`, `bar.volume / buckets.length` per row. From OHLCV this is an approximation, not a tick-accurate profile.
+- Each bar's volume is spread **uniformly** across `priceBuckets(bar.low, bar.high, tickSize)`, `bar.volume / buckets.length` per row. From OHLCV this is an approximation, not a tick-accurate profile. A volume that is absent, or not a finite number of at least zero, counts as none, here and in `computeMarketProfile` (since 2.7.3; before, one `NaN` made every total `NaN` and moved the POC).
 - `buckets` / `levels` are always sorted **high price first**.
 - **POC** is the max-volume row; ties resolve to the **highest** price (strict `>` over a descending list).
 - **Value area** starts at the POC and repeatedly absorbs whichever immediate neighbour holds more volume, stopping once accumulated volume reaches `totalVolume * valueAreaPercent`. Ties go **upward**. `vah` / `val` are the extremes reached.
@@ -120,7 +122,7 @@ Returns `MarketProfileResult` = `{ sessions: MarketProfileSessionResult[], optio
 | Field | Meaning |
 |---|---|
 | `levels` | `MarketProfileLevel[]` high to low: `{ price, count, letters, periods, volume }`. |
-| `poc` / `vah` / `val` | Same expansion algorithm as the volume profile, over TPO counts. |
+| `poc` / `vah` / `val` | Same expansion algorithm as the volume profile, over TPO counts. TPO counts are small integers, so a tied longest row is the normal case (more than half of simulated NSE days), and the tie still goes to the **highest** price, not the row nearest the range's middle. |
 | `periodDetail` / `periods` | `MarketProfilePeriod[]` = `{ index, letter, startTime, endTime, high, low, volume }`; `periods` is `maxIndex + 1` and can exceed `periodDetail.length` when a period had no bars. |
 | `initialBalance` / `rangeExtension` | IB from bars with period index `< initialBalancePeriods`; extension is `{ up: max(0, high - ib.high), down: max(0, ib.low - low) }`. |
 | `singlePrints` | Interior levels with `count === 1`; both extremes excluded by construction. |
@@ -246,7 +248,7 @@ Nothing else in this file has that dependency, Volume Profile and Market Profile
 
 `computeFootprint(time, trades, tickSize, rowTicks = 1, options?: FootprintBuildOptions)` returns a `FootprintBar`. `ClassifiedTrade` is `{ price, qty, side: 'bid' | 'ask' }`; `FootprintCell` is `{ price, bidVol, askVol }`. `FootprintBar` requires `{ time, cells, delta }`, with cells high to low and `delta = sum(askVol - bidVol)`. Its optional metadata fields are `rowSize`, `open`, `high`, `low`, `close`, `tradeCount`, `minDelta`, `maxDelta` and `auction` (`{ highBid, highAsk, lowBid, lowAsk }`: every print's bid and ask volume at the exact high and low, before any size filter).
 
-**Row alignment.** A trade is put on its tick (half away from zero), then on its row by round half to even: rows are centred on multiples of `tickSize * rowTicks`, and a tick exactly between two row centres goes to the even row (2-point rows on a 0.05 tick: 22469.00 to 22468, 22471.00 to 22472). Interval bars cover `[start, start + seconds)`, so a trade stamped on a boundary opens the next bar.
+**Row alignment.** A trade is put on its tick (half away from zero), then on its row by round half to even: rows are centred on multiples of `tickSize * rowTicks`, and a tick exactly between two row centres goes to the even row (2-point rows on a 0.05 tick: 22469.00 to 22468, 22471.00 to 22472). That is the one place the footprint and the profiles differ: a profile sends such a tick to the upper row (22469.00 to 22470, 22471.00 to 22472), because a profile spreads a bar across every row its range covers, and even-row ties would give alternate rows `rowTicks + 1` and `rowTicks - 1` ticks. Interval bars cover `[start, start + seconds)`, so a trade stamped on a boundary opens the next bar.
 
 **`FootprintBuildOptions`** is `{ minTradeSize? }`: count only single prints of at least this raw quantity. Smaller prints still open their row (it shows zero) and still set OHLC; volume, delta, delta extremes and `tradeCount` count only the prints that pass. Negative or nonfinite sizes throw.
 

@@ -44,6 +44,15 @@ APIs and inspect failures or partial-restore reports. Preserve the last good sto
 document when a migration fails. Broker orders, positions, credentials and armed
 state do not belong in portable layout files.
 
+A drawing's or a study's `policy` is the host's, not the document's. `restoreState`
+and the workspace repository's own catalog read the host's own state and keep it.
+`parseWorkspaceDocument` and `parseWorkspacePayload` keep it by default, as hosts read
+their own saved state through them. Since 2.7.3 both drop it when given
+`{ keepPolicy: false }`, and `WorkspaceRepository.importDocument` always drops it, so a
+shared file cannot place an object the user cannot select, change or delete. Run a
+document the host did not write through `importDocument`, or a parser with
+`{ keepPolicy: false }`, before restoring it.
+
 ## Deprecated APIs
 
 Each entry keeps working until the release in the "Removed in" column. The

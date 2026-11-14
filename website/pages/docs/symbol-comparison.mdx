@@ -163,7 +163,9 @@ already log and you want it kept that way.
 The default `baseline: 'first-visible'` preserves existing integrations: each source
 uses its own first visible close. For performance comparisons across different calendars,
 choose `comparisonController(chart, { baseline: 'common' })`, before or after adding
-sources, or call `cc.setBaseline('common')` on the controller you hold.
+sources, or call `cc.setBaseline('common')` on the controller you hold. Either way, an
+automatic primary range expands to fit the visible relative moves (the default baseline
+does so since 2.7.3), so a comparison that moves further than the primary stays on the pane.
 
 Common mode selects the first visible timestamp with a positive finite close on the
 primary and every visible comparison. Hidden sources do not constrain the start. Pan,

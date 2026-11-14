@@ -15,7 +15,7 @@ import { DEFAULT_PRICE_SCALE_OPTIONS } from 'openalgo-charts';
 |---|---|---|---|
 | `marginTop` | `number` | `0.1` | Fraction of **pane height** kept empty above the data band. |
 | `marginBottom` | `number` | `0.1` | Fraction of **pane height** kept empty below the data band. |
-| `minMove` | `number` | `0` | Instrument tick size (e.g. `0.05`); for a `TickSchedule`, its `minMove`, the grid every band lies on. `0` infers precision from the visible range. **A chart-wide setter withholds this from a pane that does not quote the instrument**: see below. |
+| `minMove` | `number` | `0` | Instrument tick size (e.g. `0.05`); for a `TickSchedule`, its `minMove`, the grid every band lies on. `0` infers precision from the visible range. Set, it gives the labels the tick's own decimals (since 2.7.3: `0.25` prints two and `2.5` one, where they printed one and none) and keeps the axis ladder on whole multiples of it. **A chart-wide setter withholds this from a pane that does not quote the instrument**: see below. |
 | `minPrecision` | `number` | `0` | Least decimals a scale with no tick prints. Set to 2 on every study pane; ignored once `minMove` is set. |
 | `mode` | `'linear' \| 'logarithmic' \| 'percentage' \| 'indexed-to-100'` | `'linear'` | `logarithmic` maps through `log10`, clamped at `1e-10`. The last two rebase against a baseline, below. |
 | `inverted` | `boolean` | `false` | Price increases downward. |
@@ -47,7 +47,11 @@ ps.baseline;                          // number | null
 - **`reset()` drops the baseline** along with the range, so a pane that loses its last series does not keep quoting the next one against a departed price.
 - **A rebase relabels the pane, it does not reshape it.** The transform is affine over a price-space range, so one series looks identical to its linear self by definition. Two instruments become comparable only when each sits on its own scale with its own baseline, which is what [replay-and-compare](replay-and-compare.md) builds on.
 
-`PriceScale.ticks(maxTicks = 6)` is the axis ladder and belongs to the scale, not the axis renderer. Linear and log get `niceTicks` over the price range; the rebasing modes get nice values chosen over the **transformed** range and mapped back, because a nice price is an ugly percentage (`+3.47%, +6.94%` instead of `+5.00%, +10.00%`).
+`PriceScale.ticks(maxTicks = 6)` is the axis ladder and belongs to the scale, not the axis renderer. Linear gets `niceTicks` over the price range; the rebasing modes get nice values chosen over the **transformed** range and mapped back, because a nice price is an ugly percentage (`+3.47%, +6.94%` instead of `+5.00%, +10.00%`).
+
+**A declared tick bounds the ladder (since 2.7.3).** With `minMove` set, the step is a whole number of ticks and never finer than one, so every rung is a price the instrument trades at and its label is that price. Before, a tight range stepped below the tick and printed each rung rounded: on a `0.01` tick from 8.10 to 8.15 the rungs 8.095 and 8.100 both read `8.10`. A range only a few ticks tall now shows fewer rungs, and one narrower than a tick shows none. With no tick declared the ladder is unchanged.
+
+**A logarithmic axis has its own ladder and decimals (since 2.7.3).** Each label slot is an equal share of the log span, and each rung is the roundest price one to two slots above the rung below: `1, 2, 5, 10, 20, 50 ...` across decades, `100, 120, 150, 200, 250 ...` within one. Through 2.7.2 it used the linear ladder, which over 2 to 3000 put every label in the top 178 px of 600. `precision()` reads a hundredth of the pane at the foot of the range, where a log axis spends the most pixels per price, so a crosshair at 2.35 on that chart reads `2.35` rather than `2`. A range a log cannot read (a minimum at or below zero) keeps the linear ladder.
 
 **How many rungs the axis asks for changed in 1.8.5.** The renderer used to pass a flat 6 whatever the pane measured, so a 700 px chart read one price every 120 px while a reference terminal read one every 30. It now derives the count from the pane height at a fixed spacing, `priceTickCount(plotHeight)` against `PRICE_LABEL_SPACING` (32 px, clamped to 2..30), which puts about twenty prices on that pane instead of six. Both live in `src/render/axis.ts` and are internal, like the axis renderer itself; the number a host sees is simply the denser ladder. The `maxTicks = 6` default on `ticks()` is untouched, and `ticks()` is public: it is a ceiling for a direct caller, not what the axis uses.
 
@@ -62,7 +66,7 @@ ps.baseline;                          // number | null
 | `setPriceRange({ min, max })` | Sets the range and marks the scale as scaled. |
 | `priceRange()` | `{ min, max }`. |
 | `autoscale(low, high)` | Applies `autoscaleRange` with the configured margins, in log space on a logarithmic scale (since 2.6.3). |
-| `scaleAroundCenter(factor)` | `>1` widens, `<1` narrows. Switches to manual. |
+| `scaleAroundCenter(factor)` | `>1` widens, `<1` narrows, in transformed space (since 2.7.3), as the price-axis drag that calls it does: a logarithmic range keeps a positive floor. Switches to manual. |
 | `panByPixels(dy)` | Shifts in transformed space, honours `inverted`. Switches to manual. |
 | `scaled` (getter) | `false` until a real range is applied; the placeholder is `0..1`. |
 
@@ -119,7 +123,7 @@ keyed on the pane an indicator is handed, not on anything in the descriptor, so
 `registerIndicator` needs no precision field and there is no per-indicator list to
 keep in sync.
 
-`priceToY(price)` / `yToPrice(y)` are pane-local media px; `chart.priceToCoordinate` / `chart.coordinateToPrice` add the pane's top offset. `precision()` derives decimals from `minMove` (or `range/100`), `snapToTick(price)` rounds to `minMove`, `format(price)` renders the axis label, `setPriceFormatter(fn | null)` overrides it, `clampY(y)` clamps to the pane. Tick values come from `niceTicks(min, max, maxTicks = 6)` on the 1 / 2 / 2.5 / 5 / 10 ladder.
+`priceToY(price)` / `yToPrice(y)` are pane-local media px; `chart.priceToCoordinate` / `chart.coordinateToPrice` add the pane's top offset. `precision()` derives decimals from the digits of `minMove` (or `range/100`, read at the foot of a logarithmic range; at most 12 since 2.7.3, 8 before), `snapToTick(price)` rounds to `minMove`, `format(price)` renders the axis label, `setPriceFormatter(fn | null)` overrides it, `clampY(y)` clamps to the pane. Tick values come from `niceTicks(min, max, maxTicks = 6, tick = 0)` on the 1 / 2 / 2.5 / 5 / 10 ladder; a `tick` (since 2.7.3) makes the step a whole number of ticks, never finer than one. `precisionForStep(step)` reads only a step's magnitude, so for a tick's own decimals use `scale.precision()`.
 
 ### Autoscale rules
 

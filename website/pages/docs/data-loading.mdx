@@ -67,7 +67,7 @@ bindings and preserves a saved view when the original instrument matches.
 | Operation | Behavior |
 | --- | --- |
 | `load(req)` | Cancel the old context, clear its bars, optionally paint closed cache bars, fetch current history and seed the stream. |
-| `refresh()` | Fetch authoritative history, buffer incoming bars, then publish the merged result. A failure retains a stale display and Retry remains available. |
+| `refresh()` | Fetch authoritative history, buffer incoming bars, then publish the merged result. A failure keeps the existing bars, shows what the stream delivered meanwhile and follows the stream from there, marked stale; Retry remains available. |
 | `loadMore(until?)` | Share a pending page, deduplicate older bars and reject obsolete responses after a context change. `until` (UTC seconds) widens a date feed's window to reach that time in one request, up to `maxBars` bars of a fixed interval; a paged feed keeps its ordinary window and returns one `countBack` page per call. |
 | `pushBar(bar, meta?)` | Accept live bars from an existing host-owned subscription. Omit `feed.subscribeBars` to avoid a second subscription. `meta.provisional` marks a bar whose open is only the first tick a builder saw; it keeps the open history holds for that bucket. |
 | `getState()` / `subscribe(fn)` | Read/observe display bars and typed loading status. Subscribe does not immediately invoke the listener. |
@@ -146,9 +146,13 @@ The OpenAlgo REST adapter bounds both fetch and JSON decoding.
 snapshot for immediate display, followed by authoritative refresh. Durable-store
 read, write, delete or invalid-entry failures fall back to bounded memory. A warm
 snapshot is not a claim that the latest candle is current. Cache reads are bounded
-to 500 ms in the controller, and forming candles are never stored.
+to 500 ms in the controller, and forming candles are never stored. When the
+authoritative request after a warm snapshot returns no bars, the load reports
+`stale` with an error and keeps the cached bars, as a refresh does.
 
-Refresh preserves observed live extrema and close; overlapping whole-bar volumes
+Refresh preserves observed live extrema and close, including the close of the
+forming candle once the stream has delivered it, since a history snapshot lags
+the stream; after a stream resync the history close is taken. Overlapping whole-bar volumes
 use their maximum because a REST snapshot cannot identify overlap with sampled
 updates. Exact tick replay and reconstruction of missed trades require upstream
 sequence/trade data. See [cache behavior](/docs/bar-cache) and
@@ -382,7 +386,11 @@ the true open is not undone by the next tick.
 for logging or triggering signal evaluation).
 
 The `volumeMode` option controls volume accounting:
-- `'ltq-sum'` -- add each tick's `ltq` field (last-traded quantity).
+- `'ltq-sum'` -- add each tick's `ltq` field (last-traded quantity). A tick
+  without one but with `cumDayVolume` adds the change in that total (since
+  2.7.3); a tick with neither adds nothing, so fill the volume from history.
+  The packaged OpenAlgo live feed does not count such a bar as zero: it
+  reports the bar's volume as unknown.
 - `'day-delta'` -- diff a cumulative daily volume counter (`cumDayVolume`);
   handles intraday resets automatically.
 
