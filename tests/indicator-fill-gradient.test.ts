@@ -40,7 +40,8 @@ function read(rec: RecordingContext): Calls {
 const DPR = 2;
 const rc = {
   dpr: DPR,
-  timeScale: { indexToX: (i: number) => i * 10 },
+  // Every point in view: the band paints the points in view and one either side.
+  timeScale: { indexToX: (i: number) => i * 10, visibleRange: () => ({ from: -Infinity, to: Infinity }) },
   priceScale: { priceToY: (v: number) => 100 - v },
 } as unknown as PrimitiveRenderContext;
 

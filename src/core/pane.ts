@@ -59,6 +59,7 @@ import { Canvas2dBackend } from '../render/canvas2d-backend';
 import type { ChartTheme } from '../theme';
 import { DEFAULT_TIMEZONE, formatZonedCrosshairLabel } from '../feed/time';
 import type { LooseOptional } from '../helpers/types';
+import { reportError } from '../helpers/dispatch';
 
 export interface PaneRenderContext {
   timeScale: TimeScale;
@@ -158,6 +159,39 @@ function seriesTagColor(style: SeriesStyle, up: boolean): string | undefined {
 
 /** Where a z-order band paints, back to front; the series band sits between 1 and 2. */
 const HIT_RANK: Record<ZOrder, number> = { bottom: 0, normal: 2, top: 3 };
+
+/** Primitives whose fault has been reported: one that throws on every frame is reported once. */
+const FAULTED = new WeakSet<IPrimitive>();
+
+/**
+ * A primitive threw: report it and carry on. A primitive is host code run in
+ * the middle of the engine's frame, and its bug used to abort the rest of that
+ * frame, the later panes and the overlay with it, on every frame it lasted.
+ * The error goes where `dispatch` sends a throwing listener's.
+ */
+function fault(primitive: IPrimitive, error: unknown): void {
+  if (FAULTED.has(primitive)) return;
+  FAULTED.add(primitive);
+  reportError(error);
+}
+
+/**
+ * Draw one primitive, counting its saves. A save it leaves open, by throwing
+ * between it and its restore, would be popped by the pane's next restore in
+ * place of the pane's own, leaving the plot clip over the axes and one more
+ * state on the stack every frame; a restore past its own saves would pop the
+ * pane's. Either way what it did to the stack ends with it.
+ */
+function drawPrimitive(p: IPrimitive, g: CanvasRenderingContext2D, rc: PrimitiveRenderContext): void {
+  const { save, restore } = g;
+  let open = 0;
+  g.save = (): void => { open++; save.call(g); };
+  g.restore = (): void => { if (open > 0) { open--; restore.call(g); } };
+  try { p.draw(g, rc); } catch (error) { fault(p, error); } finally {
+    g.save = save; g.restore = restore;
+    for (; open > 0; open--) restore.call(g);
+  }
+}
 
 /**
  * Scratch for the pane's visible-bar walks and its level-of-detail request, so
@@ -797,12 +831,13 @@ export class Pane {
       if (!p.hitTest || p === except) continue;
       // The kept box first, so a primitive the point is nowhere near costs a
       // read and four comparisons: not even its render context is built.
-      let context: PrimitiveRenderContext | undefined;
-      let box = this._hitBoxes.kept(i);
-      if (box === undefined) box = this._hitBoxes.measure(i, p, context = this._boundPrimitiveContext(p, prc, ctx));
-      if (!inHitBox(box, x, y)) continue;
-      context ??= this._boundPrimitiveContext(p, prc, ctx);
-      let hit = p.hitTest(x, y, context);
+      let context: PrimitiveRenderContext | undefined, hit: PrimitiveHit | null;
+      try {
+        let box = this._hitBoxes.kept(i);
+        if (box === undefined) box = this._hitBoxes.measure(i, p, context = this._boundPrimitiveContext(p, prc, ctx));
+        if (!inHitBox(box, x, y)) continue;
+        hit = p.hitTest(x, y, context ??= this._boundPrimitiveContext(p, prc, ctx));
+      } catch (error) { fault(p, error); continue; }
       if (hit === null) continue;
       if (this._primitiveScales.has(p)) hit = { ...hit, priceScale: context.priceScale };
       const painter = hit.paintedBy ?? p, after = slotted?.get(painter);
@@ -950,7 +985,7 @@ export class Pane {
     // Every scale on the pane now holds a measured range, and nothing has been
     // painted yet. That is the only window in which a primitive can correct a
     // scale and still have the axis drawn from the corrected value.
-    for (const p of this._primitives) p.afterAutoscale?.();
+    for (const p of this._primitives) try { p.afterAutoscale?.(); } catch (error) { fault(p, error); }
     return easing;
   }
 
@@ -997,7 +1032,8 @@ export class Pane {
     for (const p of this._primitives) {
       if (primaryOnly) break;
       if ((this._primitiveScales.get(p) ?? 'right') !== scaleId) continue;
-      const ext = p.autoscaleInfo?.();
+      let ext: { min: number; max: number } | null | undefined;
+      try { ext = p.autoscaleInfo?.(); } catch (error) { fault(p, error); continue; }
       if (ext) {
         if (ext.min < low) low = ext.min;
         if (ext.max > high) high = ext.max;
@@ -1130,7 +1166,7 @@ export class Pane {
     // bottom-layer primitives (background zones) draw behind series
     const prc = this._primitiveContext(ctx);
     const slotted = this._slotted(live, ctx);
-    for (const p of live) if (p.zOrder() === 'bottom' && !slotted?.has(p)) p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
+    for (const p of live) if (p.zOrder() === 'bottom' && !slotted?.has(p)) drawPrimitive(p, g, this._boundPrimitiveContext(p, prc, ctx));
 
     const { readout, lastEntry, valueTags } = this._paintSeriesPass(g, ctx, layout, open, prc, slotted, target);
     // Still inside the clip and before the normal-layer primitives: a backend
@@ -1156,7 +1192,7 @@ export class Pane {
     this._paintAxisLadders(g, layout, dpr, slots, valueTags, last, lastTagOn, countdown, axisStyle);
 
     // normal-layer primitives (price lines, markers, events) draw over series
-    for (const p of live) if (p.zOrder() === 'normal' && !slotted?.has(p)) p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
+    for (const p of live) if (p.zOrder() === 'normal' && !slotted?.has(p)) drawPrimitive(p, g, this._boundPrimitiveContext(p, prc, ctx));
 
     // The readout tag goes on after them: where the market is now outranks a
     // level's tag (AXIS_LABEL_PRIORITY), so a price line crossing it, a
@@ -1342,7 +1378,7 @@ export class Pane {
       if (after !== record) continue;
       if (!flushed && target === undefined) this._backend.endFrame();
       flushed = true;
-      p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
+      drawPrimitive(p, g, this._boundPrimitiveContext(p, prc, ctx));
     }
   }
 
@@ -1370,7 +1406,7 @@ export class Pane {
     // Resolved only for a top primitive placed in the series band: this runs on
     // every pointer move, and a drawing's series layers are not top primitives.
     const slotted = this._stackAbove.size === 0 ? null : this._slotted(live.filter(p => p.zOrder() === 'top' && this._stackAbove.has(p)), ctx);
-    for (const p of live) if (p.zOrder() === 'top' && !slotted?.has(p)) p.draw(g, this._boundPrimitiveContext(p, prc, ctx));
+    for (const p of live) if (p.zOrder() === 'top' && !slotted?.has(p)) drawPrimitive(p, g, this._boundPrimitiveContext(p, prc, ctx));
     if (cross !== null) {
       const style = resolveCrosshairStyle(ctx.theme, ctx.canvasOptions?.crosshair, dpr);
       // A strip has no plot to cross; its time tag below still follows the pointer.

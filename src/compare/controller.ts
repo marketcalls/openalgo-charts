@@ -38,7 +38,7 @@ import { toBar } from '../model/bar';
 import { observeReplayWindow, replayWindow } from '../model/replay-window';
 import type { IPrimitive } from '../primitives/primitive';
 import type { AddSeriesOptions } from '../core/chart';
-import { alignToPrimary, EMPTY_ALIGNMENT, type ComparisonAlignment } from './align';
+import { alignToPrimary, EMPTY_ALIGNMENT, printsByTime, type ComparisonAlignment } from './align';
 
 /**
  * How the pane quotes prices while a comparison is on it. The two rebasing
@@ -186,7 +186,7 @@ export class ComparisonController {
     this._baseline = options.baseline ?? 'first-visible';
     this._off.push(observeReplayWindow(chart, () => this.realign()));
     if (chart.on) {
-      this._off.push(chart.on('data:update', () => { if (this._needsAlignment()) this.realign(); }));
+      this._off.push(chart.on('data:update', () => this._follow()));
       this._off.push(chart.on('destroy', () => this._dispose()));
     }
   }
@@ -356,7 +356,7 @@ export class ComparisonController {
     if (this._syncing) return;
     this._syncing = true;
     try {
-      if (this._needsAlignment()) this.realign();
+      this._follow();
       for (const entry of this._panes.values()) this._mirror(entry);
     } finally { this._syncing = false; }
   }
@@ -386,6 +386,45 @@ export class ComparisonController {
       primary !== this._alignedPrimary || primary.length !== this._primaryLength
       || primary[0]?.time !== this._primaryFirst || primary[primary.length - 1]?.time !== this._primaryLast
     ));
+  }
+
+  /**
+   * Keep every comparison on the primary's bars. A live bar appended at the
+   * right edge is the change a session brings, and aligning that bar alone is
+   * what spares a long history a full alignment and rewrite per bar. Anything
+   * else (history paged in or replaced, a replay step) aligns in full.
+   */
+  private _follow(): void {
+    if (!this._needsAlignment()) return;
+    const primary = this._primaryBars(), from = this._primaryLength;
+    if (this._realigning || replayWindow(this._chart) || primary !== this._alignedPrimary || from < 1 || primary.length < from
+      || primary[0]?.time !== this._primaryFirst || primary[from - 1]?.time !== this._primaryLast) {
+      this.realign();
+      return;
+    }
+    this._realigning = true;
+    const syncing = this._syncing;
+    this._syncing = true;
+    try {
+      for (const state of this._items.values()) {
+        // Only prints past the primary's old end can match: a pass over their
+        // times, read afresh as a full alignment read them.
+        const prints = printsByTime(state.bars, primary[from - 1]!.time);
+        for (let i = from; i < primary.length; i++) this._append(state, prints, primary[i]!.time);
+      }
+      this._rememberAlignment();
+    } finally { this._realigning = false; this._syncing = syncing; }
+    if (!syncing) this._repaint();
+  }
+
+  /** One primary bar appended at `time`: its item, as `alignToPrimary` would have made it. */
+  private _append(state: ItemState, prints: Map<number, Bar>, time: number): void {
+    const hit = prints.get(time), item: SeriesDataItem = hit ?? { time }, n = hit === undefined ? 0 : 1;
+    state.items.push(item);
+    state.values.set(time, toBar(item));
+    const { bars, matched, gaps, dropped } = state.alignment;
+    state.alignment = { bars: bars + 1, matched: matched + n, gaps: gaps + 1 - n, dropped: dropped - n };
+    state.series.update(state.suppressed ? { time } : item);
   }
 
   private _rememberAlignment(): void {
@@ -512,8 +551,8 @@ export class ComparisonController {
       for (const state of states) this._setSuppressed(state, false);
       return;
     }
-    if (this._baseline === 'common' && entry.primary.options.mode === entry.applied) {
-      const bars = this._visiblePrimary();
+    const bars = this._visiblePrimary();
+    if (this._baseline === 'common') {
       const anchor = this._commonAnchor(entry, bars);
       for (const state of states) {
         const value = anchor && state.values.get(anchor.time)?.close;
@@ -521,35 +560,18 @@ export class ComparisonController {
       }
       if (anchor === null) return;
       entry.primary.setBaseline(anchor.close);
-      const range = entry.primary.priceRange();
       for (const state of states) {
         const value = state.values.get(anchor.time)?.close;
         state.scale.setBaseline(value && value > 0 ? value : null);
-        if (!entry.primary.autoScale || !value || value <= 0 || !this._visible(state)) continue;
-        // Fit relative moves, not absolute prices. Manual primary ranges stay owned by the user.
-        const renderer = getChartType(state.type);
-        const style = this._record(state)?.style ?? state.style;
-        let low = Infinity, high = -Infinity;
-        for (const bar of bars) {
-          const own = state.values.get(bar.time);
-          if (!own) continue;
-          const extents = renderer.extents(own, style);
-          if (!Number.isFinite(extents.min) || !Number.isFinite(extents.max)) continue;
-          low = Math.min(low, extents.min); high = Math.max(high, extents.max);
-        }
-        if (!(low <= high)) continue;
-        const fitted = scaleAutoscaleRange(entry.primary.options.mode, low, high, entry.primary.options.marginTop, entry.primary.options.marginBottom);
-        const factor = anchor.close / value;
-        range.min = Math.min(range.min, fitted.min * factor);
-        range.max = Math.max(range.max, fitted.max * factor);
       }
-      if (entry.primary.autoScale) entry.primary.setComputedRange(range);
     }
     const bp = entry.primary.baseline;
-    if (bp === null || !Number.isFinite(bp) || bp <= 0 || !entry.primary.scaled) return;
+    if (bp === null || !Number.isFinite(bp) || bp <= 0) return;
+    // Manual primary ranges stay owned by the user.
+    if (entry.primary.autoScale) this._fit(entry, states, bars, bp);
+    if (!entry.primary.scaled) return;
     const range = entry.primary.priceRange();
-    for (const state of this._items.values()) {
-      if (state.entry !== entry) continue;
+    for (const state of states) {
       const bc = state.scale.baseline;
       if (bc === null || !Number.isFinite(bc) || bc <= 0) continue;
       const k = bc / bp;
@@ -557,6 +579,37 @@ export class ComparisonController {
       state.scale.setOptions({ inverted: state.appliedInverted });
       state.scale.setComputedRange({ min: range.min * k, max: range.max * k });
     }
+  }
+
+  /**
+   * Widen the primary's range to hold each shown comparison's relative moves
+   * over `bars`, the primary's bars in view. The primary autoscales on its own
+   * series alone, and every overlay is that band times its baseline ratio, so
+   * a comparison that moved further than the primary was drawn off the pane
+   * whichever baseline it was measured from.
+   */
+  private _fit(entry: PaneEntry, states: readonly ItemState[], bars: readonly Bar[], bp: number): void {
+    const range = entry.primary.priceRange(), { mode, marginTop, marginBottom } = entry.primary.options;
+    for (const state of states) {
+      const bc = state.scale.baseline;
+      if (bc === null || !Number.isFinite(bc) || bc <= 0 || !this._visible(state)) continue;
+      const renderer = getChartType(state.type);
+      const style = this._record(state)?.style ?? state.style;
+      let low = Infinity, high = -Infinity;
+      for (const bar of bars) {
+        const own = state.values.get(bar.time);
+        if (!own) continue;
+        const extents = renderer.extents(own, style);
+        if (!Number.isFinite(extents.min) || !Number.isFinite(extents.max)) continue;
+        low = Math.min(low, extents.min); high = Math.max(high, extents.max);
+      }
+      if (!(low <= high)) continue;
+      // Relative moves, not absolute prices: the comparison's fit in the primary's units.
+      const fitted = scaleAutoscaleRange(mode, low, high, marginTop, marginBottom);
+      range.min = Math.min(range.min, fitted.min * bp / bc);
+      range.max = Math.max(range.max, fitted.max * bp / bc);
+    }
+    entry.primary.setComputedRange(range);
   }
 
   private _primaryBars(): readonly Bar[] {

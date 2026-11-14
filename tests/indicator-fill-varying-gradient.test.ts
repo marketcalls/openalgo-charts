@@ -8,7 +8,8 @@ const gradient = (topValue = 80, bottomValue = 60): FillGradient => ({ ...colors
 const point = (index: number, grad?: FillGradient): FillPoint => ({ index, a: 80, b: 20, gradient: grad });
 const context = (offset = 0, dpr = 1, inverted = false) => ({
   dpr,
-  timeScale: { indexToX: (index: number) => index * 10 },
+  // Every point in view: the band paints the points in view and one either side.
+  timeScale: { indexToX: (index: number) => index * 10, visibleRange: () => ({ from: -Infinity, to: Infinity }) },
   priceScale: { priceToY: (value: number) => offset + (inverted ? value : 100 - value) },
 }) as unknown as PrimitiveRenderContext;
 

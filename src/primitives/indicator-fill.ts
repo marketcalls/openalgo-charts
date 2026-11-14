@@ -69,8 +69,17 @@ function sameGradient(a: FillGradient | undefined, b: FillGradient | undefined):
     && a.bottomValue === b.bottomValue && a.topColor === b.topColor && a.bottomColor === b.bottomColor);
 }
 
+/** The first of `points`, in index order, whose index passes `test`; `points.length` when none does. */
+function firstPoint(points: readonly FillPoint[], test: (index: number) => boolean): number {
+  let lo = 0, hi = points.length;
+  while (lo < hi) { const mid = (lo + hi) >>> 1; if (test(points[mid]!.index)) hi = mid; else lo = mid + 1; }
+  return lo;
+}
+
 export class IndicatorFill implements IPrimitive {
   private _points: FillPoint[] = [];
+  /** The band's lowest and highest value, for a gradient that names no prices; measured once per set of points. */
+  private _extent: { min: number; max: number } | undefined;
   private _opts: IndicatorFillOptions;
   private _host: PrimitiveHost | null = null;
   private _visible = true;
@@ -86,8 +95,10 @@ export class IndicatorFill implements IPrimitive {
   /** The plots it spans already drive the scale; the fill must not widen it. */
   public autoscaleInfo(): null { return null; }
 
+  /** Points in index order, one per bar, as a study's plots are. */
   public setPoints(points: readonly FillPoint[]): void {
     this._points = points.slice();
+    this._extent = undefined;
     this._host?.requestUpdate();
   }
 
@@ -110,12 +121,13 @@ export class IndicatorFill implements IPrimitive {
     // Canvas gradients capture the transform at creation. Cache only within
     // this draw so panning, pane movement and other bands cannot reuse stale axes.
     const gradients = new Map<string, CanvasGradient>();
-    let extent: { min: number; max: number } | undefined;
     const gradientFor = (grad: FillGradient): CanvasGradient => {
       let hi = grad.topValue;
       let lo = grad.bottomValue;
       if (hi === undefined || lo === undefined) {
-        if (extent === undefined) {
+        // The whole band's range, not the view's: the stops stay on the same
+        // prices as the view pans.
+        if (this._extent === undefined) {
           let min = Infinity;
           let max = -Infinity;
           for (const p of this._points) {
@@ -123,10 +135,10 @@ export class IndicatorFill implements IPrimitive {
               if (value !== null && Number.isFinite(value)) { min = Math.min(min, value); max = Math.max(max, value); }
             }
           }
-          extent = { min, max };
+          this._extent = { min, max };
         }
-        hi ??= extent.max;
-        lo ??= extent.min;
+        hi ??= this._extent.max;
+        lo ??= this._extent.min;
       }
       const top = y(hi);
       const bottom = top + ((y(lo) - top) || 1);
@@ -167,8 +179,13 @@ export class IndicatorFill implements IPrimitive {
       run = null;
     };
 
-    for (let i = 0; i < this._points.length; i++) {
-      const p = this._points[i]!;
+    // Only the points in view and one either side, which put every polygon's
+    // edge outside the plot: the clip leaves the same picture as a walk of the
+    // whole history, which cost a projection and two vertices per bar a paint.
+    const points = this._points, view = rc.timeScale.visibleRange();
+    const last = Math.min(points.length - 1, firstPoint(points, index => index > view.to));
+    for (let i = Math.max(0, firstPoint(points, index => index >= view.from) - 1); i <= last; i++) {
+      const p = points[i]!;
       if (p.a === null || p.b === null || !Number.isFinite(p.a) || !Number.isFinite(p.b)) {
         flush();
         continue;
@@ -191,7 +208,7 @@ export class IndicatorFill implements IPrimitive {
       if (run !== null && run.up !== up) {
         // Sign flipped: end the run at the crossing so the colours meet on the
         // intersection instead of a bar boundary.
-        const prev = this._points[i - 1];
+        const prev = points[i - 1];
         if (prev !== undefined && prev.a !== null && prev.b !== null) {
           const d0 = prev.a - prev.b;
           const d1 = p.a - p.b;

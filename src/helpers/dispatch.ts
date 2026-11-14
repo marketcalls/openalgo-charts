@@ -16,9 +16,14 @@ export function dispatch<T>(listeners: Iterable<(payload: T) => void> | undefine
     try {
       listener(payload);
     } catch (error) {
-      (globalThis as { reportError?: (error: unknown) => void }).reportError?.(error);
+      reportError(error);
     }
   }
+}
+
+/** Send a host's error where a throwing DOM listener's goes, or drop it where there is no such place. */
+export function reportError(error: unknown): void {
+  (globalThis as { reportError?: (error: unknown) => void }).reportError?.(error);
 }
 
 /** Add `listener` to `listeners`; the function returned takes that one out again. */

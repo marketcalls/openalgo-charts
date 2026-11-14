@@ -122,13 +122,15 @@ export class ChartStudies {
   private _barColorOwner: string | null = null;
   private _barColors: readonly (string | null)[] | null = null;
   /**
-   * Each price bar's own colour, indexed like the series. The overlay overwrites
-   * `Bar.color`, so a bar's own value is only readable the first time we touch
-   * it, and removing the indicator has to put something back.
+   * Each clone the overlay wrote, with the colour of the host's bar it stands
+   * for: removing the indicator has to put that back, and the clone's own
+   * `color` is the overlay's. Keyed by the clone rather than by index, since a
+   * page of older history moves every clone to a new index.
    */
+  private readonly _barColorOwn = new WeakMap<Bar, string | undefined>();
+  /** The bar at each index as the last pass left it, and that bar's own colour: a pass reads the map only where a bar changed. */
+  private readonly _barColorSeen: Bar[] = [];
   private readonly _barColorBase: (string | undefined)[] = [];
-  /** Time of bar 0 when the snapshot was taken, to catch a replaced history. */
-  private _barColorAnchor = 0;
 
   public constructor(chart: object, host: StudiesHost) {
     this._chart = chart;
@@ -633,23 +635,30 @@ export class ChartStudies {
     if (dataId === null) return;
     const bars = this._host._dataLayer.seriesBars(dataId);
     const n = bars.length;
-    const base = this._barColorBase;
-    // Anything that replaces history (a symbol change, a page of older bars)
-    // invalidates the snapshot, since index i is no longer the same bar. A
-    // snapshot is read against the bars only where there are at least as many.
-    if (n < base.length || (base.length > 0 && bars[0]!.time !== this._barColorAnchor)) base.length = 0;
-    if (base.length === 0) this._barColorAnchor = n > 0 ? bars[0]!.time : 0;
-    for (let i = base.length; i < n; i++) base[i] = bars[i]!.color;
+    const own = this._barColorOwn, seen = this._barColorSeen, base = this._barColorBase;
     const colors = this._barColors;
     const out = new Array<Bar>(n);
     let changed = false;
     for (let i = 0; i < n; i++) {
-      const bar = bars[i]!;
+      const bar = bars[i]!, prev = seen[i];
+      // A bar not met here before is a clone moved by a page of older history,
+      // or the host's own: a replacement, a tick, a new bar. A live tick
+      // changes one, so the map is read for one. A host bar with the time and
+      // colour of the clone it replaced was copied from it, a tick built on
+      // `getData()`, and stands for the same bar.
+      if (prev !== bar) {
+        if (prev?.time !== bar.time || prev.color !== bar.color || !own.has(prev)) base[i] = own.has(bar) ? own.get(bar) : bar.color;
+        seen[i] = bar;
+      }
       const color = colors?.[i] ?? base[i];
       if (color === bar.color) { out[i] = bar; continue; }
-      out[i] = { ...bar, color } satisfies LooseOptional<Bar> as Bar; // undefined restores a host bar that had no colour
+      const clone = { ...bar, color } satisfies LooseOptional<Bar> as Bar; // undefined restores a host bar that had no colour
+      own.set(clone, base[i]);
+      out[i] = seen[i] = clone;
       changed = true;
     }
+    // Withdrawn, nothing is left to restore, and the bars need not be held.
+    seen.length = base.length = colors === null ? 0 : n;
     if (!changed) return;
     // Straight to the data layer, not through `_setData`: the time points are
     // untouched, so nothing about the axis or the base index moves, and routing
