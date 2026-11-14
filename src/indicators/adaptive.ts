@@ -37,6 +37,11 @@ import { zip } from './series';
  * this follows Kaufman's published definition. It first prints at `erLength`, the
  * earliest bar where both legs of the ratio exist, seeded there on the source
  * itself, because there is no prior average to carry forward.
+ *
+ * A bar with no value is read as if it were not there, the way Parabolic SAR
+ * reads an incomplete bar: it prints nothing, the ratio window counts the
+ * values either side of it, and the average carries on from the last one. One
+ * missing close otherwise entered the recursion as NaN and ended the line.
  */
 export const KAMA: IndicatorDescriptor = withTimeframe({
   id: 'kama',
@@ -55,16 +60,20 @@ export const KAMA: IndicatorDescriptor = withTimeframe({
     style: { color: '#2962ff', lineWidth: 1.5 },
   }],
   calc: (bars, s) => {
-    const values = sourceValues(bars, src(s));
-    const n = values.length;
+    const source = sourceValues(bars, src(s));
     const erLength = int(s, 'erLength', 10);
-    const out = new Array<number>(n).fill(NaN);
+    const out = new Array<number>(source.length).fill(NaN);
+    // The bar of each value, so the run below sees no gap at all.
+    const at: number[] = [];
+    for (let i = 0; i < source.length; i++) if (Number.isFinite(source[i])) at.push(i);
+    const values = at.map((i) => source[i]!);
+    const n = values.length;
     if (n <= erLength) return { kama: nulls(out) };
 
     // This path calculation treats nonfinite steps, including bar 0's missing
     // predecessor, as zero contribution. By the first path read, the initial
     // placeholder has left the rolling window. Every series here holds one
-    // value per bar, and there are more than `erLength` of them.
+    // value per observation, and there are more than `erLength` of them.
     const steps = change(values, 1);
     for (let i = 0; i < n; i++) steps[i] = Number.isFinite(steps[i]) ? Math.abs(steps[i]!) : 0;
     const path = rollingSum(steps, erLength);
@@ -74,7 +83,7 @@ export const KAMA: IndicatorDescriptor = withTimeframe({
     const slowAlpha = 2 / (int(s, 'slowLength', 30) + 1);
 
     let prev = values[erLength]!;
-    out[erLength] = prev;
+    out[at[erLength]!] = prev;
     for (let i = erLength + 1; i < n; i++) {
       const walked = path[i]!;
       // A window that never moved has no direction to measure; Kaufman's rule is
@@ -82,7 +91,7 @@ export const KAMA: IndicatorDescriptor = withTimeframe({
       const er = Number.isFinite(walked) && walked !== 0 ? Math.abs(travel[i]!) / walked : 0;
       const alpha = er * (fastAlpha - slowAlpha) + slowAlpha;
       prev += alpha * alpha * (values[i]! - prev);
-      out[i] = prev;
+      out[at[i]!] = prev;
     }
     return { kama: nulls(out) };
   },

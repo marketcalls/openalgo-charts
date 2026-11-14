@@ -1,7 +1,14 @@
+import { IndicatorInputError } from 'openalgo-charts';
 import type { IndicatorAttachContext, IndicatorCalcContext, IndicatorDescriptor, IndicatorSettings, IndicatorStore } from 'openalgo-charts';
 import { createRequestedIndicator } from './requested-indicator';
 
 type Select = (settings: Readonly<IndicatorSettings>, context?: IndicatorCalcContext) => string | null;
+
+/**
+ * A timeframe the chart's own bars cannot be folded to, though requested
+ * history of it could be drawn: refused by the local fold alone.
+ */
+export class UnfoldableTimeframe extends IndicatorInputError {}
 
 /** Share the requested lifecycle while retaining the original descriptor's rendering hooks. */
 export function createTimeframeHistory(
@@ -10,6 +17,7 @@ export function createTimeframeHistory(
 ): IndicatorDescriptor {
   const contexts = new WeakMap<IndicatorStore, IndicatorAttachContext>();
   const reported = new WeakSet<IndicatorStore>();
+  const deferred = new WeakSet<IndicatorStore>();
   const capable = (ctx: IndicatorAttachContext): boolean => {
     const state = ctx.requestState?.();
     return state?.supportsWarmup === true && state.supportsSnapshots === true;
@@ -44,8 +52,17 @@ export function createTimeframeHistory(
     return attached !== undefined && capable(attached) && historyBars(settings) !== null && select(settings, context) !== null;
   };
   const result: IndicatorDescriptor = { ...folded,
-    calc: (bars, settings, store, context) => independent(store, settings, context)
-      ? requested.calc(bars, settings, store, context) : folded.calc(bars, settings, store, context),
+    calc: (bars, settings, store, context) => {
+      if (independent(store, settings, context)) return requested.calc(bars, settings, store, context);
+      try { return folded.calc(bars, settings, store, context); }
+      catch (error) {
+        // A chart calculates once before it attaches, when nothing yet says
+        // whether its host can request the timeframe. Draw nothing until then.
+        if (!(error instanceof UnfoldableTimeframe) || contexts.has(store)) throw error;
+        deferred.add(store);
+        return requested.calc(bars, settings, store, context);
+      }
+    },
     attach: ctx => {
       contexts.set(ctx.store, ctx);
       const cleanup = requested.attach!({ ...ctx,
@@ -55,6 +72,8 @@ export function createTimeframeHistory(
         },
         setDataRetry: retry => { if (selected(ctx) || retry === null) ctx.setDataRetry?.(retry); },
       });
+      // A host that cannot request it is left with the local fold, whose refusal now reports.
+      if (deferred.delete(ctx.store) && !selected(ctx)) ctx.requestRecompute();
       return () => { if (contexts.get(ctx.store) === ctx) contexts.delete(ctx.store); if (typeof cleanup === 'function') cleanup(); };
     },
   };

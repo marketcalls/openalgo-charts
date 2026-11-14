@@ -67,6 +67,21 @@ describe('built-in independent timeframe history', () => {
     h.chart.removeIndicator(indicator.id);
     expect(requests[requests.length - 1]!.signal?.aborted).toBe(true);
   });
+  it('requests a timeframe the chart bars do not divide into; only the local fold refuses it', async () => {
+    const h = harness();
+    h.chart.setDataContext({ symbol: 'TEST', exchange: 'TEST', interval: '3m' });
+    const indicator = h.chart.addIndicator('ema', { length: 5, timeframe: '5m' });
+    await settle();
+    expect(h.requestSnapshot.mock.calls[h.requestSnapshot.mock.calls.length - 1]![0]).toMatchObject({ interval: '5m' });
+    expect(indicator.dataStatus()?.state).toBe('ready');
+    const legacy = harness({ supportsWarmup: false });
+    legacy.chart.setDataContext({ symbol: 'TEST', exchange: 'TEST', interval: '3m' });
+    const folded = legacy.chart.addIndicator('ema', { length: 5, timeframe: '5m' });
+    await settle();
+    expect(folded.values().ma.every(value => value === null)).toBe(true);
+    expect(String((folded.dataStatus() as { error?: unknown } | null)?.error)).toMatch(/not a whole multiple/);
+    expect(legacy.requestSnapshot).not.toHaveBeenCalled();
+  });
   it('rejects forward-looking displacement on independent history', async () => {
     const h = harness(), indicator = h.chart.addIndicator('donchian', { length: 20, offset: -1, timeframe: 'D' });
     await settle();

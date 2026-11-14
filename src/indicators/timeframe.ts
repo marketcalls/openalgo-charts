@@ -12,7 +12,9 @@
  *
  * Sub-day buckets start at the session open, the way an exchange cuts its own
  * hourly bars, and the open is read from the bars in the chart's zone (see
- * `sessionOpen`). A timeframe no coarser than the chart's is the chart's own.
+ * `sessionOpen`). A timeframe no coarser than the chart's is the chart's own,
+ * and one the chart's bars do not divide into (5m on a 3m chart) is refused
+ * rather than folded into buckets of the wrong length.
  *
  * Only a calculation from the chart's bars alone folds, and only a causal one:
  * a value at a bar reads no later bar. Which built-ins opt in, and why the
@@ -26,6 +28,7 @@ import {
   utcSecondsToZonedParts,
   type Bar,
   type Bucketing,
+  type CalendarBucketing,
   type IndicatorCalcContext,
   type IndicatorDescriptor,
   type IndicatorInput,
@@ -34,7 +37,7 @@ import {
   type IndicatorValues,
 } from 'openalgo-charts';
 import { keyOf, localDays, securityExpression } from './security';
-import { createTimeframeHistory } from './timeframe-history';
+import { createTimeframeHistory, UnfoldableTimeframe } from './timeframe-history';
 import { timeframeHistoryBars } from './timeframe-warmup';
 
 /** The settings key the input writes. */
@@ -50,11 +53,31 @@ const DAY = 86400;
 const MONTH = 2629746;
 const MONTHS = { month: 1, quarter: 3, year: 12 } as const;
 
+/** Whole months in one calendar bucket. */
+const months = (b: CalendarBucketing): number => MONTHS[b.unit] * Math.max(1, Math.floor(b.count ?? 1));
+
 /** How long one bucket runs, nominally. */
 function span(b: Bucketing): number {
   if (b.mode === 'interval') return b.seconds;
-  if (b.mode === 'calendar') return MONTHS[b.unit] * Math.max(1, Math.floor(b.count ?? 1)) * MONTH;
+  if (b.mode === 'calendar') return months(b) * MONTH;
   return NaN;
+}
+
+/**
+ * Whether every chart bar lies inside one bucket of the timeframe. A fold puts
+ * a bar in the bucket it opens in, so a 3m bar opening at 09:18 takes its 09:20
+ * minute into the 09:15 bucket: 5m on 3m is buckets of 6 and 3 minutes, each
+ * summed as if it were 5, and nothing in the result says so. A day or longer
+ * takes any intraday bar whole, as a session is taken to end by local
+ * midnight, which keeps 75m bars foldable to a day; past a day the chart's
+ * bars must tile the bucket, a week by days, a quarter by months.
+ */
+function nests(tf: Bucketing, chart: Bucketing): boolean {
+  if (tf.mode === 'calendar') {
+    return chart.mode === 'calendar' ? months(tf) % months(chart) === 0 : chart.mode === 'interval' && chart.seconds <= DAY;
+  }
+  if (tf.mode !== 'interval' || chart.mode !== 'interval') return false;
+  return (tf.seconds % DAY === 0 && chart.seconds < DAY) || tf.seconds % chart.seconds === 0;
 }
 
 /** A timeframe to fold to, once it has passed every check. */
@@ -62,8 +85,8 @@ interface Fold {
   tf: string;
   bucketing: Bucketing;
   zone: string;
-  /** The chart declared a clock interval; without one, a fold that groups nothing is the chart's own. */
-  known: boolean;
+  /** The chart's declared clock interval; without one, a fold that groups nothing is the chart's own. */
+  chart: Bucketing | null;
 }
 
 /**
@@ -100,7 +123,20 @@ function plan(d: IndicatorDescriptor, s: Readonly<IndicatorSettings>, ctx: Indic
     }
   }
   const zone = ctx?.timezone ?? (typeof s.timezone === 'string' && s.timezone !== '' ? s.timezone : DEFAULT_TIMEZONE);
-  return { tf, bucketing: found.bucketing, zone, known: chart !== null };
+  return { tf, bucketing: found.bucketing, zone, chart };
+}
+
+/**
+ * `plan` for a fold of the chart's own bars, which also needs each chart bar
+ * inside one bucket. Requested history brings real bars of the timeframe, so
+ * that path plans without this check.
+ */
+function localPlan(d: IndicatorDescriptor, s: Readonly<IndicatorSettings>, ctx: IndicatorCalcContext | undefined): Fold | null {
+  const fold = plan(d, s, ctx);
+  if (fold !== null && fold.chart !== null && !nests(fold.bucketing, fold.chart)) {
+    throw new UnfoldableTimeframe(`${d.name}: "${fold.tf}" is not a whole multiple of the chart's "${ctx?.interval ?? ''}" bars, so they cannot be folded to it`);
+  }
+  return fold;
 }
 
 /**
@@ -198,7 +234,7 @@ export function withTimeframe(descriptor: IndicatorDescriptor, options: Timefram
     : [...descriptor.inputs.slice(0, at), INPUT, ...descriptor.inputs.slice(at)];
 
   const calc: IndicatorDescriptor['calc'] = (bars, settings, store, ctx) => {
-    const fold = plan(descriptor, settings, ctx);
+    const fold = localPlan(descriptor, settings, ctx);
     if (fold === null || bars.length === 0) {
       remember(store, null);
       return descriptor.calc(bars, settings, store, ctx);
@@ -220,7 +256,7 @@ export function withTimeframe(descriptor: IndicatorDescriptor, options: Timefram
       }
       return result;
     }, { mode: 'confirmed', timezone: fold.zone, ...(sessionStart === null ? {} : { session: sessionAt(sessionStart) }) });
-    if (!fold.known && count === bars.length) {
+    if (fold.chart === null && count === bars.length) {
       remember(store, { tf: fold.tf, zone: fold.zone, sessionStart, identity: true });
       return descriptor.calc(bars, settings, store, ctx);
     }
@@ -229,7 +265,7 @@ export function withTimeframe(descriptor: IndicatorDescriptor, options: Timefram
   };
 
   const tail: NonNullable<IndicatorDescriptor['calcTail']> = (bars, settings, from, previous, store, ctx) => {
-    const fold = plan(descriptor, settings, ctx);
+    const fold = localPlan(descriptor, settings, ctx);
     if (fold === null) return descriptor.calcTail?.(bars, settings, from, previous, store, ctx) ?? null;
     const key = owner(store);
     const memo = key === null ? undefined : memos.get(key);
