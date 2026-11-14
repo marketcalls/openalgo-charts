@@ -118,7 +118,7 @@ const deepStraddle = (): MarketDepth => ({
 });
 const total = (rows: readonly LadderRow[]): number => rows.reduce((sum, row) => sum + row.bidQty + row.askQty, 0);
 const onGrid = (price: number, tick: number): boolean => Math.abs(price / tick - Math.round(price / tick)) < 1e-9;
-/** The ladder's bucketing before schedules, kept to prove the constant path unchanged. */
+/** The ladder's bucketing before schedules, kept to prove the ungrouped constant path unchanged. */
 function constantRows(book: MarketDepth, tickSize: number, groupBy = 1): LadderRow[] {
   const step = tickSize * Math.max(1, groupBy);
   const bucket = (p: number): number => Math.round(Math.round(p / step) * step * 1e8) / 1e8;
@@ -155,18 +155,17 @@ describe('buildRows with a tick schedule', () => {
     // Five cents below 100, five nickels from 100.
     for (const row of rows) expect(onGrid(row.price, row.price < 100 ? 0.05 : 0.25)).toBe(true);
     expect(rows.filter(row => row.price < 100).length).toBe(10);
-    // 101.15 through 101.35: the five nickels nearest 101.25.
-    expect(rows.find(row => row.price === 101.25)).toEqual({ price: 101.25, bidQty: 0, askQty: 123 + 124 + 125 + 126 + 127 });
+    // 101.05 through 101.25: an ask rounds up to its group, never below its price.
+    expect(rows.find(row => row.price === 101.25)).toEqual({ price: 101.25, bidQty: 0, askQty: 121 + 122 + 123 + 124 + 125 });
   });
 
   it('never lets a group in one band label a row with a price the next band forbids', () => {
-    // Six cents is 0.06: 99.99 is nearest 100.02, which the 0.05 band above
-    // 100 cannot trade at, so the group stops at the boundary.
-    const book: MarketDepth = { ltp: 99.99, bids: [level(99.99, 7)], asks: [level(100.05, 8)] };
-    expect(buildRows(book, BANDED, 6)).toEqual([{ price: 100, bidQty: 7, askQty: 8 }]);
+    // Six cents is 0.06: an ask at 99.99 rounds up to 100.02, which the 0.05
+    // band above 100 cannot trade at, so the group stops at the boundary.
+    expect(buildRows({ ltp: 99.98, bids: [], asks: [level(99.99, 8)] }, BANDED, 6)).toEqual([{ price: 100, bidQty: 0, askQty: 8 }]);
     const above = new TickSchedule([{ tick: 0.05 }, { from: 100.1, tick: 0.1 }]);
-    // Downward too: 100.2 on a 0.5 group is nearest 100, below where its band starts.
-    expect(buildRows({ ltp: 100.2, bids: [], asks: [level(100.2, 2)] }, above, 5)).toEqual([{ price: 100.1, bidQty: 0, askQty: 2 }]);
+    // Downward too: a bid at 100.2 on a 0.5 group rounds down to 100, below where its band starts.
+    expect(buildRows({ ltp: 100.2, bids: [level(100.2, 2)], asks: [] }, above, 5)).toEqual([{ price: 100.1, bidQty: 2, askQty: 0 }]);
   });
 
   it('counts whole ticks when a schedule groups rows', () => {
@@ -179,8 +178,10 @@ describe('buildRows with a tick schedule', () => {
     expect(buildRows(book, 0.05, 2.5).some(row => !onGrid(row.price, 0.05))).toBe(true);
   });
 
-  it('keeps the constant tick path exactly as it was', () => {
-    for (const groupBy of [1, 5, 2.5, 0]) {
+  it('keeps the ungrouped constant tick path exactly as it was', () => {
+    // Grouped rows moved on purpose in 2.7.3: a bid now rounds down to its
+    // group and an ask up (tests/audit-273-trade-ladder.test.ts).
+    for (const groupBy of [1, 0]) {
       for (const book of [depth(200), straddle(), deepStraddle()]) {
         expect(buildRows(book, 0.05, groupBy)).toEqual(constantRows(book, 0.05, groupBy));
       }
@@ -188,15 +189,14 @@ describe('buildRows with a tick schedule', () => {
     expect(Object.keys(DEFAULT_DOM_LADDER_OPTIONS)).toEqual(['tickSize', 'width', 'groupBy', 'maxRows', 'rowHeight']);
   });
 
-  it('coerces a tick size that is not an object exactly as before schedules', () => {
+  it('coerces a tick size that is not an object as numeric arithmetic does', () => {
     // A plain-JS host may hand over a numeric string. Only an object takes the
-    // schedule path, so every other value meets the old arithmetic unchanged.
+    // schedule path, so every other value meets the constant arithmetic.
     const loose = ['0.05', ' 0.05 ', undefined, null, true] as unknown as number[];
     for (const tick of loose) {
-      for (const groupBy of [1, 5, 2.5]) {
-        for (const book of [straddle(), deepStraddle()]) {
-          expect(buildRows(book, tick, groupBy)).toEqual(constantRows(book, tick, groupBy));
-        }
+      for (const book of [straddle(), deepStraddle()]) {
+        expect(buildRows(book, tick, 1)).toEqual(constantRows(book, tick, 1));
+        for (const groupBy of [5, 2.5]) expect(buildRows(book, tick, groupBy)).toEqual(buildRows(book, Number(tick), groupBy));
       }
     }
     expect(buildRows(deepStraddle(), '0.05' as unknown as number, 5)).toEqual(buildRows(deepStraddle(), 0.05, 5));

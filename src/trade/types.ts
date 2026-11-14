@@ -24,6 +24,13 @@ export type OrderRole = 'entry' | 'sl' | 'tp';
 export interface Order {
   id: string;
   symbol: string;
+  /**
+   * The venue, when the provider says. Symbol and exchange together name a
+   * contract: one symbol on two exchanges is two instruments.
+   */
+  exchange?: string | undefined;
+  /** The product (`CNC`, `MIS`, `NRML` on OpenAlgo), when the provider says. */
+  product?: string | undefined;
   side: OrderSide;
   type: OrderType;
   qty: number;
@@ -38,6 +45,9 @@ export interface Order {
 
 export interface Position {
   symbol: string;
+  /** As on `Order`. A book holds one row per symbol, exchange and product, and each is its own position. */
+  exchange?: string | undefined;
+  product?: string | undefined;
   /** Net signed quantity: positive = long, negative = short, 0 = flat. */
   netQty: number;
   avgPrice: number;
