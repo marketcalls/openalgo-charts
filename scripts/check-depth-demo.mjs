@@ -123,8 +123,14 @@ try {
   await pick.click();
   await expect(demo.getByRole('status')).toContainText('Bid at');
   await expect(demo.getByRole('status')).toContainText('simulation only');
-  const sharedRow = pick.locator('..').locator('..');
-  await sharedRow.getByRole('button', { name: /^Inspect ask at / }).click();
+  // A grouped bid sits at or below its price and an ask at or above (2.7.3),
+  // so no row offers both sides: one would show a better price than the book.
+  assert.equal(await demo.evaluate(root => [...root.querySelectorAll('button')]
+    .filter(b => /^Inspect bid at /.test(b.getAttribute('aria-label') ?? b.textContent ?? ''))
+    .filter(b => [...(b.parentElement?.parentElement?.querySelectorAll('button') ?? [])]
+      .some(o => /^Inspect ask at /.test(o.getAttribute('aria-label') ?? o.textContent ?? ''))).length), 0,
+  'A grouped row must not hold both a bid and an ask');
+  await demo.getByRole('button', { name: /^Inspect ask at / }).first().click();
   await expect(demo.getByRole('status')).toContainText('Ask at');
   await demo.getByRole('button', { name: 'Resume updates' }).click();
   await expect(snapshot).not.toHaveText(paused);

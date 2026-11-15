@@ -191,7 +191,7 @@ export default function DepthLadderDemo() {
         <span>Updates every 750 ms. All prices and quantities are simulated.</span>
         <span>Ladder grouping leaves candle prices, zoom and price scale untouched. Both views have separate instrument configuration.</span>
         <span>ATM call is an illustrative fixed contract; this demo does not select or roll live option contracts.</span>
-        <span>Row prices are rounded display buckets. Grouping can place both sides in one row.</span>
+        <span>Row prices are display buckets: a grouped bid sits at or below its price and an ask at or above, so no row shows a better price than the book holds.</span>
         <p role="status" aria-live="polite">{selection}</p>
       </div>
       <style jsx>{`

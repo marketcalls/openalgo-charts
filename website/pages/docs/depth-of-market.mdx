@@ -114,13 +114,16 @@ book easier to read without changing the instrument's tick size.
 | 0.05 | 10 | 0.50 |
 | 0.05 | 20 | 1.00 |
 
-The helper rounds each supplied price to the nearest multiple of
-`tickSize * groupBy`, sums quantities independently on each side, and sorts rows
-from high to low. For example, at a 0.50 display step, bids of 10 at 100.05 and 20
-at 100.10 become a bid quantity of 30 in the 100.00 display row.
+The helper places each supplied price on a multiple of `tickSize * groupBy`, sums
+quantities independently on each side, and sorts rows from high to low. A grouped
+bid goes to the row at or below its price and an ask to the row at or above it
+(since 2.7.3; both used to round to the nearest), so no row shows a better price
+than the book holds and no row holds both sides. For example, at a 0.50 display
+step, bids of 10 at 100.05 and 20 at 100.10 become a bid quantity of 30 in the
+100.00 display row, and an ask at 100.15 is shown in the 100.50 row. Ungrouped,
+every level keeps its own price.
 
-Bid and ask quantities can appear in the **same display row** after rounding.
-That row label is an aggregation bucket, not an executable quote. The best bid
+A grouped row label is an aggregation bucket, not an executable quote. The best bid
 and ask above the demo come from the ungrouped supplied book. Empty price levels
 are not invented or filled in between the supplied levels.
 
