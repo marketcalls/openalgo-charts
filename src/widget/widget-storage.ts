@@ -428,6 +428,8 @@ export class WidgetStorage {
       if (this._overtaken.get(key) !== overtaken) return text;
       const next = stored === base ? text : merged(merge, base, text, stored) ?? text;
       await store.setItem(key, next);
+      // A newer change was made from this copy's text, not from the merge or the older base.
+      if (this._base.has(key)) this._base.set(key, text);
       this._out(key, text);
       return next;
     });
