@@ -106,8 +106,8 @@ export function bucketPrice(price: number, step: number): number {
 /**
  * Inclusive list of bucket prices spanning [low, high]. A step that is not a
  * positive finite number gives no buckets, and so does a range the numbers
- * cannot step through: a step too small to move a price that large, or a
- * price past the largest number.
+ * cannot step through: a step too small to move a price that large, or to
+ * number its rows exactly, or a price past the largest number.
  */
 export function priceBuckets(low: number, high: number, step: number): number[] {
   // A negative step would walk away from `high` and never stop.
@@ -118,8 +118,10 @@ export function priceBuckets(low: number, high: number, step: number): number[] 
   const lo = gridPrice(first, step, scale);
   const hi = gridPrice(last, step, scale);
   // A step that no longer moves the price, or a price that overflows, has no
-  // rows a walk could tell apart.
-  if (!Number.isFinite(last - first) || lo + step === lo || hi + step === hi) return [];
+  // rows a walk could tell apart. Nor does a row past 2^53: there a row plus
+  // one is the same row, so the walk below would never pass `last`, and 0.1
+  // on a step of 1e-17 is row 10^16 although 0.1 + 1e-17 still moves.
+  if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || lo + step === lo || hi + step === hi) return [];
   const out: number[] = [];
   for (let i = first; i <= last; i++) out.push(gridPrice(i, step, scale));
   return out;

@@ -497,8 +497,16 @@ function buildSession(g: readonly Bar[], r: Resolved): MarketProfileSessionResul
   let totalVolume = 0;
   let high = -Infinity;
   let low = Infinity;
+  let opened: Bar | undefined;
+  let closed: Bar | undefined;
 
   for (const b of g) {
+    // A gap (a whitespace point, NaN prices) holds no price: one NaN taken
+    // into the extremes below made the session's high, low, balance and range
+    // extension NaN. It still anchors the letters when it opens the session.
+    if (!Number.isFinite(b.high) || !Number.isFinite(b.low)) continue;
+    opened ??= b;
+    closed = b;
     const period = Math.max(0, Math.floor((b.time - anchor) / r.blockSec));
     if (period > maxPeriod) maxPeriod = period;
     if (period < r.ibPeriods) { ibHigh = Math.max(ibHigh, b.high); ibLow = Math.min(ibLow, b.low); }
@@ -560,8 +568,9 @@ function buildSession(g: readonly Bar[], r: Resolved): MarketProfileSessionResul
     levels,
     poc: va.poc, vah: va.vah, val: va.val,
     high, low,
-    open: g[0]!.open,
-    close: g[g.length - 1]!.close,
+    // Bars with prices exist: `levels` is not empty.
+    open: opened!.open,
+    close: closed!.close,
     periods: maxPeriod + 1,
     periodDetail,
     initialBalance: ib,
@@ -572,7 +581,7 @@ function buildSession(g: readonly Bar[], r: Resolved): MarketProfileSessionResul
     poorLow: levels[levels.length - 1]!.count > 1,
     developing: developingValues(levels, periodDetail, r.vaPct),
     dayType: classifyDay(ib, high, low, rangeExtension, levels, va.poc),
-    openType: classifyOpen(g[0]!.open, periodDetail[0], periodDetail[1], high, low),
+    openType: classifyOpen(opened!.open, periodDetail[0], periodDetail[1], high, low),
     volumePoc,
     totalVolume,
   };

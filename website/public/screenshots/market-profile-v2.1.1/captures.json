@@ -3,7 +3,7 @@
     "examples/market-profile/index.html": "221d9d7482526b457d1c17ec96a0efb9012c148669eb88da005066d9b03460c4",
     "examples/market-profile/themes.js": "2cbc8488168ee94bc836ea816b8edb499803fd0184fe9d4b2f534d6096462a98",
     "src/profile/market-profile-primitive.ts": "498c817f763e73e93de1fb248e22ea7dbfbc0206817d17d46681e7a0eb38f6c7",
-    "src/profile/market-profile.ts": "bdad314bba6fd25a49dd760f185e4c3d34e3b838043a3578ca26c33ed24e5650",
+    "src/profile/market-profile.ts": "314778cd2094c30a3f327dc3f24de69da406d1980ae4c0d7b4fcafdff8a14b79",
     "src/profile/compact-text.ts": "cbac1c0aef17e1877d8b149ee14f7bc5453f88e269731ac9ebd506bf8cb8ba14",
     "src/primitives/watermark.ts": "57f86c390dd8f257e998cc0adf29bec70d1a51479543ca5b71a6482b16ab427f",
     "src/primitives/openalgo-glyph.ts": "0df8b26e60a6214420570f80b9bc4ffc3c2fdabb9fc416a6058a589110faea51"
