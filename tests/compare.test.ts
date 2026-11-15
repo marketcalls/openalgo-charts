@@ -398,6 +398,42 @@ describe('keeping up with the primary series', () => {
     expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), prints).alignment);
   });
 
+  // Audit N05, second round: the append path counted every new match off the
+  // last alignment's dropped prints, including one the host had only just added.
+  it('counts a print the host appended since the last alignment as a full alignment does', () => {
+    const { chart } = loaded(ramp(100, 3, 102));
+    const prints = ramp(1000, 3, 1020);
+    const handle = addComparison(chart, { symbol: 'A', bars: prints });
+    prints.push(bar(3, 1030));
+    chart.primarySeries()!.update(bar(3, 103));
+    expect(handle.alignment()).toEqual({ bars: 4, matched: 4, gaps: 0, dropped: 0 });
+    // One the primary skips past stays dropped, and one past its end is dropped too.
+    prints.push(bar(4, 1040), bar(5, 1050), bar(7, 1070));
+    chart.primarySeries()!.update(bar(5, 105));
+    expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), prints).alignment);
+    expect(handle.alignment()).toEqual({ bars: 5, matched: 5, gaps: 0, dropped: 2 });
+    chart.primarySeries()!.update(bar(7, 107));
+    expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), prints).alignment);
+  });
+
+  it('reads only the prints a live append can match, not the instrument\'s whole history', () => {
+    const count = 20_000;
+    const { chart } = loaded(ramp(100, count, 200));
+    let reads = 0;
+    const prints = Array.from({ length: count }, (_, day) => ({ get time(): number { reads++; return at(day); }, value: 1000 + day }));
+    const handle = addComparison(chart, { symbol: 'A', bars: prints });
+    reads = 0;
+    chart.primarySeries()!.update(bar(count, 201));
+    expect(reads).toBeLessThan(10);
+    expect(handle.alignment()).toEqual({ bars: count + 1, matched: count, gaps: 1, dropped: 0 });
+    // Out of time order, the prints are read in full again, as an alignment reads them.
+    const shuffled: SeriesDataItem[] = [{ time: at(count + 1), value: 9 }, ...ramp(1000, 3, 1020)];
+    handle.setBars(shuffled);
+    chart.primarySeries()!.update(bar(count + 1, 202));
+    expect(handle.barAt(at(count + 1))?.close).toBe(9);
+    expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), shuffled).alignment);
+  });
+
   it('withholds an appended print while its comparison is suppressed', () => {
     const { chart } = loaded(ramp(100, 3, 102));
     const controller = comparisonController(chart, { baseline: 'common' });

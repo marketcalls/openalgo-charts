@@ -159,6 +159,29 @@ describe('a primitive that throws in draw', () => {
     expect(reported.map(error => (error as Error).message).sort()).toEqual(['first', 'second']);
   });
 
+  // Audit C6, second round: a fault before any save of its own left what the
+  // primitive had set on the context for the primitives after it.
+  it.each(['bottom', 'normal', 'top'] as const)('gives the next %s primitive the canvas state from before the fault', (zOrder) => {
+    const { chart, frame } = makeChart();
+    chart.addSeries('candlestick').setData(bars);
+    frame();
+    const pane = chart.panes()[0]!;
+    const g = zOrder === 'top' ? pane.top.ctx : pane.base.ctx;
+    // The recording context keeps no state stack: give it one for the property under test.
+    const alphas: number[] = [], { save, restore } = g;
+    g.globalAlpha = 1;
+    g.save = function (this: CanvasRenderingContext2D): void { alphas.push(this.globalAlpha); save.call(this); };
+    g.restore = function (this: CanvasRenderingContext2D): void { if (alphas.length > 0) this.globalAlpha = alphas.pop()!; restore.call(this); };
+    const seen: number[] = [];
+    chart.addPrimitive({ zOrder: () => zOrder, draw: (ctx) => { ctx.globalAlpha = 0; throw new Error('alpha'); } }, 0);
+    chart.addPrimitive({ zOrder: () => zOrder, draw: (ctx) => { seen.push(ctx.globalAlpha); } }, 0);
+    frame();
+    expect(seen).toEqual([1]);
+    expect(g.globalAlpha).toBe(1);
+    expect(alphas).toEqual([]);
+    expect(reported).toHaveLength(1);
+  });
+
   it('does not let a primitive restore more than it saved pop the pane\'s own state', () => {
     const { chart, frame } = makeChart();
     chart.addSeries('candlestick').setData(bars);

@@ -153,6 +153,10 @@ interface ItemState {
   readonly type: SeriesType;
   readonly style: SeriesStyle;
   bars: readonly SeriesDataItem[];
+  /** How many of `bars`, from the front, are known to run in time order. */
+  ascending: number;
+  /** Prints later than the primary's last bar at the last alignment, all of them dropped. */
+  tail: number;
   items: SeriesDataItem[];
   values: Map<number, Bar>;
   suppressed: boolean;
@@ -217,7 +221,7 @@ export class ComparisonController {
       series, entry, scale: series.priceScale(), savedScaleMode: series.priceScale().options.mode,
       savedInverted: series.priceScale().options.inverted, appliedInverted: null,
       scaleId, type: options.type ?? 'line', style, items: [], values: new Map(), suppressed: false,
-      bars: options.bars, alignment: EMPTY_ALIGNMENT, removed: false,
+      bars: options.bars, ascending: 0, tail: 0, alignment: EMPTY_ALIGNMENT, removed: false,
     };
     if (this._mode !== 'none') state.scale.setOptions({ mode: this._mode });
     const handle: ComparisonHandle = {
@@ -406,25 +410,47 @@ export class ComparisonController {
     const syncing = this._syncing;
     this._syncing = true;
     try {
+      const added = primary.length - from, last = primary[primary.length - 1]!.time;
       for (const state of this._items.values()) {
-        // Only prints past the primary's old end can match: a pass over their
-        // times, read afresh as a full alignment read them.
-        const prints = printsByTime(state.bars, primary[from - 1]!.time);
-        for (let i = from; i < primary.length; i++) this._append(state, prints, primary[i]!.time);
+        // Only prints past the primary's old end can match, read afresh as a
+        // full alignment read them.
+        const prints = this._later(state, primary[from - 1]!.time);
+        let hits = 0, tail = 0;
+        for (let i = from; i < primary.length; i++) hits += this._append(state, prints, primary[i]!.time);
+        for (const time of prints.keys()) if (time > last) tail++;
+        // The last alignment dropped every print past the old end that it had,
+        // and the instrument's own array may have grown since.
+        const { bars, matched, gaps, dropped } = state.alignment;
+        state.alignment = { bars: bars + added, matched: matched + hits, gaps: gaps + added - hits, dropped: dropped - state.tail + prints.size - hits };
+        state.tail = tail;
       }
       this._rememberAlignment();
     } finally { this._realigning = false; this._syncing = syncing; }
     if (!syncing) this._repaint();
   }
 
-  /** One primary bar appended at `time`: its item, as `alignToPrimary` would have made it. */
-  private _append(state: ItemState, prints: Map<number, Bar>, time: number): void {
-    const hit = prints.get(time), item: SeriesDataItem = hit ?? { time }, n = hit === undefined ? 0 : 1;
+  /** One primary bar appended at `time`: its item, as `alignToPrimary` would have made it. Counts 1 for a print there. */
+  private _append(state: ItemState, prints: Map<number, Bar>, time: number): number {
+    const hit = prints.get(time), item: SeriesDataItem = hit ?? { time };
     state.items.push(item);
     state.values.set(time, toBar(item));
-    const { bars, matched, gaps, dropped } = state.alignment;
-    state.alignment = { bars: bars + 1, matched: matched + n, gaps: gaps + 1 - n, dropped: dropped - n };
     state.series.update(state.suppressed ? { time } : item);
+    return hit === undefined ? 0 : 1;
+  }
+
+  /**
+   * The instrument's prints later than `after`, read from where they can
+   * start: past the last of the prints in time order at the front of its array
+   * that is not later. A history in time order, the usual kind, then costs an
+   * append its new prints rather than a read of every one.
+   */
+  private _later(state: ItemState, after: number): Map<number, Bar> {
+    const bars = state.bars;
+    let n = Math.min(state.ascending || 1, bars.length);
+    while (n < bars.length && bars[n]!.time >= bars[n - 1]!.time) n++;
+    let from = state.ascending = n;
+    while (from > 0 && bars[from - 1]!.time > after) from--;
+    return printsByTime(bars, after, from);
   }
 
   private _rememberAlignment(): void {
@@ -671,6 +697,9 @@ export class ComparisonController {
     state.alignment = result.alignment;
     state.items = result.items;
     state.values = new Map(result.items.map(item => { const bar = toBar(item); return [bar.time, bar]; }));
+    // Read in full once here, the array being new or replaced, so an append reads only its own end.
+    state.ascending = 0;
+    state.tail = this._later(state, shown[shown.length - 1]?.time ?? -Infinity).size;
     this._write(state);
   }
 

@@ -176,20 +176,22 @@ function fault(primitive: IPrimitive, error: unknown): void {
 }
 
 /**
- * Draw one primitive, counting its saves. A save it leaves open, by throwing
- * between it and its restore, would be popped by the pane's next restore in
+ * Draw one primitive from a saved state of its own, counting its saves. A save
+ * it leaves open by throwing would be popped by the pane's next restore in
  * place of the pane's own, leaving the plot clip over the axes and one more
  * state on the stack every frame; a restore past its own saves would pop the
- * pane's. Either way what it did to the stack ends with it.
+ * pane's; and what it set before a throw with no save (an alpha, a transform,
+ * a clip) would reach the primitives after it. All of it ends with the draw.
  */
 function drawPrimitive(p: IPrimitive, g: CanvasRenderingContext2D, rc: PrimitiveRenderContext): void {
   const { save, restore } = g;
   let open = 0;
+  save.call(g);
   g.save = (): void => { open++; save.call(g); };
   g.restore = (): void => { if (open > 0) { open--; restore.call(g); } };
   try { p.draw(g, rc); } catch (error) { fault(p, error); } finally {
     g.save = save; g.restore = restore;
-    for (; open > 0; open--) restore.call(g);
+    for (; open >= 0; open--) restore.call(g);
   }
 }
 
@@ -1011,6 +1013,14 @@ export class Pane {
     if (!scale.autoScale) return false; // manual (axis-dragged) range: leave it
     let low = Infinity;
     let high = -Infinity;
+    // A log axis cannot place zero or below, so it fits the lowest positive price
+    // in view, an extent's high where its low is not positive.
+    const log = mode === 'logarithmic';
+    const fold = (ext: { min: number; max: number }): void => {
+      const min = log && !(ext.min > 0) ? ext.max : ext.min;
+      if (min < low && (!log || min > 0)) low = min;
+      if (ext.max > high) high = ext.max;
+    };
     for (const s of this._series) {
       if (s.style.visible === false || !match(s)) continue;
       const entry = getChartType(s.type);
@@ -1024,9 +1034,7 @@ export class Pane {
         const bar = bars[i]!;
         if (bar.time > span.lastTime) break;
         if (layer.timeToIndex(bar.time) === undefined) continue;
-        const ext = entry.extents(bar, s.style);
-        if (ext.min < low) low = ext.min;
-        if (ext.max > high) high = ext.max;
+        fold(entry.extents(bar, s.style));
       }
     }
     for (const p of this._primitives) {
@@ -1034,10 +1042,7 @@ export class Pane {
       if ((this._primitiveScales.get(p) ?? 'right') !== scaleId) continue;
       let ext: { min: number; max: number } | null | undefined;
       try { ext = p.autoscaleInfo?.(); } catch (error) { fault(p, error); continue; }
-      if (ext) {
-        if (ext.min < low) low = ext.min;
-        if (ext.max > high) high = ext.max;
-      }
+      if (ext) fold(ext);
     }
     return low <= high ? scale.autoscale(low, high, progress) : false;
   }

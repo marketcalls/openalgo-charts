@@ -91,8 +91,47 @@ describe('taking a bar-colouring study off', () => {
     // The copy carries the study's colour, which is not the host's.
     const data = series.getData();
     series.update({ ...data[data.length - 1]!, close: 140 });
+    series.update({ ...series.getData()[28]!, close: 129 });
     study.remove();
     expect(colorsOf(chart)).toEqual(repeat('#aa0000', 30));
+  });
+
+  it('takes the colour a host sets on a copy of what getData returned', () => {
+    const chart = makeChart(bars(0, 30, '#aa0000'));
+    const study = chart.addIndicator('audit-273-bar-paint');
+    const series = chart.primarySeries()!;
+    series.update({ ...series.getData()[29]!, close: 140, color: '#00bb00' });
+    study.remove();
+    expect(colorsOf(chart)).toEqual([...repeat('#aa0000', 29), '#00bb00']);
+  });
+
+  // Audit N04, second round: matching the study's time and colour does not make
+  // a bar the host built itself a copy of the study's.
+  it('takes a replacement coloured like the study as the bars\' own colours', () => {
+    const chart = makeChart(bars(0, 30, '#aa0000'));
+    const study = chart.addIndicator('audit-273-bar-paint');
+    chart.primarySeries()!.setData(bars(0, 30, STUDY));
+    study.remove();
+    expect(colorsOf(chart)).toEqual(repeat(STUDY, 30));
+  });
+
+  it('keeps a live tick coloured like the study as the bar\'s own colour', () => {
+    const chart = makeChart(bars(0, 30, '#aa0000'));
+    const study = chart.addIndicator('audit-273-bar-paint');
+    chart.primarySeries()!.update({ ...bar(29, STUDY), close: 140 });
+    study.remove();
+    expect(colorsOf(chart)).toEqual([...repeat('#aa0000', 29), STUDY]);
+  });
+
+  it('gives a copy of what getData returned its own colour back after a page of older history', () => {
+    const chart = makeChart(bars(20, 50, '#aa0000'));
+    const study = chart.addIndicator('audit-273-bar-paint');
+    const series = chart.primarySeries()!;
+    const copies = series.getData().map(b => ({ ...b }));
+    series.prependData(bars(0, 20, '#0000cc'));
+    series.update({ ...copies[29]!, close: 160 });
+    study.remove();
+    expect(colorsOf(chart)).toEqual([...repeat('#0000cc', 20), ...repeat('#aa0000', 30)]);
   });
 
   it('keeps the colour of a live tick on the forming bar and of a new bar', () => {

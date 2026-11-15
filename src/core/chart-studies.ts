@@ -56,6 +56,16 @@ const INSTANCE_PALETTE: readonly string[] = [
 ];
 
 /**
+ * What a clone of a price bar carries besides the overlay's colour: that
+ * colour, and the colour of the host's bar the clone stands for. A spread
+ * copies both, so a host's copy of a clone (a tick built on what `getData()`
+ * returned) still says which bar it stands for, while a bar the host built
+ * itself carries neither, and its colour is its own even when it is the study's.
+ */
+const PAINTED = Symbol('painted'), OWN = Symbol('own');
+type PaintedBar = Bar & { [PAINTED]?: string | undefined; [OWN]?: string | undefined };
+
+/**
  * The slice of the chart the study host reads, writes and drives. The chart
  * itself is the host: each member carries the name and the type of the chart's
  * own, so the moved code reads as it did in chart.ts, and a member the chart
@@ -121,16 +131,6 @@ export class ChartStudies {
   /** Instance id of the indicator whose colours are on the price bars, if any. */
   private _barColorOwner: string | null = null;
   private _barColors: readonly (string | null)[] | null = null;
-  /**
-   * Each clone the overlay wrote, with the colour of the host's bar it stands
-   * for: removing the indicator has to put that back, and the clone's own
-   * `color` is the overlay's. Keyed by the clone rather than by index, since a
-   * page of older history moves every clone to a new index.
-   */
-  private readonly _barColorOwn = new WeakMap<Bar, string | undefined>();
-  /** The bar at each index as the last pass left it, and that bar's own colour: a pass reads the map only where a bar changed. */
-  private readonly _barColorSeen: Bar[] = [];
-  private readonly _barColorBase: (string | undefined)[] = [];
 
   public constructor(chart: object, host: StudiesHost) {
     this._chart = chart;
@@ -633,32 +633,23 @@ export class ChartStudies {
   private _applyBarColors(): void {
     const dataId = this._host._firstDataId.value;
     if (dataId === null) return;
-    const bars = this._host._dataLayer.seriesBars(dataId);
+    const bars = this._host._dataLayer.seriesBars(dataId) as readonly PaintedBar[];
     const n = bars.length;
-    const own = this._barColorOwn, seen = this._barColorSeen, base = this._barColorBase;
     const colors = this._barColors;
     const out = new Array<Bar>(n);
     let changed = false;
     for (let i = 0; i < n; i++) {
-      const bar = bars[i]!, prev = seen[i];
-      // A bar not met here before is a clone moved by a page of older history,
-      // or the host's own: a replacement, a tick, a new bar. A live tick
-      // changes one, so the map is read for one. A host bar with the time and
-      // colour of the clone it replaced was copied from it, a tick built on
-      // `getData()`, and stands for the same bar.
-      if (prev !== bar) {
-        if (prev?.time !== bar.time || prev.color !== bar.color || !own.has(prev)) base[i] = own.has(bar) ? own.get(bar) : bar.color;
-        seen[i] = bar;
-      }
-      const color = colors?.[i] ?? base[i];
+      const bar = bars[i]!;
+      // A clone, or the host's copy of one still in the overlay's colour, stands
+      // for the bar it was cloned from wherever a page of older history moved
+      // it. A bar with no mark, or with a colour of its own since, is the host's.
+      const own = bar[PAINTED] === bar.color ? bar[OWN] : bar.color;
+      const color = colors?.[i] ?? own;
       if (color === bar.color) { out[i] = bar; continue; }
-      const clone = { ...bar, color } satisfies LooseOptional<Bar> as Bar; // undefined restores a host bar that had no colour
-      own.set(clone, base[i]);
-      out[i] = seen[i] = clone;
+      // undefined restores a host bar that had no colour
+      out[i] = { ...bar, color, [PAINTED]: color, [OWN]: own } satisfies LooseOptional<PaintedBar> as PaintedBar;
       changed = true;
     }
-    // Withdrawn, nothing is left to restore, and the bars need not be held.
-    seen.length = base.length = colors === null ? 0 : n;
     if (!changed) return;
     // Straight to the data layer, not through `_setData`: the time points are
     // untouched, so nothing about the axis or the base index moves, and routing
