@@ -37,13 +37,21 @@
  *   the stored document is read again: what this chart added, changed or
  *   deleted since it last read or wrote it goes in as it has it, and every
  *   other drawing stays as the store has it, so the later writer erases
- *   neither the other's drawings nor its deletions.
+ *   neither the other's drawings nor its deletions. A store whose writes
+ *   land later does the same once more as each write lands
+ *   (`InstrumentDrawings.merge`), since two writes can be made before either
+ *   has landed.
  * - **A drawing stays on its pane.** Panes are slots, and a study removed or
  *   moved while an instrument is off screen shifts them under its document.
  *   Each document is written with the panes it was drawn on (`panes`: the
- *   price pane as null, any other by the ids of its studies), and is put back
- *   on those panes wherever they stand now when it is read, which a chart
- *   that reports its panes and studies allows.
+ *   price pane as null, any other by its studies, each by id and kind), and
+ *   is put back on those panes wherever they stand now when it is read,
+ *   which a chart that reports its panes and studies allows. A pane whose
+ *   studies have all gone takes its drawings with it, unless a pane of the
+ *   same kinds of study stands where it was (the same template applied
+ *   again): another study put in its place is not given them. A layout
+ *   restored over drawings that carry their panes, as `document` returns
+ *   them, puts them on the panes their studies hold once it has landed.
  * - **A store that fails loses nothing for the session.** A refused write is
  *   reported through `onError` and the document is held in memory, read back
  *   from there, and written again with the next change.
@@ -105,7 +113,8 @@ export interface InstrumentDrawingsChart {
    * stand now; without them a drawing keeps its slot.
    */
   panes?(): readonly unknown[];
-  indicators?(): readonly { readonly id: string; readonly paneIndex: number }[];
+  /** `indicatorId`, the kind of study, lets a pane rebuilt with new ids (a template applied again) keep its drawings. */
+  indicators?(): readonly { readonly id: string; readonly paneIndex: number; readonly indicatorId?: string }[];
   primaryPaneIndex?(): number;
 }
 
@@ -147,11 +156,14 @@ const EMPTY: DrawingsDocument = { version: drawingsDocumentVersion([]), drawings
 /** A document with nothing in it, which is stored as no entry at all. */
 const isEmpty = (document: DrawingsDocument): boolean => document.drawings.length === 0 && !document.groups?.length;
 
+/** A study as a document's panes name it: its id, and its kind when the chart says. */
+interface PaneStudy { readonly id: string; readonly indicatorId?: string }
+
 /**
  * The panes a document was drawn on, slot by slot: null for the price pane,
- * and for any other the ids of the studies on it (none for a bare pane).
+ * and for any other the studies on it (none for a bare pane).
  */
-type PaneKeys = ReadonlyArray<readonly string[] | null>;
+type PaneKeys = ReadonlyArray<readonly PaneStudy[] | null>;
 
 /** A document as it is stored: its drawings and the panes they were drawn on. */
 type StoredDocument = DrawingsDocument & { panes?: PaneKeys };
@@ -162,33 +174,74 @@ function documentOf(drawings: Drawing[], groups: unknown): DrawingsDocument {
   return { version: drawingsDocumentVersion(drawings), drawings, ...(kept.length ? { groups: kept } : {}) };
 }
 
+/** A study a stored pane names, or null. A document written before kinds were kept names it by its id alone. */
+function paneStudy(value: unknown): PaneStudy | null {
+  if (typeof value === 'string') return { id: value };
+  const { id, indicatorId } = (value ?? {}) as { id?: unknown; indicatorId?: unknown };
+  return typeof id !== 'string' ? null : typeof indicatorId === 'string' ? { id, indicatorId } : { id };
+}
+
 /** The panes a stored value names, or null when it names none this build reads. */
 function paneKeysOf(value: unknown): PaneKeys | null {
   const panes = (value as { panes?: unknown } | null)?.panes;
-  return Array.isArray(panes) && panes.every(key => key === null || (Array.isArray(key) && key.every(id => typeof id === 'string')))
-    ? panes as PaneKeys : null;
+  if (!Array.isArray(panes)) return null;
+  const keys = panes.map(key => key === null ? null : Array.isArray(key) ? key.map(paneStudy) : undefined);
+  return keys.every(key => key === null || (key !== undefined && key.every(study => study !== null))) ? keys as PaneKeys : null;
 }
 
-/** Where each pane of `from` stands in `to`: the price pane, the pane holding any of its studies, or -1. */
+/** The kinds of study on a pane, in one order, or null when one of them is not known. */
+function kindsOf(key: readonly PaneStudy[]): string | null {
+  const kinds = key.map(study => study.indicatorId);
+  return kinds.every(kind => kind !== undefined) ? kinds.sort().join('\n') : null;
+}
+
+/**
+ * Where each pane of `from` stands in `to`, or -1: the price pane; else the
+ * pane holding any of its studies; else, for one whose studies have all
+ * gone, a pane of the same kinds no pane of `from` has claimed, its own slot
+ * first, as when a template is applied again with new ids. Another kind of
+ * study put in its place is not its pane. Without the kinds (a chart that
+ * does not report them), a pane keeps its slot while no other claimed it.
+ */
 function slotsIn(from: PaneKeys, to: PaneKeys): number[] {
-  return from.map(key => key === null ? to.indexOf(null) : to.findIndex(other => other !== null && other.some(id => key.includes(id))));
+  const slots = from.map(key => key === null ? to.indexOf(null)
+    : to.findIndex(other => other !== null && other.some(study => key.some(mine => mine.id === study.id))));
+  const taken = new Set(slots);
+  return slots.map((slot, i) => {
+    const key = from[i];
+    if (slot >= 0 || key === null || key === undefined) return slot;
+    const kinds = kindsOf(key);
+    const fits = (j: number): boolean => {
+      const other = to[j];
+      return other !== null && other !== undefined && !taken.has(j) && (kinds === null || kindsOf(other) === kinds);
+    };
+    const found = fits(i) ? i : kinds === null ? -1 : to.findIndex((_, j) => fits(j));
+    if (found >= 0) taken.add(found);
+    return found;
+  });
 }
 
 /**
  * `document`, drawn on the panes `from`, put on the panes `to`: each drawing
- * on the slot its pane holds now. One whose pane is not there keeps its slot
- * while `to` has it and no pane of `from` moved onto it, as when another
- * layout keeps another study there; else its pane has gone, and it goes with
- * it, as a pane removed on screen takes its drawings.
+ * on the slot its pane holds now, or gone with its pane, as a pane removed on
+ * screen takes its drawings. One on a slot `from` does not name keeps it
+ * while `to` has it and no pane of `from` moved onto it.
  */
 function onPanes(document: DrawingsDocument, from: PaneKeys, to: PaneKeys): DrawingsDocument {
   const slots = slotsIn(from, to);
   const taken = new Set(slots);
   return documentOf(document.drawings.flatMap(d => {
-    const found = slots[d.paneIndex] ?? -1;
-    const slot = found >= 0 ? found : d.paneIndex < to.length && !taken.has(d.paneIndex) ? d.paneIndex : -1;
+    const slot = d.paneIndex < from.length ? slots[d.paneIndex]! : d.paneIndex < to.length && !taken.has(d.paneIndex) ? d.paneIndex : -1;
     return slot < 0 ? [] : [slot === d.paneIndex ? d : { ...d, paneIndex: slot }];
   }), document.groups);
+}
+
+/** A stored value as a document, on the panes `onto` when both name theirs, or the empty document for none. */
+function readOnto(value: unknown, onto: PaneKeys | null): DrawingsDocument {
+  if (value === null || value === undefined) return EMPTY;
+  const from = onto === null ? null : paneKeysOf(value);
+  const migrated = migrateDrawings(value);
+  return from === null || onto === null ? migrated : onPanes(migrated, from, onto);
 }
 
 /**
@@ -297,7 +350,7 @@ export class InstrumentDrawings {
    * `panes` those after every pane moved or removed since. Null once the
    * drawings are on the panes standing now.
    */
-  private _pending: { text: string; stamp: PaneKeys; panes: Array<readonly string[] | null> } | null = null;
+  private _pending: { text: string; stamp: PaneKeys; panes: Array<readonly PaneStudy[] | null> } | null = null;
   /** Documents whose write failed, by key: what the store should hold, kept for the session. */
   private readonly _held = new Map<string, string>();
   private _swapping = false;
@@ -315,6 +368,8 @@ export class InstrumentDrawings {
       chart.on('data:context', context => this._follow(context as DrawingInstrument | undefined)),
       chart.on('drawing:change', payload => this._changed(payload)),
       chart.on('draw:restore', () => this._restored()),
+      // After the controller's own listener has put the document on.
+      chart.on('drawings:restore', document => this._restoredOnPanes(document)),
       chart.on('paneRemoved', value => { this._pending?.panes.splice((value as { paneIndex: number }).paneIndex, 1); }),
       chart.on('paneMoved', value => {
         const panes = this._pending?.panes, { from, to } = value as { from: number; to: number };
@@ -349,27 +404,46 @@ export class InstrumentDrawings {
   /**
    * The saved document of an instrument: the drawings on the chart for the
    * current one, the stored document for any other, on the panes standing
-   * now, or null when it has none (or no key). A copy either way.
+   * now, or null when it has none (or no key). A copy either way. The
+   * current one's names the panes it is drawn on (`panes`), as it is stored,
+   * so a layout restored with it puts each drawing on its study's pane.
    */
   public document(instrument: DrawingInstrument): DrawingsDocument | null {
     const key = this._keyFor(instrument);
     if (key === null) return null;
-    const document = key === this._key && !this._destroyed ? this._draw.toJSON() : this._read(key, this._panes());
+    const document = key === this._key && !this._destroyed
+      ? this._stamped(this._draw.toJSON(), this._pending?.panes ?? this._panes()) : this._read(key, this._panes());
     return document === null || isEmpty(document) ? null : document;
   }
 
   /**
-   * Replace one instrument's drawings, drawn on the panes standing now. On
-   * the current instrument that is the controller's `fromJSON`, which clears
-   * its undo history; on any other, the stored document, shown when the
-   * chart next moves there. For a layout that brings the drawings of an
-   * instrument the chart is about to show.
+   * Replace one instrument's drawings, drawn on the panes standing now, or
+   * on those it names (`panes`, as stored). On the current instrument that
+   * is the controller's `fromJSON`, which clears its undo history; on any
+   * other, the stored document, shown when the chart next moves there. For a
+   * layout that brings the drawings of an instrument the chart is about to show.
    */
   public setDocument(instrument: DrawingInstrument, document: unknown): void {
     const key = this._keyFor(instrument);
     if (this._destroyed || key === null) return;
-    if (key === this._key) { this._draw.fromJSON(document); return; }
-    this._write(key, this._stamped(migrateDrawings(document), this._panes()));
+    const panes = key === this._key ? this._pending?.panes ?? this._panes() : this._panes();
+    if (key === this._key) { this._draw.fromJSON(readOnto(document, panes)); return; }
+    this._write(key, this._stamped(readOnto(document, panes), panes));
+  }
+
+  /**
+   * The document to store when another writer may have stored one since
+   * `base`, the stored document `ours` was made from: each drawing `ours`
+   * added, changed or deleted since `base` as `ours` has it, every other as
+   * `theirs` (what the store holds now) has it, on the panes `ours` names.
+   * For a store whose writes land later than they are made, so that two
+   * writes made before either landed keep both: the widget's own store
+   * merges each write as it lands. Since 2.7.3.
+   */
+  public static merge(base: unknown, ours: unknown, theirs: unknown): DrawingsDocument {
+    const panes = paneKeysOf(ours);
+    const merged = withTheirs(readOnto(base, panes), migrateDrawings(ours), readOnto(theirs, panes));
+    return panes === null ? merged : { ...merged, panes: [...panes] } as StoredDocument;
   }
 
   /** Write the current instrument's document now, and any the store refused before. False while one is still refused. */
@@ -400,14 +474,14 @@ export class InstrumentDrawings {
   }
 
   /**
-   * The panes standing now: null for the price pane, the ids of its studies
-   * for any other. Null for a chart that does not report them.
+   * The panes standing now: null for the price pane, its studies by id and
+   * kind for any other. Null for a chart that does not report them.
    */
-  private _panes(): Array<readonly string[] | null> | null {
+  private _panes(): Array<readonly PaneStudy[] | null> | null {
     const chart = this._chart;
     if (chart.panes === undefined || chart.indicators === undefined) return null;
-    const panes: Array<string[] | null> = chart.panes().map(() => []);
-    for (const study of chart.indicators()) panes[study.paneIndex]?.push(study.id);
+    const panes: Array<PaneStudy[] | null> = chart.panes().map(() => []);
+    for (const { id, indicatorId, paneIndex } of chart.indicators()) panes[paneIndex]?.push(indicatorId === undefined ? { id } : { id, indicatorId });
     const price = chart.primaryPaneIndex?.() ?? 0;
     if (price < panes.length) panes[price] = null;
     return panes;
@@ -505,6 +579,18 @@ export class InstrumentDrawings {
     else this._pending = null;
   }
 
+  /**
+   * A layout restored with drawings that name their panes (`document`'s, as
+   * the widget restores a state over the drawings on the chart): they are
+   * on those panes, and go onto the panes their studies hold once the layout
+   * has landed (`_settle`), wherever it puts them.
+   */
+  private _restoredOnPanes(document: unknown): void {
+    const stamp = paneKeysOf(document);
+    if (stamp === null || this._swapping || this._destroyed || this._key === null || this._pending !== null) return;
+    this._pending = { text: this._live(), stamp, panes: [...stamp] };
+  }
+
   /** A layout has landed: drawings read before it go onto its panes. */
   private _settle(): void {
     const pending = this._pending;
@@ -574,10 +660,7 @@ export class InstrumentDrawings {
    * the current shape and put on the panes `onto` when given, or null.
    */
   private _read(key: string, onto: PaneKeys | null, value: unknown = this._raw(key)): DrawingsDocument | null {
-    if (value === null || value === undefined) return null;
-    const migrated = migrateDrawings(value);
-    const from = onto === null ? null : paneKeysOf(value);
-    const document = from === null || onto === null ? migrated : onPanes(migrated, from, onto);
+    const document = readOnto(value, onto);
     return isEmpty(document) ? null : document;
   }
 

@@ -328,9 +328,12 @@ describe('WidgetStorage over an asynchronous store', () => {
     storage.set('state', { n: 2 });
     storage.set('rail', { r: 1 });
     const flushed = storage.flush();
-    // Synchronous, as the page going away needs it: what is out and what is not sent yet.
+    // Synchronous, as the page going away needs it: what is out and what is not sent yet,
+    // each with what the store may hold without another writer having moved it on (2.7.3):
+    // what it held before, and each of this copy's values out. A stale journal is not replayed.
     expect(JSON.parse(journal.map.get('oac-widget-journal:a')!)).toEqual({
       version: 1, entries: { 'oac-widget:a:state': '{"n":2}', 'oac-widget:a:rail': '{"r":1}' },
+      was: { 'oac-widget:a:state': [null, '{"n":1}', '{"n":2}'], 'oac-widget:a:rail': [null, '{"r":1}'] },
     });
     store.release();
     await settle();

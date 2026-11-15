@@ -121,7 +121,8 @@ describe('D2: two writers on one instrument', () => {
     const b = make({ persist: 'desk', storage: store });
     expect(prices(b)).toEqual([101]);
     a.draw.remove(kept.id);
-    expect(storedDoc(store, 'desk', 'NSE:AAA')).toBeNull();
+    // An empty document, not none, so an older layout cannot seed it again (D3, 2.7.3).
+    expect(storedDoc(store, 'desk', 'NSE:AAA')).toEqual({ version: 2, drawings: [] });
     b.draw.add(line(202));
     expect(storedPrices(store, 'desk', 'NSE:AAA')).toEqual([202]);
   });

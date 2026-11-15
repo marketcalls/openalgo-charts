@@ -9,8 +9,9 @@
  * persistence fields besides what it names.
  */
 import type { WorkspacePayload } from 'openalgo-charts/workspace';
-import type { DrawingsDocument } from 'openalgo-charts/draw';
+import { InstrumentDrawings, type DrawingsDocument } from 'openalgo-charts/draw';
 import { WidgetStorage } from './context';
+import { flushLeaving, mergeOnCommit } from './widget-storage';
 import { defaultWidgetStore } from './storage';
 import { errorText, widgetText } from './localization';
 import { SAVE_DEBOUNCE_MS } from './widget';
@@ -46,17 +47,48 @@ export function gridStorage(s: GridState): WidgetStorage {
       context.toast(message, 'error');
     },
   });
+  // Two tabs on one desk can each change a chart's drawings before either
+  // write has landed: each goes in merged into what the other stored.
+  mergeOnCommit(storage, name => (name === DRAWINGS_KEY ? mergeDrawings : null));
   // Closed with the grid, which lets go of this listener with it.
   storage.subscribe(name => heard(s, name));
   return storage;
 }
 
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * The desk's drawings record as this tab (`ours`) and another (`theirs`)
+ * changed it since `base`: a document only one of them changed as that one
+ * has it, one both changed merged drawing by drawing (`InstrumentDrawings.merge`).
+ */
+function mergeDrawings(base: unknown, ours: unknown, theirs: unknown): unknown {
+  const was = readChartDrawings(base), mine = readChartDrawings(ours), other = readChartDrawings(theirs);
+  const charts: Record<string, Record<string, DrawingsDocument>> = {};
+  for (const id of new Set([...was.keys(), ...mine.keys(), ...other.keys()])) {
+    const docs: Record<string, DrawingsDocument> = {};
+    for (const key of new Set([...(was.get(id)?.keys() ?? []), ...(mine.get(id)?.keys() ?? []), ...(other.get(id)?.keys() ?? [])])) {
+      const b = was.get(id)?.get(key), o = mine.get(id)?.get(key), t = other.get(id)?.get(key);
+      const doc = same(o, b) ? t : same(t, b) ? o : InstrumentDrawings.merge(b, o, t);
+      if (doc !== undefined) docs[key] = doc;
+    }
+    if (Object.keys(docs).length > 0) charts[id] = docs;
+  }
+  return { version: 1, charts };
+}
+
 /** The key under which a cell's document is marked as changed here (`GridState.changed`). */
 const changeKey = (cell: string, key: string): string => `${cell}\n${key}`;
 
-/** What a cell's drawing store calls for each document the chart writes: changed here, unless the grid is following the store. */
-export const markChanged = (s: GridState, cell: string) => (key: string): void => {
-  if (!s.following) s.changed.add(changeKey(cell, key));
+/**
+ * What a cell's drawing store calls for each document the chart writes:
+ * changed here, from the document it replaced, unless the grid is following
+ * the store. A document changed again keeps the first: the change to save is
+ * everything since.
+ */
+export const markChanged = (s: GridState, cell: string) => (key: string, before: DrawingsDocument | undefined): void => {
+  const changed = changeKey(cell, key);
+  if (!s.following && !s.changed.has(changed)) s.changed.set(changed, before);
 };
 
 /**
@@ -72,9 +104,11 @@ function heard(s: GridState, name: string): void {
 }
 
 /**
- * Each chart takes the documents another tab saved, but for those it has
- * changed itself since its last save, and shows its own instrument's newer
- * one: the next save, or an edit here, then never writes the older copy back.
+ * Each chart takes the documents another tab saved, and shows its own
+ * instrument's newer one: the next save, or an edit here, then never writes
+ * the older copy back. One it has changed itself since its last save takes
+ * theirs under its own change, which stays to be saved; the chart shows it
+ * once it shows that instrument again.
  */
 function followDrawings(s: GridState): void {
   const theirs = readChartDrawings(s.storage.get(DRAWINGS_KEY));
@@ -87,8 +121,13 @@ function followDrawings(s: GridState): void {
       const shown = cell.widget.instrumentDrawings?.key() ?? null;
       let reload = false;
       for (const key of new Set([...mine.keys(), ...(next?.keys() ?? [])])) {
-        const document = next?.get(key);
-        if (s.changed.has(changeKey(cell.id, key)) || JSON.stringify(document) === JSON.stringify(mine.get(key))) continue;
+        const document = next?.get(key), changed = changeKey(cell.id, key);
+        if (same(document, mine.get(key))) continue;
+        if (s.changed.has(changed)) {
+          mine.set(key, InstrumentDrawings.merge(s.changed.get(changed), mine.get(key), document));
+          s.changed.set(changed, document);
+          continue;
+        }
         if (document === undefined) mine.delete(key);
         else mine.set(key, document);
         reload ||= key === shown;
@@ -198,7 +237,7 @@ function shareChords(s: GridState): void {
  */
 export function leaving(s: GridState): void {
   if (s.saveTimer !== 0 || s.saveRefused) saveNow(s);
-  void s.storage.flush();
+  flushLeaving(s.storage);
   s.saved?.flush();
 }
 

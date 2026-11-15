@@ -41,6 +41,9 @@ export interface IndexedDbWidgetStorage extends AsyncStorageLike {
   close(): void;
 }
 
+/** A store that reads one key as it stands, as every store storage-idb.ts builds does. Internal. */
+export type OneKeyStore = AsyncStorageLike & { getItem(key: string): Promise<string | null> };
+
 /** The IndexedDB store, fetched when the first store is created. Internal. */
 export const indexedDbPart = lazyPart(() => import('./storage-idb'));
 
@@ -48,19 +51,19 @@ type IdbModule = NonNullable<typeof indexedDbPart.now>;
 type Listener = (key: string, value: string | null) => void;
 
 /** A store built by `open` once its code has arrived, and used through this until then. */
-function lazyStore(open: (module: IdbModule) => AsyncStorageLike & { close?(): void }, journal: StorageLike | null): IndexedDbWidgetStorage {
-  let real: (AsyncStorageLike & { close?(): void }) | null = null;
+function lazyStore(open: (module: IdbModule) => OneKeyStore & { close?(): void }, journal: StorageLike | null): IndexedDbWidgetStorage & OneKeyStore {
+  let real: (OneKeyStore & { close?(): void }) | null = null;
   let closed = false;
   const heard = new Map<Listener, (() => void) | undefined>();
-  const build = (module: IdbModule): AsyncStorageLike & { close?(): void } => {
+  const build = (module: IdbModule): OneKeyStore & { close?(): void } => {
     if (real !== null) return real;
     const store = real = open(module);
     for (const listener of heard.keys()) heard.set(listener, store.subscribe?.(listener));
     if (closed) store.close?.();
     return store;
   };
-  const now = (): AsyncStorageLike | null => real ?? (indexedDbPart.now === null ? null : build(indexedDbPart.now));
-  const use = <T>(call: (store: AsyncStorageLike) => Promise<T>): Promise<T> => {
+  const now = (): OneKeyStore | null => real ?? (indexedDbPart.now === null ? null : build(indexedDbPart.now));
+  const use = <T>(call: (store: OneKeyStore) => Promise<T>): Promise<T> => {
     const store = now();
     return store !== null ? call(store) : indexedDbPart.load().then(module => call(build(module)));
   };
@@ -69,6 +72,7 @@ function lazyStore(open: (module: IdbModule) => AsyncStorageLike & { close?(): v
   return {
     journal,
     entries: prefix => use(store => store.entries(prefix)),
+    getItem: key => use(store => store.getItem(key)),
     setItem: (key, value) => use(store => store.setItem(key, value)),
     removeItem: key => use(store => store.removeItem(key)),
     subscribe(listener) {

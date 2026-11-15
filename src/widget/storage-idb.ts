@@ -37,9 +37,9 @@
  *   answered from an older copy. A host that names this store gets IndexedDB
  *   or a reported failure, never a quiet change of store.
  */
-import { STORAGE_PREFIX, defaultStorage, type AsyncStorageLike } from './context';
+import { STORAGE_PREFIX, defaultStorage } from './context';
 import { storageEvents } from './widget-storage';
-import { DATABASE, type IndexedDbWidgetStorage, type IndexedDbWidgetStorageOptions } from './storage';
+import { DATABASE, type IndexedDbWidgetStorage, type IndexedDbWidgetStorageOptions, type OneKeyStore } from './storage';
 
 const STORE = 'entries';
 /** Where a namespace's copy from the page's storage is recorded; outside every `oac-widget:` range. */
@@ -52,7 +52,7 @@ const ANSWERED = 'oac-widget-store:indexeddb';
 type ChangeListener = (key: string, value: string | null) => void;
 
 /** The store `createIndexedDbWidgetStorage` builds (storage.ts), once this module has arrived. */
-export function openIndexedDbStore(factory: IDBFactory, name: string, options: IndexedDbWidgetStorageOptions): IndexedDbWidgetStorage {
+export function openIndexedDbStore(factory: IDBFactory, name: string, options: IndexedDbWidgetStorageOptions): IndexedDbWidgetStorage & OneKeyStore {
   const journal = options.journal === undefined ? defaultStorage() : options.journal;
   const legacy = options.migrateFrom === undefined ? pageStorage() : options.migrateFrom;
   let opening: Promise<IDBDatabase> | null = null;
@@ -158,6 +158,11 @@ export function openIndexedDbStore(factory: IDBFactory, name: string, options: I
         };
       };
     }),
+    // One key as it stands, for a write merged into it: never the copy from the page's storage `entries` makes.
+    getItem: key => run<string | null>('readonly', (store, done) => {
+      const read = store.get(key);
+      read.onsuccess = () => { done(typeof read.result === 'string' ? read.result : null); };
+    }),
     setItem: (key, value) => run<void>('readwrite', store => { store.put(value, key); }).then(() => announce(key, value)),
     removeItem: key => run<void>('readwrite', store => { store.delete(key); }).then(() => announce(key, null)),
     subscribe: listener => {
@@ -212,7 +217,7 @@ function pageStorage(): Storage | null {
 }
 
 /** The store `defaultWidgetStore` hands every widget on the page (storage.ts), once this module has arrived. */
-export function openPageDefault(factory: IDBFactory): AsyncStorageLike {
+export function openPageDefault(factory: IDBFactory): OneKeyStore {
   return orPageStorage(openIndexedDbStore(factory, DATABASE, {}));
 }
 
@@ -232,13 +237,13 @@ export function openPageDefault(factory: IDBFactory): AsyncStorageLike {
  * would vanish when the database opens again. The read fails instead, which
  * the widget reports and answers by keeping that session's changes in memory.
  */
-function orPageStorage(idb: IndexedDbWidgetStorage): AsyncStorageLike {
+function orPageStorage(idb: IndexedDbWidgetStorage & OneKeyStore): OneKeyStore {
   const page = pageStorage();
   if (page === null) return idb;
   let use: 'idb' | 'page' | null = null;
   const answered = (): boolean => { try { return page.getItem(ANSWERED) !== null; } catch { return false; } };
-  const onPage = (write: () => void): Promise<void> => {
-    try { write(); return Promise.resolve(); } catch (error) { return Promise.reject(error); }
+  const onPage = <T>(call: () => T): Promise<T> => {
+    try { return Promise.resolve(call()); } catch (error) { return Promise.reject(error); }
   };
   return {
     journal: idb.journal,
@@ -260,6 +265,7 @@ function orPageStorage(idb: IndexedDbWidgetStorage): AsyncStorageLike {
         use = 'page';
         return legacyEntries(page, prefix);
       }),
+    getItem: key => use === 'page' ? onPage(() => page.getItem(key)) : idb.getItem(key),
     setItem: (key, value) => use === 'page' ? onPage(() => page.setItem(key, value)) : idb.setItem(key, value),
     removeItem: key => use === 'page' ? onPage(() => page.removeItem(key)) : idb.removeItem(key),
   };

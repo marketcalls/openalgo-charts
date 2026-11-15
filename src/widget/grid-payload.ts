@@ -19,19 +19,20 @@ export type ChartDrawings = Map<string, Map<string, DrawingsDocument>>;
 /**
  * One cell's store, inside `docs`. The documents are copied on the way in,
  * so a later change on the chart never edits one the grid is about to save.
- * `changed` hears the key of each document the chart writes.
+ * `changed` hears the key of each document the chart writes, with the one it
+ * replaces. An instrument whose last drawing was deleted keeps an empty
+ * document rather than none, so a layout saved before the deletion, which
+ * seeds only an instrument with nothing stored, does not bring it back.
  */
-export function cellDrawingStore(id: string, docs: ChartDrawings, changed: (key: string) => void): DrawingDocumentStore {
-  return {
-    get: key => docs.get(id)?.get(key) ?? null,
-    set: (key, document) => {
-      let mine = docs.get(id);
-      if (mine === undefined) docs.set(id, mine = new Map());
-      mine.set(key, JSON.parse(JSON.stringify(document)) as DrawingsDocument);
-      changed(key);
-    },
-    remove: key => { docs.get(id)?.delete(key); changed(key); },
+export function cellDrawingStore(id: string, docs: ChartDrawings, changed: (key: string, before: DrawingsDocument | undefined) => void): DrawingDocumentStore {
+  const put = (key: string, document: DrawingsDocument): void => {
+    let mine = docs.get(id);
+    if (mine === undefined) docs.set(id, mine = new Map());
+    const before = mine.get(key);
+    mine.set(key, JSON.parse(JSON.stringify(document)) as DrawingsDocument);
+    changed(key, before);
   };
+  return { get: key => docs.get(id)?.get(key) ?? null, set: put, remove: key => put(key, { version: 2, drawings: [] }) };
 }
 
 /** The saved drawings entry, read defensively: anything it cannot use is left out, never thrown. */

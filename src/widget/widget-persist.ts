@@ -33,7 +33,10 @@ import {
   InstrumentDrawings, instrumentDrawingsKey, memoryDrawingStore, migrateUnscopedDrawings,
   type DrawingDocumentStore, type DrawingInstrument,
 } from 'openalgo-charts/draw';
-import { WidgetBus, type WidgetBusEvents, type WidgetStorage, type WidgetStorageError } from './context';
+import {
+  WidgetBus, WidgetStorage, type AsyncStorageLike, type StorageLike, type WidgetBusEvents, type WidgetStorageError,
+} from './context';
+import { flushLeaving, mergeOnCommit } from './widget-storage';
 import { restoreTimeframeCode } from './timeframe-preferences';
 import { isChartTypeChoice } from './chart-type-choice';
 import { errorText, widgetText } from './localization';
@@ -224,9 +227,9 @@ export function applySavedLayout(this: PersistHost, saved: WidgetState | null): 
  */
 export function scopeDrawings(this: PersistHost, saved: WidgetState | null): InstrumentDrawings {
   const storage = this._storage;
-  const store: DrawingDocumentStore = this._opts.drawingStore ?? (storage.enabled ? storedDrawings(storage) : memoryDrawingStore());
+  const store: DrawingDocumentStore = this._opts.drawingStore ?? keepingEmpty(storage.enabled ? storedDrawings(storage) : memoryDrawingStore());
   if (saved?.chart?.drawings !== undefined) migrateUnscopedDrawings(store, savedKey(saved), saved.chart.drawings);
-  return new InstrumentDrawings(this.chart, this.draw, {
+  const scoped = new InstrumentDrawings(this.chart, this.draw, {
     store,
     // While the store has not answered, no instrument: nothing is read from
     // a copy not filled yet, and nothing written over what it holds.
@@ -242,17 +245,55 @@ export function scopeDrawings(this: PersistHost, saved: WidgetState | null): Ins
       this._bus.emit('status', { text, kind: 'error' });
     },
   });
+  STORES.set(scoped, store);
+  return scoped;
 }
 
+/** The store each widget's drawings live in, for `holdsDrawings`. */
+const STORES = new WeakMap<InstrumentDrawings, DrawingDocumentStore>();
+
 /** Each instrument's drawings beside the layout, in the widget's own storage. */
-function storedDrawings(storage: WidgetStorage): DrawingDocumentStore {
+function storedDrawings(storage: WidgetStorage): Pick<DrawingDocumentStore, 'get' | 'set'> {
   return {
     get: key => storage.get(DRAWINGS_KEY_PREFIX + key),
     set: (key, document) => storage.set(DRAWINGS_KEY_PREFIX + key, document),
-    // A removal the store refused is a failure the drawings report and hold,
-    // or the deleted drawing would come back with the next read.
-    remove: key => { if (storage.remove(DRAWINGS_KEY_PREFIX + key) === false) throw new Error('The drawing store refused the removal'); },
   };
+}
+
+/**
+ * `store`, keeping an instrument whose last drawing was deleted as an empty
+ * document rather than no entry, which is how a 2.7.2 page reads it too. A
+ * layout seeds only an instrument with nothing stored (`restoreWidgetState`),
+ * and one saved before the deletion would otherwise bring the drawing back,
+ * now or after a reload. A store that refuses it throws, so the drawings
+ * hold the deletion and say so rather than see it return with the next read.
+ */
+function keepingEmpty(store: Pick<DrawingDocumentStore, 'get' | 'set'>): DrawingDocumentStore {
+  return {
+    get: key => store.get(key),
+    set: (key, document) => store.set(key, document),
+    remove: key => { if (store.set(key, { version: 2, drawings: [] }) === false) throw new Error('The drawing store refused the removal'); },
+  };
+}
+
+/** Whether an instrument has drawings of its own, or had them all deleted: one a layout's copy must not seed. */
+function holdsDrawings(scoped: InstrumentDrawings, instrument: DrawingInstrument): boolean {
+  if (scoped.document(instrument) !== null) return true;
+  const key = instrumentDrawingsKey(instrument);
+  try { return key !== null && (STORES.get(scoped)?.get(key) ?? null) !== null; } catch { return false; }
+}
+
+/**
+ * The widget's storage over `store`, reporting its failures on the status
+ * line. Over an asynchronous store each instrument's drawings are merged into
+ * what another tab or widget stored as they land, rather than written over
+ * it; over a synchronous one the drawings read the store just before each
+ * write, which merges them there already.
+ */
+export function openStorage(this: PersistHost, namespace: string, store: StorageLike | AsyncStorageLike | null): WidgetStorage {
+  const storage = new WidgetStorage(namespace, store, { onError: failure => reportStorage.call(this, failure) });
+  if (!storage.loaded) mergeOnCommit(storage, name => (name.startsWith(DRAWINGS_KEY_PREFIX) ? InstrumentDrawings.merge : null));
+  return storage;
 }
 
 /** Let the drawings follow the instrument the chart shows, reading its own from the store. */
@@ -323,15 +364,17 @@ export function restoreWidgetState(this: PersistHost, state: unknown): WidgetRes
     const target = { symbol, exchange };
     const scopedHere = scoped !== null && instrumentDrawingsKey(target) !== null;
     // An instrument's stored drawings are its newest: a layout carries the
-    // copy it was saved with, which only seeds an instrument with none, and
-    // a state with no drawings at all leaves them alone. A layout for
-    // another instrument puts its copy in that instrument's store while the
-    // chart restore keeps the drawings on screen, which are this one's until
-    // the switch below, so the alerts it restores are judged against their
-    // own drawings.
+    // copy it was saved with, which only seeds an instrument with none (one
+    // whose drawings were all deleted has an empty one), and a state with no
+    // drawings at all leaves them alone. A layout for another instrument puts
+    // its copy in that instrument's store while the chart restore keeps the
+    // drawings on screen, which are this one's until the switch below, so
+    // the alerts it restores are judged against their own drawings. On the
+    // same instrument those go in naming their panes, so each lands on its
+    // own study's pane however the layout orders them.
     const moving = scopedHere && (symbol !== this._symbol || exchange !== this._exchange);
-    const incoming = scopedHere && scoped.document(target) === null ? doc.drawings : undefined;
-    if (scopedHere && (moving || incoming === undefined)) doc = { ...doc, drawings: this.draw.toJSON() };
+    const incoming = scopedHere && !holdsDrawings(scoped, target) ? doc.drawings : undefined;
+    if (scopedHere && (moving || incoming === undefined)) doc = { ...doc, drawings: (moving ? null : scoped.document(target)) ?? this.draw.toJSON() };
     chart = this.chart.restoreState(same ? doc : stripView(doc));
     if (!chart.applied) return { applied: false, reason: chart.reason, chart };
     restorePrimaryStyle.call(this, doc);
@@ -450,11 +493,11 @@ export function flushOnPageHide(this: PersistHost): void {
   if (win !== null && win !== undefined && typeof win.addEventListener === 'function') {
     // A debounced save still pending when the tab closes is the last quarter
     // second of the user's work; pagehide is the last synchronous moment.
-    // An asynchronous store is sent everything now as well, which journals
-    // what may not land before the page is gone.
+    // An asynchronous store is sent everything now as well, in this call,
+    // which journals what may not land before the page is gone.
     const flush = (): void => {
       if (savesOnLeave.call(this)) this._saveNow();
-      if (later) void this._storage.flush();
+      if (later) flushLeaving(this._storage);
     };
     win.addEventListener('pagehide', flush);
     this._cleanups.push(() => win.removeEventListener('pagehide', flush));
@@ -469,7 +512,7 @@ export function flushOnPageHide(this: PersistHost): void {
     const hidden = (): void => {
       if (doc.visibilityState !== 'hidden') return;
       if (this._saveTimer !== 0) this._saveNow();
-      void this._storage.flush();
+      flushLeaving(this._storage);
     };
     doc.addEventListener('visibilitychange', hidden);
     this._cleanups.push(() => doc.removeEventListener('visibilitychange', hidden));
@@ -574,7 +617,7 @@ function applyLoaded(this: PersistHost, start: StartFacts): void {
   }
   this.history.ignore(() => {
     if (saved !== null && this.instrumentDrawings !== null && saved.chart?.drawings !== undefined) {
-      migrateUnscopedDrawings(o.drawingStore ?? storedDrawings(this._storage), savedKey(saved), saved.chart.drawings);
+      migrateUnscopedDrawings(o.drawingStore ?? keepingEmpty(storedDrawings(this._storage)), savedKey(saved), saved.chart.drawings);
     }
     releaseDrawings.call(this);
     // The rail read its own entry while the copy was empty. It is its own
@@ -618,7 +661,7 @@ function applyLoaded(this: PersistHost, start: StartFacts): void {
  * line over at once. A refused write is not, since a full store refuses every
  * change and a toast for each would bury the chart.
  */
-export function reportStorage(this: PersistHost, failure: WidgetStorageError): void {
+function reportStorage(this: PersistHost, failure: WidgetStorageError): void {
   if (this._destroyed) return;
   const error = errorText(this.context, failure.error);
   if (failure.operation !== 'load') {

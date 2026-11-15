@@ -44,6 +44,7 @@
  */
 import type { ChartTheme, DataFeed, DataVariant, LinkChart, LinkOptions, ResolvedLinkOptions } from 'openalgo-charts';
 import type { WorkspaceChartState, WorkspacePane, WorkspacePayload, WorkspaceStore } from 'openalgo-charts/workspace';
+import type { DrawingsDocument } from 'openalgo-charts/draw';
 import {
   WidgetBus, createOverlayStack, createTipController, h,
   type AsyncStorageLike, type OverlayOptions, type OverlayStack, type StorageLike, type TipController, type WidgetContext, type WidgetStorage,
@@ -58,6 +59,7 @@ import type { GridSaved } from './grid-saved';
 import { canCopyImage } from './capture';
 import { restorePane, THEME_SETTING, widgetPane } from './layouts-target';
 import { cellDrawingStore, checkWorkspace, type ChartDrawings } from './grid-payload';
+import { flushLeaving } from './widget-storage';
 import { CHART_GRID_LAYOUTS, focusSlot, isChartGridLayout, type ChartGridLayoutId } from './grid-layouts';
 import {
   ALL_OFF, GridLinks, channelsOf, describeGroups, instrument, linkMember,
@@ -384,8 +386,12 @@ export interface GridState {
   restored: ChartGridApplyReport | null;
   /** The drawings of the charts on the grid, for the instruments each one is not showing. */
   drawings: ChartDrawings;
-  /** The documents in `drawings` a chart here changed since the last save, which another tab's do not replace (grid-persist.ts). */
-  changed: Set<string>;
+  /**
+   * The documents in `drawings` a chart here changed since the last save,
+   * each with the one it was changed from: another tab's copy is merged
+   * into them rather than replacing them (grid-persist.ts).
+   */
+  changed: Map<string, DrawingsDocument | undefined>;
   /** Another tab saved the desk since this one last did; it is opened when the page is shown again. */
   behind: boolean;
   /** The grid is taking what another tab saved: no chart's change is its own to save. */
@@ -446,7 +452,7 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
     rows: 1, cols: 1, rowW: [1], colW: [1], preset: null, theme: options.theme ?? 'dark',
     themeSync: false, compact: false, maxed: false, pointerIn: false, destroyed: false, syncing: false, nextId: 0,
     saveTimer: 0, saveQueued: false, saveRefused: false, held: false, restored: null, drawings: new Map(),
-    changed: new Set(), behind: false, following: false, chromeLayer: null, bar: null, foot: null, saved: null, ready: Promise.resolve(),
+    changed: new Map(), behind: false, following: false, chromeLayer: null, bar: null, foot: null, saved: null, ready: Promise.resolve(),
   } as Omit<GridState, 'storage' | 'grid' | 'barHost' | 'restoring' | 'timeframePreferences'> as GridState;
   s.storage = gridStorage(s);
   s.timeframePreferences = options.timeframePreferences ?? storedTimeframePreferences(s.storage, options.intervals ?? DEFAULT_INTERVALS);
@@ -1109,8 +1115,8 @@ function destroyGrid(s: GridState): void {
   if (s.destroyed) return;
   // Only a save still pending or refused, as when the page is left (`leaving`).
   if (s.saveTimer !== 0 || s.saveQueued || s.saveRefused) saveNow(s);
-  // Sends an asynchronous store's writes, and stops following other tabs' changes to it.
-  void s.storage.flush();
+  // Sends an asynchronous store's writes in this call, and stops following other tabs' changes to it.
+  flushLeaving(s.storage);
   s.storage.close();
   s.destroyed = true;
   for (const off of s.offs.splice(0)) off();

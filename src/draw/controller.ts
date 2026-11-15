@@ -105,8 +105,8 @@ interface CrosshairPayload extends PointerFacts {
   samples?: PointerSample[];
 }
 
-let nextId = 1;
-
+/** Minted ids go on from a random point per page: two tabs adding to one instrument's stored drawings mint different ids, and their writes merge keeping both. */
+let nextId = 1 + Math.floor(Math.random() * 1e9) * 1000;
 const sameIds = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((id, i) => id === b[i]);
 
