@@ -315,6 +315,7 @@ export class DataLoadingController {
       const fresh = await this._pool.getBars({ ...original, from, to, noCache: true, signal: abort.signal } satisfies LooseOptional<BarsRequest> as BarsRequest, 5);
       if (!this._current(generation) || id !== this._refreshId) return this._bars;
       if (fresh.length === 0 && this._bars.length) throw new Error('History refresh returned no bars');
+      if (!this._showBuffered(generation, id)) return this._bars;
       const newest = this._mergeRefresh(fresh, from, to, held, ticked);
       this._buffer = null;
       this._ahead = false;
@@ -332,6 +333,7 @@ export class DataLoadingController {
       // What the stream delivered while the request was out is shown now, and
       // the stream is followed from here, explicitly stale. Holding it all for
       // a retry that nothing schedules froze the chart and blinded alerts.
+      if (!this._showBuffered(generation, id)) return this._bars;
       this._buffer = null;
       this._ahead = true;
       this._limit();
@@ -346,6 +348,30 @@ export class DataLoadingController {
       }
     }
     return this._bars;
+  }
+
+  /**
+   * Show what the stream delivered while a refresh held the display, one bar
+   * at a time and in order, before the refresh's answer replaces it. A reader
+   * of the display (an alert, a study) then meets each as the live update it
+   * was. Folded into the replacement it reads as history: an alert armed
+   * since the last update seeds on it, and a touch that came back inside the
+   * bar is gone. Returns false when a listener moved the controller on.
+   */
+  private _showBuffered(generation: number, id: number): boolean {
+    let shown = this._state.bars;
+    for (const bar of this._state.paused ? [] : [...this._buffer?.values() ?? []]) {
+      const tail = shown[shown.length - 1];
+      if (tail && bar.time < tail.time) continue;
+      const next = shown.slice();
+      // As `pushBar` stores it: a bar without a volume keeps the one shown.
+      if (tail?.time === bar.time) next[next.length - 1] = { ...bar, volume: bar.volume ?? tail.volume } satisfies LooseOptional<Bar> as Bar;
+      else next.push(bar);
+      shown = next.slice(-this._options.maxBars!);
+      this._publish('live', { bars: shown });
+      if (!this._current(generation) || id !== this._refreshId) return false;
+    }
+    return true;
   }
 
   /** The span a refresh asks history for: the request's own width ending now, or a tail window. */
@@ -582,7 +608,7 @@ export class DataLoadingController {
   }
   private _publish(reason: DataUpdateReason, patch: SnapshotPatch = {}): void {
     if (this._destroyed) return;
-    this._state = { ...this._state, ...patch, reason, bars: this._state.paused || this._buffer ? this._state.bars : this._bars } satisfies LooseOptional<DataLoadingSnapshot> as DataLoadingSnapshot;
+    this._state = { ...this._state, ...patch, reason, bars: this._state.paused ? this._state.bars : patch.bars ?? (this._buffer ? this._state.bars : this._bars) } satisfies LooseOptional<DataLoadingSnapshot> as DataLoadingSnapshot;
     const snapshot = this._state;
     for (const listener of [...this._listeners]) {
       if (this._destroyed || this._state !== snapshot) break;

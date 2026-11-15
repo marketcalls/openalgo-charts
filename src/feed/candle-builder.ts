@@ -233,7 +233,13 @@ export class CandleBuilder {
       this._lastCum = cum;
       this._hasCum = true;
     }
-    if (this._opts.volumeMode === 'ltq-sum' && tick.ltq !== undefined) return tick.ltq;
+    if (this._opts.volumeMode === 'ltq-sum' && tick.ltq !== undefined) {
+      // A total sent with a quantity includes it. Measured from here, a later
+      // frame with only a total adds what traded since, and cannot recount
+      // the bar from the total and drop the quantities summed into it.
+      if (cum !== undefined) this._cumAtBarStart = cum - tick.ltq;
+      return tick.ltq;
+    }
     return cum === undefined ? 0 : Math.max(0, cum - this._cumAtBarStart);
   }
 
@@ -254,6 +260,11 @@ export class CandleBuilder {
       this._lastCum = cum;
       total = Math.max(0, cum - this._cumAtBarStart);
     }
-    return this._opts.volumeMode === 'ltq-sum' && tick.ltq !== undefined ? (bar.volume ?? 0) + tick.ltq : total ?? 0;
+    if (this._opts.volumeMode === 'day-delta') return total ?? 0;
+    // A total that lags the quantities counted takes none of them back.
+    if (tick.ltq === undefined) return Math.max(bar.volume ?? 0, total ?? 0);
+    const volume = (bar.volume ?? 0) + tick.ltq;
+    if (cum !== undefined) this._cumAtBarStart = cum - volume; // as in _volumeForNewBar
+    return volume;
   }
 }
