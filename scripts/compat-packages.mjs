@@ -24,7 +24,8 @@ export const BASELINES = [
   { version: '2.6.0', why: 'a retained 2.x compatibility baseline' },
   { version: '2.6.4', why: 'a retained OpenAlgo compatibility baseline' },
   { version: '2.6.5', why: 'a retained 2.x compatibility baseline' },
-  { version: '2.6.6', why: 'the previous release and version OpenAlgo pins' },
+  { version: '2.6.6', why: 'a retained 2.x compatibility baseline' },
+  { version: '2.7.2', why: 'the previous release and version OpenAlgo pins' },
 ];
 
 const NAME = 'openalgo-charts';
