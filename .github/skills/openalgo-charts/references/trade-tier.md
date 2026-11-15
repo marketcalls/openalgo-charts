@@ -99,8 +99,8 @@ interface PlaceResult { ok: boolean; clientId?: string; state?: ClientOrderState
 |---|---|
 | `placeOrder(req)` | validate -> idempotency -> gate -> `feed.place` -> `ack`/`reject`. Returns `PlaceResult` |
 | `placeMarket(symbol, side, qty)` | `placeOrder({ symbol, side, type: 'MARKET', qty })` |
-| `requestModify(clientId, price)` | Validates, coalesces, sends at most every `minModifyIntervalMs`. It writes to the broker: call it on release, never from a drag's move callback |
-| `commitModify(clientId)` | Force-flushes the pending modify. Call on release, after `requestModify` |
+| `requestModify(clientId, price, { triggerPrice }?)` | Validates, coalesces, sends at most every `minModifyIntervalMs`. It writes to the broker: call it on release, never from a drag's move callback. `price` is the limit, or the trigger of a stop-market (below) |
+| `commitModify(clientId)` | Force-flushes the pending modify and resolves once the broker has answered it and every modify of the order already out. Call on release, after `requestModify`, and read the book on it |
 | `cancelOrder(clientId)` | `submitCancel` -> `feed.cancel` -> `cancelled`, then cancels the OCO peer |
 | `linkOco(clientIdA, clientIdB)` | Mutual peer link |
 | `onFill(brokerId, full)` | Broker fill in. `full: true` also cancels the peer |
@@ -125,6 +125,10 @@ There is **no `placeLimit`** despite what `website/pages/docs/trading.mdx` shows
 **A host that calls `OpenAlgoTradeFeed.place` directly gets the feed's duplicate guard only when it passes a `clientToken`.** Without one, two identical calls are two orders. The engine always sends one, generating it when the request has none.
 
 `requestModify` validates first: an invalid price is neither queued nor sent, and surfaces through `onValidationError(reason)` so the UI can snap the line back. Only the latest price survives coalescing, and the flush no-ops until `place` has acked (it needs the broker id).
+
+What it sends depends on the order type. A limit order moves its `price`; a stop-market (`SL-M`) takes `price` as its trigger; a stop-limit (`SL`) takes `price` as its limit and, without an explicit `triggerPrice`, carries the trigger at the gap it was placed with. `WorkingOrderLine` draws an order at `triggerPrice ?? price`, so a stop-limit's line is its trigger: dragging a 100/95 order's line to 110 and passing 110 rests the trigger at 105, not where it was dropped. Pass the trigger it was dropped at and the limit that keeps the gap, `requestModify(id, 115, { triggerPrice: 110 })`, and preview those same two fields, as the worked example does.
+
+**`commitModify` waits for a write already out (2.7.3).** On a release `requestModify` usually sends at once, which leaves nothing queued; `commitModify` used to resolve immediately then, so a book read on it could repaint the order at its old price before the broker took the change. It now resolves after that answer, success or failure.
 
 ## Order state machine (`src/trade/order-state-machine.ts`)
 
@@ -187,12 +191,17 @@ bracketValid(side, entry, stop, target): boolean  // BUY: stop<entry && target>e
 | Class | Constructor | Draws | Hit ids | zOrder |
 |---|---|---|---|---|
 | `WorkingOrderLine` | `(order: Order, { extentFromRight? })` | Dashed line, `[SIDE][qty][TYPE price +/-dist][cancel]`, axis price tag | `order:<id>` (`ns-resize`), `order:<id>::close` (`pointer`) | `normal` |
-| `PositionMarker` | `(position: Position, { extentFromRight? })` | Entry line, entry->LTP band tinted by P&L sign, `[LONG\|SHORT][qty][pnl (pct)][cancel]` | `position:<symbol>`, `position:<symbol>::close` (both `pointer`) | `normal` |
-| `BracketGroup` | `(state: BracketState)` | Shaded risk/reward zones, SL/TP dashed lines with chips, an R:R chip | `bracket-sl:<symbol>`, `bracket-tp:<symbol>` (`ns-resize`) | `bottom` |
+| `PositionMarker` | `(position: Position, { extentFromRight?, hitKey? })` | Entry line, entry->LTP band tinted by P&L sign, `[LONG\|SHORT][qty][pnl (pct)][cancel]` | `position:<hitKey>`, `position:<hitKey>::close` (both `pointer`) | `normal` |
+| `BracketGroup` | `(state: BracketState, { hitKey? })` | Shaded risk/reward zones, SL/TP dashed lines with chips, an R:R chip | `bracket-sl:<hitKey>`, `bracket-tp:<hitKey>` (`ns-resize`) | `bottom` |
 
 ```ts
-interface BracketState { symbol: string; side: OrderSide; entry: number; stop: number; target: number }
+interface BracketState {
+  symbol: string; side: OrderSide; entry: number; stop: number; target: number;
+  exchange?: string; product?: string;   // the position it protects, when the book names them (2.7.3)
+}
 ```
+
+`hitKey` defaults to the symbol, so a primitive built directly hit-tests as before; read it back with the `hitKey` getter. `TradeController` sets it (below).
 
 `extentFromRight` defaults to `0.5`, clamped `0.1..1`. All three take `update(...)`; the first two take `setLtp(ltp)`. `WorkingOrderLine` renders at `triggerPrice ?? price`, dims when `status === 'pending'`, and shows `filledQty/qty` once partially filled. `PositionMarker` draws nothing when `netQty === 0`.
 
@@ -205,12 +214,18 @@ interface TradeHost { addPrimitive(p: IPrimitive): void; removePrimitive(p: IPri
 
 const tc = new TradeController(chart.tradeHost());  // the price pane; tradeHost(n) for another pane
 tc.reconcile(orders, positions, { symbol: 'RELIANCE', exchange: 'NSE' });  // full snapshot, this chart's instrument only
-tc.onLtp('RELIANCE', 2950);        // pushes into every bound primitive
+tc.onLtp('RELIANCE', 2950);        // pushes into every bound primitive of the symbol
+tc.onLtp('RELIANCE', 2950, 'NSE'); // only rows on NSE, and rows that name no exchange (2.7.3)
+tc.positionOf('position:RELIANCE::close');   // the Position a hit id names, exchange and product included
 ```
 
 **Pass the chart's instrument (`InstrumentKey`, since 2.7.3).** A book covers the whole account. Without the third argument every working order is drawn on this chart and joins its autoscale: a futures order at 52000 stretches an equity chart to 52000, and an order on another exchange sits at a plausible price where a drag would modify it. A row that names no exchange matches on its symbol (the provider did not say); `OpenAlgoTradeFeed.modify` refuses such an order rather than guess its venue. Omitting the argument draws everything, as before 2.7.3.
 
-`reconcile` diffs orders by `Order.id` and positions by symbol, exchange and product (before 2.7.3 by symbol alone, so the last row of a symbol replaced the others): new -> add, existing -> `update`, missing -> remove. Brackets pair with the position of the same key. Two positions of one symbol still share the hit id `position:<symbol>`. Reconnect needs no special path, a fresh snapshot without a stale order removes its line. Rules: orders failing `isWorking` are skipped; orders with `role: 'sl' | 'tp'` are **excluded from standalone lines** and folded into a `BracketGroup`; a bracket only appears when a non-flat position exists for that symbol, exchange and product (SL uses `triggerPrice ?? price`, TP uses `price`). Introspection: `orderLineCount()`, `positionCount()`, `bracketCount()`.
+`reconcile` diffs orders by `Order.id` and positions by symbol, exchange and product (before 2.7.3 by symbol alone, so the last row of a symbol replaced the others): new -> add, existing -> `update`, missing -> remove. Brackets pair with the position of the same key. Reconnect needs no special path, a fresh snapshot without a stale order removes its line. Rules: orders failing `isWorking` are skipped; orders with `role: 'sl' | 'tp'` are **excluded from standalone lines** and folded into a `BracketGroup`; a bracket only appears when a non-flat position exists for that symbol, exchange and product (SL uses `triggerPrice ?? price`, TP uses `price`). Introspection: `orderLineCount()`, `positionCount()`, `bracketCount()`.
+
+**Hit ids name one row (2.7.3).** A symbol drawn with one position keeps `position:<symbol>`, `position:<symbol>::close`, `bracket-sl:<symbol>` and `bracket-tp:<symbol>`, the ids hosts already parse. When two drawn positions share a symbol (a delivery and an intraday position, or two exchanges when nothing filters by instrument), each of that symbol's markers and brackets carries its row key in place of the symbol, `position:["INFY","NSE","MIS"]::close`: the JSON of `[symbol, exchange, product]`, `null` for a part the book leaves out. Before 2.7.3 both close segments read `position:INFY::close`, and a host could not tell which product to close. A host that slices the symbol out of the id now finds no row for a shared symbol instead of the wrong one; resolve ids with `positionOf(id)`, which takes either form, `::close` included, and returns the drawn `Position` (for a bracket id, the position it protects), or `undefined`. The ids change when a second row of the symbol appears or the last other one closes, and the controller rebuilds those primitives, so resolve an id when it arrives rather than keeping it.
+
+`onLtp(symbol, ltp)` reaches every row of the symbol, as before. Pass the exchange as a third argument when the book spans exchanges, or an NSE tick moves a BSE row's P&L. A row drawn later takes the last price pushed for its own exchange, else the last one pushed for its symbol.
 
 ## `DomLadder`
 
@@ -306,7 +321,7 @@ Full guide: website `docs/trading-accounts`.
 
 ```ts
 import { createChart, OpenAlgoTradeFeed } from 'openalgo-charts';
-import { OrderEngine, TradeController } from 'openalgo-charts/trade';
+import { OrderEngine, TradeController, type Order } from 'openalgo-charts/trade';
 
 const chart = createChart(el);
 chart.addSeries('candlestick').setData(bars);
@@ -333,10 +348,17 @@ const drafts = new Map<string, number>();  // 'order:<id>' -> dragged price, loc
 function draw() {
   const orders = book.orders.map((o) => {
     const price = drafts.get(`order:${o.id}`);
-    if (price === undefined) return o;
-    return o.triggerPrice !== undefined ? { ...o, triggerPrice: price } : { ...o, price };
+    return price === undefined ? o : { ...o, ...dragged(o, price) };
   });
   controller.reconcile(orders, book.positions, instrument);
+}
+
+// What a drag of `o` to `price` changes: the preview draws these fields and the
+// release sends them. The line sits at the trigger when there is one, so the
+// trigger follows the pointer, and a stop-limit's limit keeps its gap to it.
+function dragged(o: Order, price: number): { price?: number; triggerPrice?: number } {
+  if (o.triggerPrice === undefined) return { price };
+  return o.type === 'SL' ? { price: o.price + price - o.triggerPrice, triggerPrice: price } : { triggerPrice: price };
 }
 
 async function refreshBook() {
@@ -372,9 +394,15 @@ chart.subscribeDrag(
   },
   (id) => {
     const c = clientOf.get(id), price = drafts.get(id);
+    const o = book.orders.find((r) => `order:${r.id}` === id);
     drafts.delete(id);
-    if (c === undefined || price === undefined) return;   // cancelled, or never moved
-    engine.requestModify(c, price);
+    if (c === undefined || price === undefined || o === undefined) return;   // cancelled, never moved, or gone
+    // The fields the preview drew. A stop-limit given only the pointer price
+    // would move its limit there and rest the trigger off the drop.
+    const fields = dragged(o, price);
+    engine.requestModify(c, fields.price ?? price, fields);
+    // commitModify resolves once the broker has answered this modify, so the
+    // read sees the order where it now rests.
     void engine.commitModify(c).finally(refreshBook);
   },
 );
@@ -395,7 +423,7 @@ Reconciling the fill back onto the chart *is* `refreshBook()`, the filled order 
 
 What the adapter refuses to read as an answer (2.7.3):
 
-- `getOrders`, `getOrderBook` and `getPositions` throw on an HTTP-success body that says `status: 'error'` or carries no list. Only a list the server sent, empty or not, is a book. Keep what is drawn when a read throws.
+- `getOrders`, `getOrderBook` and `getPositions` throw on an HTTP-success body that says `status: 'error'` or carries no list. Only a list the server sent, empty or not, is a book, and only in its endpoint's shape: the orderbook's `data` list or `data.orders`, the positionbook's `data` list. A positionbook answer of `{ data: { orders: [] } }` throws; it used to read as a flat account. Keep what is drawn when a read throws.
 - `getPositions` and `mapPosition` throw on a row with no symbol, an unreadable quantity, or an open quantity with an unreadable average price, naming the field (`positions[3].quantity`). Such a row used to read as flat. A flat row's blank average price reads 0.
 - `cancel` rejects unless the answer says `status: 'success'` or echoes the order id, as `modify` does. That rejection is not pre-flight: the request left, so the order may be gone or still working.
 - `modify` refuses pre-flight, before anything is sent and without touching the cached context, a price or trigger that is not finite and a quantity `place` would refuse (NaN, zero, negative, fractional, off the configured lot grid or over the freeze limit).

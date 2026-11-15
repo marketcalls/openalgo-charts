@@ -216,7 +216,7 @@ const off = live.subscribeBars(req, (bar) => series.update(bar), {
 - `subscribeBars` resolves the interval code **once, up front** through `resolveInterval`, then creates a **per-subscription** aggregator: a `CandleBuilder` for a fixed-length interval, a `TickBarAggregator` for a calendar, tick-count or volume one. It filters WS ticks by symbol **and** exchange and forwards the bar to `onBar`. Unsubscribing detaches the callback and sends the WS unsubscribe.
 - Resolving up front is deliberate: a bad interval code throws at subscribe time, where the mistake is, instead of silently on every tick for the life of the subscription.
 - `opts.seedFrom` seeds the aggregator with the last history bar so the first tick continues that bucket. It applies to **time-bucketed intervals only**: a count-driven bar cannot resume one whose trades were never counted here. `opts.cumDayVolumeSoFar` gives a `day-delta` builder the right baseline. Since 2.7.3 a fixed-length code with no registered `anchorSec` buckets on the seed bar's grid rather than the epoch's, so live bars match history stamped at 09:15 IST (hourly, 30-minute), at IST midnight (daily) or on Monday (weekly). History on the epoch grid, such as a daily bar at 00:00 UTC, buckets exactly as before. The seed must be a bucket-open time, as history bars are.
-- Volume under the default `'ltq-sum'`: a frame's `ltq` is summed when present; a frame without one but with a cumulative day `volume` contributes the change in that total; a frame with neither (OpenAlgo's LTP mode documents only price and time) leaves volume unknown. Since 2.7.3 a bar opened by such frames has no `volume` rather than `0`, and a seeded bar keeps its history volume. Under `'day-delta'` a frame missing the day total no longer reads as a reset.
+- Volume under the default `'ltq-sum'`: a frame's `ltq` is summed when present; a frame without one but with a cumulative day `volume` contributes the change in that total since the previous frame that carried one, on top of the quantities already summed (2.7.3), and a total that lags them takes none back; a frame with neither (OpenAlgo's LTP mode documents only price and time) leaves volume unknown. Since 2.7.3 a bar opened by such frames has no `volume` rather than `0`, and a seeded bar keeps its history volume. Under `'day-delta'` a frame missing the day total no longer reads as a reset.
 - `opts.onResync` is called without arguments when the socket emits `client_warning` with code `STREAM_RESYNC` after reconnect. Replayed subscriptions resume delivery but do not repair missed history. Handle this callback with the history replacement sequence above; unsubscribing also removes this control listener.
 - A tick with no usable timestamp (`timeSec` absent or `<= 0`) is bucketed at `Date.now()`, never at the epoch.
 - `subscribeDepth` subscribes `Depth` and filters the same way.
@@ -236,7 +236,7 @@ Only buffered timestamps are merged; other bars retain authoritative history. Wh
 | Option | Default | Meaning |
 |---|---|---|
 | `intervalSec` | `60` | Bucket size. |
-| `volumeMode` | `'ltq-sum'` | `'ltq-sum'` accumulates `tick.ltq`, falling back to the change in `tick.cumDayVolume` for a tick without one; `'day-delta'` diffs `tick.cumDayVolume`. A tick with neither adds nothing, as before: a host on such a stream fills the volume from history. (The packaged OpenAlgo live feed reports such a bar's volume as unknown instead, since 2.7.3.) |
+| `volumeMode` | `'ltq-sum'` | `'ltq-sum'` accumulates `tick.ltq`, falling back to the change in `tick.cumDayVolume` since the previous total for a tick without one, so switching between the two keeps what was counted; `'day-delta'` diffs `tick.cumDayVolume`. A tick with neither adds nothing, as before: a host on such a stream fills the volume from history. (The packaged OpenAlgo live feed reports such a bar's volume as unknown instead, since 2.7.3.) |
 | `lateTickPolicy` | `'foldIntoBar'` | `'foldIntoBar'` merges a tick older than the current bar into it; `'dropOlderThanPrevBar'` returns `null`. |
 | `sessionAnchorSec` | `0` | Bucket alignment origin, in UTC seconds. |
 
@@ -527,6 +527,14 @@ The controller paints it as refreshing and fetches authoritative history; cache
 peek time is bounded to 500 ms. Never treat a warm snapshot as a live forming bar.
 An empty reply to that history request, while cached bars are shown, is a failure
 (status `stale`, cached bars kept) as it is for `refresh()`.
+
+While a refresh is out, snapshots hold the display and `pushBar` bars wait for
+it. Since 2.7.3, when it lands or fails, each bar the stream delivered meanwhile
+is published first, in order, as its own `reason: 'live'` snapshot (status still
+`refreshing`), and the `refresh` snapshot follows. A host that paints `live`
+snapshots as updates hands them to alerts and studies as the updates they were;
+inside the replacement they read as history, which a newly armed alert seeds on.
+A host that ignores `live` snapshots sees the same `refresh` snapshot as before.
 
 The cache validates entries and writes `CachedBars.version = BAR_CACHE_VERSION`
 (currently 1), accepting valid unversioned legacy entries. Storage failures fall

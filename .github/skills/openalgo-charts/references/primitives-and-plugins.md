@@ -71,7 +71,7 @@ interface PrimitiveHit {
 
 **`zOrder` is a method, not a property.** `{ zOrder: 'bottom' }` compiles under a loose annotation and then throws at paint time when the pane calls `p.zOrder()`.
 
-**A primitive that throws is isolated (since 2.7.3).** An exception from `draw`, `hitTest`, `autoscaleInfo` or `afterAutoscale` is reported once per primitive through `reportError`, and the pane, the other primitives, later panes and the overlay keep painting. The broken primitive simply does not draw; fix the error rather than relying on the guard.
+**A primitive that throws is isolated (since 2.7.3).** An exception from `draw`, `hitTest`, `autoscaleInfo` or `afterAutoscale` is reported once per primitive through `reportError`, and the pane, the other primitives, later panes and the overlay keep painting. The broken primitive simply does not draw; fix the error rather than relying on the guard. Each `draw` also runs inside its own canvas save and restore, so alpha, transforms or clips one primitive sets never reach the next.
 
 `attached(host)` is called on `pane.addPrimitive`; keep the host and call `host.requestUpdate()` whenever your state changes, it takes no arguments. `detached()` fires on `chart.removePrimitive` and on pane destruction; drop the host reference there.
 

@@ -284,9 +284,9 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // 2.7.3 fixes what a plain chart draws: the axis ladder on whole ticks and in
 // log space, a throwing primitive isolated per frame, host bar colours
 // restored, the context-menu snapshot released, and the live close and
-// alert judging across refreshes. The final build measures 90178 bytes, 567
+// alert judging across refreshes. The final build measures 90329 bytes, 718
 // more than 2.7.2, which kept the 2.6.8 figure; retain the exact ceiling.
-const LIMIT_BYTES = 90178;
+const LIMIT_BYTES = 90329;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

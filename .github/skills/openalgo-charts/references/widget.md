@@ -133,10 +133,10 @@ Everything `src/widget/index.ts` exports at runtime. The shell (`createWidget` a
 | Export | Kind | Purpose |
 |---|---|---|
 | `WidgetBus` | class | Typed `on` / `off` / `emit` / `clear`; the widget's own events ride it. |
-| `WidgetStorage` | class | Namespaced `get` / `set` / `remove` over a `StorageLike`, straight through, or (since 2.5.10) over an `AsyncStorageLike` through a copy of the namespace in memory. `load()` reads it once. Changes are written behind, coalesced per key and in order. `flush()` sends them now and journals them. `loaded` says whether reads answer from the store. Over a store with `subscribe`, the copy follows the writes other tabs land until `close()`, which the widget calls on destroy. `subscribe(listener)` (since 2.7.3) hears another tab's change to one key, by its name, over an asynchronous store and over a host-passed `localStorage` (through the `storage` event); over an asynchronous store `get(name)` already returns the new value inside the call. This page's own writes are not heard, and `close()` stops every listener. `remove` returns a boolean (since 2.7.3): false when a synchronous removal throws or there is no store. `new WidgetStorage(namespace, store, { onError })` reports each `WidgetStorageError`. `enabled` is false when `persist` is off, and a throwing store reads as "nothing saved". |
+| `WidgetStorage` | class | Namespaced `get` / `set` / `remove` over a `StorageLike`, straight through, or (since 2.5.10) over an `AsyncStorageLike` through a copy of the namespace in memory. `load()` reads it once. Changes are written behind, coalesced per key and in order. `flush()` sends them now and journals them. `loaded` says whether reads answer from the store. Over a store with `subscribe`, the copy follows the writes other tabs land until `close()`, which the widget calls on destroy. `subscribe(listener)` (since 2.7.3) hears another tab's change to one key, by its name, over an asynchronous store and over a host-passed `localStorage` (through the `storage` event); over an asynchronous store `get(name)` already returns the new value inside the call. This page's own writes are not heard, and `close()` stops every listener. `remove` returns a boolean (since 2.7.3): false when a synchronous removal throws or there is no store. Since 2.7.3 the journal records, beside each pending value, what the store may hold without another writer having moved it on (what it held before, and this page's own values still out), and the next load replays a value only over one of those: a journal whose writes landed and that could be neither removed nor emptied after is not replayed over another writer's newer value. `new WidgetStorage(namespace, store, { onError })` reports each `WidgetStorageError`. `enabled` is false when `persist` is off, and a throwing store reads as "nothing saved". |
 | `STORAGE_PREFIX` | const `'oac-widget:'` | Every key the widget writes sits under it. |
 | `defaultStorage()` | function | The page's `localStorage` when it exists and works, else null. |
-| `createIndexedDbWidgetStorage(factory, name?, options?)` | function | (since 2.5.10) The widget's key-value store over IndexedDB (`name` default `'openalgo-charts-widget'`): one object store of JSON texts, one transaction per call, `close()`. The first read of a namespace the database has never held copies the `oac-widget:<namespace>:` keys from `localStorage` (`options.migrateFrom`; null copies nothing) and leaves them there. Each write that lands is announced to `subscribe` listeners, and to other tabs over a broadcast channel. `options.journal` (default `localStorage`, null for none) keeps the writes still pending when a page goes away. Since 2.7.3 the default store tries a failed IndexedDB open once more, and once IndexedDB has answered on the origin it no longer falls back to `localStorage`: the failure is reported on the status line and in a toast, and the session is kept in memory. |
+| `createIndexedDbWidgetStorage(factory, name?, options?)` | function | (since 2.5.10) The widget's key-value store over IndexedDB (`name` default `'openalgo-charts-widget'`): one object store of JSON texts, one transaction per call, `close()`. The first read of a namespace the database has never held copies the `oac-widget:<namespace>:` keys from `localStorage` (`options.migrateFrom`; null copies nothing) and leaves them there. Each write that lands is announced to `subscribe` listeners, and to other tabs over a broadcast channel. `getItem(key)` (since 2.7.3) reads one key as the database holds it, never the copy from `localStorage`; `AsyncStorageLike.getItem` is optional, and a host store without it is read through `entries`. `options.journal` (default `localStorage`, null for none) keeps the writes still pending when a page goes away. Since 2.7.3 the default store tries a failed IndexedDB open once more, and once IndexedDB has answered on the origin it no longer falls back to `localStorage`: the failure is reported on the status line and in a toast, and the session is kept in memory. |
 | `registerWidgetDialog(name, mount)` | function | Make a dialog's mount known to every shell. Returns a disposer. |
 | `registerWidgetDialogs(mounts)` | function | Several at once, from a module's exports. |
 | `unregisterWidgetDialog(name)` | function | Remove one; false when nothing was registered. |
@@ -1095,19 +1095,40 @@ or a data variant keeps them.
   keeps the drawings on screen for the symbol they belong to, and then
   switches, so the alerts the layout restores are judged against their own
   drawings.
+- **Deleting the last drawing** (since 2.7.3) keeps an empty document under
+  the instrument's key rather than none, in the widget's own storage, in
+  memory and in a grid cell's documents, so a layout saved before the
+  deletion does not seed it again, then or after a reload. A 2.7.2 page reads
+  the empty document as no drawings. A host `drawingStore` that removes the
+  entry gets the layout's copy seeded again.
 - **Two tabs.** Since 2.7.3 a write of an instrument's drawings reads the
   stored document first and keeps what another tab on the same store changed
   since this one last read or wrote it: its new drawings, its edits and its
   deletions. Only what this chart itself changed goes in as it has it. Over
-  IndexedDB this relies on the change announcements the store makes; the
-  other tab's drawings show here when the symbol is next loaded.
+  an asynchronous store (IndexedDB) two tabs, or two widgets on one page, can
+  each change one instrument before either write has landed, so each write is
+  read again and merged into what the store holds as it goes out
+  (`InstrumentDrawings.merge`), holding a lock on its key from the read to the
+  write: a Web Lock across the tabs of the origin, else among the widgets on
+  the page. The widget's and the grid's own leaving (`pagehide`, a hidden
+  page, `destroy`) does not wait for the lock: every change is written in that
+  call, merged into what another tab was heard to land meanwhile, and an
+  older write still waiting for the lock then writes nothing. A journaled
+  write the store moved past meanwhile is merged at the next load the same
+  way. Drawing ids are minted from a random point on each
+  page, so two tabs do not mint one id for two drawings. The other tab's
+  drawings show here when the symbol is next loaded.
 - **Panes.** A drawing on a study pane is stored with the panes it was drawn on
-  (`panes`: the price pane as null, any other by the ids of its studies, written
-  when the chart has more than the price pane). A study removed or moved while
-  another symbol is on screen therefore no longer leaves that symbol's drawings
-  on the wrong pane: read back, each goes to its pane wherever it stands, and
-  one whose pane is gone goes with it, as on screen. A drawing kept for a pane
-  the chart does not have makes no pane (since 2.7.3).
+  (`panes`: the price pane as null, any other by its studies, each by id and
+  kind, written when the chart has more than the price pane). A study removed
+  or moved while another symbol is on screen therefore no longer leaves that
+  symbol's drawings on the wrong pane: read back, each goes to its study's pane
+  wherever it stands, and one whose pane is gone goes with it, as on screen,
+  even when another study has taken its slot. A study of the same kind made
+  again (a template applied again) takes them back. `restoreState` on the same
+  symbol puts each drawing on its own study's pane however the state orders
+  the panes. A drawing kept for a pane the chart does not have makes no pane
+  (since 2.7.3).
 - **Migration.** A persisted layout from before (one drawing set, no per
   instrument entries) holds the drawings of the symbol it was saved on: they
   are attached to that symbol the first time the widget opens, so opening on
@@ -1128,7 +1149,11 @@ or a data variant keeps them.
   not showing are written beside the workspace, under `oac-widget:<namespace>:grid-drawings`;
   the workspace payload itself still carries only what each chart shows. A cell
   a preset drops takes its documents with it, and a workspace the host applies
-  starts each cell from its own payload.
+  starts each cell from its own payload. Since 2.7.3 two grids on one desk that
+  each change a chart's drawings before the other's save lands keep both: the
+  record is merged into what the store holds as it is written, over an
+  asynchronous store and over a synchronous one alike, and a document changed
+  here takes another tab's copy under its own change rather than ignoring it.
 - **Keeping the old behaviour.** `drawingScope: 'chart'` keeps one drawing set
   per widget (per cell in a grid), shown whatever symbol is loaded.
 

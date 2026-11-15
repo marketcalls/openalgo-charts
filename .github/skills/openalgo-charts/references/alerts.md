@@ -157,6 +157,10 @@ to have judged an update on the series first, or the replacement to have trimmed
 the front; until then a replacement seeds silently, so a first load, a warm load
 extending its cached bars, the first loads after a context change and a
 replacement that no longer holds the last judged element never deliver history.
+What the stream delivered during a `DataLoadingController` refresh reaches the
+widget, before the replacement, as `live` updates (2.7.3), so an alert armed
+since the last update, or a touch that crossed and came back inside the bar,
+is judged on them when the refresh lands or fails.
 
 onTouch observes newly reached extrema and the path between observed closes.
 A wick already present when arming or resuming is not a fresh touch. An intrabar

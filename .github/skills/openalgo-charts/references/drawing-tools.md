@@ -1130,7 +1130,8 @@ chart.setDataContext({ symbol: 'TCS', exchange: 'NSE', interval: '5m' });   // s
 
 | Export | What it is |
 |---|---|
-| `InstrumentDrawings(chart, controller, options?)` | The helper. `chart` is `InstrumentDrawingsChart`: `on`, and `getDataContext` to read the instrument at the start; optional `panes`, `indicators` and `primaryPaneIndex` (since 2.7.3) let it store which pane each drawing was drawn on. |
+| `InstrumentDrawings(chart, controller, options?)` | The helper. `chart` is `InstrumentDrawingsChart`: `on`, and `getDataContext` to read the instrument at the start; optional `panes`, `indicators` and `primaryPaneIndex` (since 2.7.3) let it store which pane each drawing was drawn on, and an `indicatorId` on each of `indicators()` lets a pane rebuilt with new ids keep its drawings (see Panes, below). |
+| `InstrumentDrawings.merge(base, ours, theirs)` | (since 2.7.3) The document to store when another writer may have stored one since `base`, the stored document `ours` was made from: each drawing `ours` added, changed or deleted since `base` as `ours` has it, every other as `theirs` (what the store holds now) has it, on the panes `ours` names. For a store whose writes land later than they are made: the widget's own store merges each write as it lands. |
 | `createInstrumentDrawings(chart, controller, options?)` | The same, as a function. |
 | `instrumentDrawingsKey(instrument)` | The default key: `NSE:INFY`, or `AAPL` with no exchange; each part URI-encoded; null without a symbol. Case is kept. |
 | `memoryDrawingStore()` | The default store, in memory for the life of the page, a copy per entry. |
@@ -1145,8 +1146,10 @@ variant or a namespace per chart), `prefer` (`'stored'`, the default, or
 'write' | 'remove'`, `key`, `error`). Methods: `key()`, `setInstrument(instrument
 | null)` for a host that switches ahead of its data context or publishes none,
 `document(instrument)` (a copy, the live drawings for the current instrument,
-null when there are none), `setDocument(instrument, document)` (the
-controller's `fromJSON` for the current instrument, the store for another),
+null when there are none; since 2.7.3 the current instrument's names the panes
+it is drawn on, `panes`, as it is stored), `setDocument(instrument, document)` (the
+controller's `fromJSON` for the current instrument, the store for another; a
+document that names its `panes` goes onto them wherever they stand now),
 `save()` (writes now and retries refused writes; false while one is still
 refused), `destroy()`, `isDestroyed`.
 
@@ -1207,6 +1210,29 @@ What it decides, and why:
   written again with the next change or `save()`. An unreadable entry is
   reported and shows no drawings; the next change on that instrument writes
   over it.
+- **Two writers** (since 2.7.3). Two charts on one store and one instrument
+  each hold the document they last read. Before each write the stored document
+  is read again: what this chart added, changed or deleted since it last read
+  or wrote it goes in as it has it, and every other drawing as the store has
+  it. That is enough over a synchronous store, where the read and the write
+  are one step. A store whose writes land later merges once more as each write
+  lands, with `InstrumentDrawings.merge`, since two writes can both be made
+  before either has landed; the widget's store does (widget.md, Drawings per
+  instrument). Drawings are told apart by id, and a controller mints ids from
+  a random point on each page (since 2.7.3), so two tabs that each add a
+  drawing to one instrument do not give both the same id.
+- **Panes** (since 2.7.3). A document is stored with the panes it was drawn
+  on, `panes`: the price pane as null, any other by its studies, each by `id`
+  and `indicatorId`. Read back, each drawing goes to the pane holding its
+  study now. A pane whose studies have all gone takes its drawings with it,
+  as a pane removed on screen does, unless a pane of the same kinds of study
+  stands where it was, or elsewhere unclaimed (a template applied again, with
+  new ids): another study put in its slot is not given them. Without the kinds
+  (a chart whose `indicators()` gives no `indicatorId`), a pane keeps its slot
+  while no other pane claimed it. A `chart.restoreState` whose drawings name
+  their panes, as `document` returns them, puts each drawing on the pane its
+  study holds once the layout has landed, however the layout orders the
+  panes; the widget restores a state over the drawings on the chart that way.
 
 ## Modifier gestures (since 2.5.9)
 

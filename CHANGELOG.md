@@ -24,9 +24,17 @@ orders and positions keep the exchange and product that identify them.
   stored, where it used to restore without the study and be overwritten by
   the next autosave. Drawings on study panes are stored with their panes, so
   removing or moving a pane while another symbol is shown no longer moves
-  them onto the wrong study or adds an empty pane. A drawing link member
+  them onto the wrong study or adds an empty pane; a drawing follows its
+  study rather than its slot, so a study put in a removed one's place does not
+  inherit its drawings and a layout restored with its panes reordered keeps
+  each drawing on its own study. Two tabs, two widgets or two grids that change
+  one instrument's drawings before either write lands keep both: each write
+  is merged into what the store holds under a per-key lock, and drawing ids
+  are unique per page. Deleting an instrument's last drawing keeps an empty
+  document, so an older layout no longer brings it back. A drawing link member
   added without a context source keeps sharing across a symbol round trip. A
-  recovery journal that cannot be removed no longer replays older values, a
+  recovery journal that cannot be removed or emptied no longer replays older
+  values over a newer committed one, a
   removal the store refuses is reported, and a failed IndexedDB open is
   retried once and then reported, instead of moving the session to
   localStorage without a word. Workspace size limits apply to each layout,
@@ -34,8 +42,12 @@ orders and positions keep the exchange and product that identify them.
 - **Alerts across refreshes.** A history replacement that extends what an
   alert already judged (a refresh in flight, a refresh that failed and then
   recovered, a chart holding its `maxBars`) is judged from the last bar the
-  alert saw, so a crossing that lands in it fires. A first load, a cache load
-  and a change of symbol, interval or variant still seed silently.
+  alert saw, so a crossing that lands in it fires. Bars the stream delivered
+  while a refresh held the display are published as live updates, in order,
+  before the refresh lands or fails, so an alert armed since the last update,
+  or a touch that crossed and came back inside one bar, is judged too. A first
+  load, a cache load and a change of symbol, interval or variant still seed
+  silently.
 - **Live candles.** The packaged OpenAlgo live feed buckets on the grid of
   the history it continues when the interval declares no anchor: an NSE hour
   at 09:15, a day stamped at IST midnight and a week stamped on Monday no
@@ -48,13 +60,15 @@ orders and positions keep the exchange and product that identify them.
   as before. On a derived timeframe, a frame stamped with an old last-trade time no
   longer forces a full reload. A warm-cache load whose history request comes
   back empty keeps the cached bars and reports stale history.
-- **Live volume.** A frame without a traded quantity uses the change in the
-  day's cumulative volume when it carries one. The packaged OpenAlgo live
+- **Live volume.** A frame without a traded quantity adds the change in the
+  day's cumulative volume when it carries one, on top of the quantities
+  already counted (a lagging total takes nothing back). The packaged OpenAlgo live
   feed reports a bar no frame measured (OpenAlgo's LTP mode sends price and
   time only) with no `volume` rather than a confirmed 0. `CandleBuilder`
   still counts such a frame as no volume, as hosts that fill volume from
   history rely on.
-- **The price axis.** With an instrument tick declared, the axis steps by
+- **The price axis.** A logarithmic axis fits the lowest positive price in
+  view when a visible low is zero or below. With an instrument tick declared, the axis steps by
   the tick or a whole number of ticks, so a tight range no longer prints a
   price twice or a price between ticks, and a fractional tick prints its own
   decimals (0.25 shows 100.25, 2.5 shows 102.5; the legend follows). On a
@@ -64,12 +78,15 @@ orders and positions keep the exchange and product that identify them.
   decimals to tell them apart.
 - **Frames and overlays.** A primitive that throws in `draw`, `hitTest`,
   `autoscaleInfo` or `afterAutoscale` is reported once and the rest of the
-  frame paints; `addPriceLine({ price })` without a colour draws instead of
+  frame paints, and each primitive draws from its own saved canvas state, so
+  alpha, transforms or clips it leaves set never reach the next; `addPriceLine({ price })` without a colour draws instead of
   throwing. Removing or hiding a bar-colouring study restores the candles'
   own colours after paged-in history, a same-timestamp replacement or a live
-  tick. Indicator fills paint only the bars in view. A comparison on the
+  tick, even where a host colour equals the study's. Indicator fills paint only the bars in view. A comparison on the
   default baseline fits on the pane when it moves further than the primary,
-  and a primary append aligns only the new bars. A pane frozen for the
+  and a primary append aligns only the new bars, reading only the
+  comparison's newest prints, with `alignment().dropped` right when the host
+  appends to the comparison's own array. A pane frozen for the
   browser's own context menu is released once the menu is gone.
 - **Studies.** CPR never prints levels taken from a partly loaded first
   session, week or month. A study timeframe the chart's interval does not
@@ -86,19 +103,27 @@ orders and positions keep the exchange and product that identify them.
   too. A bar without prices is skipped by Renko, point and figure, range
   bars, line break and Kagi, so ATR box sizes and range bars no longer stall
   on it, and a NaN, infinite or negative bar volume counts as none in a
-  profile.
+  profile. Market profile and TPO sessions read their high, low, initial
+  balance, open and close from bars with prices, so a gap no longer makes
+  them NaN, and a profile step too fine to number its rows gives no rows
+  instead of looping.
 - **Trading.** `OpenAlgoTradeFeed` orders and positions keep their exchange
   and product, `TradeController` keeps one position per symbol, exchange and
   product, and `reconcile(orders, positions, instrument)` draws and
   autoscales only the chart's instrument. A position row the adapter cannot
   read throws instead of reading flat, and the book reads throw on an error
-  body instead of returning an empty book. `cancel` checks its
+  body, or a positionbook reply shaped like an orderbook, instead of
+  returning an empty book. Two positions of one symbol get distinct close and
+  bracket hit ids (a symbol with one position keeps its ids). `cancel` checks its
   acknowledgement as `modify` does, and `modify` refuses a non-finite price
   or an invalid quantity before sending. A grouped depth ladder shows a bid
   at or below its price and an ask at or above it.
 - **Restoring state.** `restoreState` refuses a study on an impossible pane
   before it removes anything, never installs a clock a saved state carries,
-  and refuses more than 256 panes. Drawing colours are checked as colours on
+  and refuses more than 256 panes, counting the panes legacy studies without
+  a pane will open. A study that throws while being rebuilt leaves the chart
+  as it was, and `restoreState` returns `{ applied: false, reason }` instead
+  of throwing. Drawing colours are checked as colours on
   load and paste, and the mixed colour swatch builds no CSS from raw text.
 
 ### Changed
@@ -108,6 +133,12 @@ orders and positions keep the exchange and product that identify them.
   `policy`, and `parseWorkspaceDocument` and `parseWorkspacePayload` do the
   same when given `{ keepPolicy: false }`. The parsers keep policies by
   default, as before, because hosts read their own saved state through them.
+- **`commitModify` settles later.** It resolves only once the broker has
+  answered every modify of that order already sent, so a book read after it
+  sees the change. The drag recipes preview and send a stop-limit's trigger
+  where it was dropped, its limit keeping its gap.
+- **`restoreState` refuses instead of throwing** when a study throws while
+  being rebuilt.
 - **Trade-tier docs modify on release only.** The skills reference and the
   chart trading example previewed a drag by sending a modify on every move;
   they now preview locally and modify on release, restoring the line on
@@ -127,7 +158,12 @@ orders and positions keep the exchange and product that identify them.
 - `WidgetStorage.subscribe(listener)`; `WidgetStorage.remove` returns
   whether the store took the removal.
 - Optional `panes`, `indicators` and `primaryPaneIndex` on
-  `InstrumentDrawingsChart`.
+  `InstrumentDrawingsChart`, and an optional `indicatorId` on the items
+  `indicators()` returns; `InstrumentDrawings.merge(base, ours, theirs)`.
+- `TradeController.positionOf(id)`; optional `exchange` and `product` on
+  `BracketState`; an optional `exchange` argument to `TradeController.onLtp`.
+- An optional `getItem(key)` on `AsyncStorageLike`, which the IndexedDB store
+  implements.
 
 ### Compatibility
 
@@ -147,7 +183,10 @@ orders and positions keep the exchange and product that identify them.
   colour that is not a CSS colour is dropped on load; Renko, point and figure
   and Kagi elements on decimal boxes and at reversals change where they were
   wrong; CPR waits one more period on a chart whose history starts inside a
-  period.
+  period; a merged drawing write takes a Web Lock named
+  `oac-widget-write:<key>`, and new drawing ids are `d` plus a page-random
+  number; bars a bar-colouring study clones carry two symbol-keyed marks,
+  which JSON and `Object.keys` do not see.
 - **OpenScript.** OpenAlgo compiles studies and strategies with OpenScript
   0.8.1. 48 programs were run in 25 scenarios each on 2.7.2 and 2.7.3, and
   the library's OpenScript integration test passes. Studies on Renko charts
@@ -176,38 +215,42 @@ orders and positions keep the exchange and product that identify them.
 ### Size
 
 Every tier but WebGL2 grows for the fixes, and each budget rises only to
-the measured build. The base engine is 141.49 kB Brotli, 1.43 kB more than
-2.7.2 (base + trade 158.47 kB), for the axis ladder on whole ticks and in
+the measured build. The base engine is 141.88 kB Brotli, 1.82 kB more than
+2.7.2 (base + trade 159.17 kB), for the axis ladder on whole ticks and in
 log space, primitive isolation, bar-colour restore, comparison fit, the live
 close and alert judging across refreshes, restore validation and the trade
-adapter's fail-closed reads. The draw tier is 61.60 kB (0.81 kB more), the
-widget tier 130.30 kB (0.72 kB more) and its first-use parts 21.02 kB,
-indicators 45.10 kB, transform 6.55 kB, profile 20.89 kB and workspace
-11.89 kB; WebGL2 keeps 6.99 kB. The widget terminal is 378.49 kB, all tiers
-441.79 kB and the nine classic scripts 455.38 kB; the base classic script is
-141.53 kB and the widget classic script 143.62 kB. The chart-only import is
-90,178 bytes, 567 more than 2.7.2, since a plain chart carries the axis,
+adapter's fail-closed reads. The draw tier is 61.86 kB (1.07 kB more), the
+widget tier 131.31 kB (1.73 kB more) and its first-use parts 21.04 kB,
+indicators 45.10 kB, transform 6.55 kB, profile 20.96 kB and workspace
+11.89 kB; WebGL2 keeps 6.99 kB. The widget terminal is 380.15 kB, all tiers
+443.83 kB and the nine classic scripts 457.50 kB; the base classic script is
+141.94 kB and the widget classic script 144.74 kB. The chart-only import is
+90,329 bytes, 718 more than 2.7.2, since a plain chart carries the axis,
 frame and refresh fixes.
 
 ### Performance
 
 Five runs per version in one session on one machine (AMD Ryzen 7 7700, 16
 logical CPUs, Windows, headless Chromium 149.0.7827.55, software GL), under
-the unchanged render budgets. A browser, an editor and an OpenAlgo server
-were open but idle throughout, under both builds alike. At 200,000 bars the
-lowest Canvas 2D p95 pan, full zoom-out and ten-study tick are 2.1, 55.2 and
-75.4 ms against 2.2, 55.1 and 155.5 ms for 2.7.2 in the same session. The
-tick is 2.1x faster there and 1.5x faster at 10,000 and 50,000 bars, and the
-WebGL2 tick 1.5x and 2.0x faster at 50,000 and 200,000 bars: indicator fills
-now paint only the bars in view, where a tick frame used to walk every bar
-of every fill. Pan and zoom-out are unchanged within noise. This entry was
+the unchanged render budgets. A browser, two editors' background services and
+an OpenAlgo server were open but idle throughout, under both builds alike. At
+200,000 bars the lowest Canvas 2D p95 pan, full zoom-out and ten-study tick
+are 2.2, 51.3 and 73.4 ms against 2.1, 52.7 and 159.4 ms for 2.7.2 in the
+same session. The tick is 2.2x faster there, 1.4x faster at 10,000 bars and
+1.3x at 50,000, and the WebGL2 tick 1.3x and 1.9x faster at 50,000 and
+200,000 bars: indicator fills now paint only the bars in view, where a tick
+frame used to walk every bar of every fill. Pan and zoom-out are unchanged
+within noise. The one cell the table reads as slower, the Canvas 2D zoom-out
+at 10,000 bars (5.6 to 5.9 ms), was timed again with the two builds
+alternating, twelve passes each: a median p95 of 7.5 ms for 2.7.3 against
+7.1 ms for 2.7.2, both far inside the frame budget. This entry was
 measured on another machine than the 2.6.9 to 2.7.2 entries, so compare it
 only with its own 2.7.2 column. See the
 [same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#273).
 
 ### Tests
 
-12,390 engine tests across 549 files and 740 reference-host tests across 69
+12,483 engine tests across 560 files and 740 reference-host tests across 69
 files. Each fix has a regression test that failed on the code before it,
 apart from the guards named as such (the builder keeping its 2.7.2 volume,
 a host refresh taking history's close, the fill culling matching the full
