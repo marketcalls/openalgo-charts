@@ -64,6 +64,21 @@ class AnnouncingStore extends FakeAsyncStore {
   }
 }
 
+/**
+ * Web Locks as a browser keeps them: one queue per name for the whole origin,
+ * so a request from any tab waits for the one before it. Two pages that do not
+ * share a module only take turns through these; Node 20, which CI runs, has no
+ * `navigator.locks` of its own.
+ */
+function originLocks(): { locks: { request(name: string, options: object, callback: () => Promise<unknown>): Promise<unknown> } } {
+  const queues = new Map<string, Promise<unknown>>();
+  return { locks: { request(name, _options, callback) {
+    const held = (queues.get(name) ?? Promise.resolve()).then(() => callback());
+    queues.set(name, held.catch(() => undefined));
+    return held;
+  } } };
+}
+
 describe('D2: two writers change one instrument before either write lands', () => {
   it('keeps both widgets\' drawings', async () => {
     const store = new AnnouncingStore();
@@ -91,13 +106,16 @@ describe('D2: two writers change one instrument before either write lands', () =
       const fresh = await import('../src/widget/index');
       return make({ persist: 'pages', storage: store }, fresh.createWidget as unknown as typeof createWidget);
     };
-    const a = await page(), b = await page();
-    await a.ready; await b.ready; await quiet();
-    a.series.setData(bars); b.series.setData(bars);
-    const [mine, theirs] = [add(a, 111), add(b, 222)];
-    expect(mine.id).not.toBe(theirs.id);
-    await Promise.all([a.context.storage.flush(), b.context.storage.flush()]); await settle();
-    expect(savedPrices(store, 'pages')).toEqual([100, 111, 222]);
+    vi.stubGlobal('navigator', originLocks());
+    try {
+      const a = await page(), b = await page();
+      await a.ready; await b.ready; await quiet();
+      a.series.setData(bars); b.series.setData(bars);
+      const [mine, theirs] = [add(a, 111), add(b, 222)];
+      expect(mine.id).not.toBe(theirs.id);
+      await Promise.all([a.context.storage.flush(), b.context.storage.flush()]); await settle();
+      expect(savedPrices(store, 'pages')).toEqual([100, 111, 222]);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it('keeps both grids\' drawings on one desk', async () => {
