@@ -516,11 +516,15 @@ export class OpenAlgoTradeFeed implements OrderFeed {
  * The rows of a book read, or a throw. An HTTP-success body can still be a
  * refusal (`status: 'error'`) or carry no list at all, and reading either as
  * an empty book removes every order line and reports every position flat. Only
- * a list the server actually sent, empty or not, is a book.
+ * a list the server actually sent, empty or not, is a book, and only where its
+ * endpoint sends one: the orderbook nests its rows beside its statistics, the
+ * positionbook sends the list as `data`, so `{ data: { orders: [] } }` from the
+ * positionbook is not an empty position book.
  */
-function bookRows(json: unknown, route: string): unknown[] {
+function bookRows(json: unknown, route: 'orderbook' | 'positionbook'): unknown[] {
   const o = (typeof json === 'object' && json !== null ? json : {}) as { status?: unknown; message?: unknown; data?: unknown };
-  const rows = Array.isArray(o.data) ? o.data : (o.data as { orders?: unknown } | null | undefined)?.orders;
+  const rows = Array.isArray(o.data) ? o.data
+    : route === 'orderbook' ? (o.data as { orders?: unknown } | null | undefined)?.orders : undefined;
   if ((o.status === undefined || o.status === 'success') && Array.isArray(rows)) return rows as unknown[];
   throw new Error(o.status === 'error'
     ? `openalgo-charts: ${route} failed: ${String(o.message ?? 'no reason given')}`

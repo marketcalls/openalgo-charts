@@ -46,10 +46,16 @@
     function draw() {
       const orders = book.orders.map((o) => {
         const price = drafts.get('order:' + o.id);
-        if (price === undefined) return o;
-        return o.triggerPrice !== undefined ? { ...o, triggerPrice: price } : { ...o, price };
+        return price === undefined ? o : { ...o, ...dragged(o, price) };
       });
       tc.reconcile(orders, book.positions, { symbol: SYM, exchange: 'NSE' });
+    }
+    // What a drag to `price` changes, which the preview draws and the release
+    // sends. The line sits at the trigger when there is one, so the trigger
+    // follows the pointer, and a stop-limit's limit keeps its gap to it.
+    function dragged(o, price) {
+      if (o.triggerPrice === undefined) return { price };
+      return o.type === 'SL' ? { price: o.price + price - o.triggerPrice, triggerPrice: price } : { triggerPrice: price };
     }
     broker.onBook((orders, positions) => { book = { orders, positions }; draw(); });
     broker.onLtp((s, ltp) => tc.onLtp(s, ltp));
@@ -80,9 +86,13 @@
       (id, price) => { if (brokerToClient.has(id)) { drafts.set(id, price); draw(); } },
       (id) => {
         const c = brokerToClient.get(id), price = drafts.get(id);
+        const o = book.orders.find((r) => 'order:' + r.id === id);
         drafts.delete(id);
-        if (c === undefined || price === undefined) return;
-        eng.requestModify(c, price);
+        if (c === undefined || price === undefined || o === undefined) return;
+        // Send the fields the preview drew; commitModify resolves once the
+        // broker has answered, so the redraw shows where the order now rests.
+        const fields = dragged(o, price);
+        eng.requestModify(c, fields.price ?? price, fields);
         void eng.commitModify(c).finally(draw);
       },
     );

@@ -3,7 +3,9 @@
  * with a broker-style segmented pill group ([LONG|SHORT][qty][P&L (pct)][close]),
  * a compact avg-price tag on the axis, and a shaded entry-to-LTP band colored by
  * P&L sign. Updates cheaply on every LTP tick. The close segment hit-tests as
- * `position:<symbol>::close` (wire it to your square-off flow).
+ * `position:<symbol>::close` (wire it to your square-off flow), or with a
+ * `hitKey` in place of the symbol: `TradeController` gives one to each row of a
+ * symbol it draws more than once, so a click names one product.
  */
 import type { IPrimitive, PrimitiveHost, PrimitiveRenderContext, PrimitiveHit, ZOrder } from 'openalgo-charts';
 import type { Position } from './types';
@@ -21,11 +23,16 @@ export class PositionMarker implements IPrimitive {
   private _host: PrimitiveHost | null = null;
   private _group: { x0: number; x1: number; closeX0: number } | null = null;
   private readonly _extent: number;
+  private readonly _hitKey: string | undefined;
 
-  public constructor(position: Position, options: { extentFromRight?: number } = {}) {
+  public constructor(position: Position, options: { extentFromRight?: number; hitKey?: string | undefined } = {}) {
     this._position = position;
     this._extent = Math.max(0.1, Math.min(1, options.extentFromRight ?? 0.5));
+    this._hitKey = options.hitKey;
   }
+
+  /** What its hit ids name after `position:`: the `hitKey` it was built with, else the symbol. */
+  public get hitKey(): string { return this._hitKey ?? this._position.symbol; }
 
   public attached(host: PrimitiveHost): void { this._host = host; }
   public detached(): void { this._host = null; }
@@ -58,7 +65,7 @@ export class PositionMarker implements IPrimitive {
     const pnlColor = pnl >= 0 ? rc.theme.profit : rc.theme.loss;
     const long = this._position.netQty > 0;
     const sideColor = long ? rc.theme.buy : rc.theme.sell;
-    const id = `position:${this._position.symbol}`;
+    const id = `position:${this.hitKey}`;
     const active = rc.hoverId === id || rc.hoverId === `${id}::close`;
 
     const xStart = Math.round(rc.plotWidth * (1 - this._extent) * dpr);
@@ -120,7 +127,7 @@ export class PositionMarker implements IPrimitive {
     if (this._position.netQty === 0 || x < 0 || x > rc.plotWidth) return null;
     const lineY = rc.priceScale.priceToY(this._position.avgPrice);
     const distance = Math.abs(y - lineY);
-    const id = `position:${this._position.symbol}`;
+    const id = `position:${this.hitKey}`;
     const g = this._group;
     if (g !== null && distance <= TAG_H / 2 + 1 && x >= g.x0 && x <= g.x1) {
       if (x >= g.closeX0) return { externalId: `${id}::close`, zOrder: 'normal', distance, cursor: 'pointer' };

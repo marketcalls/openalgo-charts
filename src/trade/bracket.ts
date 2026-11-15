@@ -3,6 +3,8 @@
  * with theme-derived shaded risk/reward zones, rounded "SL/TP @ price" chips at
  * the left edge, and an R:R chip near entry: the core advanced-trade-management
  * visualisation. The SL/TP lines thicken on hover and are draggable (OCO modify).
+ * They hit-test as `bracket-sl:<symbol>` and `bracket-tp:<symbol>`, or with a
+ * `hitKey` in place of the symbol, as `PositionMarker` does.
  */
 import type { IPrimitive, PrimitiveHost, PrimitiveRenderContext, PrimitiveHit, ZOrder } from 'openalgo-charts';
 import type { OrderSide } from './types';
@@ -11,6 +13,9 @@ import { withAlpha, drawPill } from '../render/pill';
 
 export interface BracketState {
   symbol: string;
+  /** The exchange and product of the position it protects, when the book names them. */
+  exchange?: string | undefined;
+  product?: string | undefined;
   side: OrderSide;
   entry: number;
   stop: number;
@@ -20,10 +25,15 @@ export interface BracketState {
 export class BracketGroup implements IPrimitive {
   private _state: BracketState;
   private _host: PrimitiveHost | null = null;
+  private readonly _hitKey: string | undefined;
 
-  public constructor(state: BracketState) {
+  public constructor(state: BracketState, options: { hitKey?: string | undefined } = {}) {
     this._state = state;
+    this._hitKey = options.hitKey;
   }
+
+  /** What its hit ids name after `bracket-sl:` and `bracket-tp:`: the `hitKey` it was built with, else the symbol. */
+  public get hitKey(): string { return this._hitKey ?? this._state.symbol; }
 
   public attached(host: PrimitiveHost): void { this._host = host; }
   public detached(): void { this._host = null; }
@@ -62,8 +72,8 @@ export class BracketGroup implements IPrimitive {
     ctx.font = `500 ${10 * dpr}px system-ui, sans-serif`;
     ctx.textBaseline = 'middle';
     for (const [yRaw, color, tag, price, id] of [
-      [yStop, rc.theme.loss, 'SL', stop, `bracket-sl:${this._state.symbol}`],
-      [yTarget, rc.theme.profit, 'TP', target, `bracket-tp:${this._state.symbol}`],
+      [yStop, rc.theme.loss, 'SL', stop, `bracket-sl:${this.hitKey}`],
+      [yTarget, rc.theme.profit, 'TP', target, `bracket-tp:${this.hitKey}`],
     ] as const) {
       const y = Math.round(yRaw) + 0.5;
       const hovered = rc.hoverId === id || rc.dragId === id;
@@ -99,8 +109,8 @@ export class BracketGroup implements IPrimitive {
     const yTarget = rc.priceScale.priceToY(this._state.target);
     const dStop = Math.abs(y - yStop);
     const dTarget = Math.abs(y - yTarget);
-    if (dStop <= 4) return { externalId: `bracket-sl:${this._state.symbol}`, zOrder: 'bottom', distance: dStop, cursor: 'ns-resize' };
-    if (dTarget <= 4) return { externalId: `bracket-tp:${this._state.symbol}`, zOrder: 'bottom', distance: dTarget, cursor: 'ns-resize' };
+    if (dStop <= 4) return { externalId: `bracket-sl:${this.hitKey}`, zOrder: 'bottom', distance: dStop, cursor: 'ns-resize' };
+    if (dTarget <= 4) return { externalId: `bracket-tp:${this.hitKey}`, zOrder: 'bottom', distance: dTarget, cursor: 'ns-resize' };
     return null;
   }
 }
