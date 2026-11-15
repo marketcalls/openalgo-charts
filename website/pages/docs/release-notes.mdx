@@ -8,6 +8,223 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.7.3
+
+2026-11-15
+
+A correctness release from an audit of 2.7.2 and an independent check of
+that audit. Saved drawings and layouts survive reloads, a second tab and a
+reopened layout; alerts fire across history refreshes; live candles follow
+the history they continue; the price axis labels only tradable prices; and
+orders and positions keep the exchange and product that identify them.
+
+### Fixed
+
+- **Saved work.** Reopening a saved grid layout no longer deletes the
+  drawings kept for the instruments its charts are not showing. A tab that
+  falls behind another on the same desk or instrument writes only its own
+  changes and takes the other's, instead of writing its whole older state on
+  hide or close. Opening a saved layout keeps the drawings made on its symbol
+  since it was saved, and a state without drawings deletes none. A persisted
+  layout naming a study the page has not registered is refused whole and kept
+  stored, where it used to restore without the study and be overwritten by
+  the next autosave. Drawings on study panes are stored with their panes, so
+  removing or moving a pane while another symbol is shown no longer moves
+  them onto the wrong study or adds an empty pane. A drawing link member
+  added without a context source keeps sharing across a symbol round trip. A
+  recovery journal that cannot be removed no longer replays older values, a
+  removal the store refuses is reported, and a failed IndexedDB open is
+  retried once and then reported, instead of moving the session to
+  localStorage without a word. Workspace size limits apply to each layout,
+  not to the whole catalog, so the 47th ordinary layout saves.
+- **Alerts across refreshes.** A history replacement that extends what an
+  alert already judged (a refresh in flight, a refresh that failed and then
+  recovered, a chart holding its `maxBars`) is judged from the last bar the
+  alert saw, so a crossing that lands in it fires. A first load, a cache load
+  and a change of symbol, interval or variant still seed silently.
+- **Live candles.** The packaged OpenAlgo live feed buckets on the grid of
+  the history it continues when the interval declares no anchor: an NSE hour
+  at 09:15, a day stamped at IST midnight and a week stamped on Monday no
+  longer gain a second bar part-way through. A failed history refresh shows
+  the ticks that arrived meanwhile and follows the stream, marked stale,
+  instead of freezing the last candle. The controller's own poll and
+  bar-close repair no longer move the forming bar's close back to an older
+  history close once the stream has updated it; a refresh the host asks for
+  (after a reconnect, on a tab's return, `reload()`) takes history's close
+  as before. On a derived timeframe, a frame stamped with an old last-trade time no
+  longer forces a full reload. A warm-cache load whose history request comes
+  back empty keeps the cached bars and reports stale history.
+- **Live volume.** A frame without a traded quantity uses the change in the
+  day's cumulative volume when it carries one. The packaged OpenAlgo live
+  feed reports a bar no frame measured (OpenAlgo's LTP mode sends price and
+  time only) with no `volume` rather than a confirmed 0. `CandleBuilder`
+  still counts such a frame as no volume, as hosts that fill volume from
+  history rely on.
+- **The price axis.** With an instrument tick declared, the axis steps by
+  the tick or a whole number of ticks, so a tight range no longer prints a
+  price twice or a price between ticks, and a fractional tick prints its own
+  decimals (0.25 shows 100.25, 2.5 shows 102.5; the legend follows). On a
+  logarithmic scale, dragging the price axis zooms the decades on screen
+  instead of collapsing the chart, the labels spread across every decade and
+  low prices get the decimals they need. Prices below 0.0000001 get enough
+  decimals to tell them apart.
+- **Frames and overlays.** A primitive that throws in `draw`, `hitTest`,
+  `autoscaleInfo` or `afterAutoscale` is reported once and the rest of the
+  frame paints; `addPriceLine({ price })` without a colour draws instead of
+  throwing. Removing or hiding a bar-colouring study restores the candles'
+  own colours after paged-in history, a same-timestamp replacement or a live
+  tick. Indicator fills paint only the bars in view. A comparison on the
+  default baseline fits on the pane when it moves further than the primary,
+  and a primary append aligns only the new bars. A pane frozen for the
+  browser's own context menu is released once the menu is gone.
+- **Studies.** CPR never prints levels taken from a partly loaded first
+  session, week or month. A study timeframe the chart's interval does not
+  divide into (5m on a 3m chart) is refused with an error status instead of
+  folding buckets of the wrong length; hosts that request higher-timeframe
+  history are unaffected. KAMA steps over a missing value instead of
+  stopping for good, and HalfTrend seeds from the first complete bar.
+- **Transforms and profiles.** Profile rows are found by counting ticks, so
+  decimal row sizes hold the same number of ticks each and no longer move
+  the POC, and rows finer than 1e-8 stay distinct. Renko edges no longer
+  drift on a decimal box. Point and figure fills an O box only when the low
+  reaches it, so reversals no longer come a box early, and an exact touch of
+  a decimal box counts. Kagi judges thickness on the bar that turns the line
+  too. A bar without prices is skipped by Renko, point and figure, range
+  bars, line break and Kagi, so ATR box sizes and range bars no longer stall
+  on it, and a NaN, infinite or negative bar volume counts as none in a
+  profile.
+- **Trading.** `OpenAlgoTradeFeed` orders and positions keep their exchange
+  and product, `TradeController` keeps one position per symbol, exchange and
+  product, and `reconcile(orders, positions, instrument)` draws and
+  autoscales only the chart's instrument. A position row the adapter cannot
+  read throws instead of reading flat, and the book reads throw on an error
+  body instead of returning an empty book. `cancel` checks its
+  acknowledgement as `modify` does, and `modify` refuses a non-finite price
+  or an invalid quantity before sending. A grouped depth ladder shows a bid
+  at or below its price and an ask at or above it.
+- **Restoring state.** `restoreState` refuses a study on an impossible pane
+  before it removes anything, never installs a clock a saved state carries,
+  and refuses more than 256 panes. Drawing colours are checked as colours on
+  load and paste, and the mixed colour swatch builds no CSS from raw text.
+
+### Changed
+
+- **Imported workspace documents arrive as the user's own.**
+  `WorkspaceRepository.importDocument` drops each drawing's and study's
+  `policy`, and `parseWorkspaceDocument` and `parseWorkspacePayload` do the
+  same when given `{ keepPolicy: false }`. The parsers keep policies by
+  default, as before, because hosts read their own saved state through them.
+- **Trade-tier docs modify on release only.** The skills reference and the
+  chart trading example previewed a drag by sending a modify on every move;
+  they now preview locally and modify on release, restoring the line on
+  `drag:cancel`.
+- **Docs.** ARCHITECTURE.md describes Renko (a one-box reversal), range bars
+  (a close threshold, not a fixed span), point and figure and Kagi as the
+  code builds them; the website says tied TPO rows go to the highest price.
+
+### Added
+
+- `Order.exchange`, `Order.product`, `Position.exchange`, `Position.product`
+  (optional), and an optional `instrument` argument to
+  `TradeController.reconcile`.
+- An optional `tick` argument to `niceTicks`.
+- `WorkspaceParseOptions` (`keepPolicy`) as an optional second argument to
+  `parseWorkspaceDocument` and `parseWorkspacePayload`.
+- `WidgetStorage.subscribe(listener)`; `WidgetStorage.remove` returns
+  whether the store took the removal.
+- Optional `panes`, `indicators` and `primaryPaneIndex` on
+  `InstrumentDrawingsChart`.
+
+### Compatibility
+
+- Every addition is optional and nothing is removed or narrowed;
+  `check-compat` finds every tier additive, now against 2.7.2 as well, the
+  previous release and the version OpenAlgo pins.
+- Documents 2.7.2 saved (a chart state with studies, drawings and alerts, the
+  widget's persisted layout, a workspace and its catalog), written by the
+  published package in Chromium, load in 2.7.3 and save again with no change
+  beyond those every earlier release shows.
+- Behaviour a host can see: `mapPosition`, `getPositions` and the book reads
+  throw where they returned flat or empty; a primitive's exception no longer
+  propagates out of a frame; a default comparison widens the primary's
+  automatic range; a persisted widget layout naming an unregistered study is
+  refused; the default widget store sets one localStorage key
+  (`oac-widget-store:indexeddb`) once IndexedDB has answered; a drawing
+  colour that is not a CSS colour is dropped on load; Renko, point and figure
+  and Kagi elements on decimal boxes and at reversals change where they were
+  wrong; CPR waits one more period on a chart whose history starts inside a
+  period.
+- **OpenScript.** OpenAlgo compiles studies and strategies with OpenScript
+  0.8.1. 48 programs were run in 25 scenarios each on 2.7.2 and 2.7.3, and
+  the library's OpenScript integration test passes. Studies on Renko charts
+  with decimal boxes and on point and figure charts see the corrected
+  elements; nothing else an OpenScript program computes changes.
+- **OpenAlgo.** No migration. A dry run with the packed candidate in an isolated
+  OpenAlgo worktree (pinned 2.7.2 first, then 2.7.3) passes its typecheck,
+  its full test suite (3,686 tests across 273 files), its production build,
+  and the 14 `/trading` browser checks in Chromium, Firefox and WebKit; the
+  optional template, readout, open interest and named workspace groups pass
+  too. Two optional groups stop on checks that fail the same way on 2.7.2
+  (a volume colour check and a selector OpenAlgo now matches twice). The
+  terminal can now filter its order lines by `exchange` as well as symbol.
+
+### Security
+
+- Unchanged from 2.7.2: the published package has no runtime dependencies
+  (`npm audit --omit=dev` finds none), and the two open advisories are the
+  development-only `minimatch` under `typedoc` and zod in the documentation
+  site, for the reasons given in 2.7.1.
+- Restoring shared state is tighter: an imported workspace document can no
+  longer place objects the user cannot select or delete, a saved state can
+  no longer replace the chart's clock, and a drawing colour can no longer
+  carry CSS into the widget's colour swatch.
+
+### Size
+
+Every tier but WebGL2 grows for the fixes, and each budget rises only to
+the measured build. The base engine is 141.49 kB Brotli, 1.43 kB more than
+2.7.2 (base + trade 158.47 kB), for the axis ladder on whole ticks and in
+log space, primitive isolation, bar-colour restore, comparison fit, the live
+close and alert judging across refreshes, restore validation and the trade
+adapter's fail-closed reads. The draw tier is 61.60 kB (0.81 kB more), the
+widget tier 130.30 kB (0.72 kB more) and its first-use parts 21.02 kB,
+indicators 45.10 kB, transform 6.55 kB, profile 20.89 kB and workspace
+11.89 kB; WebGL2 keeps 6.99 kB. The widget terminal is 378.49 kB, all tiers
+441.79 kB and the nine classic scripts 455.38 kB; the base classic script is
+141.53 kB and the widget classic script 143.62 kB. The chart-only import is
+90,178 bytes, 567 more than 2.7.2, since a plain chart carries the axis,
+frame and refresh fixes.
+
+### Performance
+
+Five runs per version in one session on one machine (AMD Ryzen 7 7700, 16
+logical CPUs, Windows, headless Chromium 149.0.7827.55, software GL), under
+the unchanged render budgets. A browser, an editor and an OpenAlgo server
+were open but idle throughout, under both builds alike. At 200,000 bars the
+lowest Canvas 2D p95 pan, full zoom-out and ten-study tick are 2.1, 55.2 and
+75.4 ms against 2.2, 55.1 and 155.5 ms for 2.7.2 in the same session. The
+tick is 2.1x faster there and 1.5x faster at 10,000 and 50,000 bars, and the
+WebGL2 tick 1.5x and 2.0x faster at 50,000 and 200,000 bars: indicator fills
+now paint only the bars in view, where a tick frame used to walk every bar
+of every fill. Pan and zoom-out are unchanged within noise. This entry was
+measured on another machine than the 2.6.9 to 2.7.2 entries, so compare it
+only with its own 2.7.2 column. See the
+[same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#273).
+
+### Tests
+
+12,390 engine tests across 549 files and 740 reference-host tests across 69
+files. Each fix has a regression test that failed on the code before it,
+apart from the guards named as such (the builder keeping its 2.7.2 volume,
+a host refresh taking history's close, the fill culling matching the full
+walk). In Chromium, Firefox and WebKit the browser suite passes; on the
+Windows release machine a varying set of timing-sensitive tests fails under
+full parallel load on 2.7.3 and on 2.7.2 alike, and every one passes run
+with two workers or project by project. OpenScript 0.8.1: 48 programs in 25
+scenarios each were compared between 2.7.2 and 2.7.3, and every difference
+is a fix listed above; the library's OpenScript integration test passes 21
+of 21.
+
 ## 2.7.2
 
 2026-11-12
