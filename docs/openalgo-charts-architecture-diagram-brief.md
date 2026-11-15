@@ -117,6 +117,8 @@ Rechecked on 2.7.1 with `npx size-limit` on the final versioned release build: b
 
 Rechecked on 2.7.2 with `npx size-limit` on the final versioned release build: base 140.06 kB, indicators 44.85 kB, draw 60.79 kB, profile 20.83 kB, transform 6.38 kB, trade 16.88 kB on its own (base + trade 156.93 kB), workspace 11.73 kB, WebGL2 6.99 kB, widget 129.58 kB, and 438.07 kB for all tiers. Registry counts are 112 indicators, 90 drawing tools (the five Elliott wave counts among them), 13 base chart types, 15 with the transform tier, and six series transforms. The diagram shows the 2.7.2 title, version label, base, draw, widget and all-tier sizes, and the 90 drawing tools.
 
+Rechecked on 2.7.3 with `npx size-limit` on the final versioned release build: base 141.49 kB, indicators 45.10 kB, draw 61.60 kB, profile 20.89 kB, transform 6.55 kB, trade 16.98 kB on its own (base + trade 158.47 kB), workspace 11.89 kB, WebGL2 6.99 kB, widget 130.30 kB, and 441.79 kB for all tiers. Registry counts are unchanged: 112 indicators, 90 drawing tools, 13 base chart types, 15 with the transform tier, and six series transforms. The diagram shows the 2.7.3 title, version label and every tier size. The release adds no box or arrow.
+
 Source references: `src/index.ts`, `src/feed/data-controller.ts`,
 `src/feed/instrument.ts`, `src/model/bar.ts`, `src/core/pane.ts`,
 `src/alerts/controller.ts`, `src/replay/group.ts`, `src/link/group.ts`,
