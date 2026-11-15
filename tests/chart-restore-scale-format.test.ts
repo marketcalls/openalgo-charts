@@ -78,9 +78,11 @@ it('does not read selector accessors or leave preservation active after a failed
     calc: () => { throw new Error('Calculation failed'); },
   });
   chart.primarySeries()!.applyOptions({ precision: 3 });
-  expect(() => chart.restoreState({ version: 1, indicators: [{ indicatorId: `${id}-fails`, settings: {}, paneIndex: 0 }] }, {
+  // Refused rather than thrown: once the study fails, the chart's own state
+  // goes back on and the restore reports the study's reason.
+  expect(chart.restoreState({ version: 1, indicators: [{ indicatorId: `${id}-fails`, settings: {}, paneIndex: 0 }] }, {
     preserveScaleFormats: [{ paneIndex: 0, scaleId: 'right' }],
-  })).toThrow('Calculation failed');
+  })).toMatchObject({ applied: false, reason: 'Calculation failed' });
   expect(chart.primarySeries()!.priceScale().format(12.3456)).toBe('12.346');
   chart.addIndicator(id);
   expect(chart.primarySeries()!.priceScale().format(12.3456)).toBe('12.35%');

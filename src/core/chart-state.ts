@@ -53,6 +53,7 @@ import { hasOnlyDataProperties, isPlainObject } from '../helpers/validate';
  * page for seconds before anything is shown.
  */
 const MAX_PANES = 256;
+const TOO_MANY_PANES = `Invalid pane list, or more than ${MAX_PANES} panes`;
 
 /**
  * The axis-strip switches of a saved state, never its clock. `getState` does
@@ -66,6 +67,24 @@ interface PreparedIndicatorRestore {
   specs: IndicatorState[];
   order: readonly string[];
   descriptors: ReadonlyMap<string, IndicatorDescriptor>;
+}
+
+/**
+ * `studies`, once making them in their order is known to stand up no more
+ * panes than a restore may (or than the chart has already). A study that
+ * names a slot needs every pane up to it, and a pane study that names none
+ * opens its own after the last (`nextPaneIndex`), so a legacy layout that
+ * names no slot at all is counted here and nowhere else.
+ */
+function withinPaneLimit(studies: PreparedIndicatorRestore, current: number, listed: number): PreparedIndicatorRestore {
+  const slots = new Map(studies.specs.map(spec => [spec.instanceId!, spec.paneIndex]));
+  let panes = Math.max(current, listed);
+  for (const id of studies.order) {
+    const slot = slots.get(id);
+    panes = slot === undefined ? panes + Number(studies.descriptors.get(id)!.placement === 'pane') : Math.max(panes, slot + 1);
+  }
+  if (panes > Math.max(MAX_PANES, current)) throw new Error(TOO_MANY_PANES);
+  return studies;
 }
 export type PreservedScaleFormats = ReadonlyMap<Pane, ReadonlySet<PriceScaleId>>;
 
@@ -137,6 +156,8 @@ export interface PersistenceHost {
 export class ChartPersistence {
   private readonly _host: PersistenceHost;
   private _restoreGeneration = 0;
+  /** Set while a refused restore lays the chart's own state back on. */
+  private _undoing = false;
 
   public constructor(host: PersistenceHost) {
     this._host = host;
@@ -278,7 +299,7 @@ export class ChartPersistence {
         }
       }
       if (s.panes !== undefined) {
-        if (!Array.isArray(s.panes) || s.panes.length > MAX_PANES) throw new Error(`Invalid pane list, or more than ${MAX_PANES} panes`);
+        if (!Array.isArray(s.panes) || s.panes.length > MAX_PANES) throw new Error(TOO_MANY_PANES);
         panes = s.panes.map(pane => parsePaneState(pane, true));
       }
       // Checked with the rest, before anything is applied: a slot that names no
@@ -348,7 +369,7 @@ export class ChartPersistence {
           }
           return descriptor ? [{ id: spec.instanceId!, descriptor, settings: spec.settings }] : [];
         });
-        studies = { specs, order: planIndicatorDependencies(nodes).order, descriptors };
+        studies = withinPaneLimit({ specs, order: planIndicatorDependencies(nodes).order, descriptors }, this._host._panes.length, panes?.length ?? 0);
       }
     } catch (error) {
       return { applied: false, series: [], indicators: 0, reason: error instanceof Error ? error.message : 'Invalid saved alerts or identities' };
@@ -368,8 +389,7 @@ export class ChartPersistence {
       }
       // The layout setters a restore calls are the restore, which the start
       // and end events announce; they do not each fire `layout:change`.
-      const report = this._host._withinLayoutChange(() =>
-        this._host._mutateTimeScale(() => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats)));
+      const report = this._layOrUndo(studies, () => this._restoreState(s, alerts, reservedIds, panes, primaryPane ?? 0, studies, preservedFormats));
       if (report.applied && generation === this._restoreGeneration && (previousPriceOnly !== this._host._priceOnlyAutoScale
         || previousLegendCollapsed !== this._host._indicatorLegendCollapsed)) {
         this._host._emit('objects:change', {});
@@ -382,6 +402,26 @@ export class ChartPersistence {
       this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Full));
       this._host._emitViewportIfMoved(before);
       this._host._emit('state:restore:end', {});
+    }
+  }
+
+  /**
+   * `_restoreState` inside the brackets a restore runs in. A study that throws
+   * as it is rebuilt, in its constructor or its first calculation, is the one
+   * failure no check before can see, and it comes once the studies it replaces
+   * are gone. So the chart's own state is taken first and laid back on, and
+   * the restore is refused with the study's reason. The state it lays back is
+   * restored once: a failure there throws, as any restore did before.
+   */
+  private _layOrUndo(studies: PreparedIndicatorRestore | undefined, restore: () => RestoreReport): RestoreReport {
+    const lay = (): RestoreReport => this._host._withinLayoutChange(() => this._host._mutateTimeScale(restore));
+    if (studies === undefined || this._undoing) return lay();
+    const before = this.getState();
+    try { return lay(); }
+    catch (error) {
+      this._undoing = true;
+      try { this.restoreState(before); } finally { this._undoing = false; }
+      return { applied: false, series: [], indicators: 0, reason: error instanceof Error ? error.message : 'A study could not be rebuilt' };
     }
   }
 
