@@ -12,7 +12,7 @@ with no runtime dependencies.
 [![npm version](https://img.shields.io/npm/v/openalgo-charts.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/openalgo-charts)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![npm downloads](https://img.shields.io/npm/dm/openalgo-charts.svg?color=0ea5e9&label=npm%20downloads)](https://www.npmjs.com/package/openalgo-charts)
-[![tests](https://img.shields.io/badge/engine%20tests-12483%20passing-brightgreen.svg)](#develop)
+[![tests](https://img.shields.io/badge/engine%20tests-12488%20passing-brightgreen.svg)](#develop)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](#principles)
 
 [**Documentation**](https://marketcalls.github.io/openalgo-charts/) &nbsp;·&nbsp; [**Live examples**](https://marketcalls.github.io/openalgo-charts/examples) &nbsp;·&nbsp; [**Getting started**](./docs/getting-started.md) &nbsp;·&nbsp; [**Migrating to 2.0**](./docs/migrating-to-2.md) &nbsp;·&nbsp; [**Architecture**](./ARCHITECTURE.md)
@@ -188,10 +188,10 @@ Unused optional tiers stay out of the base chart download.
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO) with compact pixel letters, Footprint, order flow | 20.96 kB |
 | `openalgo-charts/trade` | Order, position and bracket tools, account state, order preview and position commands, plus a depth-of-market ladder | 17.29 kB |
 | `openalgo-charts/webgl` | GPU drawing for supported series, with Canvas 2D fallback | 6.99 kB |
-| `openalgo-charts/widget` | `createWidget`: toolbar, bottom bar, Data, Objects, Watchlist and News dock, account summary, symbol search, dialogs, mobile controls, a shortcuts editor, saved layouts, the chart grid (`createChartGrid`) and optional persistence in IndexedDB | 131.31 kB |
+| `openalgo-charts/widget` | `createWidget`: toolbar, bottom bar, Data, Objects, Watchlist and News dock, account summary, symbol search, dialogs, mobile controls, a shortcuts editor, saved layouts, the chart grid (`createChartGrid`) and optional persistence in IndexedDB | 131.55 kB |
 | `openalgo-charts/workspace` | Validated workspace and indicator-template documents, named watchlists, named catalogs with revision checks, asynchronous storage and an IndexedDB adapter; no DOM | 11.89 kB |
 
-Everything together is **443.83 kB Brotli**; a widget terminal with built-in indicators (base + draw + indicators + widget) is 380.15 kB. The widget's eight first-use parts (the shortcuts editor, the Layouts menu, the templates list, the chart data dialog, the chart type settings dialog, the grid bar and its menus, and the IndexedDB store) add 21.04 kB in files of their own, fetched only when a widget first uses one. The nine classic-script files together are 457.50 kB. Figures are measured from the 2.7.3 release build. The trade tier is 17.29 kB on its own; base + trade costs 159.17 kB. Sizes use decimal kB.
+Everything together is **444.07 kB Brotli**; a widget terminal with built-in indicators (base + draw + indicators + widget) is 380.39 kB. The widget's eight first-use parts (the shortcuts editor, the Layouts menu, the templates list, the chart data dialog, the chart type settings dialog, the grid bar and its menus, and the IndexedDB store) add 21.04 kB in files of their own, fetched only when a widget first uses one. The nine classic-script files together are 457.61 kB. Figures are measured from the 2.7.3 release build. The trade tier is 17.29 kB on its own; base + trade costs 159.17 kB. Sizes use decimal kB.
 
 ## What's built
 
@@ -524,12 +524,12 @@ Enforced in CI by [`size-limit`](./.size-limit.json). Nothing is excluded, becau
 | Transform tier | 6.56 kB | 6.55 kB |
 | Profile tier | 20.97 kB | 20.96 kB |
 | WebGL2 tier | 6.99 kB | 6.99 kB |
-| Widget tier | 131.31 kB | 131.31 kB |
+| Widget tier | 131.55 kB | 131.55 kB |
 | Widget first-use parts (eight files beside the widget tier) | 21.05 kB | 21.04 kB |
-| Widget terminal (base + draw + indicators + widget) | 380.16 kB | 380.15 kB |
+| Widget terminal (base + draw + indicators + widget) | 380.40 kB | 380.39 kB |
 | Workspace tier | 11.89 kB | 11.89 kB |
-| Script tags (the nine classic-script files) | 457.50 kB | 457.50 kB |
-| **Everything** | 443.83 kB | 443.83 kB |
+| Script tags (the nine classic-script files) | 457.62 kB | 457.61 kB |
+| **Everything** | 444.08 kB | 444.07 kB |
 
 ## Documentation
 
@@ -580,7 +580,7 @@ See [Contributing](./CONTRIBUTING.md) for setup, targeted checks, documentation 
 ```bash
 npm install        # install dev toolchain
 npm run typecheck  # TypeScript: src with the stricter flags, then the tests
-npm test           # engine unit tests (Vitest): 12483 across 560 files
+npm test           # engine unit tests (Vitest): 12488 across 561 files
 npm run test:demo  # reference-host tests: 740 across 69 files
 npm run test:endurance # node endurance-harness tests: 7 cases
 npm run build      # Rollup -> dist/ (minified ESM per tier + types)
