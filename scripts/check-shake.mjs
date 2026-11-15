@@ -281,7 +281,12 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // 2.6.8 draws an OHLC bar's stroke at a weight that follows the zoom, which
 // a plain chart can draw. The final build measures 89611 bytes, 43 more than
 // 2.6.7; retain the exact ceiling.
-const LIMIT_BYTES = 89611;
+// 2.7.3 fixes what a plain chart draws: the axis ladder on whole ticks and in
+// log space, a throwing primitive isolated per frame, host bar colours
+// restored, the context-menu snapshot released, and the live close and
+// alert judging across refreshes. The final build measures 90329 bytes, 718
+// more than 2.7.2, which kept the 2.6.8 figure; retain the exact ceiling.
+const LIMIT_BYTES = 90329;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

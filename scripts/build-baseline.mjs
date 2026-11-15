@@ -30,7 +30,6 @@ const out = join(root, 'dist-baseline');
 // No shell: a shell would need the args escaped, and every command here is
 // either a real binary (git) or a JS entry point run through this same node.
 const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: 'inherit' });
-const node = (script, args, cwd) => execFileSync(process.execPath, [script, ...args], { cwd, stdio: 'inherit' });
 
 // Fail early with a useful message rather than deep inside a worktree add.
 try {
@@ -58,7 +57,9 @@ try {
   }
 
   console.log('build-baseline: building');
-  node(join(root, 'node_modules', 'rollup', 'dist', 'bin', 'rollup'), ['-c'], tree);
+  // The heap `npm run build` gives rollup: a release's full build outgrew the
+  // default one on a CI runner, which killed the render-parity job before a test ran.
+  execFileSync(process.execPath, ['--max-old-space-size=4096', join(root, 'node_modules', 'rollup', 'dist', 'bin', 'rollup'), '-c'], { cwd: tree, stdio: 'inherit' });
 
   rmSync(out, { recursive: true, force: true });
   cpSync(join(tree, 'dist'), out, { recursive: true });

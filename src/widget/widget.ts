@@ -33,10 +33,11 @@ import {
 } from 'openalgo-charts';
 import { DrawingController, type DrawingDocumentStore, type InstrumentDrawings } from 'openalgo-charts/draw';
 import {
-  WidgetStorage, createOverlayStack, createTipController, h, widgetDialog,
+  createOverlayStack, createTipController, h, widgetDialog, type WidgetStorage,
   type AsyncStorageLike, type OverlayOptions, type OverlayStack, type TipController, type StorageLike, type WidgetBus, type WidgetBusEvents, type WidgetContext, type WidgetDialogName,
 } from './context';
 import { defaultWidgetStore } from './storage';
+import { flushLeaving } from './widget-storage';
 import { storedTimeframePreferences, type TimeframePreferences } from './timeframe-preferences';
 import { ChartHistory } from './history';
 import { Keymap } from './keymap';
@@ -71,8 +72,8 @@ import type { AccountStateSource } from 'openalgo-charts/trade';
 import { dataVariantLabel } from './data-status';
 import { installKeys, keyScopes, trackPointer, type KeysHost } from './widget-keys';
 import {
-  ShellBus, applySavedLayout, flushOnPageHide, readSaved, reportStorage, restoreWhenLoaded, restoreWidgetState, saveNow, scheduleSave,
-  scopeDrawings, stripView as stripSavedView, type PersistHost,
+  ShellBus, applySavedLayout, flushOnPageHide, openStorage, readSaved, restoreWhenLoaded, restoreWidgetState, saveNow, scheduleSave,
+  savesOnLeave, scopeDrawings, stripView as stripSavedView, type PersistHost,
 } from './widget-persist';
 // The bar, the ranges, the session calendar and the shading live in bottombar-shell.ts.
 import { attachBottombar, BOTTOMBAR_OPTION_KEYS, type BottombarHost, type ShellBottombar, type WidgetBottombarOptions } from './bottombar-shell';
@@ -694,13 +695,17 @@ class WidgetImpl implements Widget {
   private _saveTimer: ReturnType<typeof setTimeout> | 0 = 0;
   /** An asynchronous store has not answered yet: saves wait, and the first load is held. */
   private _restoring: boolean;
-  // Not private: only widget-persist.ts reads the next three.
+  // Not private: only widget-persist.ts reads the next five.
   /** Until the store answers, the drawings follow no instrument. */
   public _holdDrawings: boolean;
   /** A save was asked for while restoring; the one change worth writing once the store answers. */
   public _saveWanted = false;
   /** The host restored a whole state while restoring, which the stored one does not overwrite. */
   public _stateGiven = false;
+  /** The stored layout was refused, and stays stored until the host restores one: nothing is saved over it. */
+  public _keepSaved = false;
+  /** The stored layout as this shell last read or wrote it, to tell when another tab has stored one since. */
+  public _layoutText = 'null';
   private _destroyed = false;
   private readonly _cleanups: Array<() => void> = [];
 
@@ -735,7 +740,7 @@ class WidgetImpl implements Widget {
     // ── persisted facts, before anything is built from them ────────────
     const ns = typeof options.persist === 'string' ? options.persist : 'default';
     const store = options.persist ? (options.storage === undefined ? defaultWidgetStore() : options.storage) : null;
-    this._storage = new WidgetStorage(ns, store, { onError: failure => reportStorage.call(this as unknown as PersistHost, failure) });
+    this._storage = openStorage.call(this as unknown as PersistHost, ns, store);
     this._timeframePreferences = options.timeframePreferences ?? storedTimeframePreferences(this._storage, options.intervals ?? DEFAULT_INTERVALS);
     if (!options.timeframePreferences) this._cleanups.push(() => this._timeframePreferences.destroy());
     // An asynchronous store answers later: until then `saved` is null, the
@@ -1423,10 +1428,10 @@ class WidgetImpl implements Widget {
 
   public destroy(): void {
     if (this._destroyed) return;
-    this._saveNow();
-    // Sends an asynchronous store's writes now, journaled in case the page is
-    // going too, and stops following other tabs' changes to it.
-    void this._storage.flush();
+    if (savesOnLeave.call(this as unknown as PersistHost)) this._saveNow();
+    // Sends an asynchronous store's writes now, in this call and journaled in
+    // case the page is going too, and stops following other tabs' changes to it.
+    flushLeaving(this._storage);
     this._storage.close();
     this._destroyed = true;
     this._cancelNavigation();

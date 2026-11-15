@@ -18,15 +18,15 @@ Source of truth: `package.json` (`exports`, `sideEffects`, `files`), `rollup.con
 
 | Specifier | Emitted file | Contents | Brotli measured / limit | Import has side effects |
 |---|---|---|---|---|
-| `openalgo-charts` | `dist/openalgo-charts.mjs` | engine, 13 chart types, indicator + chart-type registries, primitives, feeds, trading controller, shortcuts, TimeNavigator, `ReplayController`, comparison controller, appearance links, grouped timeline events, settings schema, chart timezone | 140.06 kB / 140.14 kB | no |
-| `openalgo-charts/trade` | `dist/openalgo-charts.trade.mjs` | order/position/bracket primitives, DOM ladder, `OrderEngine`, `TradeController`, `FakeBroker` | 16.88 kB standalone; 157.02 kB limit for base + trade | no |
-| `openalgo-charts/transform` | `dist/openalgo-charts.transform.mjs` | Renko, Range, Point & Figure, Kagi, Line Break, Heikin Ashi, `runTransform`, symbol arithmetic (`parseExpression`, `evaluateExpression`) | 6.38 kB / 6.39 kB | **yes**, registers the `point-figure` and `kagi` chart types and the six series transforms |
-| `openalgo-charts/profile` | `dist/openalgo-charts.profile.mjs` | Volume Profile, TPO / Market Profile, Footprint, orderflow | 20.83 kB / 20.83 kB | no |
-| `openalgo-charts/indicators` | `dist/openalgo-charts.indicators.mjs` | 112 Tier-1 built-ins plus the Tier-2 contract | 44.85 kB / 44.86 kB | **yes**, registers all 112 descriptors |
-| `openalgo-charts/draw` | `dist/openalgo-charts.draw.mjs` | 90 drawing tools including Anchored VWAP and fixed-range Volume Profile, `DrawingController`, `DrawingLinkGroup`, `DrawingLayer` | 60.79 kB / 60.79 kB | **yes**, registers every built-in tool |
+| `openalgo-charts` | `dist/openalgo-charts.mjs` | engine, 13 chart types, indicator + chart-type registries, primitives, feeds, trading controller, shortcuts, TimeNavigator, `ReplayController`, comparison controller, appearance links, grouped timeline events, settings schema, chart timezone | 141.88 kB / 141.89 kB | no |
+| `openalgo-charts/trade` | `dist/openalgo-charts.trade.mjs` | order/position/bracket primitives, DOM ladder, `OrderEngine`, `TradeController`, `FakeBroker` | 17.29 kB standalone; 159.18 kB limit for base + trade | no |
+| `openalgo-charts/transform` | `dist/openalgo-charts.transform.mjs` | Renko, Range, Point & Figure, Kagi, Line Break, Heikin Ashi, `runTransform`, symbol arithmetic (`parseExpression`, `evaluateExpression`) | 6.55 kB / 6.56 kB | **yes**, registers the `point-figure` and `kagi` chart types and the six series transforms |
+| `openalgo-charts/profile` | `dist/openalgo-charts.profile.mjs` | Volume Profile, TPO / Market Profile, Footprint, orderflow | 20.96 kB / 20.97 kB | no |
+| `openalgo-charts/indicators` | `dist/openalgo-charts.indicators.mjs` | 112 Tier-1 built-ins plus the Tier-2 contract | 45.10 kB / 45.10 kB | **yes**, registers all 112 descriptors |
+| `openalgo-charts/draw` | `dist/openalgo-charts.draw.mjs` | 90 drawing tools including Anchored VWAP and fixed-range Volume Profile, `DrawingController`, `DrawingLinkGroup`, `DrawingLayer` | 61.86 kB / 61.86 kB | **yes**, registers every built-in tool |
 | `openalgo-charts/webgl` | `dist/openalgo-charts.webgl.mjs` | the WebGL2 series backend, `createWebGL2Backend`, `isWebGL2Supported`, `WebGL2Backend`, `GlDevice` | 6.99 kB / 6.99 kB | **yes**, registers the `webgl2` render backend |
-| `openalgo-charts/widget` | `dist/openalgo-charts.widget.mjs` | `createWidget`, the chrome (top bar, rail, status line, toasts), the dialogs, event details, the keymap, the tokens and stylesheet; the only tier that ships DOM. Imports `openalgo-charts/draw` itself | 129.58 kB / 129.58 kB; first-use parts 21.00 kB / 21.00 kB | **yes**, registers the nine dialog mounts with the shell |
-| `openalgo-charts/workspace` | `dist/openalgo-charts.workspace.mjs` | Validated workspace and template documents, `WorkspaceRepository`, revision conflicts and an IndexedDB adapter | 11.73 kB / 11.73 kB | no |
+| `openalgo-charts/widget` | `dist/openalgo-charts.widget.mjs` | `createWidget`, the chrome (top bar, rail, status line, toasts), the dialogs, event details, the keymap, the tokens and stylesheet; the only tier that ships DOM. Imports `openalgo-charts/draw` itself | 131.55 kB / 131.55 kB; first-use parts 21.04 kB / 21.05 kB | **yes**, registers the nine dialog mounts with the shell |
+| `openalgo-charts/workspace` | `dist/openalgo-charts.workspace.mjs` | Validated workspace and template documents, `WorkspaceRepository`, revision conflicts and an IndexedDB adapter | 11.89 kB / 11.89 kB | no |
 
 Types resolve per tier: `dist/index.d.ts`, `dist/trade/index.d.ts`, `dist/transform/index.d.ts`, `dist/profile/index.d.ts`, `dist/indicators/index.d.ts`, `dist/draw/index.d.ts`, `dist/webgl/index.d.ts`, `dist/widget/index.d.ts`, `dist/workspace/index.d.ts`.
 
@@ -156,25 +156,25 @@ An import map is optional here. Because the tier bundles reference `./openalgo-c
 
 ## Size budgets
 
-Enforced by `npm run size` (`size-limit`, Brotli, `@size-limit/file`), from `.size-limit.json`. Current measurements are from 2.7.2 and use decimal kB:
+Enforced by `npm run size` (`size-limit`, Brotli, `@size-limit/file`), from `.size-limit.json`. Current measurements are from 2.7.3 and use decimal kB:
 
 | Budget row | Files measured | Limit | Measured |
 |---|---|---|---|
-| Base engine | `openalgo-charts.mjs` | 140.14 kB | 140.06 kB |
-| Base + trade layer | base + `trade.mjs` | 157.02 kB | 156.93 kB |
-| Indicator tier | `indicators.mjs` | 44.86 kB | 44.85 kB |
-| Draw tier | `draw.mjs` | 60.79 kB | 60.79 kB |
-| Transform tier | `transform.mjs` | 6.39 kB | 6.38 kB |
-| Profile tier | `profile.mjs` | 20.83 kB | 20.83 kB |
+| Base engine | `openalgo-charts.mjs` | 141.89 kB | 141.88 kB |
+| Base + trade layer | base + `trade.mjs` | 159.18 kB | 159.17 kB |
+| Indicator tier | `indicators.mjs` | 45.10 kB | 45.10 kB |
+| Draw tier | `draw.mjs` | 61.86 kB | 61.86 kB |
+| Transform tier | `transform.mjs` | 6.56 kB | 6.55 kB |
+| Profile tier | `profile.mjs` | 20.97 kB | 20.96 kB |
 | WebGL2 tier | `webgl.mjs` | 6.99 kB | 6.99 kB |
-| Widget tier | `widget.mjs` | 129.58 kB | 129.58 kB |
-| Widget first-use parts | `widget.<part>-<hash>.mjs`, eight files | 21.00 kB | 21.00 kB |
-| Widget terminal | base + `draw.mjs` + `indicators.mjs` + `widget.mjs` | 375.27 kB | 375.27 kB |
-| Workspace tier | `workspace.mjs` | 11.73 kB | 11.73 kB |
-| Everything | all nine bundles | 438.08 kB | 438.07 kB |
-| Script tags | the nine classic-script files | 451.66 kB | 451.66 kB |
-| Base classic script | `openalgo-charts.standalone.js` | 140.28 kB | 140.11 kB |
-| Widget classic script | `openalgo-charts.widget.standalone.js`, first-use parts inlined | 142.97 kB | 142.97 kB |
+| Widget tier | `widget.mjs` | 131.55 kB | 131.55 kB |
+| Widget first-use parts | `widget.<part>-<hash>.mjs`, eight files | 21.05 kB | 21.04 kB |
+| Widget terminal | base + `draw.mjs` + `indicators.mjs` + `widget.mjs` | 380.40 kB | 380.39 kB |
+| Workspace tier | `workspace.mjs` | 11.89 kB | 11.89 kB |
+| Everything | all nine bundles | 444.08 kB | 444.07 kB |
+| Script tags | the nine classic-script files | 457.62 kB | 457.61 kB |
+| Base classic script | `openalgo-charts.standalone.js` | 141.94 kB | 141.94 kB |
+| Widget classic script | `openalgo-charts.widget.standalone.js`, first-use parts inlined | 144.85 kB | 144.85 kB |
 
 Version 2.1.2 raises the full-package budget from 187 KB to 188 KB for the feed, indicator lifecycle and recovery fixes. Version 2.1.3 raises base, widget and widget-terminal ceilings to 68 KB, 37 KB and 157 KB for navigation controls, and the chart-only tree-shaking ceiling to 45 KiB. Version 2.1.6 raises the base, base-plus-trade, widget-terminal and total ceilings
 to 73 KB, 81 KB, 165 KB and 197 KB for shared loading, resilient caching and
@@ -332,3 +332,5 @@ Version 2.7.0 redraws the drawing tool glyphs around ring anchors and finishes t
 Version 2.7.1 adds three Elliott wave tools, gives the impulse and the correction an origin anchor, and labels every count by degree. The draw tier grows 0.84 kB to 60.44 kB (budget 60.45 kB): the three descriptors and glyphs, the degree notation, the ring painted round a circled label and the origin upgrade in the migration. The widget tier grows 22 bytes to 129.58 kB (budget 129.58 kB) for the rail's Elliott waves heading. The terminal is 374.92 kB (budget 374.93 kB), all tiers 437.73 kB (budget 437.73 kB), the nine classic scripts 451.45 kB (budget 451.46 kB) and the widget classic script 142.97 kB (budget 142.97 kB). The base engine is the 2.7.0 code with a new version string, 44 bytes smaller at 140.06 kB, and the base classic script is 140.19 kB; every other tier keeps its size, and the chart-only import keeps its 89,611 bytes.
 
 Version 2.7.2 numbers Elliott wave counts from the point after their origin, centres their labels on their points, draws a count as it is placed and names each count's first and last wave in its glyph. The draw tier grows 342 bytes to 60.79 kB (budget 60.79 kB): the glyph captions, label placement measured to a label's ink, and the progressive preview. The terminal is 375.27 kB (budget 375.27 kB), all tiers 438.07 kB (budget 438.08 kB) and the nine classic scripts 451.66 kB (budget 451.66 kB). The base engine keeps its 140.06 kB with the new version string, the base classic script is 82 bytes smaller at 140.11 kB, every other tier keeps its size, and the chart-only import keeps its 89,611 bytes.
+
+Version 2.7.3 is a correctness release from an audit of 2.7.2. Every tier but WebGL2 grows, and each budget rises only to the measured build: the base engine 1.82 kB to 141.88 kB (the axis ladder on whole ticks and in log space, primitive isolation, bar-colour restore, comparison fit, the live close and alert judging across refreshes, restore validation and the trade adapter's fail-closed reads), the draw tier 1.07 kB to 61.86 kB (instrument documents that keep their panes, linked members that keep their context, colour validation), the widget tier 1.97 kB to 131.55 kB (saved layouts and other tabs no longer overwrite drawings, the IndexedDB retry and report), indicators 0.25 kB to 45.10 kB, transform 0.17 kB to 6.55 kB, profile 0.13 kB to 20.96 kB and workspace 0.16 kB to 11.89 kB. The terminal is 380.39 kB, all tiers 444.07 kB, the nine classic scripts 457.61 kB, and the chart-only import 90,329 bytes, 718 more than 2.7.2.

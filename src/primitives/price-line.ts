@@ -138,7 +138,8 @@ export class PriceLine implements IPrimitive {
     const xEnd = Math.round(rc.plotWidth * dpr);
     const extent = Math.max(0, Math.min(1, this._opts.extentFromRight ?? 1));
     const xStart = Math.round(rc.plotWidth * (1 - extent) * dpr);
-    const color = this._opts.color;
+    // A line added from plain JavaScript without a colour still draws, in the axis text's.
+    const color = typeof this._opts.color === 'string' ? this._opts.color : rc.theme.axisText;
     // Hover/dragging visual states apply to interactive lines only (draggable
     // or cancellable); plain level lines stay static under the pointer.
     const interactive = this._opts.cursor !== undefined || this._opts.closeButton === true;

@@ -2,7 +2,7 @@
   {
     "name": "Base engine (chart types + indicator registry + watermark + shortcuts + trading API + alerts)",
     "path": "dist/openalgo-charts.mjs",
-    "limit": "140.14 kB",
+    "limit": "141.89 kB",
     "brotli": true
   },
   {
@@ -11,31 +11,31 @@
       "dist/openalgo-charts.mjs",
       "dist/openalgo-charts.trade.mjs"
     ],
-    "limit": "157.02 kB",
+    "limit": "159.18 kB",
     "brotli": true
   },
   {
     "name": "Indicator tier (112 built-ins + Tier-2 contract)",
     "path": "dist/openalgo-charts.indicators.mjs",
-    "limit": "44.86 kB",
+    "limit": "45.10 kB",
     "brotli": true
   },
   {
     "name": "Draw tier (90 drawing tools + controller)",
     "path": "dist/openalgo-charts.draw.mjs",
-    "limit": "60.79 kB",
+    "limit": "61.86 kB",
     "brotli": true
   },
   {
     "name": "Transform tier (Renko/Range/P&F/Kagi/Line-break/HA + symbol arithmetic)",
     "path": "dist/openalgo-charts.transform.mjs",
-    "limit": "6.39 kB",
+    "limit": "6.56 kB",
     "brotli": true
   },
   {
     "name": "Profile tier (Volume Profile/TPO/Market Profile/Footprint/Orderflow)",
     "path": "dist/openalgo-charts.profile.mjs",
-    "limit": "20.83 kB",
+    "limit": "20.97 kB",
     "brotli": true
   },
   {
@@ -47,13 +47,13 @@
   {
     "name": "Widget tier (shell, top bar, drawing rail, status line, dialogs, keymap, styles)",
     "path": "dist/openalgo-charts.widget.mjs",
-    "limit": "129577 B",
+    "limit": "131554 B",
     "brotli": true
   },
   {
     "name": "Widget first-use parts (shortcuts panel, Layouts menu, templates list, chart data dialog, chart type settings dialog, grid bar and menus, IndexedDB store)",
     "path": "dist/openalgo-charts.widget.*.mjs",
-    "limit": "21.00 kB",
+    "limit": "21.05 kB",
     "brotli": true
   },
   {
@@ -64,13 +64,13 @@
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "375.27 kB",
+    "limit": "380.40 kB",
     "brotli": true
   },
   {
     "name": "Workspace tier (validated documents and asynchronous catalog storage)",
     "path": "dist/openalgo-charts.workspace.mjs",
-    "limit": "11.73 kB",
+    "limit": "11.89 kB",
     "brotli": true
   },
   {
@@ -86,7 +86,7 @@
       "dist/openalgo-charts.widget.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "438.08 kB",
+    "limit": "444.08 kB",
     "brotli": true
   },
   {
@@ -102,19 +102,19 @@
       "dist/openalgo-charts.widget.standalone.js",
       "dist/openalgo-charts.workspace.standalone.js"
     ],
-    "limit": "451.66 kB",
+    "limit": "457.62 kB",
     "brotli": true
   },
   {
     "name": "Base classic script (openalgo-charts.standalone.js)",
     "path": "dist/openalgo-charts.standalone.js",
-    "limit": "140.28 kB",
+    "limit": "141.94 kB",
     "brotli": true
   },
   {
     "name": "Widget classic script (widget first-use parts inlined)",
     "path": "dist/openalgo-charts.widget.standalone.js",
-    "limit": "142.97 kB",
+    "limit": "144.85 kB",
     "brotli": true
   }
 ]

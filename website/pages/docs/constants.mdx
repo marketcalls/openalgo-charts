@@ -359,10 +359,12 @@ on the series' price scale.
 `src/scale/ticks.ts`
 
 ```ts
-function niceTicks(min: number, max: number, maxTicks?: number): number[]
+function niceTicks(min: number, max: number, maxTicks?: number, tick?: number): number[]
 ```
 
 Generates up to `maxTicks` (default `6`) nicely-rounded price axis labels spanning `[min, max]`.
+Given an instrument `tick` (since 2.7.3), the step is the tick or a whole number of ticks, never finer,
+so every label is a tradable price.
 Steps follow the "nice number" sequence: 1, 2, 2.5, 5, 10 x 10^n. Returns a single midpoint
 for a degenerate (flat) range.
 

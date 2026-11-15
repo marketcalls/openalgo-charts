@@ -4,7 +4,7 @@
  * tick-size-aware formatting and support for hidden overlay scales.
  */
 import { clamp } from '../helpers/math';
-import { niceTicks, precisionForStep } from './ticks';
+import { logTicks, niceTicks, precisionForStep, tickPrecision } from './ticks';
 
 export interface PriceRange {
   min: number;
@@ -345,13 +345,19 @@ export class PriceScale {
    * Manually scale the visible range around its centre. `factor` > 1 widens the
    * range (compress / zoom out), < 1 narrows it (expand / zoom in). Switches the
    * scale to manual mode so autoscale stops overriding it.
+   *
+   * Scaled in the space the axis draws in, as `scaleAtY` is. In price units,
+   * widening a log axis over 100 to 1000 by a fifth dropped its floor under 1,
+   * two empty decades beneath the data, and a little more took it past zero.
    */
   public scaleAroundCenter(factor: number): void {
     this._manualRangeOverride = true;
-    const centre = (this._min + this._max) / 2;
-    const half = ((this._max - this._min) / 2) * factor;
-    this._min = centre - half;
-    this._max = centre + half;
+    const lo = this._t(this._min);
+    const hi = this._t(this._max);
+    const centre = (lo + hi) / 2;
+    const half = ((hi - lo) / 2) * factor;
+    this._min = this._tInv(centre - half);
+    this._max = this._tInv(centre + half);
     this._autoScale = false;
   }
 
@@ -495,13 +501,20 @@ export class PriceScale {
    * they care about. `minPrecision` is the floor for that case, and it is the
    * same two decimals the percent branch above already settles on for the same
    * reason.
+   *
+   * A log axis gives the bottom of the pane the most pixels per price, so the
+   * span is read there: a hundredth of the pane at its foot. Read off the
+   * linear span, a log chart from 2 to 3000 printed a crosshair at 2.35 as "2".
    */
   public precision(): number {
     if (this._rebase() !== null) {
       return Math.max(2, precisionForStep((this._t(this._max) - this._t(this._min)) / 100));
     }
-    if (this._options.minMove > 0) return precisionForStep(this._options.minMove);
-    const inferred = precisionForStep((this._max - this._min) / 100);
+    if (this._options.minMove > 0) return tickPrecision(this._options.minMove);
+    const lo = this._min, hi = this._max;
+    const inferred = precisionForStep(this._options.mode === 'logarithmic' && lo > 0
+      ? lo * (Math.pow(hi / lo, 0.01) - 1)
+      : (hi - lo) / 100);
     // Only where decimals are still information. Past five integer digits they
     // are not: an on-balance-volume of 1,234,567.00 says nothing the integer
     // did not, and the two zeroes cost the axis width that the digits need.
@@ -511,9 +524,11 @@ export class PriceScale {
   }
 
   /**
-   * Tick prices for the axis ladder, at most `maxTicks` of them. Linear and log
-   * get the nice ladder over the price range, exactly what the axis renderer
-   * used to build for itself.
+   * Tick prices for the axis ladder, at most `maxTicks` of them. Linear gets
+   * the nice ladder over the price range, exactly what the axis renderer used
+   * to build for itself, and log a ladder whose rungs keep their spacing down
+   * every decade (`logTicks`). Both keep to `minMove` when one is declared, so
+   * no rung falls between two prices the instrument trades at.
    *
    * The rebasing modes need it built in *label* space: a nice price is an ugly
    * percentage, and a ladder of "+3.47%, +6.94%" is not a ladder. So the nice
@@ -521,8 +536,8 @@ export class PriceScale {
    * the axis positions with.
    */
   public ticks(maxTicks = 6): number[] {
-    if (this._rebase() === null) return niceTicks(this._min, this._max, maxTicks);
-    return niceTicks(this._t(this._min), this._t(this._max), maxTicks).map((v) => this._tInv(v));
+    if (this._rebase() !== null) return niceTicks(this._t(this._min), this._t(this._max), maxTicks).map((v) => this._tInv(v));
+    return (this._options.mode === 'logarithmic' ? logTicks : niceTicks)(this._min, this._max, maxTicks, this._options.minMove);
   }
 
   /** Snap a price to the instrument tick size (no-op if minMove is 0). */

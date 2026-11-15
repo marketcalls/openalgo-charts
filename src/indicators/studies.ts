@@ -152,7 +152,13 @@ interface PivotVisibility {
  * timeframe request. There is no such request here, so the previous period is
  * derived from the bars themselves: extremes accumulate inside a period and are
  * handed over whole at the boundary. Every bar of a period therefore carries
- * one frozen frame, and the first period has nothing behind it and stays null.
+ * one frozen frame.
+ *
+ * Only a period whose start the loaded bars show is handed over. The first one
+ * may be any slice of the real period (a history cut at 12:35, on a Thursday, on
+ * the 20th), and nothing before its first bar says which, so its levels would be
+ * a plausible frame that loading older history later moves. The first two
+ * periods therefore stay null, the rule 52 Week High/Low keeps for its window.
  */
 function pivotColumns(
   bars: readonly Bar[],
@@ -180,12 +186,17 @@ function pivotColumns(
     let curHigh = NaN;
     let curLow = NaN;
     let curClose = NaN;
+    // Bar 0 never opens a frame, so the first boundary closes the partial period.
+    let covered = false;
 
     for (let i = 0; i < n; i++) {
       if (opensFrame[i]) {
-        prevHigh = curHigh;
-        prevLow = curLow;
-        prevClose = curClose;
+        if (covered) {
+          prevHigh = curHigh;
+          prevLow = curLow;
+          prevClose = curClose;
+        }
+        covered = true;
       }
       const bar = bars[i]!;
       const high = Number.isFinite(bar.high) ? bar.high : NaN;

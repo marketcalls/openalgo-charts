@@ -54,6 +54,16 @@ const KINETIC_VELOCITY_HALFLIFE_MS = 50;
 const CLICK_SLOP_PX = 3;
 
 /**
+ * Longest a native menu's snapshot holds the overlay, in ms. A menu closed by
+ * Escape with the pointer still, or from another window, sends the page
+ * nothing, and the clicked pane went on showing the right click's frame while
+ * ticks repainted the base unseen beneath it. Long enough to pick "Save image";
+ * a slower pick saves the overlay alone, the lesser failure on a chart that
+ * quotes prices. See `_holdSnapshot` for what ends it sooner.
+ */
+const MENU_SNAPSHOT_MS = 3000;
+
+/**
  * The slice of a pointer event the payload builders read. Structural so the
  * same builders serve a coalesced sample, and so a field a browser omits
  * degrades to the spec fallback instead of an `undefined` in a host's hands.
@@ -219,6 +229,8 @@ export class ChartInput {
   /** Whether that primitive draws below the overlay, so leaving it must repaint the base. */
   private _hoverOnBase = false;
   public _overlayFrozen = false; // native context menu open: keep the save-image snapshot
+  /** Takes down the timer and page listeners that end the snapshot (`_holdSnapshot`). */
+  private _snapshotRelease: (() => void) | null = null;
   /** The navigator's buttons as configured, before the navigation policy withholds any. */
   public _timeNavButtons: TimeNavigatorOptions['buttons'] = [];
   /** `subscribeDrag` subscribers. While there is one, an `ns-resize` price line drags. */
@@ -270,6 +282,7 @@ export class ChartInput {
 
   /** Take off what `_attachInput` put on, by the same function identities. */
   public _detachInput(): void {
+    this._snapshotRelease?.();
     if (typeof window === 'undefined') return;
     const el = this._host._container;
     el.removeEventListener('pointerdown', this._host._onPointerDown);
@@ -286,7 +299,10 @@ export class ChartInput {
     this._keyTarget = null;
   }
 
-  public _onPointerEnter(): void { this._pointerInside = true; }
+  public _onPointerEnter(): void {
+    this._unfreezeOverlay(); // back from the native menu, which took the pointer
+    this._pointerInside = true;
+  }
 
   /**
    * The chart renders as stacked canvases, so the browser's right-click
@@ -295,7 +311,8 @@ export class ChartInput {
    * clicked pane's base layer *beneath* its overlay bitmap so the saved image
    * is the visible chart, and freeze overlay repaints (live ticks repaint every
    * few hundred ms and would wipe the snapshot while the menu is open). The
-   * freeze lifts on the next pointer/wheel/key input after the menu closes.
+   * freeze lifts on the first input after the menu closes, on the chart or
+   * anywhere on the page, when the page is hidden, or at `MENU_SNAPSHOT_MS`.
    * Apps that present their own menu (preventDefault on contextmenu) are
    * unaffected. Multi-pane note: the native save captures the clicked pane
    * only. Use `downloadScreenshot()` for the full multi-pane composite.
@@ -327,7 +344,26 @@ export class ChartInput {
       g.drawImage(pane.base.element, 0, 0);
       g.restore();
       this._overlayFrozen = true;
+      this._holdSnapshot();
     } catch { /* zero-sized or detached canvas: nothing to snapshot */ }
+  }
+
+  /**
+   * Arm what ends the snapshot: the time bound, and the page-wide signs that
+   * the menu has closed, since an open menu holds the pointer and a hidden page
+   * has none. Not `pointerleave` or `blur`, which an engine may send as it opens.
+   */
+  private _holdSnapshot(): void {
+    this._snapshotRelease?.();
+    const doc = this._host._doc, end = (): void => this._unfreezeOverlay();
+    const types = typeof doc.addEventListener === 'function' ? ['pointermove', 'pointerdown', 'visibilitychange'] : [];
+    const timer = setTimeout(end, MENU_SNAPSHOT_MS);
+    for (const type of types) doc.addEventListener(type, end, true);
+    this._snapshotRelease = (): void => {
+      this._snapshotRelease = null;
+      clearTimeout(timer);
+      for (const type of types) doc.removeEventListener(type, end, true);
+    };
   }
 
   /** Build the `contextmenu` payload: where the pointer is, and what it is over. */
@@ -449,6 +485,7 @@ export class ChartInput {
   private _unfreezeOverlay(): void {
     if (!this._overlayFrozen) return;
     this._overlayFrozen = false;
+    this._snapshotRelease?.();
     this._host.invalidate((m) => m.invalidateGlobal(InvalidationLevel.Cursor));
   }
 
@@ -639,14 +676,12 @@ export class ChartInput {
       return;
     }
     if (this._axisDrag === 'price') {
-      // drag up (dy<0) expands (zoom in); drag down compresses (zoom out)
-      const dy = p.localY - this._axisStartCoord;
-      const factor = Math.exp(dy * 0.005);
-      const centre = (this._axisStartMin + this._axisStartMax) / 2;
-      const half = ((this._axisStartMax - this._axisStartMin) / 2) * factor;
+      // drag up (dy<0) expands (zoom in); drag down compresses (zoom out). From
+      // the press's range, scaled in the axis' own space: in price units a log
+      // axis over 100 to 1000 crossed zero after 40 px and collapsed the plot.
       const ps = this._axisDragScale ?? this._host._panes[this._downPane]!.priceScale; // the pane the press landed on
-      ps.setPriceRange({ min: centre - half, max: centre + half });
-      ps.setAutoScale(false);
+      ps.setPriceRange({ min: this._axisStartMin, max: this._axisStartMax });
+      ps.scaleAroundCenter(Math.exp((p.localY - this._axisStartCoord) * 0.005));
       this._host.invalidate((m) => m.invalidatePane(this._downPane, { level: InvalidationLevel.Light, autoScale: false }));
       return;
     }

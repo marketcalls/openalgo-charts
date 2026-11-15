@@ -25,6 +25,8 @@ const facts = (page: Page) => page.evaluate(() => {
 const requests = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).fixture.requests.slice());
 const records = (page: Page): Promise<Record<string, string>> => page.evaluate(() => (window as any).fixture.records());
 const localKeys = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).fixture.localKeys());
+/** The key the default store sets once this origin's IndexedDB has answered (storage-idb.ts). */
+const INDEXEDDB_ANSWERED = 'oac-widget-store:indexeddb';
 const drawings = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).fixture.drawings());
 const stored = async (page: Page, key: string): Promise<any> => {
   const text = (await records(page))[key];
@@ -56,8 +58,9 @@ test('a layout survives a reload on IndexedDB, and the reload asks the feed for 
   await expect.poll(async () => (await stored(page, 'oac-widget:desk:state'))?.theme).toBe('light');
   expect((await stored(page, 'oac-widget:desk:state')).interval).toBe('15m');
   await expect.poll(async () => (await stored(page, 'oac-widget:desk:drawings:NSE:INFY'))?.drawings?.length).toBe(1);
-  // Nothing of the layout in the page's localStorage.
-  expect(await localKeys(page)).toEqual([]);
+  // Nothing of the layout in the page's localStorage: only the mark (2.7.3) that this
+  // origin's IndexedDB has answered, so a later failed open is reported, not split off.
+  expect(await localKeys(page)).toEqual([INDEXEDDB_ANSWERED]);
 
   // The next visit names no symbol: it opens on the saved one.
   await mount(page, 'ns=desk');
@@ -92,7 +95,7 @@ test('a layout an earlier release left in localStorage opens from IndexedDB, cop
   const copied = await records(page);
   for (const [key, value] of Object.entries(legacy)) expect(copied[key]).toBe(value);
   // Left in place for an earlier release, and not copied over newer work again.
-  expect(await localKeys(page)).toEqual(Object.keys(legacy).sort());
+  expect(await localKeys(page)).toEqual([INDEXEDDB_ANSWERED, ...Object.keys(legacy)].sort());
   await page.locator('.oac-topbar [data-interval="5m"]').click();
   await expect.poll(async () => (await stored(page, 'oac-widget:legacy:state'))?.interval).toBe('5m');
   await mount(page, 'ns=legacy');

@@ -29,8 +29,10 @@ chart.addPrimitive(new VolumeProfile(result));
   calendar of the `timezone` option, which defaults to `Asia/Kolkata`; pass
   `chart.timezone()` so the buckets match the axis. See [Timezones](/docs/timezones).
 
-Every session reports a **POC** (highest-volume price), a **Value Area** (the band holding
-`valueAreaPercent` of volume), and - optionally - a **buy/sell split**.
+Every session reports a **POC** (highest-volume price, the higher one on a tie), a **Value
+Area** (the band holding `valueAreaPercent` of volume), and - optionally - a **buy/sell
+split**. A bar whose volume is missing, or is not a finite number of at least zero, adds no
+volume.
 
 ## Total volume
 
@@ -99,7 +101,7 @@ computeVolumeProfileSessions(bars, options): VolumeProfileFamilyResult
 
 | Option | Default | Description |
 |---|---|---|
-| `tickSize` | `0.05` | price bucket size |
+| `tickSize` | `0.05` | price bucket size: rows are centred on its multiples, and a price exactly between two belongs to the upper row |
 | `session` | `'composite'` | `'composite'` / `'day'` / `'week'` / `'month'` |
 | `valueAreaPercent` | `0.7` | fraction of volume in the value area (0..1) |
 | `deltaFromBarDirection` | `true` | split volume into buy/sell by bar direction |

@@ -744,14 +744,17 @@ Responses and live callbacks from a superseded symbol or interval are ignored.
 
 At matching timestamps, the merge keeps the history open, combines high/low extremes,
 uses the latest buffered close, and takes the maximum volume instead of adding two
-snapshots. This repairs the available bars; it does not replay unseen trades.
+snapshots. For the forming bar, the controller's own poll and bar-close repair keep the
+close the stream delivered (2.7.3); a reconnect, a tab return or `widget.reload()` takes
+history's close, unless the previous refresh failed. This repairs the available bars; it does not replay unseen trades.
 Bars without buffered updates retain the authoritative history values. The overlap
 merge is conservative: a buffered candle can retain a seed extreme that history has
 corrected. Exact snapshot/tick reconciliation requires a host-specific protocol.
 
 If this automatic refresh fails or returns no bars, the previous chart remains visible,
 the status line reports stale history, and a `data` event carries the error. Display
-updates stay paused while live buffering and reconnect monitoring continue. Call
+updates pause while the request is out; after a failure the bars delivered meanwhile are
+shown and the display follows the stream, marked stale, while reconnect monitoring continues. Call
 `widget.reload()` to retry; the cache bypass remains active until a load succeeds.
 Manual reload keeps its usual fit-to-data behavior, subject to restoring a saved view;
 viewport preservation is specific to automatic reconnect recovery.
@@ -947,14 +950,14 @@ exact version, never a range or no version at all (see
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.7.2 build, decimal
+Budgets from `.size-limit.json` and measurements from the 2.7.3 build, decimal
 Brotli kB, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 129.58 kB | 129.58 kB |
-| Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.00 kB | 21.00 kB |
-| Widget terminal | base + draw + indicators + widget | 375.27 kB | 375.27 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 131.55 kB | 131.55 kB |
+| Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.05 kB | 21.04 kB |
+| Widget terminal | base + draw + indicators + widget | 380.40 kB | 380.39 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.

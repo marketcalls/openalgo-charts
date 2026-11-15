@@ -138,6 +138,14 @@ export class DataLoadingController {
   private _seconds: number | null = null;
   /** Bucket whose open is only the first tick a builder saw, until history covers it. */
   private _provisionalTime: number | null = null;
+  /** Bucket the stream last delivered, whose close is newer than a history snapshot of it. */
+  private _liveTime: number | null = null;
+  /**
+   * The last refresh failed, so what the stream delivered since is newer than
+   * any history this controller holds. Through 2.7.2 those ticks waited in the
+   * buffer and a retry kept them; the buffer is shown now, and this keeps the retry's answer.
+   */
+  private _ahead = false;
   private _repairTimer: ReturnType<typeof setTimeout> | null = null;
   private _repairRetries = 0;
   private _pendingRepair: Repair | null = null;
@@ -185,6 +193,8 @@ export class DataLoadingController {
     this._bars = [];
     this._before = undefined;
     this._provisionalTime = null;
+    this._liveTime = null;
+    this._ahead = false;
     const found = tryResolveInterval(req.interval);
     this._seconds = found?.bucketing.mode === 'interval' ? found.bucketing.seconds : null;
     const request = { ...req, signal: undefined, timeoutMs: req.timeoutMs ?? this._options.timeoutMs } satisfies LooseOptional<BarsRequest> as BarsRequest;
@@ -248,6 +258,9 @@ export class DataLoadingController {
         ? Math.max(req.from, cached[Math.max(0, cached.length - 2)]!.time) : req.from;
       const fresh = await this._pool.getBars({ ...req, from, signal: scope.signal, noCache: req.noCache || !!this._feed.getCachedBars } satisfies LooseOptional<BarsRequest> as BarsRequest, 10);
       if (!this._current(generation)) return this._bars;
+      // Nothing back for a window the cache holds bars in, as in a refresh, is
+      // a failure: replacing the window with it deleted closed bars and said ready.
+      if (fresh.length === 0 && this._bars.length) throw new Error('History returned no bars');
       this._bars = this._replaceWindow(normalize(fresh), from, req.to);
       this._limit();
       this._before = this._bars[0]?.time ?? req.from;
@@ -263,7 +276,16 @@ export class DataLoadingController {
     return this._bars;
   }
 
+  /**
+   * Refresh the window from history. A refresh asked for here is
+   * authoritative for the forming bar's close too: a host asks after its
+   * stream reconnected or its page came back, when the stream's last close is
+   * the stale one. The controller's own poll and bar-close repair run while
+   * the stream is live, so they keep the close the stream delivered, and so
+   * does a retry after a failed refresh.
+   */
   public refresh(): Promise<readonly Bar[]> {
+    if (!this._ahead) this._liveTime = null;
     return this._refresh();
   }
 
@@ -286,14 +308,17 @@ export class DataLoadingController {
     this._buffer ??= new Map();
     const original = this._state.request;
     const held = this._bars[this._bars.length - 1];
+    const ticked = held !== undefined && held.time === this._liveTime;
     const { from, to } = this._refreshWindow(original, held, repair);
     this._publish('state', { status: 'refreshing', error: undefined });
     try {
       const fresh = await this._pool.getBars({ ...original, from, to, noCache: true, signal: abort.signal } satisfies LooseOptional<BarsRequest> as BarsRequest, 5);
       if (!this._current(generation) || id !== this._refreshId) return this._bars;
       if (fresh.length === 0 && this._bars.length) throw new Error('History refresh returned no bars');
-      const newest = this._mergeRefresh(fresh, from, to, held);
+      if (!this._showBuffered(generation, id)) return this._bars;
+      const newest = this._mergeRefresh(fresh, from, to, held, ticked);
       this._buffer = null;
+      this._ahead = false;
       this._limit();
       this._publish('refresh', { status: this._bars.length ? 'ready' : 'empty', error: undefined });
       this._startStream(generation);
@@ -305,8 +330,12 @@ export class DataLoadingController {
       }
     } catch (error) {
       if (!this._current(generation) || id !== this._refreshId || abort.signal.aborted) return this._bars;
-      // Retain buffered observations through failed repair and retry. The last
-      // authoritative display stays visible and explicitly stale in the meantime.
+      // What the stream delivered while the request was out is shown now, and
+      // the stream is followed from here, explicitly stale. Holding it all for
+      // a retry that nothing schedules froze the chart and blinded alerts.
+      if (!this._showBuffered(generation, id)) return this._bars;
+      this._buffer = null;
+      this._ahead = true;
       this._limit();
       this._publish('refresh', { status: this._bars.length ? 'stale' : 'error', error: asError(error) });
     } finally {
@@ -319,6 +348,30 @@ export class DataLoadingController {
       }
     }
     return this._bars;
+  }
+
+  /**
+   * Show what the stream delivered while a refresh held the display, one bar
+   * at a time and in order, before the refresh's answer replaces it. A reader
+   * of the display (an alert, a study) then meets each as the live update it
+   * was. Folded into the replacement it reads as history: an alert armed
+   * since the last update seeds on it, and a touch that came back inside the
+   * bar is gone. Returns false when a listener moved the controller on.
+   */
+  private _showBuffered(generation: number, id: number): boolean {
+    let shown = this._state.bars;
+    for (const bar of this._state.paused ? [] : [...this._buffer?.values() ?? []]) {
+      const tail = shown[shown.length - 1];
+      if (tail && bar.time < tail.time) continue;
+      const next = shown.slice();
+      // As `pushBar` stores it: a bar without a volume keeps the one shown.
+      if (tail?.time === bar.time) next[next.length - 1] = { ...bar, volume: bar.volume ?? tail.volume } satisfies LooseOptional<Bar> as Bar;
+      else next.push(bar);
+      shown = next.slice(-this._options.maxBars!);
+      this._publish('live', { bars: shown });
+      if (!this._current(generation) || id !== this._refreshId) return false;
+    }
+    return true;
   }
 
   /** The span a refresh asks history for: the request's own width ending now, or a tail window. */
@@ -340,7 +393,7 @@ export class DataLoadingController {
    * stream built past it, and fold in what arrived meanwhile. Returns the
    * newest bar time the answer held.
    */
-  private _mergeRefresh(fresh: Bar[], from: number | undefined, to: number, held: Bar | undefined): number {
+  private _mergeRefresh(fresh: Bar[], from: number | undefined, to: number, held: Bar | undefined, ticked: boolean): number {
     const arrived = normalize(fresh);
     // REST is authoritative for the bars it returned and for nothing past
     // them. The bar the stream just completed is routinely a few seconds
@@ -358,11 +411,16 @@ export class DataLoadingController {
     // The bar that was forming when the request went out is the one bar both
     // sides observed at once. Its extremes are the union, since each side saw
     // real prices, and its volume the larger, since volume only grows. Its
-    // open and close are REST's: the open because a builder that opened the
-    // bucket mid-way only saw its first tick, the close because a live push
-    // during the request (below) is the only proof the stream is fresher.
+    // open is REST's, because a builder that opened the bucket mid-way only
+    // saw its first tick. Its close stays with the ticks once the stream has
+    // delivered that bar, as `CandleBuilder.reconcile` keeps it: a snapshot
+    // lags the stream, and a last price that steps back on a repair is wrong.
     const forming = held && held.time === newest ? byTime.get(held.time) : undefined;
-    if (held && forming) byTime.set(held.time, widenBar(forming, held));
+    if (held && forming) {
+      const merged = widenBar(forming, held);
+      if (ticked) merged.close = held.close;
+      byTime.set(held.time, merged);
+    }
     if (this._provisionalTime !== null && byTime.has(this._provisionalTime) && this._provisionalTime <= authoritativeTo) {
       this._provisionalTime = null;
     }
@@ -395,6 +453,7 @@ export class DataLoadingController {
     }
     const tail = this._bars[this._bars.length - 1];
     if (tail && bar.time < tail.time) return;
+    this._liveTime = bar.time;
     const provisional = meta?.provisional === true;
     const rollover = !tail || bar.time > tail.time;
     if (rollover) {
@@ -549,7 +608,7 @@ export class DataLoadingController {
   }
   private _publish(reason: DataUpdateReason, patch: SnapshotPatch = {}): void {
     if (this._destroyed) return;
-    this._state = { ...this._state, ...patch, reason, bars: this._state.paused || this._buffer ? this._state.bars : this._bars } satisfies LooseOptional<DataLoadingSnapshot> as DataLoadingSnapshot;
+    this._state = { ...this._state, ...patch, reason, bars: this._state.paused ? this._state.bars : patch.bars ?? (this._buffer ? this._state.bars : this._bars) } satisfies LooseOptional<DataLoadingSnapshot> as DataLoadingSnapshot;
     const snapshot = this._state;
     for (const listener of [...this._listeners]) {
       if (this._destroyed || this._state !== snapshot) break;
@@ -567,7 +626,10 @@ export class DataLoadingController {
       const unsubscribe = this._feed.subscribeBars(this._state.request!, (bar, meta) => {
         if (this._current(generation) && stream === this._stream) this.pushBar(bar, meta);
       }, { seedFrom: this._bars[this._bars.length - 1], onResync: () => {
-        if (this._current(generation) && stream === this._stream) void this.refresh();
+        if (!this._current(generation) || stream !== this._stream) return;
+        // The stream missed something, so its last close is no longer newer than history's.
+        this._ahead = false;
+        void this.refresh();
       } } satisfies LooseOptional<BarSubscriptionOptions> as BarSubscriptionOptions);
       if (this._current(generation) && stream === this._stream) this._unsubscribe = unsubscribe;
       else this._release(unsubscribe);
@@ -589,7 +651,7 @@ export class DataLoadingController {
   private _schedulePoll(): void {
     this._clearPoll();
     if (!this._destroyed && this._visible && this._options.pollIntervalMs! > 0) {
-      this._poll = setTimeout(() => { this._poll = null; void this.refresh(); }, this._options.pollIntervalMs);
+      this._poll = setTimeout(() => { this._poll = null; void this._refresh(); }, this._options.pollIntervalMs);
     }
   }
   private _cancel(): void {

@@ -109,7 +109,7 @@ describe('widget with the OpenAlgo live feed', () => {
     expect(widget.series.getData()[2].close).toBe(14);
   });
 
-  it('keeps display paused after failed repair and reconciles buffered ticks on retry', async () => {
+  it('shows buffered and later ticks after a failed repair and reconciles them on retry', async () => {
     vi.useFakeTimers();
     const pending = pendingHistory();
     let calls = 0;
@@ -123,10 +123,15 @@ describe('widget with the OpenAlgo live feed', () => {
     sockets[1].onmessage?.({ data: JSON.stringify({ type: 'auth', status: 'success' }) });
     await flush();
     tick(sockets[1], T + 35, 40);
+    expect(widget.series.getData()).toEqual([initial]);
     pending.reject(new Error('history unavailable'));
     await flush();
+    // The failure releases what the stream delivered meanwhile, and the
+    // display follows the stream from there, still marked stale.
+    expect(widget.series.getData()).toEqual([{ ...initial, high: 40, close: 40, volume: 102 }]);
     tick(sockets[1], T + 40, 15);
-    expect(widget.series.getData()).toEqual([initial]);
+    expect(widget.series.getData()).toEqual([{ ...initial, high: 40, close: 15, volume: 104 }]);
+    expect(widget.dataController!.getState().status).toBe('stale');
     await widget.reload();
     expect(widget.series.getData()).toEqual([{ ...initial, high: 40, close: 15, volume: 140 }]);
   });

@@ -90,8 +90,18 @@ the update closes is confirmed, and each match reports its own bar in `time` and
 newer bar follows it; a forming Kagi vertex or range bar that moves to a newer time
 is still that bar. Repeats, cooldowns and expiry work as they would for separate
 appends at the same moment: a `once` alert fires at the first matching bar and stops.
-A reload, a page of older history, a late correction of an older bar, or a symbol or
-interval change still seeds silently, and a corrected bar is never judged.
+A page of older history, a late correction of an older bar, or a symbol or interval
+change still seeds silently, and a corrected bar is never judged.
+
+From 2.7.3, a `setData` that extends the bars an alert has already judged is judged
+the same way, from the bar it last saw. That is what a history refresh does when it
+lands after the stream delivered bars, what a failed refresh does when it releases
+them, and how every new bar arrives once the store sits at its `maxBars` cap. A bar
+the replacement revised is judged on its close alone, since a replacement cannot say
+when it saw the extremes it changed. Until an alert has judged an update on the
+series, a replacement that only extends it seeds silently, so a first load, a warm
+load that extends its cached bars and the loads after a symbol or interval change
+never deliver history.
 
 Use `repeat: 'everyTime'` to keep a triggered condition armed. `expiresAt` is an
 absolute UTC timestamp in seconds; expiration takes priority over a new trigger.

@@ -75,7 +75,7 @@ Every transform is incremental: `push` takes each source bar once, in time order
 |---|---|---|---|
 | `HeikinAshiTransform` | none (no constructor arg) | 1 bar per input bar, real times, `volume` carried through | `'candlestick'` |
 | `RenkoTransform` | `{ boxSize }` for the default `mode: 'fixed'`, must be `> 0`; or `mode` `'percent'` / `'atrPercent'` with `percent > 0`, or `'atr'`; `method` `'close'` (default) or `'hl'` | one brick per full box move (of the close, or of the low and high in bar order with `'hl'`); percent and ATR sizes re-resolve per brick; up brick `close > open`, down brick `close < open`; `volume` is what traded while the brick formed, all of it on the first brick a bar completes and `0` on the rest (since 2.6.8; before, no `volume`) | `'candlestick'` |
-| `RangeBarsTransform` | `{ range: number }` required, must be `> 0` | a bar per `high - low >= range`, built from the close sequence; the partial bar comes out of `flush()`; `volume` summed over its bars (since 2.6.8) | `'candlestick'` |
+| `RangeBarsTransform` | `{ range: number }` required, must be `> 0` | a bar per `high - low >= range`, built from the close sequence; the range is a threshold, not a fixed span, so a close that jumps past it completes one bar spanning the whole jump; the partial bar comes out of `flush()`; `volume` summed over its bars (since 2.6.8) | `'candlestick'` |
 | `LineBreakTransform` | `{ lines: number }`, constructor defaults to `{ lines: 3 }`, clamped to `>= 1` | a line only when the close breaks the extreme of the prior N lines; no `flush`; `volume` summed since the previous line (since 2.6.8) | `'candlestick'` |
 | `PointFigureTransform` | see below | `PointFigureColumn` (a `Bar` plus `boxSize` and `boxes`); `volume` summed over the column's bars, the reversal bar counting toward the column it opens (since 2.6.8) | `'point-figure'` |
 | `KagiTransform` | `{ reversal: number }` required, must be `> 0` | one vertex `Bar` per turning point; `volume` encodes thickness (`1` thick/yang, `0` thin/yin); `flush()` emits the live vertex dated at the newest bar (since 2.6.0; before, `time: 0`) | `'kagi'` |
@@ -85,16 +85,20 @@ const bricks = runTransform(new RenkoTransform({ boxSize: 5 }), bars);
 chart.addSeries('candlestick').setData(bricks);
 ```
 
-`RenkoTransform`, `RangeBarsTransform`, `KagiTransform`, and `PointFigureTransform` in `fixed`/`percent` mode **throw** on an unusable option, so validate user input before constructing. Renko is a simplified single-box step (no 2x reversal rule) so it stays deterministic and incremental.
+`RenkoTransform`, `RangeBarsTransform`, `KagiTransform`, and `PointFigureTransform` in `fixed`/`percent` mode **throw** on an unusable option, so validate user input before constructing. Renko reverses after a **single box** like any other step, so it stays deterministic and incremental: the first brick against the trend is drawn back over the last brick, not after a two-box move from its far side (closes 100, 121, 110, 100 at box 10 give 100-110, 110-120, 120-110, 110-100).
+
+**A bar without four finite prices is a gap** (a whitespace point reaches a transform as a `NaN` bar). Since 2.7.3 Renko, range bars, Line Break, P&F and Kagi skip it as if it were not there, and Heikin Ashi keeps its slot as an empty candle and carries on from the candle before. Before, one gap held an ATR box size at its last value for good, stopped range bars completing, left a P&F or Line Break run that opened on it empty, and emptied the Heikin Ashi candle after it.
 
 ### Construction details worth knowing
 
 - Heikin Ashi: `haClose = (o+h+l+c)/4`; `haOpen` is `(o+c)/2` on the first bar and `(prevHaOpen + prevHaClose)/2` after; `haHigh`/`haLow` are the max/min of the real extreme and the two HA prices. It is the only transform that is 1:1 with the input and keeps real times.
 - **The first source bar of Renko, Line Break, Kagi, and P&F produces nothing**: it only anchors state (Renko snaps to `floor(close / boxSize) * boxSize`). Expect a shorter output array than a naive box-count estimate, and expect an empty array from a one-bar input.
+- Renko counts moves on the box grid and computes each edge from it rather than adding box to box, so a decimal box forms a brick on every exact one-box move and every edge is a clean price (since 2.7.3; before, 200 one-box moves of 0.05 formed 199 bricks and 100 bricks of 0.1 from 100 closed at 109.99999999999943).
 - Range bars carry the *latest* contributing bar's time, not the opening bar's.
 - Line Break opens each new box at the previous line's `close`, so the boxes chain without gaps.
 - P&F establishes direction on the first real move, with an outside-bar tie resolving up, and re-derives the column boundary under the new box size on every reversal (which is why `percent`/`atr` modes stay aligned).
-- Kagi turns thick when the line exceeds the previous up-turn (shoulder) and thin when it falls below the previous down-turn (waist).
+- A P&F box is a price level, the lower edge of its glyph: an X fills each level the high reaches and an O each level the low reaches, so with box 1 and reversal 3 an X column at 20 needs a low of 17.00 to reverse, not 17.99, and an O column on a low of 10.5 bottoms at 11. A price touching a level exactly reaches it on a decimal box too. Since 2.7.3; before, an O filled any box its low entered, so O columns ran a box deeper than price traded and both reversals fired a box early (more than twice the columns on random walks).
+- Kagi turns thick when the line exceeds the previous up-turn (shoulder) and thin when it falls below the previous down-turn (waist), judged on every bar, the one that turns the line included (since 2.7.3; before, a level broken on the turning bar was missed, so the same path drew different lines depending on whether the break came on that bar or the next).
 
 ## Live updates
 
@@ -120,7 +124,7 @@ feed.onBar((bar) => { // closed bars only; see the pipeline above for the formin
 |---|---|---|---|
 | `boxSize` | `number` | none | Required for `mode: 'fixed'`; throws if not `> 0`. |
 | `reversal` | `number` | `3` | Boxes of counter-move needed to open a new column. Floored, min 1. |
-| `method` | `'hl' \| 'close'` | `'hl'` | `'hl'` extends X columns from each bar's high and O columns from its low, what P&F means on a desk. `'close'` ignores intrabar range entirely. |
+| `method` | `'hl' \| 'close'` | `'hl'` | `'hl'` extends X columns from each bar's high and O columns from its low, what P&F means on a desk. `'close'` ignores intrabar range entirely. Either way a column fills the levels its price reached, never one it only entered. |
 | `mode` | `'fixed' \| 'percent' \| 'atr' \| 'atrPercent'` | `'fixed'` | How the box is resolved, re-evaluated each time a column opens. `'atrPercent'` is `percent` of the ATR. |
 | `percent` | `number` | none | For `mode: 'percent'` (of price) or `'atrPercent'` (of the ATR); `0.5` means 0.5%. Throws if not `> 0`. |
 | `atrPeriod` | `number` | `14` | Wilder ATR lookback for `mode: 'atr'` and `'atrPercent'`. |

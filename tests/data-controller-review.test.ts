@@ -15,6 +15,17 @@ describe('controller independent lifecycle review', () => {
     await controller.load(req);
     controller.pushBar(bar(200, 15));
     await controller.refresh();
+    // A refresh a host asks for is authoritative for the close (OpenAlgo asks
+    // after its stream reconnects); the extremes are still the union.
+    expect(controller.bars()[0]).toMatchObject({ high: 20, close: 20 });
+  });
+
+  it('takes the refresh close for a forming bar the stream has not delivered', async () => {
+    let calls = 0;
+    const controller = new DataLoadingController({ getBars: async () => [bar(200, ++calls === 1 ? 10 : 20)] }, { now: () => 300 });
+    controllers.push(controller);
+    await controller.load(req);
+    await controller.refresh();
     expect(controller.bars()[0].close).toBe(20);
   });
 

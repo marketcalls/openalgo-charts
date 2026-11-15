@@ -13,7 +13,7 @@
  * `session: 'composite'`. Pure and deterministic.
  */
 import type { Bar } from '../model/bar';
-import { priceBuckets, valueArea } from './profile-model';
+import { barVolume, priceBuckets, valueArea } from './profile-model';
 import { sessionKey } from './profile-calendar';
 import { DEFAULT_TIMEZONE } from '../feed/time';
 
@@ -111,7 +111,7 @@ export function computeVolumeProfileSessions(
     let sellVolume = 0;
 
     for (const b of g) {
-      const vol = b.volume ?? 0;
+      const vol = barVolume(b);
       totalVolume += vol;
       const up = b.close >= b.open;
       const barBuy = o.deltaFromBarDirection ? (up ? vol : 0) : 0;

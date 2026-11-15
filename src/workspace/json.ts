@@ -2,7 +2,18 @@
 import { isPriceScaleId } from '../model/price-axis-layout';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+
+/** What one read may hold: UTF-8 bytes, JSON values, and nesting. */
+interface JsonLimits { bytes: number; nodes: number; depth: number }
+/** One document: a workspace, a template, a set of options. */
+const DOCUMENT: JsonLimits = { bytes: 5 * 1024 * 1024, nodes: 100000, depth: 32 };
+/**
+ * A whole catalog. Each document in it is held to `DOCUMENT` again when it is
+ * parsed on its own, so this bounds only the work of reading the catalog at
+ * once: ten documents at their limit, or a full list of ordinary layouts. A
+ * catalog nests its documents two levels down (the list, then the entry).
+ */
+export const CATALOG: JsonLimits = { bytes: 10 * DOCUMENT.bytes, nodes: 10 * DOCUMENT.nodes, depth: DOCUMENT.depth + 2 };
 
 export class WorkspaceDocumentError extends Error {
   constructor(message: string) { super(message); this.name = 'WorkspaceDocumentError'; }
@@ -15,9 +26,9 @@ const privateKeys = new Set([
   'balance', 'accountbalance', 'accountid', 'account',
 ]);
 
-export function readJson(input: unknown): Json {
+export function readJson(input: unknown, limits: JsonLimits = DOCUMENT): Json {
   if (typeof input === 'string') {
-    if (input.length > MAX_DOCUMENT_BYTES || new TextEncoder().encode(input).length > MAX_DOCUMENT_BYTES) {
+    if (input.length > limits.bytes || new TextEncoder().encode(input).length > limits.bytes) {
       throw new WorkspaceDocumentError('Document size limit exceeded');
     }
     try { input = JSON.parse(input); }
@@ -27,12 +38,12 @@ export function readJson(input: unknown): Json {
   let characters = 0;
   const ancestors = new Set<object>();
   const visit = (value: unknown, depth: number, opaque = false, plotScales = false): Json => {
-    if (++nodes > 100000) throw new WorkspaceDocumentError('Document node limit exceeded');
-    if (depth > 32) throw new WorkspaceDocumentError('Document depth limit exceeded');
+    if (++nodes > limits.nodes) throw new WorkspaceDocumentError('Document node limit exceeded');
+    if (depth > limits.depth) throw new WorkspaceDocumentError('Document depth limit exceeded');
     if (value === null || typeof value === 'boolean') return value;
     if (typeof value === 'string') {
       characters += value.length;
-      if (characters > MAX_DOCUMENT_BYTES) throw new WorkspaceDocumentError('Document size limit exceeded');
+      if (characters > limits.bytes) throw new WorkspaceDocumentError('Document size limit exceeded');
       return value;
     }
     if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -75,7 +86,7 @@ export function readJson(input: unknown): Json {
           continue;
         }
         characters += key.length;
-        if (characters > MAX_DOCUMENT_BYTES) throw new WorkspaceDocumentError('Document size limit exceeded');
+        if (characters > limits.bytes) throw new WorkspaceDocumentError('Document size limit exceeded');
         const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
         if (!('value' in descriptor)) throw new WorkspaceDocumentError('Document accessors are not allowed');
         if (plotScales && !isPriceScaleId(descriptor.value)) {
@@ -93,7 +104,7 @@ export function readJson(input: unknown): Json {
     return result;
   };
   const result = visit(input, 0);
-  if (new TextEncoder().encode(JSON.stringify(result)).length > MAX_DOCUMENT_BYTES) {
+  if (new TextEncoder().encode(JSON.stringify(result)).length > limits.bytes) {
     throw new WorkspaceDocumentError('Document size limit exceeded');
   }
   return result;

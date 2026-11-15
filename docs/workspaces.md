@@ -167,8 +167,9 @@ different symbol, price series, viewport or trading state.
 - Up to 256 study instances, 32 comparison definitions per chart, 32 internal
   chart panes and 512 series style descriptors.
 - Document names of 1-120 characters; document IDs of 1-100 characters.
-- At most 5 MiB of UTF-8 JSON, depth 32 and 100,000 JSON nodes. The complete
-  catalog is subject to the same total size limit.
+- At most 5 MiB of UTF-8 JSON, depth 32 and 100,000 JSON nodes. These limits
+  are per document; a stored catalog may hold ten times the bytes and nodes
+  (since 2.7.3).
 - No accessors, executable functions, cycles, class instances or non-finite
   numbers. The parser projects recognized document/chart fields and removes
   reserved credential and execution keys from nested records.

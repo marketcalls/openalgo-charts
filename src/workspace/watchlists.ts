@@ -1,6 +1,6 @@
 import type { InstrumentKey } from 'openalgo-charts';
 import { CatalogQueue, createMemoryCatalogStorage, randomId, type CatalogKind } from './catalog';
-import { list, number, readJson, record, string, WorkspaceDocumentError, type Json } from './json';
+import { CATALOG, list, number, readJson, record, string, WorkspaceDocumentError, type Json } from './json';
 import { createIndexedDbCatalogStorage, type IndexedDbCatalogStorage } from './indexed-db';
 
 /** Lists per namespace and entries per list. A watchlist is a shortlist, not a symbol master. */
@@ -101,7 +101,7 @@ function parseList(input: Json): Watchlist {
 
 /** Parse the complete catalog before any mutation; corrupt storage is never replaced. */
 export function parseWatchlistCatalog(input: unknown): WatchlistCatalog {
-  const source = record(readJson(input), 'watchlist catalog');
+  const source = record(readJson(input, CATALOG), 'watchlist catalog');
   if (source.version !== 1) throw new WorkspaceDocumentError('Unsupported watchlist catalog version');
   const lists = list(source.lists, 'watchlists', MAX_LISTS).map(parseList);
   const ids = new Set(lists.map(item => item.id));

@@ -58,14 +58,7 @@ export function alignToPrimary(
   primary: readonly Bar[],
   comparison: readonly SeriesDataItem[],
 ): { items: SeriesDataItem[]; alignment: ComparisonAlignment } {
-  const byTime = new Map<UTCSeconds, Bar>();
-  for (const item of comparison) {
-    const bar = toBar(item);
-    // A correction can retract a prior reading. Its gap wins without claiming
-    // overlap or counting a removed print as a dropped trade.
-    if (isFinite(bar.close)) byTime.set(bar.time, bar);
-    else byTime.delete(bar.time);
-  }
+  const byTime = printsByTime(comparison);
   const items: SeriesDataItem[] = [];
   let matched = 0;
   for (const bar of primary) {
@@ -83,4 +76,23 @@ export function alignToPrimary(
     items,
     alignment: { bars: items.length, matched, gaps: items.length - matched, dropped: byTime.size - matched },
   };
+}
+
+/**
+ * The comparison's prints by time, the map `alignToPrimary` matches through;
+ * only those later than `after`, for a primary that will only grow past it,
+ * read from `from` on, where the caller knows none before it is later.
+ */
+export function printsByTime(comparison: readonly SeriesDataItem[], after = -Infinity, from = 0): Map<UTCSeconds, Bar> {
+  const byTime = new Map<UTCSeconds, Bar>();
+  for (let i = from; i < comparison.length; i++) {
+    const item = comparison[i]!;
+    if (item.time <= after) continue;
+    const bar = toBar(item);
+    // A correction can retract a prior reading. Its gap wins without claiming
+    // overlap or counting a removed print as a dropped trade.
+    if (isFinite(bar.close)) byTime.set(bar.time, bar);
+    else byTime.delete(bar.time);
+  }
+  return byTime;
 }

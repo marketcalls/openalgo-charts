@@ -27,10 +27,12 @@ test('CPR omits incomplete prior periods and redraws corrected observations', as
       theme: lib.darkTheme, branding: false, animZoom: false, animAutoscale: false,
       timeNavigator: false, pixelRatio: () => 1, timezone: 'UTC',
     });
-    const bars = Array.from({ length: 9 }, (_, i) => ({
+    // The end of 1 January first: CPR never hands on the first loaded period,
+    // so the 2 January session is the first one it reads.
+    const bars = [{ time: Date.UTC(2024, 0, 1, 11) / 1000, open: 5, high: 7, low: 4, close: 5 }, ...Array.from({ length: 9 }, (_, i) => ({
       time: Date.UTC(2024, 0, 2 + Math.floor(i / 3), 9 + i % 3) / 1000,
       open: 5, high: i < 3 ? [100, NaN, 10][i] : 7, low: i < 3 ? i : 4, close: 5,
-    }));
+    }))];
     const source = chart.addSeries('line', { style: { color: '#888888' } });
     source.setData(bars);
     const study = chart.addIndicator('cpr', {
@@ -41,7 +43,7 @@ test('CPR omits incomplete prior periods and redraws corrected observations', as
     plot.applyOptions({ lineWidth: 3, priceLineVisible: false, lastValueVisible: false });
     plot.priceScale().setAutoScale(false);
     plot.priceScale().setPriceRange({ min: 0, max: 40 });
-    chart.setVisibleLogicalRange({ from: -1, to: 9 });
+    chart.setVisibleLogicalRange({ from: -1, to: 10 });
     const ink = (index: number, value: number) => {
       const x = chart.timeScale.indexToX(index), y = plot.priceScale().priceToY(value);
       const pixels = chart.panes()[study.paneIndex].base.ctx.getImageData(Math.round(x - 2), Math.round(y - 2), 5, 5).data;
@@ -53,12 +55,12 @@ test('CPR omits incomplete prior periods and redraws corrected observations', as
     };
     const snapshot = async () => {
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      return { values: study.values().dPivot, falseLevel: ink(3.5, 5), corrected: ink(3.5, 35), recovered: ink(6.5, 16 / 3) };
+      return { values: study.values().dPivot, falseLevel: ink(4.5, 5), corrected: ink(4.5, 35), recovered: ink(7.5, 16 / 3) };
     };
     window.__cprPeriod = { source, bars, snapshot };
     return snapshot();
   });
-  const expected = [null, null, null, null, null, null, 16 / 3, 16 / 3, 16 / 3];
+  const expected = [null, null, null, null, null, null, null, 16 / 3, 16 / 3, 16 / 3];
   expect(initial.values).toEqual(expected);
   expect(initial.falseLevel).toBe(0);
   expect(initial.recovered).toBeGreaterThan(1);
@@ -66,17 +68,17 @@ test('CPR omits incomplete prior periods and redraws corrected observations', as
 
   const corrected = await page.evaluate(async () => {
     const { source, bars, snapshot } = window.__cprPeriod;
-    source.update({ ...bars[1], high: 20 });
+    source.update({ ...bars[2], high: 20 });
     return snapshot();
   });
-  expect(corrected.values).toEqual([null, null, null, 35, 35, 35, 16 / 3, 16 / 3, 16 / 3]);
+  expect(corrected.values).toEqual([null, null, null, null, 35, 35, 35, 16 / 3, 16 / 3, 16 / 3]);
   expect(corrected.corrected).toBeGreaterThan(1);
   expect(corrected.recovered).toBeGreaterThan(1);
   await page.screenshot({ path: info.outputPath('cpr-corrected-period.png') });
 
   const unavailable = await page.evaluate(async () => {
     const { source, bars, snapshot } = window.__cprPeriod;
-    source.update(bars[1]);
+    source.update(bars[2]);
     return snapshot();
   });
   expect(unavailable.values).toEqual(expected);

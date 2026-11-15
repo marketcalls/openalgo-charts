@@ -224,7 +224,9 @@ describe('VWAP anchors', () => {
 // ── CPR ──────────────────────────────────────────────────────────────────────
 
 describe('CPR pivot frames', () => {
-  const bars = nyDaily();
+  // One February session in front, so New York March is fully covered: CPR never
+  // hands on the first loaded period, which it cannot know began at its start.
+  const bars = [{ ...nyDaily()[0]!, time: utc(2024, 2, 29, 20) }, ...nyDaily()];
   const apr30 = dayIndex(bars, 2024, 4, 30);
   const may1 = dayIndex(bars, 2024, 5, 1);
   const monthly = { pivotMode: 'manual', showDaily: false, showWeekly: false, showMonthly: true };

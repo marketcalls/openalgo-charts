@@ -54,8 +54,10 @@ During a broker repair, the production controller keeps the historical open,
 widens high/low with buffered observations, keeps the buffered close and takes
 the larger snapshot volume. It does not add overlapping history and live
 volumes. Closed candles without concurrent observations take the authoritative
-values, including corrections that reduce previous extremes or volume. This
-is snapshot reconciliation, not reconstruction of every missed trade.
+values, including corrections that reduce previous extremes or volume. On
+its own poll and bar-close repair the controller keeps the close the stream
+delivered for the forming bar, since a history snapshot can predate the last
+trade; a refresh the host asks for takes history's close. This is snapshot reconciliation, not reconstruction of every missed trade.
 
 ## Extending the contract
 

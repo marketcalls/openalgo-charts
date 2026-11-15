@@ -25,12 +25,12 @@
  *   moment in the past; autosave waits for the replay to end, and a layout is
  *   not opened under it.
  */
-import { isKnownInterval, isReplaying, registeredIndicators } from 'openalgo-charts';
+import { isKnownInterval, isReplaying } from 'openalgo-charts';
 import { isChartTypeChoice } from './chart-type-choice';
 import type { WorkspaceChartState, WorkspacePane, WorkspacePayload } from 'openalgo-charts/workspace';
 import type { LayoutApplyReport, LayoutTarget } from './layouts';
 import type { Widget, WidgetChartState, WidgetRestoreReport, WidgetState } from './widget';
-import { stripView } from './widget-persist';
+import { stripView, unavailableStudy } from './widget-persist';
 
 /** Where a layout keeps a chart's theme: one widget's layout and the chart grid's desk alike. Internal. */
 export const THEME_SETTING = 'widget.theme';
@@ -104,9 +104,7 @@ function refusal(payload: WorkspacePayload): string {
   if (!isKnownInterval(pane.interval)) return `unknown interval ${pane.interval}`;
   if (!isChartTypeChoice(pane.chartType)) return `unknown chart type ${pane.chartType}`;
   if (pane.comparisons.length > 0) return 'comparison symbols are not supported in a widget chart';
-  const studies = new Set(registeredIndicators().map(descriptor => descriptor.id));
-  const missing = (pane.chart.indicators ?? []).find(study => !studies.has(study.indicatorId));
-  return missing === undefined ? '' : `unavailable study ${missing.indicatorId}`;
+  return unavailableStudy(pane.chart);
 }
 
 /**

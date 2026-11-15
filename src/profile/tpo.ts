@@ -32,7 +32,9 @@ export function computeTpo(
     if (slice.length === 0) continue;
     let pHigh = -Infinity;
     let pLow = Infinity;
-    for (const b of slice) { pHigh = Math.max(pHigh, b.high); pLow = Math.min(pLow, b.low); }
+    // Compared, not Math.max: a gap's NaN prices fail the comparison and drop
+    // out, where Math.max took the whole period's range, and its letters, to NaN.
+    for (const b of slice) { if (b.high > pHigh) pHigh = b.high; if (b.low < pLow) pLow = b.low; }
     if (p < ibPeriods) { ibHigh = Math.max(ibHigh, pHigh); ibLow = Math.min(ibLow, pLow); }
     for (const bkt of priceBuckets(pLow, pHigh, tickSize)) count.set(bkt, (count.get(bkt) ?? 0) + 1);
   }
@@ -53,6 +55,7 @@ export function computeTpo(
     poc: buckets[va.poc]!.price,
     vah: buckets[va.upper]!.price,
     val: buckets[va.lower]!.price,
-    ib: { high: ibHigh, low: ibLow },
+    // Balance periods with no prices give the profile's own range, as the market profile's do.
+    ib: { high: Number.isFinite(ibHigh) ? ibHigh : buckets[0]!.price, low: Number.isFinite(ibLow) ? ibLow : buckets[buckets.length - 1]!.price },
   };
 }

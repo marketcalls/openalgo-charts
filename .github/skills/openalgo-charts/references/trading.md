@@ -219,7 +219,7 @@ Base size is 190x42 media px before `scale`. Use `margin` plus `legendOffset` to
 
 ## Right-click order menu
 
-The chart installs its own `contextmenu` handler that composites the base canvas under the overlay so the browser's "Save image as…" captures the visible chart, and freezes overlay repaints until the next input. **Calling `e.preventDefault()` in your own listener disables that path entirely**: which is exactly what an app-owned order menu wants (`if (e.defaultPrevented) return;` guards it).
+The chart installs its own `contextmenu` handler that composites the base canvas under the overlay so the browser's "Save image as…" captures the visible chart, and freezes overlay repaints until the menu closes: the next input on the chart or the page, the page hiding, or a short time bound. **Calling `e.preventDefault()` in your own listener disables that path entirely**: which is exactly what an app-owned order menu wants (`if (e.defaultPrevented) return;` guards it).
 
 Pattern from `examples/live/index.html` and `examples/yfinance/index.html`:
 
@@ -269,11 +269,21 @@ state, and OCO bookkeeping. Use it when you need to remember what the user is do
   pass `constraints(symbol, exchange)` to add freeze and lot limits, including on MARKET;
 - idempotency: a repeated `clientToken` is refused pre-flight; a failure after the request
   leaves is marked `'ambiguous'` and NOT released. Read it with `tokenState(token)`, clear
-  it with `releaseToken(token)` once you have established the truth from the order book;
+  it with `releaseToken(token)` once you have established the truth from the order book.
+  A call with no `clientToken` is not guarded: two identical calls are two orders;
 - decoding: `getOrderBook()` returns `{ orders, quarantined }`, and an unknown broker status
-  stays `'unknown'` rather than becoming `working`.
+  stays `'unknown'` rather than becoming `working`. Orders and positions keep `exchange`
+  and `product`. Since 2.7.3 a book body that says `status: 'error'`, carries no list, or
+  carries the other book's shape (`data.orders` from the positionbook) throws instead of
+  reading as an empty book, and so does a position row whose quantity
+  cannot be read, instead of reading as flat;
+- acknowledgements: since 2.7.3 `cancel()` rejects an HTTP-success body that is an error
+  or names neither success nor the order, as `modify()` does, and `modify()` refuses a
+  non-finite price or trigger and an invalid quantity pre-flight.
 
 Everything the client checks is advisory. The broker RMS is authoritative.
+
+A host that routes `trading:order_modify` through `OrderEngine.requestModify` passes a price the engine reads by order type: a stop-limit's limit, with its trigger carried at the gap it was placed with. A stop-limit line drawn at its trigger therefore needs the dropped trigger passed explicitly, `requestModify(id, limit, { triggerPrice: newPrice })`. Since 2.7.3 `commitModify` resolves only after the broker has answered every modify of the order already sent, so a book read on it is current. The [trade-tier](trade-tier.md) worked example does both.
 
 Since 2.6.5, `modify()` serializes writes for the same order and retains only
 acknowledged changes in its full-order context. A rejected patch cannot supply values

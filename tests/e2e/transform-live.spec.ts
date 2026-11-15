@@ -242,7 +242,7 @@ test.describe('in-chart transforms', () => {
   for (const type of ['renko', 'line-break', 'range-bars', 'point-figure', 'kagi']) {
     test(`delivers a study alert once per bar under a replayed ${type} chart`, async ({ page }, testInfo) => {
       await ready(page, `type=${type}&study=none`);
-      const run = await page.evaluate(async (forming) => {
+      const run = await page.evaluate(async ({ forming, steps }) => {
         const { chart, series, lib } = (window as any).__probe;
         // A study on the five-minute bars under the elements: a five-bar average
         // of their closes to draw, and an alert on a bar that closes above its
@@ -266,6 +266,9 @@ test.describe('in-chart transforms', () => {
         const start = chart.primaryBars().length;
         // Seven more hours replayed bar by bar, a seeded continuation of the
         // session's random walk, each bar one update as a feed delivers it.
+        // Point and figure gets three times as long: an O column fills a box
+        // only when the low reaches it (2.7.3), so columns turn less often and
+        // seven hours turn too few of them to test anything.
         let seed = 20261001;
         const random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
         const gauss = () => Math.sqrt(-2 * Math.log(random() || 1e-9)) * Math.cos(2 * Math.PI * random());
@@ -277,7 +280,7 @@ test.describe('in-chart transforms', () => {
         const expected: { index: number; time: number; message: string }[] = [];
         const explicit: typeof expected = [];
         let risingSteps = 0;
-        for (let i = 0; i < 84; i++) {
+        for (let i = 0; i < steps; i++) {
           const open = last.close;
           const close = Math.round(open * (1 + gauss() * 0.0019) * 20) / 20;
           const bar = { time: last.time + 300, open, close, high: Math.max(open, close), low: Math.min(open, close), volume: 50000 };
@@ -299,7 +302,7 @@ test.describe('in-chart transforms', () => {
         chart.setVisibleLogicalRange({ from: start - 8, to: chart.primaryBars().length + 2 });
         await (window as any).__frame();
         return { expected, explicit, risingSteps, omitted: pick('omitted'), oncePerBar: pick('oncePerBar'), everyUpdate: pick('everyUpdate') };
-      }, ['kagi', 'range-bars', 'point-figure'].includes(type));
+      }, { forming: ['kagi', 'range-bars', 'point-figure'].includes(type), steps: type === 'point-figure' ? 252 : 84 });
       // On Renko, rising bars that completed two bricks or more: each once, not once per brick.
       if (type === 'renko') expect(run.risingSteps).toBeGreaterThan(3);
       expect(run.expected.length).toBeGreaterThan(2);

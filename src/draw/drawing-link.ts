@@ -140,7 +140,11 @@ export class DrawingLinkGroup {
       }),
       chart.on('data:context', context => this.setContext(chart,
         member.resolveContext === null ? context as DrawingLinkContext | undefined : resolveContext(member.resolveContext))),
-      chart.on('symbol', () => this.setContext(chart, resolveContext(member.resolveContext ?? undefined))),
+      // Without a resolver the chart's own context names the instrument, as
+      // it did when the member joined: a widget announces `symbol` after it
+      // has published that context, and an unknown one would drop the copies
+      // the member received and stop it sharing until the next context.
+      chart.on('symbol', () => this.setContext(chart, resolveContext(member.resolveContext ?? (() => chart.getDataContext?.())))),
       chart.on('draw:restore', () => { this._detachDrawings(member, false); this._reconnect(member); }),
       chart.on('draw:destroy', payload => {
         if ((payload as { controller?: DrawingController } | null)?.controller === controller) this.remove(chart);

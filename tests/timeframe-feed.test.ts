@@ -100,7 +100,7 @@ describe('timeframe feed', () => {
     expect(result.hasMore).not.toBe(false);
     feed.destroy();
   });
-  it('replaces live contributions and asks for resync on older corrections', async () => {
+  it('replaces live contributions, drops older ones, and resyncs only when the source asks', async () => {
     let emit!: (bar: Bar) => void;
     let reconnect!: () => void;
     const off = vi.fn();
@@ -113,10 +113,14 @@ describe('timeframe feed', () => {
     expect(received[received.length - 1]).toMatchObject({ volume: 17, open: 10, close: 20 });
     expect(metadata[metadata.length - 1]?.provisional).not.toBe(true);
     emit(bars(8)[7]!);
+    const delivered = received.length;
+    // A bar from the bucket before the active one is dropped, as the native
+    // stream drops a bar older than its tail, rather than refetching history.
     emit(bars()[0]!);
-    expect(resync).toHaveBeenCalledTimes(1);
+    expect(received).toHaveLength(delivered);
+    expect(resync).not.toHaveBeenCalled();
     reconnect();
-    expect(resync).toHaveBeenCalledTimes(2);
+    expect(resync).toHaveBeenCalledTimes(1);
     unsubscribe();
     feed.destroy();
     expect(off).toHaveBeenCalledTimes(1);

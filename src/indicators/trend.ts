@@ -799,25 +799,31 @@ export const HALFTREND: IndicatorDescriptor = {
     const rollHigh = highest(highs, amp);
     const rollLow = lowest(lows, amp);
 
+    // The extremes seed from the first bar with both a high and a low. A
+    // missing one there was a NaN that no later min or max could repair, so the
+    // level never printed; the bars before that seed have nothing to show.
+    const first = bars.findIndex((b) => Number.isFinite(b.high) && Number.isFinite(b.low));
+    if (first < 0) return out;
+
     // 0 = uptrend, 1 = downtrend. `armed` is the flip currently being tracked.
-    // Every series here has one value per bar, and there is at least one bar.
+    // Every series here has one value per bar, and bar `first` is one of them.
     let trend = 0;
     let armed = 0;
-    let maxLow = lows[0]!;
-    let minHigh = highs[0]!;
+    let maxLow = lows[first]!;
+    let minHigh = highs[first]!;
     let upLevel = 0;
     let downLevel = 0;
     let seeded = false;
 
-    for (let i = 0; i < n; i++) {
+    for (let i = first; i < n; i++) {
       const half = halfAtr[i]! / 2;
       const dev = chDev * half;
       const barHigh = rollHigh[i]!;
       const barLow = rollLow[i]!;
-      // Bar 0 has no predecessor; comparing against itself can never satisfy the
-      // flip condition, which is the correct no-signal answer for a single bar.
-      const prevHigh = i > 0 ? highs[i - 1]! : highs[0]!;
-      const prevLow = i > 0 ? lows[i - 1]! : lows[0]!;
+      // The seed bar has no predecessor; comparing against itself can never
+      // satisfy the flip condition, which is the correct no-signal answer.
+      const prevHigh = i > first ? highs[i - 1]! : highs[first]!;
+      const prevLow = i > first ? lows[i - 1]! : lows[first]!;
       const wasTrend = seeded ? trend : -1;
 
       if (armed === 1) {

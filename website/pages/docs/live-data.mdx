@@ -206,8 +206,9 @@ With `createWidget(container, { feed: live, ... })`, the widget seeds every subs
 and performs this history refresh automatically on `onResync`, preserving the visible
 logical range. It merges live bars received during the fetch into refreshed history.
 It keeps the previous chart visible with a stale-history error if the refresh fails or
-returns no bars, with display updates paused but buffering and reconnect monitoring
-still active. Call `widget.reload()` to retry; the request keeps `noCache: true`
+returns no bars. Display updates pause only while the request is out: after a failure
+the bars the stream delivered meanwhile are shown and the chart follows the stream,
+still marked stale, with reconnect monitoring active. Call `widget.reload()` to retry; the request keeps `noCache: true`
 until a load succeeds. `widget.reload()` refreshes the current source without
 resetting the view; a changed symbol, exchange or interval starts a new load.
 The widget owns its subscription; the host still owns `live.close()` during teardown.

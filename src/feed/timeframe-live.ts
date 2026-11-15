@@ -4,7 +4,7 @@ import { aggregateTimeframeBars } from './timeframe-bars';
 import { timeframeBucketAt, type TimeframePlan } from './timeframe-plan';
 import { withHistoryDeadline } from './request-pool';
 
-/** Active-bucket contributions only; late corrections require an authoritative refresh. */
+/** Active-bucket contributions only; late corrections wait for the next authoritative refresh. */
 export function subscribeTimeframe(
   feed: DataFeed, req: BarsRequest, plan: TimeframePlan,
   onBar: (bar: Bar, meta?: LiveBarMeta) => void,
@@ -22,8 +22,11 @@ export function subscribeTimeframe(
     if (closed) return;
     const bounds = plan.source.bounds(bar.time);
     const bucket = bounds && timeframeBucketAt(plan, bounds.from);
-    if (!bucket) { options.onResync?.(); return; }
-    if (active && bucket.time < active.time) { options.onResync?.(); return; }
+    // A frame outside every session or before the active bucket is dropped, as
+    // the native stream drops a bar older than its tail. A quiet contract's
+    // quotes repeat the time of its last trade, and asking history again for
+    // each one refetched and resubscribed on every frame.
+    if (!bucket || (active && bucket.time < active.time)) return;
     if (!active || bucket.time > active.time) {
       active = bucket;
       loading = false;

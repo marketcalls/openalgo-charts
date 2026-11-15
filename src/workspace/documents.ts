@@ -80,6 +80,18 @@ interface DocumentMetadata {
   version: 1; id: string; name: string; createdAt: number; updatedAt: number;
 }
 export interface WorkspaceDocument extends DocumentMetadata, WorkspacePayload { kind: 'workspace' }
+/** How `parseWorkspaceDocument` and `parseWorkspacePayload` read a document. */
+export interface WorkspaceParseOptions {
+  /**
+   * False drops each drawing's and each study's `policy`. A policy is how a
+   * host keeps its own objects from the user (read-only, unselectable,
+   * unlisted), so a document from a file, a link or another account, which
+   * is anyone's, should arrive without one: pass false for it, as
+   * `importDocument` does. The default keeps them, because hosts read their
+   * own saved state through these parsers too. Since 2.7.3.
+   */
+  keepPolicy?: boolean;
+}
 export interface IndicatorTemplatePlotBinding {
   instanceId: string; plotKey: string; paneIndex: number; scaleId: PriceScaleId;
 }
@@ -349,7 +361,16 @@ export function parseIndicatorTemplatePayload(input: unknown): IndicatorTemplate
   return templatePayload(readJson(input));
 }
 
-function chartState(input: Json | undefined): WorkspaceChartState {
+/**
+ * Each drawing of a document or of a 1.9.x list, without its policy, the way
+ * a paste drops one. `drawings` is the parser's own copy, so it is changed in place.
+ */
+function dropDrawingPolicies(drawings: Json): void {
+  const list = Array.isArray(drawings) ? drawings : record(drawings, 'drawings').drawings;
+  if (Array.isArray(list)) for (const item of list) if (item !== null && typeof item === 'object' && !Array.isArray(item)) delete item.policy;
+}
+
+function chartState(input: Json | undefined, keepPolicy: boolean): WorkspaceChartState {
   const source = record(input, 'chart');
   if (source.version !== 1 && source.version !== 2) throw new WorkspaceDocumentError('Unsupported chart version');
   const out: WorkspaceChartState = { version: source.version === 2 ? 2 : 1 };
@@ -357,6 +378,9 @@ function chartState(input: Json | undefined): WorkspaceChartState {
   for (const key of ['navigation', 'canvas', 'statusLine', 'watermark', 'trading', 'events', 'axisChrome'] as const) {
     if (source[key] !== undefined) Object.assign(out, { [key]: record(source[key], key) });
   }
+  // The axis switches without a clock: `getState` never writes the callback,
+  // and a value in its place would replace the host's when the chart restores.
+  if (out.axisChrome) delete (out.axisChrome as Record<string, Json>).clock;
   if (source.viewport !== undefined) {
     const view = record(source.viewport, 'viewport');
     const from = number(view.from, 'viewport.from', -Number.MAX_SAFE_INTEGER);
@@ -371,7 +395,7 @@ function chartState(input: Json | undefined): WorkspaceChartState {
   if (source.crosshairSnapToBar !== undefined) out.crosshairSnapToBar = boolean(source.crosshairSnapToBar, 'crosshairSnapToBar');
   if (source.priceOnlyAutoScale !== undefined) out.priceOnlyAutoScale = boolean(source.priceOnlyAutoScale, 'priceOnlyAutoScale');
   if (source.indicatorLegendCollapsed !== undefined) out.indicatorLegendCollapsed = boolean(source.indicatorLegendCollapsed, 'indicatorLegendCollapsed');
-  if (source.indicators !== undefined) out.indicators = indicatorStates(source.indicators);
+  if (source.indicators !== undefined) out.indicators = indicatorStates(source.indicators, true, keepPolicy);
   if (source.sourceAbove !== undefined) out.sourceAbove = string(source.sourceAbove, 'sourceAbove');
   if (source.alerts !== undefined) {
     try { out.alerts = parseAlertsDocument(source.alerts); }
@@ -379,6 +403,7 @@ function chartState(input: Json | undefined): WorkspaceChartState {
   }
   if (source.drawings !== undefined) {
     if (source.drawings === null || typeof source.drawings !== 'object') throw new WorkspaceDocumentError('drawings must be a document or array');
+    if (!keepPolicy) dropDrawingPolicies(source.drawings);
     out.drawings = source.drawings;
   }
   if (source.panes !== undefined) out.panes = chartPanes(source.panes);
@@ -420,7 +445,7 @@ function seriesTransform(input: Json): SeriesTransformSpec {
   return out;
 }
 
-function paneState(input: Json): WorkspacePane {
+function paneState(input: Json, keepPolicy: boolean): WorkspacePane {
   const source = record(input, 'workspace pane');
   const settings = record(source.settings ?? {}, 'settings');
   for (const value of Object.values(settings)) {
@@ -436,7 +461,7 @@ function paneState(input: Json): WorkspacePane {
   if (new Set(comparisons.map(item => item.id)).size !== comparisons.length) throw new WorkspaceDocumentError('Duplicate comparison ID');
   const out: WorkspacePane = {
     id: string(source.id, 'pane id', 100), symbol: string(source.symbol, 'symbol'), exchange: string(source.exchange, 'exchange', 200, true),
-    interval: string(source.interval, 'interval', 100), chartType: string(source.chartType, 'chartType', 100), chart: chartState(source.chart),
+    interval: string(source.interval, 'interval', 100), chartType: string(source.chartType, 'chartType', 100), chart: chartState(source.chart, keepPolicy),
     settings: settings as WorkspaceSettings, volume: boolean(source.volume, 'volume', true),
     magnet: choice(source.magnet, 'magnet', ['off', 'weak', 'strong'], 'off'), stay: boolean(source.stay, 'stay', false),
     comparisons, comparisonMode: choice(source.comparisonMode, 'comparisonMode', ['price', 'percent'], 'percent'),
@@ -482,8 +507,8 @@ function linkGroups(input: Json): WorkspaceLinkGroup[] {
   });
 }
 
-function payload(input: Record<string, Json>): WorkspacePayload {
-  const panes = list(input.panes, 'panes', 16).map(paneState);
+function payload(input: Record<string, Json>, options?: WorkspaceParseOptions): WorkspacePayload {
+  const panes = list(input.panes, 'panes', 16).map(pane => paneState(pane, options?.keepPolicy !== false));
   if (panes.length === 0) throw new WorkspaceDocumentError('A workspace needs at least one pane');
   const ids = new Set(panes.map(pane => pane.id));
   if (ids.size !== panes.length) throw new WorkspaceDocumentError('Duplicate pane ID');
@@ -533,18 +558,20 @@ function payload(input: Record<string, Json>): WorkspacePayload {
   return out;
 }
 
-/** Validate, detach and project a portable chart-only workspace. */
-export function parseWorkspaceDocument(input: unknown): WorkspaceDocument {
+/** Validate, detach and project a portable chart-only workspace. Policies are kept unless `options.keepPolicy` is false. */
+export function parseWorkspaceDocument(input: unknown, options?: WorkspaceParseOptions): WorkspaceDocument {
   const source = record(readJson(input), 'workspace');
-  return { kind: 'workspace', ...metadata(source, 'workspace'), ...payload(source) };
+  return { kind: 'workspace', ...metadata(source, 'workspace'), ...payload(source, options) };
 }
-export function parseWorkspacePayload(input: unknown): WorkspacePayload { return payload(record(readJson(input), 'workspace')); }
+export function parseWorkspacePayload(input: unknown, options?: WorkspaceParseOptions): WorkspacePayload {
+  return payload(record(readJson(input), 'workspace'), options);
+}
 export function parseIndicatorTemplate(input: unknown): IndicatorTemplateDocument {
   const source = record(readJson(input), 'indicator template');
   return { kind: 'indicator-template', ...metadata(source, 'indicator-template'), ...templatePayload(source) };
 }
 
-/** Explicit migration of the existing single-widget state; no input is modified. */
+/** Explicit migration of the existing single-widget state, the host's own, so policies are kept; no input is modified. */
 export function migrateWidgetWorkspace(input: unknown, meta: { id: string; name: string; now: number }): WorkspaceDocument {
   const source = record(readJson(input), 'widget');
   if (source.version !== 1 || source.kind !== undefined) throw new WorkspaceDocumentError('Unsupported widget state');

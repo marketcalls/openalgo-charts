@@ -45,11 +45,12 @@ function scheduleError(where: string): TypeError {
 
 /**
  * A row price on a tick schedule: the level's nearest valid price, and with
- * grouping the nearest multiple of `n` ticks of that price's band, kept inside
- * the band so the row is still a price a click can trade at.
+ * grouping the multiple of `n` ticks of that price's band at or below a bid
+ * and at or above an ask, kept inside the band so the row is still a price a
+ * click can trade at.
  */
-function scheduleBucket(ticks: TickSchedule, n: number): (p: number) => number {
-  return (p) => {
+function scheduleBucket(ticks: TickSchedule, n: number): Bucket {
+  return (p, side) => {
     const price = ticks.round(p), { bands } = ticks;
     if (n === 1 || !Number.isFinite(price)) return price;
     // A schedule has at least one band (its constructor refuses none), and i
@@ -57,16 +58,30 @@ function scheduleBucket(ticks: TickSchedule, n: number): (p: number) => number {
     let i = bands.length - 1;
     while (i > 0 && price < bands[i]!.from!) i--;
     const band = bands[i]!;
-    const step = band.tick * n;
     const lower = band.from ?? -Infinity, upper = bands[i + 1]?.from ?? Infinity;
     // A boundary is valid in both bands, so it is where a group stops.
-    return ticks.round(Math.min(Math.max(Math.round(price / step) * step, lower), upper));
+    const group = toGroup(Math.round(price / band.tick) / n, side) * n * band.tick;
+    return ticks.round(Math.min(Math.max(group, lower), upper));
   };
+}
+
+type Bucket = (price: number, side: 'bid' | 'ask') => number;
+
+/**
+ * The group a level falls in, counted in groups from zero. A bid rounds down
+ * and an ask up, so no row shows a better price than the book holds: rounding
+ * both to the nearest put a bid on the row above its price and an ask on the
+ * row below, where a click would route an order at a price nobody is quoting.
+ * The tolerance absorbs division noise; a real remainder is a whole tick.
+ */
+function toGroup(groups: number, side: 'bid' | 'ask'): number {
+  return side === 'bid' ? Math.floor(groups + 1e-9) : Math.ceil(groups - 1e-9);
 }
 
 /**
  * Merge bids + asks into price rows, optionally bucketing every `groupBy` ticks
- * (price-step aggregation for deep books). Returns rows sorted high to low price.
+ * (price-step aggregation for deep books), a bid into the group at or below its
+ * price and an ask into the one at or above. Returns rows sorted high to low price.
  * Pass a `TickSchedule` in place of the tick size for an instrument whose tick
  * changes with price: each row is then a price its band allows, and a group
  * spans `groupBy` ticks of that band, so the step changes at a boundary.
@@ -75,17 +90,18 @@ function scheduleBucket(ticks: TickSchedule, n: number): (p: number) => number {
  * allows. The constant path multiplies `tickSize * groupBy` as it always has.
  */
 export function buildRows(depth: MarketDepth, tickSize: number | TickSchedule, groupBy = 1): LadderRow[] {
-  let bucket: (p: number) => number;
+  let bucket: Bucket;
   if (!isSchedule(tickSize)) {
-    const step = tickSize * Math.max(1, groupBy);
-    bucket = (p: number): number => Math.round(Math.round(p / step) * step * 1e8) / 1e8;
+    const g = Math.max(1, groupBy), step = tickSize * g;
+    // Each level snaps to its nearest tick first, then to its side's group.
+    bucket = (p, side) => Math.round(toGroup(Math.round(p / tickSize) / g, side) * step * 1e8) / 1e8;
   } else {
     if (typeof tickSize.round !== 'function') throw scheduleError('buildRows');
     bucket = scheduleBucket(tickSize, groupBy > 1 ? Math.floor(groupBy) : 1);
   }
   const map = new Map<number, LadderRow>();
   const add = (price: number, qty: number, side: 'bid' | 'ask'): void => {
-    const key = bucket(price);
+    const key = bucket(price, side);
     let row = map.get(key);
     if (row === undefined) { row = { price: key, bidQty: 0, askQty: 0 }; map.set(key, row); }
     if (side === 'bid') row.bidQty += qty; else row.askQty += qty;

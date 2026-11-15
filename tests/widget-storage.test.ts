@@ -156,7 +156,10 @@ describe('a synchronous store the host passes', () => {
 // The calls and their order are what this holds; the state record itself
 // changed in 2.6.3 (the widget's drag default in the chart state, and the
 // savedBy stamp), so its state hashes were taken again then, and again in 2.6.4
-// once the stamp's version was left out of the hash.
+// once the stamp's version was left out of the hash. Since 2.7.3 two reads are
+// marked as well: an instrument's drawings are read before each write, so a
+// second tab's are kept, and the layout before the write on leaving, so a
+// layout another tab stored since is not overwritten. The values are unchanged.
 const SYNC_LOG: readonly string[] = [
   'get oac-widget:pin:timeframes null',
   'get oac-widget:pin:state null',
@@ -164,11 +167,14 @@ const SYNC_LOG: readonly string[] = [
   'get oac-widget:pin:rail null',
   'get oac-widget:pin:rail null',
   'get oac-widget:pin:keymap null', // the shortcuts editor
+  'get oac-widget:pin:drawings:NSE:ALPHA null', // read before the write (2.7.3)
   'set oac-widget:pin:drawings:NSE:ALPHA dec3d03e62c9',
   'set oac-widget:pin:state cdef0a98fedf',
   'get oac-widget:pin:drawings:NSE:BETA null',
+  'get oac-widget:pin:drawings:NSE:BETA null', // read before the write (2.7.3)
   'set oac-widget:pin:drawings:NSE:BETA 37916dec368c',
   'set oac-widget:pin:state 92ca0b81d21d',
+  'get oac-widget:pin:state 92ca0b81d21d', // read before the write on leaving (2.7.3)
   'set oac-widget:pin:state 92ca0b81d21d',
   'get oac-widget:pin:timeframes null',
   'get oac-widget:pin:state 92ca0b81d21d',
@@ -180,6 +186,7 @@ const SYNC_LOG: readonly string[] = [
   'set oac-widget:pin:rail bebd1f203d89',
   'get oac-widget:pin:drawings:NSE:ALPHA dec3d03e62c9',
   'set oac-widget:pin:state c5cc8a9a7a40',
+  'get oac-widget:pin:state c5cc8a9a7a40', // read before the write on leaving (2.7.3)
   'set oac-widget:pin:state c5cc8a9a7a40',
 ];
 
@@ -321,9 +328,12 @@ describe('WidgetStorage over an asynchronous store', () => {
     storage.set('state', { n: 2 });
     storage.set('rail', { r: 1 });
     const flushed = storage.flush();
-    // Synchronous, as the page going away needs it: what is out and what is not sent yet.
+    // Synchronous, as the page going away needs it: what is out and what is not sent yet,
+    // each with what the store may hold without another writer having moved it on (2.7.3):
+    // what it held before, and each of this copy's values out. A stale journal is not replayed.
     expect(JSON.parse(journal.map.get('oac-widget-journal:a')!)).toEqual({
       version: 1, entries: { 'oac-widget:a:state': '{"n":2}', 'oac-widget:a:rail': '{"r":1}' },
+      was: { 'oac-widget:a:state': [null, '{"n":1}', '{"n":2}'], 'oac-widget:a:rail': [null, '{"r":1}'] },
     });
     store.release();
     await settle();

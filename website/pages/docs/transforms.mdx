@@ -144,7 +144,10 @@ return chart;`} />
 
 ## Renko
 
-Bricks form only when price moves a full box size, filtering out noise.
+Bricks form only when price moves a full box size, filtering out noise. A reversal is one box
+too: the first brick against the trend is drawn back over the last brick, not after a two-box
+move from its far side. Moves are counted on the box grid, so a decimal box such as 0.05 forms a
+brick on every exact one-box move and every brick edge is a clean price.
 
 <RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
 const bars = lib.generateBars(1700000000, 500, 3600);
@@ -167,7 +170,10 @@ runTransform(new RenkoTransform({ mode: 'atrPercent', percent: 50, atrPeriod: 14
 
 ## Range bars
 
-Each bar spans a fixed price range, regardless of time.
+A bar completes once its closes span the range, regardless of time. Range bars are built from
+the close sequence, and the range is a threshold rather than a fixed span: a close that jumps
+past it completes one bar covering the whole jump, so a completed bar spans at least the range
+and can span more. No bars are invented inside a jump.
 
 <RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
 const bars = lib.generateBars(1700000000, 500, 3600);
@@ -180,6 +186,11 @@ return chart;`} />
 
 Columns of Xs (up) and Os (down); a new column starts only after a reversal of N boxes. Plot
 the result as a `point-figure` series.
+
+A box is a price level: an X column fills each level its high reaches and an O column each
+level its low reaches. Under an X column at 20 with 1-point boxes and a 3-box reversal, a low of
+17.99 has not reached 17 and opens nothing; a low of 17.00 opens the O column. A price that
+touches a level exactly reaches it on a decimal box too.
 
 <RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
 const bars = lib.generateBars(1700000000, 600, 3600);
@@ -242,8 +253,10 @@ reproduces the older close-only variant, which ignores intrabar range entirely.
 
 ## Kagi
 
-A continuous line that reverses (and switches thick/thin) only after a move of at least the
-reversal amount. Plot it as a `kagi` series.
+A continuous line that reverses only after a move of at least the reversal amount. It turns
+thick when it rises above the previous shoulder (up-turn) and thin when it falls below the
+previous waist (down-turn), judged on every bar, the one that turns the line included. Plot it
+as a `kagi` series.
 
 <RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
 const bars = lib.generateBars(1700000000, 600, 3600);
@@ -257,6 +270,11 @@ import { runTransform, KagiTransform } from 'openalgo-charts/transform';
 const kagi = runTransform(new KagiTransform({ reversal: 4 }), bars);
 chart.addSeries('kagi').setData(kagi);
 ```
+
+A bar without four finite prices, such as a whitespace point, is a gap. Renko, range bars,
+Line Break, point and figure and Kagi skip it as if it were not there, so a gap never stops
+range bars completing or holds an ATR box size; Heikin Ashi keeps one candle per bar and leaves
+that candle empty.
 
 <Callout type="info">
 All transforms are incremental, so they update efficiently on live data. The simplest way to use

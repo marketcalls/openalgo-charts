@@ -44,6 +44,7 @@
  */
 import type { ChartTheme, DataFeed, DataVariant, LinkChart, LinkOptions, ResolvedLinkOptions } from 'openalgo-charts';
 import type { WorkspaceChartState, WorkspacePane, WorkspacePayload, WorkspaceStore } from 'openalgo-charts/workspace';
+import type { DrawingsDocument } from 'openalgo-charts/draw';
 import {
   WidgetBus, createOverlayStack, createTipController, h,
   type AsyncStorageLike, type OverlayOptions, type OverlayStack, type StorageLike, type TipController, type WidgetContext, type WidgetStorage,
@@ -58,6 +59,7 @@ import type { GridSaved } from './grid-saved';
 import { canCopyImage } from './capture';
 import { restorePane, THEME_SETTING, widgetPane } from './layouts-target';
 import { cellDrawingStore, checkWorkspace, type ChartDrawings } from './grid-payload';
+import { flushLeaving } from './widget-storage';
 import { CHART_GRID_LAYOUTS, focusSlot, isChartGridLayout, type ChartGridLayoutId } from './grid-layouts';
 import {
   ALL_OFF, GridLinks, channelsOf, describeGroups, instrument, linkMember,
@@ -68,7 +70,7 @@ import {
   captureBlocked, captureRows, copyAll, downloadAll, downloadGridScreenshot, report, takeGridScreenshot,
 } from './grid-capture';
 import { groupMark, installGridKeys, installHeaderDrag, neighbour } from './grid-cells';
-import { followChords, gridStorage, leaving, openStoredDesk, saveNow, saveSoon, scheduleSave } from './grid-persist';
+import { catchUp, followChords, gridStorage, leaving, markChanged, openStoredDesk, saveNow, saveSoon, scheduleSave } from './grid-persist';
 import { density, solo, splitters, tracks } from './grid-tracks';
 import { lazyPart, partFailed, usePart, type PartSlot } from './lazy';
 import { rovingIndex } from './roving';
@@ -376,11 +378,24 @@ export interface GridState {
   saveQueued: boolean;
   /** The last save was refused by the store, and was said; the next refusal is the same failure. */
   saveRefused: boolean;
-  /** A stored desk this grid refused to restore, kept until the user changes something. */
+  /**
+   * The stored desk stays as it is until the user changes something: one
+   * this grid refused to restore, or one another tab saved that it has just opened.
+   */
   held: boolean;
   restored: ChartGridApplyReport | null;
   /** The drawings of the charts on the grid, for the instruments each one is not showing. */
   drawings: ChartDrawings;
+  /**
+   * The documents in `drawings` a chart here changed since the last save,
+   * each with the one it was changed from: another tab's copy is merged
+   * into them rather than replacing them (grid-persist.ts).
+   */
+  changed: Map<string, DrawingsDocument | undefined>;
+  /** Another tab saved the desk since this one last did; it is opened when the page is shown again. */
+  behind: boolean;
+  /** The grid is taking what another tab saved: no chart's change is its own to save. */
+  following: boolean;
   chromeLayer: ChromeLayer | null;
   bar: GridBarHandle | null;
   foot: BottombarHandle | null;
@@ -437,7 +452,7 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
     rows: 1, cols: 1, rowW: [1], colW: [1], preset: null, theme: options.theme ?? 'dark',
     themeSync: false, compact: false, maxed: false, pointerIn: false, destroyed: false, syncing: false, nextId: 0,
     saveTimer: 0, saveQueued: false, saveRefused: false, held: false, restored: null, drawings: new Map(),
-    chromeLayer: null, bar: null, foot: null, saved: null, ready: Promise.resolve(),
+    changed: new Map(), behind: false, following: false, chromeLayer: null, bar: null, foot: null, saved: null, ready: Promise.resolve(),
   } as Omit<GridState, 'storage' | 'grid' | 'barHost' | 'restoring' | 'timeframePreferences'> as GridState;
   s.storage = gridStorage(s);
   s.timeframePreferences = options.timeframePreferences ?? storedTimeframePreferences(s.storage, options.intervals ?? DEFAULT_INTERVALS);
@@ -468,6 +483,8 @@ export function createChartGrid(container: HTMLElement | string, options: ChartG
       s.saved = module.attachGridSaved({
         grid, ready: s.ready, workspaces: options.workspaces, layouts: options.layouts,
         context: () => overGrid(s, (s.active as Cell).widget.context), opened: () => s.given,
+        // Copied, since a layout the grid refuses must leave them as they were.
+        apply: payload => openDesk(s, payload, new Map([...s.drawings].map(([id, docs]) => [id, new Map(docs)]))),
       });
       s.bar = module.mountGridBar(s.barHost, barEl);
     }, error => report(s, partFailed(text, widgetText(text, 'Chart grid'), error), 'error'), () => !s.destroyed);
@@ -579,12 +596,7 @@ function gridApi(s: GridState): ChartGrid {
     downloadScreenshot: filename => downloadGridScreenshot(s, filename),
     getWorkspace: () => getWorkspace(s),
 
-    applyWorkspace(payload) {
-      const result = apply(s, payload, new Map());
-      // The newer desk: neither the stored one nor the last saved layout replaces it.
-      if (result.applied) s.given = true;
-      return result;
-    },
+    applyWorkspace: payload => openDesk(s, payload, new Map()),
 
     destroy: () => destroyGrid(s),
   };
@@ -782,7 +794,7 @@ function makeCell(s: GridState, id: string, source: Source, parent: HTMLElement,
   const chartOptions: WidgetOptions = {
     ...s.cellOptions, theme: cellTheme, symbol: s.restoring ? undefined : source.symbol, exchange: source.exchange, interval: source.interval,
     variant: source.variant, chartType: source.chartType, keyboardRoute: () => route(s, cell),
-    feed: typeof feed === 'function' ? feed({ id, historyPeriod }) : feed, drawingStore: cellDrawingStore(id, docs),
+    feed: typeof feed === 'function' ? feed({ id, historyPeriod }) : feed, drawingStore: cellDrawingStore(id, docs, markChanged(s, id)),
   };
   // The bar under the grid carries this chart's Go to, which opens over the grid from that bar.
   if (footEl !== null) GRID_BAR_CHARTS.set(chartOptions, ctx => overGrid(s, ctx, () => footEl.querySelector<HTMLElement>('.oac-bottombar__goto')));
@@ -869,8 +881,9 @@ function join(s: GridState, cell: Cell): void {
     cell.span = span(cell);
     // A navigation sets the linked window; the keeper's other moves carry it along.
     if (mine || cell === cell.group?.keeper) keep(cell);
-    // A window set by data is still written, but a desk held after a refused restore stays held.
-    if (mine || !s.held) scheduleSave(s);
+    // A window set by data is still written, but a desk held after a refused
+    // restore stays held, and one another tab saved since is not written over.
+    if (mine || (!s.held && !s.behind)) scheduleSave(s);
   };
   // The widget reports a chart type change as a layout change, from its
   // own menu, an undo or a restore alike; the group hears it once.
@@ -1100,9 +1113,10 @@ function getWorkspace(s: GridState): WorkspacePayload {
 
 function destroyGrid(s: GridState): void {
   if (s.destroyed) return;
-  saveNow(s);
-  // Sends an asynchronous store's writes, and stops following other tabs' changes to it.
-  void s.storage.flush();
+  // Only a save still pending or refused, as when the page is left (`leaving`).
+  if (s.saveTimer !== 0 || s.saveQueued || s.saveRefused) saveNow(s);
+  // Sends an asynchronous store's writes in this call, and stops following other tabs' changes to it.
+  flushLeaving(s.storage);
   s.storage.close();
   s.destroyed = true;
   for (const off of s.offs.splice(0)) off();
@@ -1119,10 +1133,20 @@ function destroyGrid(s: GridState): void {
 }
 
 /**
+ * A desk opened on the grid: the newer one, which neither the stored desk
+ * nor the last saved layout replaces. `docs` as for `apply`.
+ */
+function openDesk(s: GridState, payload: WorkspacePayload, docs: ChartDrawings): ChartGridApplyReport {
+  const result = apply(s, payload, docs);
+  if (result.applied) s.given = true;
+  return result;
+}
+
+/**
  * Apply a workspace whose charts start from `docs` for the instruments
  * they are not showing: the saved ones when the grid restores its own
- * desk, none for a desk the host hands over, whose payload carries only
- * the drawings each chart shows.
+ * desk or opens one of its saved layouts, none for a desk the host hands
+ * over, whose payload carries only the drawings each chart shows.
  */
 function apply(s: GridState, payload: WorkspacePayload, docs: ChartDrawings): ChartGridApplyReport {
   if (s.destroyed) return { applied: false, reason: 'the grid is destroyed' };
@@ -1229,8 +1253,11 @@ function listenGrid(s: GridState): void {
   }
   if (win != null && typeof win.addEventListener === 'function') {
     if (Observer === undefined) listen(win, 'resize', () => measure(s));
-    listen(win, 'pagehide', () => leaving(s, false));
+    listen(win, 'pagehide', () => leaving(s));
   }
   // Hiding is the last moment a page is sure to see; unload may never come.
-  listen(doc, 'visibilitychange', () => { if (doc.visibilityState === 'hidden') leaving(s, true); });
+  listen(doc, 'visibilitychange', () => {
+    if (doc.visibilityState === 'hidden') leaving(s);
+    else catchUp(s, (payload, docs) => apply(s, payload, docs));
+  });
 }

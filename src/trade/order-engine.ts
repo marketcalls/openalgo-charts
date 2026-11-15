@@ -163,6 +163,8 @@ export class OrderEngine {
   private readonly _sentTokens = new Set<string>();
   private readonly _lastModifyAt = new Map<string, number>();
   private readonly _pendingModify = new Map<string, ModifyPatch>();
+  /** Modifies sent and not yet answered, by client id, for `commitModify` to wait on. */
+  private readonly _modifying = new Map<string, Promise<void>>();
   /** Settled client ids, oldest first: the eviction order for the maps above. */
   private readonly _settledIds: string[] = [];
   /** Leg rows that named an entry before it was bound, by entry broker id, then leg broker id. */
@@ -728,12 +730,29 @@ export class OrderEngine {
     }
     this._pendingModify.set(clientId, built.patch);
     const last = this._lastModifyAt.get(clientId) ?? -Infinity;
-    if (this._now() - last >= this._minModifyMs) void this._flushModify(clientId);
+    if (this._now() - last >= this._minModifyMs) void this._sendModify(clientId);
   }
 
-  /** Force-send any pending modify (e.g. on drag end). */
+  /**
+   * Force-send any pending modify (e.g. on drag end). Resolves once the broker
+   * has answered it and every modify of this order already out: `requestModify`
+   * sends at once when its interval has passed, so on a release there is often
+   * nothing left to flush, and a book read on this promise must not run before
+   * the broker took that write.
+   */
   public commitModify(clientId: string): Promise<void> {
-    return this._flushModify(clientId);
+    return this._sendModify(clientId);
+  }
+
+  /** `_flushModify`, joined to the modifies of this order still out. */
+  private _sendModify(clientId: string): Promise<void> {
+    const prior = this._modifying.get(clientId);
+    const flush = this._flushModify(clientId);
+    const all = prior === undefined ? flush : Promise.all([prior, flush]).then(() => undefined);
+    const clear = (): void => { if (this._modifying.get(clientId) === all) this._modifying.delete(clientId); };
+    this._modifying.set(clientId, all);
+    all.then(clear, clear);
+    return all;
   }
 
   /**

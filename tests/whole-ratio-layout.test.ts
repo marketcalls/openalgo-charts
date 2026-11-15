@@ -165,7 +165,8 @@ describe('panes at a whole-number device pixel ratio', () => {
 // the first pass now ends and the second begins: no op that draws moved or
 // changed, and no tick label here sits near enough to an edge to be dropped.
 const RATIO_1_LAYOUT = 'bd1455549dc7857ae92474247590dc228a56c18ccb554149d23045aeee3e73f2';
-const RATIO_1_FRAME = '519a178b6b9d57c9226f49078f81432f35e8f89a61f52255677b6de0fb2a4541';
+// Each primitive draws inside its own save and restore since 2.7.3.
+const RATIO_1_FRAME = '2f66361a1ba764c368787d84a7989c182ad731e741002fb51e2b1217b233e8ea';
 const RATIO_1_COORDINATES = 'e040a4f3863f6dc97925f6bd5af6871c5700c9e1062810a2b99caa3855968e03';
 const RATIO_2_LAYOUT = '9e5b14d0efc2eb945d62b04efceb2b8a5fb986a1d3d0073f22a7ce3bbb7f4b97';
-const RATIO_2_FRAME = '90ca0eaaa801ad3d6e1dc1ccb87a1fb636c2db03ff3a5ecf84465d3bae200361';
+const RATIO_2_FRAME = 'c81f30384196425517b44107a43e2eb550745010de1b64e9d4d8da6d08b3e7af';

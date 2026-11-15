@@ -6,7 +6,7 @@ import { atr, trueRange } from '../src/indicators/atr';
 import { supertrend } from '../src/indicators/supertrend';
 import { nulls, smaSeededEma } from '../src/indicators/calc';
 import { ATR } from '../src/indicators/momentum';
-import { KELTNER_CHANNEL } from '../src/indicators/adaptive';
+import { KAMA, KELTNER_CHANNEL } from '../src/indicators/adaptive';
 import { CHANDE_KROLL_STOP, CHANDELIER_EXIT } from '../src/indicators/overlay';
 import { MEDIAN, TEMA, TWAP } from '../src/indicators/averages';
 import { HALFTREND, PARABOLIC_SAR, SUPERTREND, VWAP } from '../src/indicators/trend';
@@ -386,6 +386,87 @@ describe('Parabolic SAR steps over incomplete bars', () => {
         if (i % 7 === 3) expect(out[i]).toBeNull();
         else expect(out[i]).toBe(expected[k++]);
       }
+    }
+  });
+});
+
+describe('KAMA steps over a missing value', () => {
+  it('reads it exactly as if it were not there, wherever it falls', () => {
+    // Bar 5 sits in the first ratio window, 12 just after the seed, 200 mid-run;
+    // one missing close used to leave every later bar without a reading.
+    const complete = completeSessions().slice(0, 400);
+    for (const holes of [[0], [5], [10], [12], [200], [5, 6, 150, 398]]) {
+      for (const missing of [NaN, Infinity]) {
+        const holed = complete.map((b, i) => (holes.includes(i) ? { ...b, close: missing } : b));
+        const kept = complete.filter((_, i) => !holes.includes(i));
+        const out = run(KAMA, holed).kama;
+        const expected = run(KAMA, kept).kama;
+        let k = 0;
+        for (let i = 0; i < holed.length; i++) {
+          if (holes.includes(i)) expect(out[i], `holes ${holes} bar ${i}`).toBeNull();
+          else expect(out[i], `holes ${holes} bar ${i}`).toBe(expected[k++]);
+        }
+        expect(out[399], `holes ${holes}`).not.toBeNull();
+      }
+    }
+  });
+
+  it('keeps complete data bit for bit', () => {
+    // The 2.7.2 recursion, verbatim, on data with no gap.
+    const bars = completeSessions();
+    const closes = bars.map((b) => b.close);
+    const reference = (erLength: number, fast: number, slow: number): (number | null)[] => {
+      const out: (number | null)[] = new Array(closes.length).fill(null);
+      const fastAlpha = 2 / (fast + 1);
+      const slowAlpha = 2 / (slow + 1);
+      let prev = closes[erLength];
+      out[erLength] = prev;
+      for (let i = erLength + 1; i < closes.length; i++) {
+        let walked = 0;
+        for (let k = i - erLength + 1; k <= i; k++) walked += Math.abs(closes[k] - closes[k - 1]);
+        const er = walked !== 0 ? Math.abs(closes[i] - closes[i - erLength]) / walked : 0;
+        const alpha = er * (fastAlpha - slowAlpha) + slowAlpha;
+        prev += alpha * alpha * (closes[i] - prev);
+        out[i] = prev;
+      }
+      return out;
+    };
+    for (const [erLength, fastLength, slowLength] of [[10, 2, 30], [3, 5, 20], [1, 2, 3]]) {
+      const out = run(KAMA, bars, { erLength, fastLength, slowLength }).kama;
+      const ref = reference(erLength, fastLength, slowLength);
+      out.forEach((v, i) => {
+        if (ref[i] === null) expect(v).toBeNull();
+        else expect(Math.abs((v as number) - (ref[i] as number))).toBeLessThanOrEqual(Math.abs(ref[i] as number) * 1e-12);
+      });
+    }
+  });
+});
+
+describe('HalfTrend seeds from the first complete bar', () => {
+  const nan = (b: Bar): Bar => ({ ...b, open: NaN, high: NaN, low: NaN, close: NaN });
+
+  it('draws after missing leading bars the level a history starting after them draws', () => {
+    // The seed was bar 0's high and low; NaN there never left the running extremes.
+    const complete = completeSessions().slice(0, 600);
+    for (const lead of [1, 3]) {
+      const holed = complete.map((b, i) => (i < lead ? nan(b) : b));
+      const out = run(HALFTREND, holed);
+      const expected = run(HALFTREND, complete.slice(lead));
+      for (const key of ['up', 'down']) {
+        expect(out[key], `${key} after ${lead}`).toEqual([...new Array(lead).fill(null), ...expected[key]]);
+      }
+      // The channel waits on the ATR, which reads the missing close once more.
+      expect(out.atrHigh.slice(-300).every((v) => v !== null), `channel after ${lead}`).toBe(true);
+    }
+  });
+
+  it('needs both a high and a low to seed', () => {
+    const complete = completeSessions().slice(0, 300);
+    for (const field of ['high', 'low'] as const) {
+      const holed = complete.map((b, i) => (i === 0 ? { ...b, [field]: NaN } : b));
+      const out = run(HALFTREND, holed);
+      const expected = run(HALFTREND, complete.slice(1));
+      for (const key of ['up', 'down']) expect(out[key], `${field} ${key}`).toEqual([null, ...expected[key]]);
     }
   });
 });

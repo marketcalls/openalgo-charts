@@ -130,7 +130,8 @@ Zero is a valid threshold. Non-finite thresholds and negative cooldowns fail.
 
 `AlertPolicy` defaults to onBarClose. The next live primary bar confirms the
 previous tail, and the controller evaluates that closed bar, never history
-loaded through setData or prependData. `AlertRepeat` defaults to once.
+loaded through setData or prependData that it has not watched arrive (see
+replacements below). `AlertRepeat` defaults to once.
 
 One `data:update` that appends several bars after the tail an alert
 last saw is judged bar by bar, every alert at one bar before any moves to the next,
@@ -143,8 +144,23 @@ the same update is judged first, as a tick; a forming element dated again (a Kag
 vertex, a range bar) keeps its place. Repeat, cooldown and expiry apply per bar as
 for separate appends at one instant. An update that leaves fewer bars, or moves the
 tail because history changed, is judged once at the newest bar against the last
-tail seen, as before. Reloads, prepends, late corrections and context changes still
-seed silently, and a corrected bar is never judged.
+tail seen, as before. Prepends, late corrections and context changes still seed
+silently, and a corrected bar is never judged.
+
+Since 2.7.3 a `setData` that extends what an alert has judged is judged the same
+way, from the element it last saw: a history refresh landing after the stream
+delivered bars, a refresh that failed after buffering them, or a store at its
+retention cap, where each new bar trims the oldest and so arrives as a
+replacement. A tail the replacement revised is judged on its close alone, since a
+replacement cannot say when it saw the extremes it changed. This needs the alert
+to have judged an update on the series first, or the replacement to have trimmed
+the front; until then a replacement seeds silently, so a first load, a warm load
+extending its cached bars, the first loads after a context change and a
+replacement that no longer holds the last judged element never deliver history.
+What the stream delivered during a `DataLoadingController` refresh reaches the
+widget, before the replacement, as `live` updates (2.7.3), so an alert armed
+since the last update, or a touch that crossed and came back inside the bar,
+is judged on them when the refresh lands or fails.
 
 onTouch observes newly reached extrema and the path between observed closes.
 A wick already present when arming or resuming is not a fresh touch. An intrabar

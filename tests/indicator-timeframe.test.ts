@@ -499,6 +499,51 @@ describe('what a timeframe refuses', () => {
     expect(run('', 'T100')).not.toThrow();
   });
 
+  it('a timeframe the chart bars do not divide into, and keeps every one they do', () => {
+    // Bars go to the bucket they open in, so a 3m bar opening at 09:18 hands its
+    // 09:20 minute to the 09:15 bucket: 5m on 3m is buckets of 6 and 3 minutes.
+    cleanups.push(registerInterval({ code: 'M', bucketing: { mode: 'calendar', unit: 'month' } }));
+    cleanups.push(registerInterval({ code: '2M', bucketing: { mode: 'calendar', unit: 'month', count: 2 } }));
+    cleanups.push(registerInterval({ code: 'Q', bucketing: { mode: 'calendar', unit: 'quarter' } }));
+    // Called directly, as before a chart attaches, it draws nothing: a host that
+    // can request the timeframe is told apart only at attach (see the next test).
+    const d = getIndicator('rsi');
+    const run = (timeframe: string, interval: string): IndicatorValues =>
+      d.calc(bars, settingsFor(d, { timeframe, length: 2 }), {}, context(interval, bars));
+    for (const [tf, chart] of [['5m', '3m'], ['15m', '10m'], ['5m', '2m'], ['45m', '30m'], ['W', '2D'], ['M', 'W'], ['Q', '2M']]) {
+      expect(run(tf, chart).rsi.every((v) => v === null), `${tf} on ${chart}`).toBe(true);
+    }
+    for (const [tf, chart] of [['5m', '1m'], ['15m', '5m'], ['1h', '5m'], ['15m', '3m'], ['D', '5m'], ['D', '3m'],
+      ['W', '5m'], ['W', 'D'], ['M', 'D'], ['M', '5m'], ['Q', 'M'], ['2M', 'M']]) {
+      expect(() => run(tf, chart), `${tf} on ${chart}`).not.toThrow();
+    }
+    // A fold that completes buckets inside these bars still computes.
+    expect(run('15m', '3m').rsi.some((v) => v !== null)).toBe(true);
+  });
+
+  it('a timeframe the chart bars do not divide into, through the chart: error status, then recovery', () => {
+    const chart = makeChart();
+    chart.setDataContext({ interval: '3m' });
+    chart.addSeries('candlestick').setData(bars.filter((_, i) => i % 3 === 0));
+    const refused = chart.addIndicator('ema', { timeframe: '5m' });
+    expect(refused.values().ma.every((v) => v === null)).toBe(true);
+    expect(refused.dataStatus()?.state).toBe('error');
+    expect(String((refused.dataStatus() as { error: unknown }).error))
+      .toMatch(/"5m" is not a whole multiple of the chart's "3m" bars/);
+    const ema = chart.addIndicator('ema', { timeframe: '15m' });
+    expect(ema.values().ma.some((v) => v !== null)).toBe(true);
+    ema.setSettings({ timeframe: '5m' });
+    ema.values();
+    expect(ema.dataStatus()?.state).toBe('error');
+    expect(String((ema.dataStatus() as { error: unknown }).error)).toMatch(/whole multiple/);
+    ema.setSettings({ timeframe: '15m' });
+    ema.values();
+    expect(ema.dataStatus()?.state).toBe('ready');
+    refused.setSettings({ timeframe: '' });
+    expect(refused.values().ma.some((v) => v !== null)).toBe(true);
+    expect(refused.dataStatus()?.state).toBe('ready');
+  });
+
   it('another study output as the source, while it folds', () => {
     const d = getIndicator('ema');
     const source = { kind: 'indicator', instanceId: 'up', plotKey: 'ma' };

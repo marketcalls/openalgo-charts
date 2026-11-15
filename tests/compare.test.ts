@@ -3,14 +3,14 @@
  * series' bars, keeping it off the primary's price axis, and making the two
  * readable together.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { PriceScale } from '../src/scale/price-scale';
 import type { PaneRenderContext } from '../src/core/pane';
 import { Chart } from '../src/core/chart';
 import { fakeDocument } from './helpers/fake-dom';
 import { alignToPrimary } from '../src/compare/align';
 import { addComparison, comparisonController, type ComparisonHandle } from '../src/compare/controller';
-import type { Bar, SeriesDataItem } from '../src/model/bar';
+import { toBar, type Bar, type SeriesDataItem } from '../src/model/bar';
 import { ReplayController } from '../src/replay/controller';
 
 const DAY = 86400;
@@ -269,6 +269,40 @@ describe('comparable coordinates', () => {
     expect(comparison).toBeCloseTo(pane.priceScale.priceToY(105), 6);
   });
 
+  it('fits a bigger move on the pane, up or down, with the default baseline', () => {
+    const { chart, pane } = loaded(ramp(100, 50, 103)); // primary +3%
+    const rising = ramp(1000, 50, 1300), falling = ramp(500, 50, 400); // +30%, -20%
+    const up = addComparison(chart, { symbol: 'STOCK', bars: rising });
+    const down = addComparison(chart, { symbol: 'LAGGARD', bars: falling });
+    const height = pane.priceScale.height;
+    for (const [handle, bars] of [[up, rising], [down, falling]] as const) {
+      const ys = bars.map(b => handle.priceScale().priceToY(b.close));
+      expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
+      expect(Math.max(...ys)).toBeLessThanOrEqual(height);
+    }
+    // Still one ladder: the same move lands on the same pixel.
+    expect(up.priceScale().priceToY(1030)).toBeCloseTo(pane.priceScale.priceToY(103), 6);
+    expect(down.priceScale().priceToY(485)).toBeCloseTo(pane.priceScale.priceToY(97), 6);
+  });
+
+  it('fits only what is in view, shown, and leaves a manual primary range alone', () => {
+    const { chart, pane } = loaded(ramp(100, 50, 103));
+    const handle = addComparison(chart, { symbol: 'STOCK', bars: [...ramp(1000, 25, 1300), ...ramp(1300, 25, 1000, 25)] });
+    chart.setVisibleLogicalRange({ from: 30, to: 49 });
+    // The comparison falls back to where it started over the bars in view: it is fitted on its own path there.
+    const inView = ramp(1300, 25, 1000, 25).slice(5);
+    const ys = inView.map(b => handle.priceScale().priceToY(b.close));
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(pane.priceScale.height);
+    handle.series.applyOptions({ visible: false });
+    expect(pane.priceScale.priceRange().max).toBeLessThan(110);
+    handle.series.applyOptions({ visible: true });
+    pane.priceScale.setAutoScale(false);
+    pane.priceScale.setPriceRange({ min: 90, max: 110 });
+    handle.setBars(ramp(1000, 50, 2000));
+    expect(pane.priceScale.priceRange()).toEqual({ min: 90, max: 110 });
+  });
+
   it('leaves each instrument on its own autoscale in mode none', () => {
     const { chart, pane } = loaded(ramp(100, 11, 110));
     const controller = comparisonController(chart, { mode: 'none' });
@@ -334,6 +368,83 @@ describe('keeping up with the primary series', () => {
     replay.stop();
     expect(during.series.getData()).toHaveLength(3);
   });
+  it('aligns only the new bars when the primary appends, as a full alignment would', () => {
+    const { chart } = loaded(ramp(100, 20, 120));
+    // A missing print on day 22 and one on day 30, which the primary never reaches.
+    const prints = ramp(1000, 31, 1300).filter((_, day) => day !== 22 && day < 26 || day === 30);
+    const handle = addComparison(chart, { symbol: 'A', bars: prints });
+    // A full alignment rewrites the comparison's whole history.
+    const writes = vi.spyOn(handle.series, 'setData');
+    for (let day = 20; day < 24; day++) {
+      chart.primarySeries()!.update(bar(day, 100 + day));
+      const full = alignToPrimary(chart.primaryBars(), prints);
+      expect(handle.alignment()).toEqual(full.alignment);
+      expect(handle.series.getData().map(item => [item.time, item.close]))
+        .toEqual(full.items.map(item => [item.time, toBar(item).close]));
+      expect(handle.barAt(at(day))?.close ?? null).toBe(day === 22 ? null : prints.find(b => b.time === at(day))!.close);
+    }
+    expect(writes).not.toHaveBeenCalled();
+    // A tick inside the newest bar moves no timestamp and writes nothing either.
+    chart.primarySeries()!.update(bar(23, 130));
+    expect(writes).not.toHaveBeenCalled();
+    // The instrument's own array is read afresh, as a full alignment read it.
+    prints.push(bar(24, 1240));
+    chart.primarySeries()!.update(bar(24, 124));
+    expect(handle.barAt(at(24))?.close).toBe(1240);
+    expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), prints).alignment);
+    // A page of older history still re-aligns the whole of it.
+    chart.primarySeries()!.prependData([bar(-1, 99)]);
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), prints).alignment);
+  });
+
+  // Audit N05, second round: the append path counted every new match off the
+  // last alignment's dropped prints, including one the host had only just added.
+  it('counts a print the host appended since the last alignment as a full alignment does', () => {
+    const { chart } = loaded(ramp(100, 3, 102));
+    const prints = ramp(1000, 3, 1020);
+    const handle = addComparison(chart, { symbol: 'A', bars: prints });
+    prints.push(bar(3, 1030));
+    chart.primarySeries()!.update(bar(3, 103));
+    expect(handle.alignment()).toEqual({ bars: 4, matched: 4, gaps: 0, dropped: 0 });
+    // One the primary skips past stays dropped, and one past its end is dropped too.
+    prints.push(bar(4, 1040), bar(5, 1050), bar(7, 1070));
+    chart.primarySeries()!.update(bar(5, 105));
+    expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), prints).alignment);
+    expect(handle.alignment()).toEqual({ bars: 5, matched: 5, gaps: 0, dropped: 2 });
+    chart.primarySeries()!.update(bar(7, 107));
+    expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), prints).alignment);
+  });
+
+  it('reads only the prints a live append can match, not the instrument\'s whole history', () => {
+    const count = 20_000;
+    const { chart } = loaded(ramp(100, count, 200));
+    let reads = 0;
+    const prints = Array.from({ length: count }, (_, day) => ({ get time(): number { reads++; return at(day); }, value: 1000 + day }));
+    const handle = addComparison(chart, { symbol: 'A', bars: prints });
+    reads = 0;
+    chart.primarySeries()!.update(bar(count, 201));
+    expect(reads).toBeLessThan(10);
+    expect(handle.alignment()).toEqual({ bars: count + 1, matched: count, gaps: 1, dropped: 0 });
+    // Out of time order, the prints are read in full again, as an alignment reads them.
+    const shuffled: SeriesDataItem[] = [{ time: at(count + 1), value: 9 }, ...ramp(1000, 3, 1020)];
+    handle.setBars(shuffled);
+    chart.primarySeries()!.update(bar(count + 1, 202));
+    expect(handle.barAt(at(count + 1))?.close).toBe(9);
+    expect(handle.alignment()).toEqual(alignToPrimary(chart.primaryBars(), shuffled).alignment);
+  });
+
+  it('withholds an appended print while its comparison is suppressed', () => {
+    const { chart } = loaded(ramp(100, 3, 102));
+    const controller = comparisonController(chart, { baseline: 'common' });
+    const source = controller.add({ symbol: 'A', bars: [bar(0, 0), bar(1, -10), bar(2, -20), bar(3, -30)] });
+    chart.primarySeries()!.update(bar(3, 103));
+    expect(source.series.getData()).toHaveLength(4);
+    expect(source.series.getData().every(item => !Number.isFinite(item.close))).toBe(true);
+    controller.setMode('none');
+    expect(source.series.getData().map(item => item.close)).toEqual([0, -10, -20, -30]);
+  });
+
   it('re-aligns when the primary gains bars', () => {
     const chart = makeChart();
     const primary = chart.addSeries('candlestick');

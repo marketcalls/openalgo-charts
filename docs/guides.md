@@ -132,12 +132,17 @@ chart.subscribeDrag((id, price) => {
   draftPrices.delete(id);
   if (price === undefined) return;
   eng.requestModify(clientId(id), price);
-  void eng.commitModify(clientId(id));
+  void eng.commitModify(clientId(id)).finally(refreshBook);
 });
 ```
 
-`requestModify` can send immediately; it is not a preview API. The line map,
-ID mapping and cancellation rollback above are host-owned. See the
+`requestModify` can send immediately; it is not a preview API. `commitModify`
+resolves once the broker has answered every modify of the order already sent
+(since 2.7.3), so the book read on it shows where the order now rests. A
+stop-limit takes the price as its limit and keeps its trigger at the same gap:
+for a line drawn at the trigger, pass the dropped trigger and the shifted limit,
+`requestModify(id, limit, { triggerPrice })`, and preview both. The line map,
+ID mapping, book refresh and cancellation rollback above are host-owned. See the
 [trading guide](https://marketcalls.github.io/openalgo-charts/docs/trading/#drag-to-modify)
 for the release path. `AlertController` threshold edits are separate and never
 send a broker order by themselves.

@@ -8,7 +8,7 @@ import DrawingToolsDemo from '../../components/DrawingToolsDemo'
 
 # Drawing Tools
 
-`openalgo-charts/draw` is a lazy tier (**60.79 kB** Brotli in 2.7.2) with 90 tools and a headless
+`openalgo-charts/draw` is a lazy tier (**61.86 kB** Brotli in 2.7.3) with 90 tools and a headless
 controller. It ships **no UI**: no toolbar, no dialogs. It owns the model and the
 interactions; your app supplies the buttons.
 
@@ -604,7 +604,9 @@ makes.
 A copy is the user's own drawing: paste and duplicate never carry a policy. A policy is
 data, so it survives a save and a restore for a persistent drawing, and the migration keeps
 only the four boolean flags; strip `policy` before `fromJSON` when importing a document you
-do not trust, the way the yfinance host does for every layout file it imports. Stacking order (front, back, either side of the series, a place in the series band) is outside the policy.
+do not trust, the way the yfinance host does for every layout file it imports. Since
+2.7.3 the workspace tier does this for you: `importDocument` drops `policy`, and so do
+`parseWorkspaceDocument` and `parseWorkspacePayload` when given `{ keepPolicy: false }`. Stacking order (front, back, either side of the series, a place in the series band) is outside the policy.
 
 The widget draws every edit control for a read-only selection disabled with the note
 "read-only" (context menu, properties dialog, rail, mobile bar) and keeps copy and duplicate.

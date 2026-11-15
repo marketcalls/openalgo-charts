@@ -3,7 +3,7 @@
   "caps": {
     "src/core/chart-state.ts": {
       "ChartPersistence._restoreState": 160,
-      "ChartPersistence.restoreState": 153
+      "ChartPersistence.restoreState": 152
     },
     "src/core/chart-studies.ts": {
       "ChartStudies._indicatorHost": 205

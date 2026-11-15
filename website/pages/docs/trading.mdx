@@ -136,7 +136,8 @@ At the feed, with no configuration at all:
 
 - a non-finite, zero, negative or fractional quantity is refused;
 - a repeated `clientToken` is refused before anything is sent, so a double-clicked button
-  places once even when both clicks land before the first response.
+  places once even when both clicks land before the first response. A call that passes no
+  `clientToken` is not guarded: two identical calls are two orders.
 
 Supply `constraints(symbol, exchange)` on the feed config and the exchange freeze limit and
 lot grid apply too, **including on MARKET orders**, which is the case that matters because a
@@ -215,20 +216,32 @@ chart.subscribeDrag(
     draftPrices.delete(id);
     if (price === undefined) return;
     eng.requestModify(clientId(id), price);
-    void eng.commitModify(clientId(id));
+    void eng.commitModify(clientId(id)).finally(refreshBook);
   },
 );
 ```
 
-`orderLines`, `clientId` and `restoreOrderPreview` belong to the host. The preview
+`orderLines`, `clientId`, `restoreOrderPreview` and `refreshBook` belong to the host. The preview
 above shows the raw pointer price; with a tick schedule in the engine's constraints,
 preview `ticks.round(price)` with that same schedule instead, which is the price
 `requestModify` will send. The last
 restores the broker-confirmed level after cancellation. `requestModify` can
 send immediately and rate-limits subsequent requests; it is not a visual-preview
-API. `commitModify` flushes any queued patch. Call them only when the host has
-accepted the edit. The [drag lifecycle](/docs/events#primitive-drag-lifecycle)
-explains why cancellation must be handled before a legacy end callback.
+API. `commitModify` flushes any queued patch, and since 2.7.3 resolves only once the
+broker has answered it and every modify of that order already sent. On a release
+`requestModify` usually sends at once, which left nothing to flush, so a book read on
+`commitModify` used to run before the broker took the change and repaint the order at
+its old price. Call them only when the host has accepted the edit. The
+[drag lifecycle](/docs/events#primitive-drag-lifecycle) explains why cancellation must
+be handled before a legacy end callback.
+
+The price `requestModify` takes depends on the order type: a limit order's price, a
+stop-market's trigger, and a stop-limit's **limit**, its trigger carried at the gap it
+was placed with. A line drawn at the trigger, as `WorkingOrderLine` draws a stop, is
+therefore not where a stop-limit rests when the pointer price is passed alone: a 100/95
+order dragged to 110 rests at limit 110, trigger 105. Pass the trigger it was dropped at
+and the limit that keeps the gap, `requestModify(id, 115, { triggerPrice: 110 })`, and
+preview those same two fields.
 
 ## Interaction feedback (hover, drag, ghost)
 
@@ -519,14 +532,39 @@ import type { TradeHost } from 'openalgo-charts/trade';
 // chart must implement addPrimitive / removePrimitive.
 const controller = new TradeController(chart);
 
-controller.reconcile(orders, positions); // call after every snapshot
+// Call after every snapshot, naming the chart's instrument.
+controller.reconcile(orders, positions, { symbol: 'RELIANCE', exchange: 'NSE' });
 controller.onLtp('RELIANCE', 2950);      // call on every LTP tick
+controller.onLtp('RELIANCE', 2950, 'NSE'); // or only for that exchange's rows (2.7.3)
+
+// The position a click names, with its exchange and product:
+chart.subscribeClick((id) => {
+  if (id.startsWith('position:') && id.endsWith('::close')) closeRow(controller.positionOf(id));
+});
 
 // Introspection helpers for tests:
 controller.orderLineCount() // -> number of active WorkingOrderLine primitives
 controller.positionCount()  // -> number of active PositionMarker primitives
 controller.bracketCount()   // -> number of active BracketGroup primitives
 ```
+
+A book covers the whole account, so pass the chart's instrument as the third argument
+(since 2.7.3). Without it every working order is drawn on this chart and joins its
+autoscale: a futures order at 52000 stretches an equity chart to 52000, and an order on
+another exchange sits at a plausible price where a drag would modify it. A row that names
+no exchange matches on its symbol. Positions are keyed by symbol, exchange and product, so
+a delivery holding and an intraday position in one symbol are two markers.
+
+Their hit ids name one row each (since 2.7.3). A symbol drawn with one position keeps
+`position:<symbol>` and `bracket-sl:<symbol>`, the ids hosts already parse. When two drawn
+positions share a symbol, each of its markers and brackets carries the row key instead,
+`position:["INFY","NSE","MIS"]::close` (the JSON of symbol, exchange and product), where
+both used to read `position:INFY::close`. `positionOf(id)` takes either form, `::close`
+included, and returns the `Position` the id names (for a bracket, the position it
+protects), or `undefined`. The ids change when a second row of the symbol appears or the
+last other one closes, so resolve an id when it arrives. `onLtp` takes an optional
+exchange: without it a price reaches every row of the symbol, as before; with it, only
+rows on that exchange and rows that name none.
 
 `TradeHost` is a two-method interface; any object with `addPrimitive` and
 `removePrimitive` qualifies. `IPrimitive` is exported from the base package:
@@ -567,7 +605,8 @@ line.setLtp(2950);         // refresh the distance-to-LTP label
 
 A solid line at the average entry price with a shaded P&L band to LTP and a
 label showing direction, net quantity, P&L amount, and P&L percent, coloured by
-profit/loss sign. Hit-test returns `position:<symbol>`.
+profit/loss sign. Hit-test returns `position:<symbol>`, or `position:<hitKey>` when built
+with `{ hitKey }`, which `TradeController` does for two rows of one symbol.
 
 ```ts
 import { PositionMarker } from 'openalgo-charts/trade';
@@ -584,7 +623,9 @@ marker.setLtp(2950);
 SL and TP dashed lines with shaded risk (red) and reward (green) zones drawn
 behind the candles (`zOrder: 'bottom'`), plus an R:R label near the entry. The
 hit-tests return `bracket-sl:<symbol>` and `bracket-tp:<symbol>` with
-`ns-resize` cursors.
+`ns-resize` cursors, the symbol replaced by a `hitKey` passed as a second argument.
+`BracketState` also carries the `exchange` and `product` of the position it protects
+when the book names them (since 2.7.3).
 
 ```ts
 import { BracketGroup } from 'openalgo-charts/trade';
@@ -654,24 +695,35 @@ const feed = new OpenAlgoTradeFeed({
 
 const engine = new OrderEngine({ feed, constraints: { tickSize: 0.05 } });
 
-// Fetch and reconcile the current book on connect or reconnect:
+// Fetch and reconcile the current book on connect or reconnect. Either read
+// throws when the book cannot be read: keep what is drawn until one succeeds.
 const [orders, positions] = await Promise.all([
   feed.getOrders(),
   feed.getPositions(),
 ]);
-controller.reconcile(orders, positions);
+controller.reconcile(orders, positions, { symbol: 'RELIANCE', exchange: 'NSE' });
 ```
+
+Orders and positions keep the `exchange` and `product` of their book row. Since 2.7.3
+`getOrders`, `getOrderBook` and `getPositions` throw on an HTTP-success body that says
+`status: 'error'` or carries no list, rather than return an empty book that would remove
+every line and report every position flat. An explicit empty list is still empty. Each
+endpoint is read in its own shape: the orderbook's rows as `data` or `data.orders`, the
+positionbook's only as `data`, so an orderbook-shaped answer from the positionbook throws.
 
 `decodeOrder` and `mapPosition` convert raw OpenAlgo REST rows from your own
 fetch calls. `decodeOrder` returns `{ ok: true, order }` or `{ ok: false, issue }`,
 so a row with no honest order form is reported rather than drawn; `getOrders`
 decodes the same way, and `getOrderBook()` returns the rows it could not read as
-`quarantined`:
+`quarantined`. `mapPosition` throws on a row with no symbol, an unreadable quantity,
+or an open quantity with an unreadable average price, and `getPositions` fails the
+read naming the row (`positions[3].quantity`): an unreadable position is unknown, not
+flat.
 
 ```ts
 const decoded  = decodeOrder(rawRow);   // coerces string fields, maps order_status
 if (decoded.ok) use(decoded.order); else report(decoded.issue);
-const position = mapPosition(rawRow);   // maps quantity (signed net) + average_price
+const position = mapPosition(rawRow);   // signed net quantity, average_price, exchange, product
 ```
 
 `mapOrder`, the older mapper that returned a placeholder for an unreadable row,
@@ -688,6 +740,12 @@ After any failed modification, including an HTTP error, the order may have chang
 the broker. Refresh with `getOrders()` or `getOrderBook()` before modifying it again;
 a read started before that uncertain outcome cannot resolve it. Cancellation remains
 available. New-order placement uses its existing path.
+
+From 2.7.3 a direct `modify()` refuses a non-finite price or trigger, and a quantity
+`place()` would refuse, before anything is sent and without touching that context.
+`cancel()` checks its answer the way `modify()` does: an HTTP-success body that says
+`status: 'error'`, or names neither success nor the order, rejects. The request left,
+so treat the order as possibly still working and read the book.
 
 <Callout type="warning">
 The trade path is broker-live. Test against OpenAlgo **analyzer mode** first, and verify the

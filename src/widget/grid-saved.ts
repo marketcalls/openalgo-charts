@@ -4,8 +4,10 @@
  * menu on.
  *
  * Its own module so grid.ts carries only the option and the mount call. It
- * reaches the grid through its public API alone, as a host building its own
- * controller over a grid would.
+ * reaches the grid through its public API, as a host building its own
+ * controller over a grid would, but for opening a layout (`apply`): a layout
+ * of this desk keeps the drawings each chart holds for the instruments it is
+ * not showing, where a desk a host hands over starts without them.
  *
  * Three decisions worth recording:
  *
@@ -26,7 +28,7 @@
 import { isReplaying } from 'openalgo-charts';
 import type { WorkspacePayload, WorkspaceStore } from 'openalgo-charts/workspace';
 import type { WidgetContext } from './context';
-import type { ChartGrid } from './grid';
+import type { ChartGrid, ChartGridApplyReport } from './grid';
 import { createLayoutsController, type LayoutsController, type LayoutTarget } from './layouts';
 import { layoutChartState, widgetLayoutTarget } from './layouts-target';
 import { layoutStatusText, sayLayoutFailures, showLayoutsMenu, type LayoutsMenuSlot } from './layouts-widget';
@@ -44,6 +46,8 @@ interface GridSavedHost {
   context(): WidgetContext;
   /** Whether a desk was opened on the grid (`applyWorkspace`) since it was built. */
   opened(): boolean;
+  /** `applyWorkspace`, keeping the documents of the instruments the charts are not showing. */
+  apply(payload: WorkspacePayload): ChartGridApplyReport;
 }
 
 /** What the grid holds of its saved layouts; internal. */
@@ -81,7 +85,7 @@ export function attachGridSaved(host: GridSavedHost): GridSaved | null {
       return { ...payload, activePaneId: payload.panes[0]!.id,
         panes: payload.panes.map(pane => ({ ...pane, chart: layoutChartState(pane.chart as WidgetChartState) })) };
     },
-    apply: payload => grid.applyWorkspace(payload),
+    apply: payload => host.apply(payload),
     subscribe(listener) {
       heard = listener;
       wire();

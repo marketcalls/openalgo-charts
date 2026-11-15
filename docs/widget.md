@@ -464,14 +464,14 @@ cannot name a part either: allow the origin, or the directory as a path ending i
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.7.2 build, decimal Brotli kB, enforced by
+Budgets from `.size-limit.json` and measurements from the 2.7.3 build, decimal Brotli kB, enforced by
 `npm run size`:
 
 | Row | Files | Budget | Actual |
 |---|---|---|---|
-| Widget tier | `openalgo-charts.widget.mjs` | 129.58 kB | 129.58 kB |
-| Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.00 kB | 21.00 kB |
-| Widget terminal | base + draw + indicators + widget | 375.27 kB | 375.27 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 131.55 kB | 131.55 kB |
+| Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.05 kB | 21.04 kB |
+| Widget terminal | base + draw + indicators + widget | 380.40 kB | 380.39 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged. Measure, do not
@@ -507,8 +507,10 @@ refreshes history on `onResync`. Recovery buffers live bars during the fetch,
 bypasses `withBarCache`, merges the observations and preserves the viewport.
 Overlapping volumes use the maximum snapshot. Whole-bar merging can retain seed
 extrema corrected by history; unseen trades are not replayed.
-A failed refresh retains visible history marked stale while live buffering and
-reconnect monitoring continue. Call `reload()` to retry with fresh history;
+On the controller's own poll and bar-close repair the forming bar keeps the close
+the stream delivered; a reconnect, a tab return or `reload()` takes history's close.
+A failed refresh keeps visible history marked stale, shows the bars
+delivered during the request and follows the stream while reconnect monitoring continues. Call `reload()` to retry with fresh history;
 manual reload keeps its usual fit/saved-view behavior. Custom hosts reconcile through
 the optional `BarSubscriptionOptions` contract. See the
 [live data guide](https://marketcalls.github.io/openalgo-charts/docs/live-data/).

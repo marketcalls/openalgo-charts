@@ -124,8 +124,10 @@ describe('study descriptors', () => {
 // ── CPR with Floor Pivot ─────────────────────────────────────────────────────
 
 /**
- * Three IST sessions of three hourly bars each. Session one spans 85..120 and
- * closes at 108, which is the frame every bar of session two must carry.
+ * Three IST sessions of three hourly bars each, after the last bar of the
+ * session before them, which is all the history holds of that one. Session one
+ * spans 85..120 and closes at 108, which is the frame every bar of session two
+ * must carry; the partial session's absurd range must reach nothing.
  */
 const sessions = (): Bar[] => {
   const shape: [number, number, number][][] = [
@@ -133,7 +135,9 @@ const sessions = (): Bar[] => {
     [[130, 100, 120], [140, 110, 135], [138, 118, 130]],
     [[150, 140, 145], [152, 141, 150], [151, 139, 148]],
   ];
-  const out: Bar[] = [];
+  const out: Bar[] = [{
+    time: istMorning(2023, 12, 31) + 2 * 3600, open: 100, high: 1000, low: 1, close: 100, volume: 500,
+  }];
   shape.forEach((day, d) => {
     day.forEach(([high, low, close], i) => {
       // 09:30 IST plus one hour per bar, so every bar of a day shares its date.
@@ -150,21 +154,21 @@ describe('CPR with Floor Pivot: the daily frame', () => {
   const bars = sessions();
   const values = CPR.calc(bars, defaults(CPR), {});
 
-  it('is null through the first session, which has nothing behind it', () => {
+  it('is null through the partial session and the first whole one, which has nothing whole behind it', () => {
     for (const key of ['dPivot', 'dS2', 'dS3', 'dR2', 'dR3', 'dBc', 'dTc']) {
-      expect(firstNonNull(values[key]), key).toBe(3);
+      expect(firstNonNull(values[key]), key).toBe(4);
     }
   });
 
   it('holds one frozen frame across the whole of the following session', () => {
     // Session one: high 120, low 85, close 108.
     const pivot = (120 + 85 + 108) / 3;
-    expect(values.dPivot[3]).toBeCloseTo(pivot, 12);
-    expect(values.dPivot[4]).toBe(values.dPivot[3]);
-    expect(values.dPivot[5]).toBe(values.dPivot[3]);
+    expect(values.dPivot[4]).toBeCloseTo(pivot, 12);
+    expect(values.dPivot[5]).toBe(values.dPivot[4]);
+    expect(values.dPivot[6]).toBe(values.dPivot[4]);
     // Session two: high 140, low 100, close 130. The frame steps at the boundary.
-    expect(values.dPivot[6]).toBeCloseTo((140 + 100 + 130) / 3, 12);
-    expect(values.dPivot[6]).not.toBe(values.dPivot[5]);
+    expect(values.dPivot[7]).toBeCloseTo((140 + 100 + 130) / 3, 12);
+    expect(values.dPivot[7]).not.toBe(values.dPivot[6]);
   });
 
   it('derives every level from the previous session', () => {
@@ -172,15 +176,15 @@ describe('CPR with Floor Pivot: the daily frame', () => {
     const width = 120 - 85;
     const s1 = 2 * pivot - 120;
     const r1 = 2 * pivot - 85;
-    expect(values.dS2[3]).toBeCloseTo(pivot - width, 12);
-    expect(values.dS3[3]).toBeCloseTo(s1 - width, 12);
-    expect(values.dR2[3]).toBeCloseTo(pivot + width, 12);
-    expect(values.dR3[3]).toBeCloseTo(r1 + width, 12);
-    expect(values.dBc[3]).toBeCloseTo((120 + 85) / 2, 12);
+    expect(values.dS2[4]).toBeCloseTo(pivot - width, 12);
+    expect(values.dS3[4]).toBeCloseTo(s1 - width, 12);
+    expect(values.dR2[4]).toBeCloseTo(pivot + width, 12);
+    expect(values.dR3[4]).toBeCloseTo(r1 + width, 12);
+    expect(values.dBc[4]).toBeCloseTo((120 + 85) / 2, 12);
   });
 
   it('places the top and bottom of the central range symmetrically about the pivot', () => {
-    for (let i = 3; i < bars.length; i++) {
+    for (let i = 4; i < bars.length; i++) {
       const p = values.dPivot[i] as number;
       const bc = values.dBc[i] as number;
       const tc = values.dTc[i] as number;
@@ -195,9 +199,9 @@ describe('CPR with Floor Pivot: the daily frame', () => {
     expect(allNull(values.dR1)).toBe(true);
     const shown = CPR.calc(bars, withSettings(CPR, { displayS1R1: true }), {});
     const pivot = (120 + 85 + 108) / 3;
-    expect(shown.dS1[3]).toBeCloseTo(2 * pivot - 120, 12);
-    expect(shown.dR1[3]).toBeCloseTo(2 * pivot - 85, 12);
-    expect(firstNonNull(shown.dS1)).toBe(3);
+    expect(shown.dS1[4]).toBeCloseTo(2 * pivot - 120, 12);
+    expect(shown.dR1[4]).toBeCloseTo(2 * pivot - 85, 12);
+    expect(firstNonNull(shown.dS1)).toBe(4);
   });
 
   it('blanks a whole group when its switch is off and leaves the others alone', () => {
@@ -207,7 +211,7 @@ describe('CPR with Floor Pivot: the daily frame', () => {
     for (const key of ['dPivot', 'dS1', 'dS2', 'dS3', 'dBc', 'dTc']) {
       expect(allNull(hidden[key]), key).toBe(true);
     }
-    expect(firstNonNull(hidden.dR2)).toBe(3);
+    expect(firstNonNull(hidden.dR2)).toBe(4);
   });
 });
 
@@ -265,30 +269,41 @@ describe('CPR with Floor Pivot: period selection', () => {
 
   it('opens a weekly frame on the Monday-based week index, not on the weekend', () => {
     // 1 January 2024 is a Monday, so 4..7 January share a week and 8 January
-    // opens the next one. Saturday and Sunday must not step the frame.
+    // opens the next one. Saturday and Sunday must not step the frame. The
+    // Friday before is a week the history holds only the end of.
     const bars = datedSeries([
-      [2024, 1, 4], [2024, 1, 5], [2024, 1, 6], [2024, 1, 7], [2024, 1, 8], [2024, 1, 9],
+      [2023, 12, 29], [2024, 1, 4], [2024, 1, 5], [2024, 1, 6], [2024, 1, 7], [2024, 1, 8], [2024, 1, 9],
     ]);
     const values = CPR.calc(bars, withSettings(CPR, {
       pivotMode: 'manual', showDaily: false, showWeekly: true, showMonthly: false,
     }), {});
-    expect(firstNonNull(values.wPivot)).toBe(4);
-    // That first week ran 102..105 high, 98..101 low, closing at 103.
-    expect(values.wPivot[4]).toBeCloseTo((105 + 98 + 103) / 3, 12);
-    expect(values.wPivot[5]).toBe(values.wPivot[4]);
+    expect(firstNonNull(values.wPivot)).toBe(5);
+    // That first whole week ran 103..106 high, 99..102 low, closing at 104.
+    expect(values.wPivot[5]).toBeCloseTo((106 + 99 + 104) / 3, 12);
+    expect(values.wPivot[6]).toBe(values.wPivot[5]);
   });
 
   it('opens a monthly frame on the IST month change, across a year end', () => {
     const bars = datedSeries([
-      [2024, 12, 30], [2024, 12, 31], [2025, 1, 1], [2025, 1, 2],
+      [2024, 11, 29], [2024, 12, 30], [2024, 12, 31], [2025, 1, 1], [2025, 1, 2],
     ]);
     const values = CPR.calc(bars, withSettings(CPR, {
       pivotMode: 'manual', showDaily: false, showWeekly: false, showMonthly: true,
     }), {});
-    expect(firstNonNull(values.mPivot)).toBe(2);
-    // December contributed two bars: high 103, low 98, close 101.
-    expect(values.mPivot[2]).toBeCloseTo((103 + 98 + 101) / 3, 12);
-    expect(values.mPivot[3]).toBe(values.mPivot[2]);
+    expect(firstNonNull(values.mPivot)).toBe(3);
+    // December contributed two bars: high 104, low 99, close 102.
+    expect(values.mPivot[3]).toBeCloseTo((104 + 99 + 102) / 3, 12);
+    expect(values.mPivot[4]).toBe(values.mPivot[3]);
+  });
+
+  it('never hands on the first loaded period, however it starts', () => {
+    // History that opens on a boundary is no different from history that opens
+    // inside a period: nothing before the first bar says which it is.
+    const bars = datedSeries([[2024, 1, 1], [2024, 1, 2], [2024, 2, 1], [2024, 3, 1]]);
+    const values = CPR.calc(bars, withSettings(CPR, {
+      pivotMode: 'manual', showDaily: false, showWeekly: false, showMonthly: true,
+    }), {});
+    expect(values.mPivot).toEqual([null, null, null, (104 + 100 + 102) / 3]);
   });
 
   it('keeps the top and bottom of every active frame symmetric about its pivot', () => {

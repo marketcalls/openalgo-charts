@@ -40,7 +40,10 @@ chart.addPrimitive(new MarketProfile(result, { blockDisplay: 'compact' }));
   axis agree. See [Timezones](/docs/timezones).
 - **Period / letter** - each `blockMinutes` slice of a session is one TPO letter (`A`, `B`,
   ... `Z`, then `a`..`z`).
-- **POC** - Point of Control, the price with the most TPOs (the longest row).
+- **POC** - Point of Control, the price with the most TPOs (the longest row). TPO counts
+  are small whole numbers, so several rows often tie for the longest; the POC is then the
+  highest-priced of them, not the one nearest the middle of the range, and the value area
+  grows from it.
 - **Value Area (VAH / VAL)** - the band around the POC holding `valueAreaPercent` of all TPOs.
 - **Initial Balance** - the price range of the opening `initialBalancePeriods` periods.
 - **Single prints** - lone TPOs away from the extremes (quick moves that left a gap in time).
@@ -162,10 +165,20 @@ computeMarketProfile(bars, { tickSize: 0.1, rowTicks: rowTicksFor(2, 0.1) });  /
 
 `rowTicksFor(rowSize, tickSize)` does the division for you and floors at 1.
 
+Rows are centred on multiples of the row height. With an even `rowTicks`, every other tick
+on a row boundary sits exactly between two row centres; such a price belongs to the **upper**
+row, so each row spans `[centre - row / 2, centre + row / 2)` and holds the same number of
+ticks. On 0.1 rows of a 0.05 instrument, 100.15 counts in 100.2 and 100.25 in 100.3. A half
+is recognised however binary rounds the division, so a decimal row size cannot send one
+half-row price up and the next one down. A bar whose volume is not a finite number of at
+least zero counts as having none.
+
 <Callout>
 The **order flow / footprint** side takes the same multiplier, so a chart's bricks and its
 profile rows can share one grid: `computeFootprint(time, trades, 0.1, 20)` and
-`new FootprintAggregator(tf, 0.1, 20)`. See [Profiles & Order Flow](/docs/profiles-and-orderflow).
+`new FootprintAggregator(tf, 0.1, 20)`. Every price lands in the same row of both except a
+tick exactly between two row centres, which the footprint sends to the even row instead. See
+[Profiles & Order Flow](/docs/profiles-and-orderflow).
 </Callout>
 
 ### Session windows

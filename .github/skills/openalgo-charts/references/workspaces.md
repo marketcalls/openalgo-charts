@@ -19,6 +19,10 @@ Runtime exports:
   `movablePrimaryPane`; any other chart refuses it rather than misplace the panes.
   Optional layout `rowWeights`/`columnWeights` preserve unequal tracks: positive
   finite values up to 1,000, one per track. Missing lists mean equal tracks.
+  (since 2.7.3) Both take `WorkspaceParseOptions` as a second argument. They keep each
+  drawing's and each study's `policy` by default, because a host reads its own saved
+  state through them; pass `{ keepPolicy: false }` for a document from a file, a link
+  or another account, so what it places arrives as the user's own.
 - `parseIndicatorTemplate`, `parseIndicatorTemplatePayload`, `parseIndicatorStates`: retain duplicate instances,
   settings, visibility, pane placement and unavailable custom IDs. Empty is valid.
   Chart states retain unique instanceId values for alert anchors. Layout-bearing
@@ -53,11 +57,18 @@ Runtime exports:
   append overlap, the 256-study limit and pane indices 0 through 31 before apply.
 - `migrateWidgetWorkspace`: explicit single-widget version-1 migration; metadata
   is supplied by the host, bars and execution state are excluded.
-- `WorkspaceDocumentError`: malformed/unsupported/oversized input.
-- `parseWorkspaceCatalog`: validate the entire persisted catalog before mutation.
+- `WorkspaceDocumentError`: malformed/unsupported/oversized input. One document is held
+  to 5 MiB of UTF-8 JSON, depth 32 and 100,000 JSON values. (since 2.7.3) The limits are
+  per document: a catalog is read to ten times the bytes and values, and each document in
+  it is still held to its own, so a catalog keeps far more than one document's worth.
+- `parseWorkspaceCatalog`: validate the entire persisted catalog before mutation. The
+  catalog is the host's own storage, so its layouts keep their policies.
 - `WorkspaceRepository`: asynchronous `load`, `createWorkspace`, `saveWorkspace`,
   `createTemplate`, `saveTemplate`, `rename`, `duplicate`, `remove`, `openWorkspace`, `setAutosave`,
   `importDocument`, `exportDocument`; immutable `namespace`; optional `now`/`id`.
+  `createWorkspace`, `saveWorkspace` and `duplicate` keep policies (the host's own
+  layouts); `importDocument` drops them (since 2.7.3), as a parser given
+  `{ keepPolicy: false }` does.
   `createTemplate`/`saveTemplate` accept study arrays or complete payloads.
   `saveTemplate` retains metadata identity and captures detached inputs; saving an
   array removes prior layout metadata. Empty updates are valid; failed writes preserve old content.
@@ -84,7 +95,7 @@ Runtime exports:
   version changes close it automatically; construct a new adapter afterward.
 
 Types: `WorkspaceKind`, `WorkspaceSettings`, `WorkspaceChartState`,
-`WorkspaceComparison`, `WorkspaceSlot`, `WorkspacePane`, `WorkspacePayload`,
+`WorkspaceComparison`, `WorkspaceSlot`, `WorkspacePane`, `WorkspacePayload`, `WorkspaceParseOptions`,
 `WorkspaceDocument`, `IndicatorTemplateDocument`, `WorkspaceCatalog`,
 `WorkspaceStorage`, `WorkspaceStore`, `WorkspaceRepositoryOptions`, `WorkspaceOperationOptions`, `WorkspaceOpenOptions`,
 `IndexedDbWorkspaceStorage`, `IndicatorTemplateMode`, `IndicatorTemplateInput`,
@@ -130,8 +141,10 @@ Do not execute imported text or assume namespace names provide authorization.
 
 ## Study policies in documents
 
-Workspace chart states keep each study's `policy` (validated, restrictions only) and a
-moved source's `sourceAbove`. A portable indicator template is the user's own copy of the
+Workspace chart states keep a moved source's `sourceAbove`. A study's or a drawing's
+`policy` is kept by the repository and by the parsers by default (validated,
+restrictions only), and dropped by a parser given `{ keepPolicy: false }` and by
+`importDocument` (since 2.7.3). A portable indicator template is the user's own copy of the
 user's own studies: parsing and `captureIndicatorTemplate` leave out every study the host
 keeps from the user (policy not `removable` or not `listed`), every study reading the
 output of one, their plot bindings and the scale ranges they owned, and drop `policy` from

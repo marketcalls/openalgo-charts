@@ -253,14 +253,13 @@ export class OpenAlgoTradeFeed implements OrderFeed {
    * constructs an engine, so a guarantee reachable only through the engine is
    * not a guarantee for the largest consumer of this library.
    */
-  private _assertQuantity(req: PlaceRequest): void {
-    const exchange = req.exchange ?? 'NSE';
+  private _assertQuantity(symbol: string, exchange: string, qty: number): void {
     // Universal floor first, so a NaN or a negative is refused with no config.
-    const c = this._config.constraints?.(req.symbol, exchange) ?? { tickSize: 0 };
-    const v = validateQuantity(req.qty, c);
+    const c = this._config.constraints?.(symbol, exchange) ?? { tickSize: 0 };
+    const v = validateQuantity(qty, c);
     if (!v.ok) {
       // Pre-flight by construction: nothing has been sent at this point.
-      throw preflight(`openalgo-charts: ${req.symbol} ${exchange}: ${v.reason}`);
+      throw preflight(`openalgo-charts: ${symbol} ${exchange}: ${v.reason}`);
     }
   }
 
@@ -332,7 +331,7 @@ export class OpenAlgoTradeFeed implements OrderFeed {
     assertTradingCapability(this.capabilities, capabilityRequest);
     // Both throw pre-flight, so a refusal here provably sent nothing and the
     // caller may correct and retry without wondering whether an order is live.
-    this._assertQuantity(req);
+    this._assertQuantity(req.symbol, req.exchange ?? 'NSE', req.qty);
     const token = this._claimToken(req.clientToken);
     const ctx: OrderContext = {
       symbol: req.symbol,
@@ -416,21 +415,23 @@ export class OpenAlgoTradeFeed implements OrderFeed {
         : 'unknown order context (place it or load the order book first)';
       throw preflight(`openalgo-charts: cannot modify ${orderId}, ${reason}`);
     }
+    // The checks place runs, for hosts that call this directly. Outside the try
+    // below: a refusal here sent nothing, so it must not mark the order uncertain,
+    // and JSON would carry a NaN to the broker as null.
+    for (const [field, value] of [['price', patch.price], ['trigger price', patch.triggerPrice]] as const) {
+      if (value !== undefined && !Number.isFinite(value)) {
+        throw preflight(`openalgo-charts: cannot modify ${orderId}, ${field} ${value} is not a finite number`);
+      }
+    }
+    if (patch.qty !== undefined) this._assertQuantity(ctx.symbol, ctx.exchange, patch.qty);
     try {
-      const ack = await this._post('/api/v1/modifyorder', {
+      assertAcknowledged(await this._post('/api/v1/modifyorder', {
         orderid: orderId, strategy: this._strategy,
         symbol: ctx.symbol, action: ctx.action, exchange: ctx.exchange,
         pricetype: ctx.pricetype, product: ctx.product,
         quantity: patch.qty ?? ctx.quantity, price: patch.price ?? ctx.price,
         trigger_price: patch.triggerPrice ?? ctx.triggerPrice, disclosed_quantity: 0,
-      }) as { status?: string; orderid?: string; order_id?: string; message?: string } | null;
-      if (ack?.status === 'error') {
-        throw new Error(`openalgo-charts: modifyorder failed: ${ack.message ?? 'order rejected'}`);
-      }
-      if (ack == null || (ack.status !== 'success' &&
-        !(ack.status === undefined && (ack.orderid ?? ack.order_id) === orderId))) {
-        throw new Error('openalgo-charts: modifyorder returned no readable acknowledgement');
-      }
+      }), orderId, 'modifyorder');
       // Apply only acknowledged deltas to the current context, never an awaited snapshot.
       const current = this._ctx.get(orderId);
       if (current !== undefined) this._ctx.set(orderId, {
@@ -450,7 +451,7 @@ export class OpenAlgoTradeFeed implements OrderFeed {
     const ctx = this._ctx.get(orderId);
     assertTradingCapability(this.capabilities, { operation: 'cancel', orderId, // see modify
       symbol: ctx?.symbol, exchange: ctx?.exchange, type: ctx?.pricetype } satisfies LooseOptional<TradingCapabilityRequest> as TradingCapabilityRequest);
-    await this._post('/api/v1/cancelorder', { orderid: orderId, strategy: this._strategy });
+    assertAcknowledged(await this._post('/api/v1/cancelorder', { orderid: orderId, strategy: this._strategy }), orderId, 'cancelorder');
   }
 
   /* ── reads ────────────────────────────────────────────────────────────── */
@@ -465,8 +466,7 @@ export class OpenAlgoTradeFeed implements OrderFeed {
   public async getOrderBook(): Promise<OrderBookSnapshot> {
     const read = ++this._bookRead;
     const contexts = new Map(this._ctx);
-    const json = (await this._post('/api/v1/orderbook', {})) as { data?: { orders?: RawOrder[] } | RawOrder[] };
-    const rows = Array.isArray(json.data) ? json.data : (json.data?.orders ?? []);
+    const rows = bookRows(await this._post('/api/v1/orderbook', {}), 'orderbook') as RawOrder[];
     const orders: DecodedOrder[] = [];
     const quarantined: QuarantinedRow[] = [];
     for (let i = 0; i < rows.length; i++) {
@@ -482,8 +482,7 @@ export class OpenAlgoTradeFeed implements OrderFeed {
       // `?? 'NSE'` and `?? this._defaultProduct`, which sends a modify for an
       // MCX order to NSE, or turns a CNC order into MIS. With no context,
       // modify() refuses by name, which is a failure the trader can act on.
-      const exchange = str(raw.exchange);
-      const product = str(raw.product);
+      const { exchange, product } = res.order;
       if (exchange !== undefined && product !== undefined && read === this._bookRead &&
         !this._modifies.has(res.order.id) && this._ctx.get(res.order.id) === contexts.get(res.order.id)) {
         this._ctx.set(res.order.id, {
@@ -502,10 +501,49 @@ export class OpenAlgoTradeFeed implements OrderFeed {
     return (await this.getOrderBook()).orders;
   }
 
-  /** Fetch the position book for reconciliation. */
+  /**
+   * Fetch the position book for reconciliation. One row per symbol, exchange
+   * and product. Throws rather than answer when the book or any row in it
+   * cannot be read: a failed position read is unknown, not flat.
+   */
   public async getPositions(): Promise<Position[]> {
-    const json = (await this._post('/api/v1/positionbook', {})) as { data?: RawPosition[] };
-    return (json.data ?? []).map(mapPosition);
+    const rows = bookRows(await this._post('/api/v1/positionbook', {}), 'positionbook') as RawPosition[];
+    return rows.map((r, i) => decodePosition(r, `positions[${i}]`));
+  }
+}
+
+/**
+ * The rows of a book read, or a throw. An HTTP-success body can still be a
+ * refusal (`status: 'error'`) or carry no list at all, and reading either as
+ * an empty book removes every order line and reports every position flat. Only
+ * a list the server actually sent, empty or not, is a book, and only where its
+ * endpoint sends one: the orderbook nests its rows beside its statistics, the
+ * positionbook sends the list as `data`, so `{ data: { orders: [] } }` from the
+ * positionbook is not an empty position book.
+ */
+function bookRows(json: unknown, route: 'orderbook' | 'positionbook'): unknown[] {
+  const o = (typeof json === 'object' && json !== null ? json : {}) as { status?: unknown; message?: unknown; data?: unknown };
+  const rows = Array.isArray(o.data) ? o.data
+    : route === 'orderbook' ? (o.data as { orders?: unknown } | null | undefined)?.orders : undefined;
+  if ((o.status === undefined || o.status === 'success') && Array.isArray(rows)) return rows as unknown[];
+  throw new Error(o.status === 'error'
+    ? `openalgo-charts: ${route} failed: ${String(o.message ?? 'no reason given')}`
+    : `openalgo-charts: ${route} returned no readable book`);
+}
+
+/**
+ * Accept a write only on a readable acknowledgement. An HTTP-success body can
+ * still carry the broker's refusal, and one that names neither success nor this
+ * order says nothing about what happened. Both reject, and neither is
+ * pre-flight: the request left, so the order may have changed.
+ */
+function assertAcknowledged(json: unknown, orderId: string, route: string): void {
+  const ack = json as { status?: unknown; orderid?: unknown; order_id?: unknown; message?: unknown } | null | undefined;
+  if (ack?.status === 'error') {
+    throw new Error(`openalgo-charts: ${route} failed: ${String(ack.message ?? 'order rejected')}`);
+  }
+  if (ack == null || (ack.status !== 'success' && !(ack.status === undefined && (ack.orderid ?? ack.order_id) === orderId))) {
+    throw new Error(`openalgo-charts: ${route} returned no readable acknowledgement`);
   }
 }
 
@@ -525,6 +563,8 @@ export interface RawOrder {
 
 interface RawPosition {
   symbol?: string;
+  exchange?: string;
+  product?: string;
   quantity?: number | string;
   average_price?: number | string;
 }
@@ -675,7 +715,19 @@ export function decodeOrder(r: RawOrder, path = 'order'): OrderDecodeResult {
     status: status ?? 'unknown',
   };
   if (status === undefined) order.rawStatus = rawStatus;
+  withVenue(order, r);
   return { ok: true, order };
+}
+
+/**
+ * Copy the exchange and product a row carries. Both are optional, as they
+ * always were: a row without them still decodes, and `modify()` refuses such
+ * an order by name rather than guess a venue for it.
+ */
+function withVenue(target: { exchange?: string | undefined; product?: string | undefined }, r: { exchange?: unknown; product?: unknown }): void {
+  const exchange = str(r.exchange), product = str(r.product);
+  if (exchange !== undefined) target.exchange = exchange;
+  if (product !== undefined) target.product = product;
 }
 
 /**
@@ -713,8 +765,34 @@ export function mapOrder(r: RawOrder): DecodedOrder {
   };
 }
 
+/**
+ * Map one position book row, keeping its exchange and product.
+ *
+ * Throws on a row with no symbol, an unreadable quantity, or an open quantity
+ * with an unreadable average price. A position has no inert form the way an
+ * order has `status: 'unknown'`: an unreadable quantity used to read 0, which
+ * says flat, and a trader told flat may open the same position again. A flat
+ * row's average price may be blank, and reads 0.
+ */
 export function mapPosition(r: RawPosition): Position {
-  return { symbol: r.symbol ?? '', netQty: decNum(r.quantity) ?? 0, avgPrice: decNum(r.average_price) ?? 0 };
+  return decodePosition(r, 'position');
+}
+
+function decodePosition(r: RawPosition, path: string): Position {
+  const symbol = str(r.symbol);
+  if (symbol === undefined) return refuse(bad(`${path}.symbol`, 'MISSING', NON_EMPTY, r.symbol));
+  const netQty = decNum(r.quantity);
+  if (netQty === undefined) return refuse(bad(`${path}.quantity`, r.quantity === undefined ? 'MISSING' : 'NON_FINITE', FINITE, r.quantity));
+  const avgPrice = decNum(r.average_price) ?? (netQty === 0 ? 0 : undefined);
+  if (avgPrice === undefined) return refuse(bad(`${path}.average_price`, 'NON_FINITE', FINITE, r.average_price));
+  const position: Position = { symbol, netQty, avgPrice };
+  withVenue(position, r);
+  return position;
+}
+
+/** Throw the issue a position row failed on, in the words `decodeOrder` reports. */
+function refuse({ issue }: { issue: OrderDecodeIssue }): never {
+  throw new Error(`openalgo-charts: unreadable position, ${issue.path} should be ${issue.expected} (got ${issue.got})`);
 }
 
 /**

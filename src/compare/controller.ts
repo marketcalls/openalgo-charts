@@ -38,7 +38,7 @@ import { toBar } from '../model/bar';
 import { observeReplayWindow, replayWindow } from '../model/replay-window';
 import type { IPrimitive } from '../primitives/primitive';
 import type { AddSeriesOptions } from '../core/chart';
-import { alignToPrimary, EMPTY_ALIGNMENT, type ComparisonAlignment } from './align';
+import { alignToPrimary, EMPTY_ALIGNMENT, printsByTime, type ComparisonAlignment } from './align';
 
 /**
  * How the pane quotes prices while a comparison is on it. The two rebasing
@@ -153,6 +153,10 @@ interface ItemState {
   readonly type: SeriesType;
   readonly style: SeriesStyle;
   bars: readonly SeriesDataItem[];
+  /** How many of `bars`, from the front, are known to run in time order. */
+  ascending: number;
+  /** Prints later than the primary's last bar at the last alignment, all of them dropped. */
+  tail: number;
   items: SeriesDataItem[];
   values: Map<number, Bar>;
   suppressed: boolean;
@@ -186,7 +190,7 @@ export class ComparisonController {
     this._baseline = options.baseline ?? 'first-visible';
     this._off.push(observeReplayWindow(chart, () => this.realign()));
     if (chart.on) {
-      this._off.push(chart.on('data:update', () => { if (this._needsAlignment()) this.realign(); }));
+      this._off.push(chart.on('data:update', () => this._follow()));
       this._off.push(chart.on('destroy', () => this._dispose()));
     }
   }
@@ -217,7 +221,7 @@ export class ComparisonController {
       series, entry, scale: series.priceScale(), savedScaleMode: series.priceScale().options.mode,
       savedInverted: series.priceScale().options.inverted, appliedInverted: null,
       scaleId, type: options.type ?? 'line', style, items: [], values: new Map(), suppressed: false,
-      bars: options.bars, alignment: EMPTY_ALIGNMENT, removed: false,
+      bars: options.bars, ascending: 0, tail: 0, alignment: EMPTY_ALIGNMENT, removed: false,
     };
     if (this._mode !== 'none') state.scale.setOptions({ mode: this._mode });
     const handle: ComparisonHandle = {
@@ -356,7 +360,7 @@ export class ComparisonController {
     if (this._syncing) return;
     this._syncing = true;
     try {
-      if (this._needsAlignment()) this.realign();
+      this._follow();
       for (const entry of this._panes.values()) this._mirror(entry);
     } finally { this._syncing = false; }
   }
@@ -386,6 +390,67 @@ export class ComparisonController {
       primary !== this._alignedPrimary || primary.length !== this._primaryLength
       || primary[0]?.time !== this._primaryFirst || primary[primary.length - 1]?.time !== this._primaryLast
     ));
+  }
+
+  /**
+   * Keep every comparison on the primary's bars. A live bar appended at the
+   * right edge is the change a session brings, and aligning that bar alone is
+   * what spares a long history a full alignment and rewrite per bar. Anything
+   * else (history paged in or replaced, a replay step) aligns in full.
+   */
+  private _follow(): void {
+    if (!this._needsAlignment()) return;
+    const primary = this._primaryBars(), from = this._primaryLength;
+    if (this._realigning || replayWindow(this._chart) || primary !== this._alignedPrimary || from < 1 || primary.length < from
+      || primary[0]?.time !== this._primaryFirst || primary[from - 1]?.time !== this._primaryLast) {
+      this.realign();
+      return;
+    }
+    this._realigning = true;
+    const syncing = this._syncing;
+    this._syncing = true;
+    try {
+      const added = primary.length - from, last = primary[primary.length - 1]!.time;
+      for (const state of this._items.values()) {
+        // Only prints past the primary's old end can match, read afresh as a
+        // full alignment read them.
+        const prints = this._later(state, primary[from - 1]!.time);
+        let hits = 0, tail = 0;
+        for (let i = from; i < primary.length; i++) hits += this._append(state, prints, primary[i]!.time);
+        for (const time of prints.keys()) if (time > last) tail++;
+        // The last alignment dropped every print past the old end that it had,
+        // and the instrument's own array may have grown since.
+        const { bars, matched, gaps, dropped } = state.alignment;
+        state.alignment = { bars: bars + added, matched: matched + hits, gaps: gaps + added - hits, dropped: dropped - state.tail + prints.size - hits };
+        state.tail = tail;
+      }
+      this._rememberAlignment();
+    } finally { this._realigning = false; this._syncing = syncing; }
+    if (!syncing) this._repaint();
+  }
+
+  /** One primary bar appended at `time`: its item, as `alignToPrimary` would have made it. Counts 1 for a print there. */
+  private _append(state: ItemState, prints: Map<number, Bar>, time: number): number {
+    const hit = prints.get(time), item: SeriesDataItem = hit ?? { time };
+    state.items.push(item);
+    state.values.set(time, toBar(item));
+    state.series.update(state.suppressed ? { time } : item);
+    return hit === undefined ? 0 : 1;
+  }
+
+  /**
+   * The instrument's prints later than `after`, read from where they can
+   * start: past the last of the prints in time order at the front of its array
+   * that is not later. A history in time order, the usual kind, then costs an
+   * append its new prints rather than a read of every one.
+   */
+  private _later(state: ItemState, after: number): Map<number, Bar> {
+    const bars = state.bars;
+    let n = Math.min(state.ascending || 1, bars.length);
+    while (n < bars.length && bars[n]!.time >= bars[n - 1]!.time) n++;
+    let from = state.ascending = n;
+    while (from > 0 && bars[from - 1]!.time > after) from--;
+    return printsByTime(bars, after, from);
   }
 
   private _rememberAlignment(): void {
@@ -512,8 +577,8 @@ export class ComparisonController {
       for (const state of states) this._setSuppressed(state, false);
       return;
     }
-    if (this._baseline === 'common' && entry.primary.options.mode === entry.applied) {
-      const bars = this._visiblePrimary();
+    const bars = this._visiblePrimary();
+    if (this._baseline === 'common') {
       const anchor = this._commonAnchor(entry, bars);
       for (const state of states) {
         const value = anchor && state.values.get(anchor.time)?.close;
@@ -521,35 +586,18 @@ export class ComparisonController {
       }
       if (anchor === null) return;
       entry.primary.setBaseline(anchor.close);
-      const range = entry.primary.priceRange();
       for (const state of states) {
         const value = state.values.get(anchor.time)?.close;
         state.scale.setBaseline(value && value > 0 ? value : null);
-        if (!entry.primary.autoScale || !value || value <= 0 || !this._visible(state)) continue;
-        // Fit relative moves, not absolute prices. Manual primary ranges stay owned by the user.
-        const renderer = getChartType(state.type);
-        const style = this._record(state)?.style ?? state.style;
-        let low = Infinity, high = -Infinity;
-        for (const bar of bars) {
-          const own = state.values.get(bar.time);
-          if (!own) continue;
-          const extents = renderer.extents(own, style);
-          if (!Number.isFinite(extents.min) || !Number.isFinite(extents.max)) continue;
-          low = Math.min(low, extents.min); high = Math.max(high, extents.max);
-        }
-        if (!(low <= high)) continue;
-        const fitted = scaleAutoscaleRange(entry.primary.options.mode, low, high, entry.primary.options.marginTop, entry.primary.options.marginBottom);
-        const factor = anchor.close / value;
-        range.min = Math.min(range.min, fitted.min * factor);
-        range.max = Math.max(range.max, fitted.max * factor);
       }
-      if (entry.primary.autoScale) entry.primary.setComputedRange(range);
     }
     const bp = entry.primary.baseline;
-    if (bp === null || !Number.isFinite(bp) || bp <= 0 || !entry.primary.scaled) return;
+    if (bp === null || !Number.isFinite(bp) || bp <= 0) return;
+    // Manual primary ranges stay owned by the user.
+    if (entry.primary.autoScale) this._fit(entry, states, bars, bp);
+    if (!entry.primary.scaled) return;
     const range = entry.primary.priceRange();
-    for (const state of this._items.values()) {
-      if (state.entry !== entry) continue;
+    for (const state of states) {
       const bc = state.scale.baseline;
       if (bc === null || !Number.isFinite(bc) || bc <= 0) continue;
       const k = bc / bp;
@@ -557,6 +605,37 @@ export class ComparisonController {
       state.scale.setOptions({ inverted: state.appliedInverted });
       state.scale.setComputedRange({ min: range.min * k, max: range.max * k });
     }
+  }
+
+  /**
+   * Widen the primary's range to hold each shown comparison's relative moves
+   * over `bars`, the primary's bars in view. The primary autoscales on its own
+   * series alone, and every overlay is that band times its baseline ratio, so
+   * a comparison that moved further than the primary was drawn off the pane
+   * whichever baseline it was measured from.
+   */
+  private _fit(entry: PaneEntry, states: readonly ItemState[], bars: readonly Bar[], bp: number): void {
+    const range = entry.primary.priceRange(), { mode, marginTop, marginBottom } = entry.primary.options;
+    for (const state of states) {
+      const bc = state.scale.baseline;
+      if (bc === null || !Number.isFinite(bc) || bc <= 0 || !this._visible(state)) continue;
+      const renderer = getChartType(state.type);
+      const style = this._record(state)?.style ?? state.style;
+      let low = Infinity, high = -Infinity;
+      for (const bar of bars) {
+        const own = state.values.get(bar.time);
+        if (!own) continue;
+        const extents = renderer.extents(own, style);
+        if (!Number.isFinite(extents.min) || !Number.isFinite(extents.max)) continue;
+        low = Math.min(low, extents.min); high = Math.max(high, extents.max);
+      }
+      if (!(low <= high)) continue;
+      // Relative moves, not absolute prices: the comparison's fit in the primary's units.
+      const fitted = scaleAutoscaleRange(mode, low, high, marginTop, marginBottom);
+      range.min = Math.min(range.min, fitted.min * bp / bc);
+      range.max = Math.max(range.max, fitted.max * bp / bc);
+    }
+    entry.primary.setComputedRange(range);
   }
 
   private _primaryBars(): readonly Bar[] {
@@ -618,6 +697,9 @@ export class ComparisonController {
     state.alignment = result.alignment;
     state.items = result.items;
     state.values = new Map(result.items.map(item => { const bar = toBar(item); return [bar.time, bar]; }));
+    // Read in full once here, the array being new or replaced, so an append reads only its own end.
+    state.ascending = 0;
+    state.tail = this._later(state, shown[shown.length - 1]?.time ?? -Infinity).size;
     this._write(state);
   }
 

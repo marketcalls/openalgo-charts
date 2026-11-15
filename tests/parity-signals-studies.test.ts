@@ -236,7 +236,8 @@ describe('Range Analysis: parity pins', () => {
 
 describe('CPR with Floor Pivot: parity pins', () => {
   it('collapses every level onto the pivot when the previous session had no range', () => {
-    // High, low and close all 100 for the first session: the width is zero, so
+    // High, low and close all 100 for the second session, the first one CPR
+    // reads (the first loaded session is never handed on): the width is zero, so
     // the six outer levels and both edges of the central range land on the
     // pivot. Nothing in the frame divides by the width, so none of it is absent.
     const day = (d: number, price: number): Bar[] =>
@@ -244,12 +245,12 @@ describe('CPR with Floor Pivot: parity pins', () => {
         time: istMorning(2024, 1, d) + i * 3600,
         open: price, high: price, low: price, close: price, volume: 500,
       }));
-    const bars = [...day(1, 100), ...day(2, 120)];
+    const bars = [...day(1, 90), ...day(2, 100), ...day(3, 120)];
     const out = run(CPR, bars, { displayS1R1: true });
     for (const key of ['dPivot', 'dS1', 'dS2', 'dS3', 'dR1', 'dR2', 'dR3', 'dBc', 'dTc']) {
-      expect(out[key][3], key).toBe(100);
+      expect(out[key][6], key).toBe(100);
     }
-    expect(firstIndex(out.dPivot)).toBe(3);
+    expect(firstIndex(out.dPivot)).toBe(6);
   });
 });
 

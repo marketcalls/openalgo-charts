@@ -39,7 +39,25 @@
 
     const broker = new FakeBroker();
     const tc = new TradeController(chart.tradeHost(0));
-    broker.onBook((o, p) => tc.reconcile(o, p));
+    // The last book the broker reported, and the prices of lines being dragged.
+    // A drag previews on top of the book and writes nothing until release.
+    let book = { orders: [], positions: [] };
+    const drafts = new Map();
+    function draw() {
+      const orders = book.orders.map((o) => {
+        const price = drafts.get('order:' + o.id);
+        return price === undefined ? o : { ...o, ...dragged(o, price) };
+      });
+      tc.reconcile(orders, book.positions, { symbol: SYM, exchange: 'NSE' });
+    }
+    // What a drag to `price` changes, which the preview draws and the release
+    // sends. The line sits at the trigger when there is one, so the trigger
+    // follows the pointer, and a stop-limit's limit keeps its gap to it.
+    function dragged(o, price) {
+      if (o.triggerPrice === undefined) return { price };
+      return o.type === 'SL' ? { price: o.price + price - o.triggerPrice, triggerPrice: price } : { triggerPrice: price };
+    }
+    broker.onBook((orders, positions) => { book = { orders, positions }; draw(); });
     broker.onLtp((s, ltp) => tc.onLtp(s, ltp));
 
     // Armed analyzer-mode engine (no confirm dialog in this demo).
@@ -60,10 +78,23 @@
     document.getElementById('sell').onclick = () => place({ symbol: SYM, side: 'SELL', type: 'MARKET', qty: 10 });
     document.getElementById('limit').onclick = () => place({ symbol: SYM, side: 'BUY', type: 'LIMIT', qty: 5, price: last * 0.985 });
 
-    // Dragging a working-order line sends a throttled modify; releasing commits it.
+    // Dragging a working-order line moves it locally; only the release sends the
+    // modify. requestModify writes whenever its interval has passed, so calling it
+    // on every move would rest the order at each price the pointer crosses.
+    chart.on('drag:cancel', ({ id }) => { if (drafts.delete(id)) draw(); });
     chart.subscribeDrag(
-      (id, price) => { const c = brokerToClient.get(id); if (c) eng.requestModify(c, price); },
-      (id, price) => { const c = brokerToClient.get(id); if (c) { eng.requestModify(c, price); eng.commitModify(c); } },
+      (id, price) => { if (brokerToClient.has(id)) { drafts.set(id, price); draw(); } },
+      (id) => {
+        const c = brokerToClient.get(id), price = drafts.get(id);
+        const o = book.orders.find((r) => 'order:' + r.id === id);
+        drafts.delete(id);
+        if (c === undefined || price === undefined || o === undefined) return;
+        // Send the fields the preview drew; commitModify resolves once the
+        // broker has answered, so the redraw shows where the order now rests.
+        const fields = dragged(o, price);
+        eng.requestModify(c, fields.price ?? price, fields);
+        void eng.commitModify(c).finally(draw);
+      },
     );
 
     // The pill's close segment routes as `order:<id>::close`, which cancels via the engine.

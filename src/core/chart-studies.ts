@@ -56,6 +56,16 @@ const INSTANCE_PALETTE: readonly string[] = [
 ];
 
 /**
+ * What a clone of a price bar carries besides the overlay's colour: that
+ * colour, and the colour of the host's bar the clone stands for. A spread
+ * copies both, so a host's copy of a clone (a tick built on what `getData()`
+ * returned) still says which bar it stands for, while a bar the host built
+ * itself carries neither, and its colour is its own even when it is the study's.
+ */
+const PAINTED = Symbol('painted'), OWN = Symbol('own');
+type PaintedBar = Bar & { [PAINTED]?: string | undefined; [OWN]?: string | undefined };
+
+/**
  * The slice of the chart the study host reads, writes and drives. The chart
  * itself is the host: each member carries the name and the type of the chart's
  * own, so the moved code reads as it did in chart.ts, and a member the chart
@@ -121,14 +131,6 @@ export class ChartStudies {
   /** Instance id of the indicator whose colours are on the price bars, if any. */
   private _barColorOwner: string | null = null;
   private _barColors: readonly (string | null)[] | null = null;
-  /**
-   * Each price bar's own colour, indexed like the series. The overlay overwrites
-   * `Bar.color`, so a bar's own value is only readable the first time we touch
-   * it, and removing the indicator has to put something back.
-   */
-  private readonly _barColorBase: (string | undefined)[] = [];
-  /** Time of bar 0 when the snapshot was taken, to catch a replaced history. */
-  private _barColorAnchor = 0;
 
   public constructor(chart: object, host: StudiesHost) {
     this._chart = chart;
@@ -631,23 +633,21 @@ export class ChartStudies {
   private _applyBarColors(): void {
     const dataId = this._host._firstDataId.value;
     if (dataId === null) return;
-    const bars = this._host._dataLayer.seriesBars(dataId);
+    const bars = this._host._dataLayer.seriesBars(dataId) as readonly PaintedBar[];
     const n = bars.length;
-    const base = this._barColorBase;
-    // Anything that replaces history (a symbol change, a page of older bars)
-    // invalidates the snapshot, since index i is no longer the same bar. A
-    // snapshot is read against the bars only where there are at least as many.
-    if (n < base.length || (base.length > 0 && bars[0]!.time !== this._barColorAnchor)) base.length = 0;
-    if (base.length === 0) this._barColorAnchor = n > 0 ? bars[0]!.time : 0;
-    for (let i = base.length; i < n; i++) base[i] = bars[i]!.color;
     const colors = this._barColors;
     const out = new Array<Bar>(n);
     let changed = false;
     for (let i = 0; i < n; i++) {
       const bar = bars[i]!;
-      const color = colors?.[i] ?? base[i];
+      // A clone, or the host's copy of one still in the overlay's colour, stands
+      // for the bar it was cloned from wherever a page of older history moved
+      // it. A bar with no mark, or with a colour of its own since, is the host's.
+      const own = bar[PAINTED] === bar.color ? bar[OWN] : bar.color;
+      const color = colors?.[i] ?? own;
       if (color === bar.color) { out[i] = bar; continue; }
-      out[i] = { ...bar, color } satisfies LooseOptional<Bar> as Bar; // undefined restores a host bar that had no colour
+      // undefined restores a host bar that had no colour
+      out[i] = { ...bar, color, [PAINTED]: color, [OWN]: own } satisfies LooseOptional<PaintedBar> as PaintedBar;
       changed = true;
     }
     if (!changed) return;

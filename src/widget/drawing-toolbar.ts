@@ -29,6 +29,7 @@ import { openMenu, type MenuRow } from './menu';
 import { commonSchema, mountDrawingProperties, resolvedDrawingValues } from './dialogs/drawing-properties';
 import { chartContainer } from './dialogs/text-editor';
 import { templateMenuRows, type DrawingTemplates } from './drawing-templates';
+import { formatColor, parseColor } from './tokens';
 
 export interface DrawingToolbarOptions {
   /** The chart's container; the toolbar keeps inside it. Default: the chart's own. */
@@ -54,6 +55,17 @@ export const TOOLBAR_LINE_WIDTHS: readonly number[] = [1, 1.5, 2, 3, 4];
 const LINE_STYLE_ICONS: Readonly<Record<string, string>> = {
   solid: 'minus', dashed: 'line-dashed', dotted: 'line-dotted', mixed: 'line-mixed',
 };
+
+/**
+ * A colour as the mixed swatch writes it into its gradient: parsed and written
+ * back, or `fallback` when it does not parse. A drawing's colour is a host's
+ * or a paste's text, and written raw it could close the gradient and add a
+ * `url()` layer, which the browser fetches the moment the swatch shows.
+ */
+function swatchColor(value: unknown, fallback: string): string {
+  const rgba = parseColor(String(value));
+  return rgba === null ? fallback : formatColor(rgba);
+}
 
 /** Room kept between the toolbar and the selection, and between it and the chart's edge. */
 const GAP = 10;
@@ -257,7 +269,7 @@ export function mountDrawingToolbar(ctx: WidgetContext, host: HTMLElement, opts:
       color.el.classList.toggle('is-mixed', now === MIXED);
       if (now !== MIXED) color.write(now);
       // Two of the colours in use, split corner to corner: mixed, without a word.
-      const [a, b] = [...new Set(live.map((d) => String(resolvedDrawingValues(d, { fields: [colorField] }, drawingToolOf(d.tool), theme)['style.color'])))];
+      const [a, b] = [...new Set(live.map((d) => swatchColor(resolvedDrawingValues(d, { fields: [colorField] }, drawingToolOf(d.tool), theme)['style.color'], theme)))];
       colorTrigger.style.backgroundImage = now === MIXED ? `linear-gradient(135deg, ${a} 0 50%, ${b ?? a} 50% 100%)` : '';
       colorTrigger.setAttribute('aria-label', now === MIXED
         ? widgetText(ctx, 'Color: {value}', { value: widgetText(ctx, 'mixed') })

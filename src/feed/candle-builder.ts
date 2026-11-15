@@ -1,9 +1,10 @@
 /**
  * Live candle aggregation (ARCHITECTURE.md §10.2). The WS feed does not deliver
- * interval candles: LTP mode gives a tick price (+ last-traded-qty), Quote mode
- * gives a *cumulative day* volume. This builder buckets ticks into interval OHLC
- * with explicit volume, session-reset, and late-tick policies. Pure and
- * deterministic (no Date/rAF) so it is fully unit-testable.
+ * interval candles: LTP mode gives a tick price (+ last-traded-qty where the
+ * broker sends one), Quote mode gives a *cumulative day* volume. This builder
+ * buckets ticks into interval OHLC with explicit volume, session-reset, and
+ * late-tick policies. Pure and deterministic (no Date/rAF) so it is fully
+ * unit-testable.
  */
 import type { Bar, UTCSeconds } from '../model/bar';
 import type { LooseOptional } from '../helpers/types';
@@ -140,9 +141,9 @@ export class CandleBuilder {
     const merged = widenBar(current, authoritative);
     if (this._provisional) merged.open = authoritative.open;
     const volume = merged.volume;
-    // In day-delta mode the volume is recomputed from the cumulative on every
-    // tick, so the baseline moves with it or the next tick would shrink it back.
-    if (this._opts.volumeMode === 'day-delta' && this._hasCum && volume !== undefined) {
+    // A volume read from the day total is recomputed from it on every tick, so
+    // the baseline moves with it or the next tick would shrink it back.
+    if (this._hasCum && volume !== undefined) {
       this._cumAtBarStart = this._lastCum - volume;
     }
     this._current = merged;
@@ -211,38 +212,59 @@ export class CandleBuilder {
     else delete bar.oi;
   }
 
+  /**
+   * A tick's own quantity counts in 'ltq-sum'; otherwise its cumulative day
+   * total gives the bar's volume. The total is tracked whenever a tick carries
+   * one, so a stream that drops the quantity on some frames falls back to it
+   * without counting a trade twice. A tick with neither adds nothing, as it
+   * always has: a host on such a stream fills the volume from history, and a
+   * host that wants it reported unknown says so itself (OpenAlgoLiveDataFeed).
+   */
   private _volumeForNewBar(tick: Tick): number {
-    if (this._opts.volumeMode === 'ltq-sum') return tick.ltq ?? 0;
-    const cum = tick.cumDayVolume ?? 0;
-    if (!this._hasCum) {
-      // First observation: this bar starts at the current cumulative (volume 0).
-      this._cumAtBarStart = cum;
-    } else if (cum < this._lastCum) {
-      // Daily reset (cumulative dropped): the new day's bar starts from 0.
-      this._cumAtBarStart = 0;
-    } else {
-      // Carry from the previous bar's closing cumulative.
+    const cum = tick.cumDayVolume;
+    if (cum === undefined) {
+      // The new bar starts wherever the last total left off.
       this._cumAtBarStart = this._lastCum;
+    } else {
+      // First observation: this bar starts at the current cumulative (volume 0).
+      // Daily reset (cumulative dropped): the new day's bar starts from 0.
+      // Otherwise carry from the previous bar's closing cumulative.
+      this._cumAtBarStart = !this._hasCum ? cum : cum < this._lastCum ? 0 : this._lastCum;
+      this._lastCum = cum;
+      this._hasCum = true;
     }
-    this._lastCum = cum;
-    this._hasCum = true;
-    return Math.max(0, cum - this._cumAtBarStart);
+    if (this._opts.volumeMode === 'ltq-sum' && tick.ltq !== undefined) {
+      // A total sent with a quantity includes it. Measured from here, a later
+      // frame with only a total adds what traded since, and cannot recount
+      // the bar from the total and drop the quantities summed into it.
+      if (cum !== undefined) this._cumAtBarStart = cum - tick.ltq;
+      return tick.ltq;
+    }
+    return cum === undefined ? 0 : Math.max(0, cum - this._cumAtBarStart);
   }
 
   private _volumeForSameBar(bar: Bar, tick: Tick): number {
-    if (this._opts.volumeMode === 'ltq-sum') return (bar.volume ?? 0) + (tick.ltq ?? 0);
-    const cum = tick.cumDayVolume ?? 0;
-    if (!this._hasCum) {
-      // History carries this bar's volume, not the day's cumulative baseline.
-      // The first quote establishes that baseline without inventing old trades.
-      this._cumAtBarStart = cum - (bar.volume ?? 0);
-      this._hasCum = true;
-    } else if (this._opts.bucketStart && cum < this._lastCum) {
-      // A calendar candle can span several volume-reset days. Keep the
-      // previous days' trades when the source's cumulative counter restarts.
-      this._cumAtBarStart = -(bar.volume ?? 0);
+    const cum = tick.cumDayVolume;
+    let total = bar.volume;
+    if (cum !== undefined) {
+      if (!this._hasCum) {
+        // History carries this bar's volume, not the day's cumulative baseline.
+        // The first quote establishes that baseline without inventing old trades.
+        this._cumAtBarStart = cum - (bar.volume ?? 0);
+        this._hasCum = true;
+      } else if (this._opts.bucketStart && cum < this._lastCum) {
+        // A calendar candle can span several volume-reset days. Keep the
+        // previous days' trades when the source's cumulative counter restarts.
+        this._cumAtBarStart = -(bar.volume ?? 0);
+      }
+      this._lastCum = cum;
+      total = Math.max(0, cum - this._cumAtBarStart);
     }
-    this._lastCum = cum;
-    return Math.max(0, cum - this._cumAtBarStart);
+    if (this._opts.volumeMode === 'day-delta') return total ?? 0;
+    // A total that lags the quantities counted takes none of them back.
+    if (tick.ltq === undefined) return Math.max(bar.volume ?? 0, total ?? 0);
+    const volume = (bar.volume ?? 0) + tick.ltq;
+    if (cum !== undefined) this._cumAtBarStart = cum - volume; // as in _volumeForNewBar
+    return volume;
   }
 }

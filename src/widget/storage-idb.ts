@@ -32,22 +32,27 @@
  *   synchronous store never had that gap, since every read went to it.
  * - **The default falls back to `localStorage` when the database cannot be
  *   read at all**, so a browser that offers IndexedDB but refuses it keeps
- *   persisting as earlier releases did. A host that names this store gets
- *   IndexedDB or a reported failure, never a quiet change of store.
+ *   persisting as earlier releases did. Only on a page where the database
+ *   has never answered: where it has, a refused open is reported rather than
+ *   answered from an older copy. A host that names this store gets IndexedDB
+ *   or a reported failure, never a quiet change of store.
  */
-import { STORAGE_PREFIX, defaultStorage, type AsyncStorageLike } from './context';
-import { DATABASE, type IndexedDbWidgetStorage, type IndexedDbWidgetStorageOptions } from './storage';
+import { STORAGE_PREFIX, defaultStorage } from './context';
+import { storageEvents } from './widget-storage';
+import { DATABASE, type IndexedDbWidgetStorage, type IndexedDbWidgetStorageOptions, type OneKeyStore } from './storage';
 
 const STORE = 'entries';
 /** Where a namespace's copy from the page's storage is recorded; outside every `oac-widget:` range. */
 const COPIED = 'copied:';
 /** The broadcast channel a database announces its landed writes on, by database name. */
 const CHANNEL = 'oac-widget-store:';
+/** Set in the page's storage once the default database has answered there (see `orPageStorage`); outside every `oac-widget:` range. */
+const ANSWERED = 'oac-widget-store:indexeddb';
 
 type ChangeListener = (key: string, value: string | null) => void;
 
 /** The store `createIndexedDbWidgetStorage` builds (storage.ts), once this module has arrived. */
-export function openIndexedDbStore(factory: IDBFactory, name: string, options: IndexedDbWidgetStorageOptions): IndexedDbWidgetStorage {
+export function openIndexedDbStore(factory: IDBFactory, name: string, options: IndexedDbWidgetStorageOptions): IndexedDbWidgetStorage & OneKeyStore {
   const journal = options.journal === undefined ? defaultStorage() : options.journal;
   const legacy = options.migrateFrom === undefined ? pageStorage() : options.migrateFrom;
   let opening: Promise<IDBDatabase> | null = null;
@@ -153,6 +158,11 @@ export function openIndexedDbStore(factory: IDBFactory, name: string, options: I
         };
       };
     }),
+    // One key as it stands, for a write merged into it: never the copy from the page's storage `entries` makes.
+    getItem: key => run<string | null>('readonly', (store, done) => {
+      const read = store.get(key);
+      read.onsuccess = () => { done(typeof read.result === 'string' ? read.result : null); };
+    }),
     setItem: (key, value) => run<void>('readwrite', store => { store.put(value, key); }).then(() => announce(key, value)),
     removeItem: key => run<void>('readwrite', store => { store.delete(key); }).then(() => announce(key, null)),
     subscribe: listener => {
@@ -207,7 +217,7 @@ function pageStorage(): Storage | null {
 }
 
 /** The store `defaultWidgetStore` hands every widget on the page (storage.ts), once this module has arrived. */
-export function openPageDefault(factory: IDBFactory): AsyncStorageLike {
+export function openPageDefault(factory: IDBFactory): OneKeyStore {
   return orPageStorage(openIndexedDbStore(factory, DATABASE, {}));
 }
 
@@ -219,13 +229,21 @@ export function openPageDefault(factory: IDBFactory): AsyncStorageLike {
  * losing each session's changes. Decided once, by the first read: a database
  * that has answered is kept for the page, so one refused write never splits
  * a page's keys between two stores.
+ *
+ * A refused read is tried once more first, since an open can fail once while
+ * the browser's backing store is busy. And a page whose database has answered
+ * before (`ANSWERED`) never falls back: its layouts live in the database, the
+ * page's storage holds an older copy or nothing, and a session written there
+ * would vanish when the database opens again. The read fails instead, which
+ * the widget reports and answers by keeping that session's changes in memory.
  */
-function orPageStorage(idb: IndexedDbWidgetStorage): AsyncStorageLike {
+function orPageStorage(idb: IndexedDbWidgetStorage & OneKeyStore): OneKeyStore {
   const page = pageStorage();
   if (page === null) return idb;
   let use: 'idb' | 'page' | null = null;
-  const onPage = (write: () => void): Promise<void> => {
-    try { write(); return Promise.resolve(); } catch (error) { return Promise.reject(error); }
+  const answered = (): boolean => { try { return page.getItem(ANSWERED) !== null; } catch { return false; } };
+  const onPage = <T>(call: () => T): Promise<T> => {
+    try { return Promise.resolve(call()); } catch (error) { return Promise.reject(error); }
   };
   return {
     journal: idb.journal,
@@ -233,23 +251,21 @@ function orPageStorage(idb: IndexedDbWidgetStorage): AsyncStorageLike {
     // storage, the storage event it fires in this tab for another tab's write.
     subscribe: listener => {
       const off = idb.subscribe((key, value) => { if (use !== 'page') listener(key, value); });
-      const win = globalThis as { addEventListener?: Window['addEventListener']; removeEventListener?: Window['removeEventListener'] };
-      const changed = (event: StorageEvent): void => {
-        if (use === 'page' && event.storageArea === page && event.key?.startsWith(STORAGE_PREFIX) === true) listener(event.key, event.newValue);
-      };
-      try { win.addEventListener?.('storage', changed); } catch { /* no other tab to hear from */ }
-      return () => {
-        off();
-        try { win.removeEventListener?.('storage', changed); } catch { /* never added */ }
-      };
+      const offPage = storageEvents(page, STORAGE_PREFIX, (key, value) => { if (use === 'page') listener(key, value); });
+      return () => { off(); offPage(); };
     },
-    entries: prefix => use === 'page' ? Promise.resolve(legacyEntries(page, prefix)) : idb.entries(prefix).then(
-      rows => { use = 'idb'; return rows; },
+    entries: prefix => use === 'page' ? Promise.resolve(legacyEntries(page, prefix)) : idb.entries(prefix).catch(() => idb.entries(prefix)).then(
+      rows => {
+        if (use === null && !answered()) try { page.setItem(ANSWERED, '1'); } catch { /* the page then falls back as before */ }
+        use = 'idb';
+        return rows;
+      },
       (error: unknown) => {
-        if (use === 'idb') throw error;
+        if (use === 'idb' || answered()) throw error;
         use = 'page';
         return legacyEntries(page, prefix);
       }),
+    getItem: key => use === 'page' ? onPage(() => page.getItem(key)) : idb.getItem(key),
     setItem: (key, value) => use === 'page' ? onPage(() => page.setItem(key, value)) : idb.setItem(key, value),
     removeItem: key => use === 'page' ? onPage(() => page.removeItem(key)) : idb.removeItem(key),
   };

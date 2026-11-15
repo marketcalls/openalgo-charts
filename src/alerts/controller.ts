@@ -19,6 +19,8 @@ interface RecordState {
   /** The newest element this record has judged or seeded on, and where it sat, so an update can tell what it appended. */
   tail?: Bar | undefined;
   index?: number | undefined;
+  /** Whether it has judged its series growing, so a replacement extending what it judged brings bars to judge. */
+  settled?: boolean;
   value?: number | undefined;
   errorTime?: number;
   plotPane?: number | undefined;
@@ -106,7 +108,12 @@ export class AlertController {
       _chart.on('data:update', payload => this._onData(payload as ChartDataUpdate)),
       // The context a variant-only change passes through is replaced at once;
       // seeding and saving for it would only be done again.
-      _chart.on('data:context', context => { if (!passingDataContext(context)) this._seedAll(); }),
+      _chart.on('data:context', context => {
+        if (passingDataContext(context)) return;
+        // A new series: nothing its first replacements bring was watched arriving.
+        for (const record of this._records.values()) record.settled = false;
+        this._seedAll();
+      }),
       _chart.on('objects:change', () => this._onObjects()),
       _chart.on('paneMoved', () => this._onObjects()),
       _chart.on('state:restore:start', () => { this._hovered = undefined; this._cancelDrag(); this._restoring = true; this._revision++; }),
@@ -544,18 +551,27 @@ export class AlertController {
     if (this._drag && !this._dragAvailability(this._drag.record, this._drag.index).available) this._cancelDrag();
     if (this._destroyed || revision !== this._revision) return;
     if (this._paused || this._replay) return;
-    if (update.kind !== 'update') { this._seedAll(); return; }
+    const reset = update.kind === 'reset';
+    if (!reset && update.kind !== 'update') { this._seedAll(); return; }
     const bars = this._chart.primaryBars();
     const tail = bars[bars.length - 1];
-    if (!tail || update.time !== tail.time) return;
+    if (!reset && (!tail || update.time !== tail.time)) return;
+    if (reset) this._cancelDrag();
     const scope = scopeOf(this._chart);
     // One update can append several elements: a bar that completes two Renko
     // bricks, or a host that writes two bars before it says so. Each is judged
     // in turn, every alert at one element before any moves to the next, which
-    // is what as many single appends would have delivered, in that order.
-    const steps = [...this._records.values()].filter(record => sameScope(record.alert.scope, scope))
-      .map(record => ({ record, from: this._firstNew(record, bars) }));
-    let changed = false;
+    // is what as many single appends would have delivered, in that order. A
+    // replacement is judged the same way from where it resumes a record, so a
+    // refresh or a capped store that brings the stream's bars costs no alert.
+    const steps: { record: RecordState; from: number }[] = [];
+    for (const record of this._records.values()) {
+      const from = !sameScope(record.alert.scope, scope) ? undefined
+        : reset ? this._resumeAt(record, bars) : this._firstNew(record, bars);
+      if (from !== undefined) steps.push({ record, from });
+      else if (reset) { this._seed(record); this._syncVisual(record); }
+    }
+    let changed = reset;
     for (let index = Math.min(...steps.map(step => step.from)); index < bars.length && revision === this._revision; index++) {
       for (const { record, from } of steps) {
         if (this._destroyed || revision !== this._revision) break;
@@ -564,8 +580,36 @@ export class AlertController {
     }
     if (changed) {
       this._saveState();
-      if (!this._destroyed) this._chart.emit('alerts:checkpoint', {});
+      if (!this._destroyed && this._records.size) this._chart.emit('alerts:checkpoint', {});
     }
+  }
+
+  /**
+   * Where a replacement of the primary bars resumes a record: after the element
+   * it last judged, or at that element when the replacement revised it.
+   * Undefined seeds the record instead. A replacement without that element is
+   * another series. One that only extends it is judged once the record has
+   * watched the series grow: until then the bars it brings closed before
+   * anyone looked, as when a warm load extends its cached bars. A front trimmed
+   * at a retention cap is judged regardless, since every new bar arrives that
+   * way there.
+   */
+  private _resumeAt(record: RecordState, bars: readonly Bar[]): number | undefined {
+    const { tail, index } = record;
+    let at = bars.length - 1;
+    while (tail && at >= 0 && bars[at]!.time > tail.time) at--;
+    const kept = bars[at];
+    if (!tail || index === undefined || !kept || kept.time !== tail.time) {
+      record.settled = false;
+      return undefined;
+    }
+    const from = sameBar(kept, tail) ? at + 1 : at;
+    if (from === bars.length || (!record.settled && at >= index)) return undefined;
+    // A replacement cannot say when it saw the extremes it revised, so the
+    // revised element is judged on how its close moved: a wick from before
+    // the alert last looked stays ignored.
+    record.tail = { ...tail, high: kept.high, low: kept.low };
+    return from;
   }
 
   /**
@@ -597,6 +641,7 @@ export class AlertController {
     const previous = record.tail;
     record.tail = { ...tail };
     record.index = index;
+    record.settled = true;
     if (record.alert.source.kind === 'drawing' && index === bars.length - 1 && previous?.time !== tail.time) this._syncVisual(record);
     if (this._destroyed || revision !== this._revision || record.alert.state !== 'armed' || !previous) return false;
     const { alert } = record;

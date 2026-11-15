@@ -10,7 +10,7 @@
  * before the change's promise resolves. Internal: each repository keeps one
  * `CatalogQueue` and delegates to it, so its public shape is its own.
  */
-import { number, readJson, string, WorkspaceDocumentError } from './json';
+import { CATALOG, number, readJson, string, WorkspaceDocumentError } from './json';
 
 /** Storage for one catalog kind. The host must atomically reject writes whose expectedRevision is stale. */
 interface CatalogStorage<C> {
@@ -25,7 +25,8 @@ export interface CatalogKind<C> {
   conflict(): Error;
 }
 
-const copy = <T>(value: T): T => readJson(value) as T;
+// A whole catalog is copied, so it reads to the catalog's ceiling, not one document's.
+const copy = <T>(value: T): T => readJson(value, CATALOG) as T;
 
 /** The ID factory a repository uses unless given one. */
 export function randomId(): string {

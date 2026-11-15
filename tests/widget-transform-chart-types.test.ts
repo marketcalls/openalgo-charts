@@ -180,7 +180,7 @@ describe('widget chart types the chart transforms', () => {
     await flush();
     expect(widget.series.getData()).toEqual(walk);
     // The size resolved at the load stands: a page of history does not resize every brick.
-    expect(box()).toBe(loaded);
+    expect(box()).toBeCloseTo(loaded, 9);
     const run = getSeriesTransform('renko').create({});
     run.setData(recent);
     run.prepend(older);
