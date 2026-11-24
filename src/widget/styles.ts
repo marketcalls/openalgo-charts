@@ -398,6 +398,9 @@ export const WIDGET_CSS = `
   min-width: 0; max-width: calc(100% - 24px); max-height: calc(100% - 24px); display: flex; flex-direction: column;
   background: ${v('panel')}; border: 1px solid ${v('bd')}; border-radius: 12px; box-shadow: ${v('shadow')}; outline: none; }
 .oac-widget .oac-dialog__head { flex: none; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
+/* The bar is the handle a dialog is dragged by; a bottom sheet stays put.
+   Safari selects the title under a drag without the prefixed property. */
+.oac-widget .oac-dialog:not(.oac-mobile-sheet) > .oac-dialog__head { cursor: move; -webkit-user-select: none; user-select: none; touch-action: none; }
 .oac-widget .oac-dialog__title { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 700; color: ${v('tx-strong')}; }
 .oac-widget .oac-dialog__body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 14px 10px; }
 .oac-widget .oac-dialog__foot { flex: none; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px 12px;

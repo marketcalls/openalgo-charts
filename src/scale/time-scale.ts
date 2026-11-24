@@ -29,6 +29,8 @@ export const DEFAULT_TIME_SCALE_OPTIONS: TimeScaleOptions = {
 export class TimeScale {
   private _barSpacing: number;
   private _rightOffset: number;
+  /** The host's configured gap, which a fit returns to; a pan moves `_rightOffset` only. */
+  private readonly _fitRightOffset: number;
   private readonly _minBarSpacing: number;
   private readonly _maxBarSpacing: number;
   private _width = 0;
@@ -38,6 +40,9 @@ export class TimeScale {
     const o = { ...DEFAULT_TIME_SCALE_OPTIONS, ...options };
     this._barSpacing = o.barSpacing;
     this._rightOffset = o.rightOffset;
+    // A fit used to restore the built-in gap whatever was passed, which also
+    // covered a host that spread an unset value in; that host keeps the built-in.
+    this._fitRightOffset = Number.isFinite(o.rightOffset) ? o.rightOffset : DEFAULT_TIME_SCALE_OPTIONS.rightOffset;
     this._minBarSpacing = o.minBarSpacing;
     this._maxBarSpacing = o.maxBarSpacing;
   }
@@ -165,7 +170,7 @@ export class TimeScale {
     if (barCount <= 0 || this._width <= 0) return;
     const before = this.visibleRange();
     this._baseIndex = barCount - 1;
-    this._rightOffset = DEFAULT_TIME_SCALE_OPTIONS.rightOffset;
+    this._rightOffset = this._fitRightOffset;
     const usable = this._width / (barCount + this._rightOffset);
     this._barSpacing = this.constrainBarSpacing(usable);
     this._notifyChange(before);

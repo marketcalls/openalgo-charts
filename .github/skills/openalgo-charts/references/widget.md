@@ -120,6 +120,14 @@ or full screen hides it. The same release adds, with no option, placement rows o
 `onchart` is never offered the price pane, and `policy.movable === false` withholds all
 four. `ind-remove` stays the last of a study's rows.
 
+Since 2.7.5 the right-click menu has a `chart-reset` row ("Reset view") after `chart-fit`,
+which runs `chart.resetScale()` and is disabled with `zoomEnabled: false`. A host that
+finds rows by `id` is unaffected; one that pins the row order sees one more row. Centred
+dialogs (every `placement: 'center'` overlay with an `.oac-dialog__head`) are dragged by
+that bar, through the CSS `translate` property, with no option and no remembered
+position; `.oac-mobile-sheet` dialogs and anchored popovers are not. A host dialog built
+with `dialogFrame` and opened through the widget's overlay stack moves the same way.
+
 Everything `src/widget/index.ts` exports at runtime. The shell (`createWidget` and the handle) is what a host uses; the rest is exported so a host that wants one piece of the chrome and its own for the rest can have it, or so a dialog module of the host's own can register with the shell.
 
 ### The shell (`widget.ts`)

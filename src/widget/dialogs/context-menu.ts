@@ -383,9 +383,7 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
   }
 
   sep();
-  out.push({ id: 'chart-fit', label: widgetText(ctx, 'Fit all bars'), icon: 'fit', chord: commandChord(ctx.keymap, 'chart:fitContent'),
-    disabled: chart.navigationOptions().zoomEnabled === false,
-    run: () => { if (chart.navigationOptions().zoomEnabled !== false) chart.fitContent(); } });
+  out.push(...viewEntries(ctx));
   if (target.kind !== 'time-scale') {
     out.push({ id: 'chart-indicators', label: widgetText(ctx, 'Indicators...'), icon: 'indicators', run: () => { mountIndicatorPicker(ctx); } });
   }
@@ -394,6 +392,23 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
   const extra = hostEntries(hooks, e);
   if (extra.length > 0) { sep(); out.push(...extra); }
   return out;
+}
+
+/**
+ * The two ways back from a panned or zoomed chart. A fit shows every loaded
+ * bar; a reset is the default view: the preferred bar count again, and every
+ * price axis a drag left manual back on auto-scale.
+ */
+function viewEntries(ctx: WidgetContext): MenuItem[] {
+  const chart = ctx.chart;
+  const locked = chart.navigationOptions().zoomEnabled === false;
+  const live = (): boolean => chart.navigationOptions().zoomEnabled !== false;
+  return [
+    { id: 'chart-fit', label: widgetText(ctx, 'Fit all bars'), icon: 'fit', chord: commandChord(ctx.keymap, 'chart:fitContent'),
+      disabled: locked, run: () => { if (live()) chart.fitContent(); } },
+    { id: 'chart-reset', label: widgetText(ctx, 'Reset view'), chord: commandChord(ctx.keymap, 'chart:resetScale'),
+      disabled: locked, run: () => { if (live()) chart.resetScale(); } },
+  ];
 }
 
 /** The host's own rows. A hook that throws must not take the chart's rows down with it. */

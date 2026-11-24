@@ -8,6 +8,125 @@ description: Version history for OpenAlgo Charts.
 The full, authoritative changelog lives in
 [`CHANGELOG.md`](https://github.com/marketcalls/openalgo-charts/blob/master/CHANGELOG.md).
 
+## 2.7.5
+
+2026-11-24
+
+Three reports from users: a fit that dropped the host's right offset, a
+right-click menu with no way back to the default view, and settings dialogs
+that could not be moved off the study being tuned. No option is added and no
+saved document changes.
+
+### Fixed
+
+- **A fit keeps the host's `timeScale.rightOffset`.** `TimeScale.fitContent`
+  returned the gap right of the last bar to the built-in four bars whatever
+  the host had configured, and the chart fits on every load and on every
+  reset, so a chart created with `timeScale: { rightOffset: 27 }` opened with
+  four. The time scale now returns to the configured gap on the initial view,
+  on `fitContent()` and on `resetScale()`. A host that sets no offset, or
+  passes one that is not a finite number, keeps four. (#74)
+
+### Added
+
+- **Reset view on the right-click menu.** The widget's menu carries a
+  `chart-reset` row after Fit all bars, with the chord bound to
+  `chart:resetScale` beside it. A fit shows every loaded bar; a reset is the
+  default view: the default bar count again, and every price axis a drag left
+  manual back on auto-fit. It runs the engine's existing `resetScale()`, the
+  command `Home`, `0` and a double-click already run, and is disabled where
+  the host sets `zoomEnabled: false`, as the fit row is. (#68)
+- **Dialogs move by their title bar.** A centred dialog (chart settings, a
+  study's settings, the indicator picker, alerts and the rest) is dragged by
+  its title bar, so it can be slid off the candles or the study whose edits
+  it previews. The whole height of the bar and a catchable width of it always
+  stay inside the widget, so a dialog cannot be lost; a press on the close
+  button or another control in the bar is that control's. Nothing is
+  remembered: a dialog that is closed and opened again is centred again. The
+  phone layout's bottom sheets and the popovers anchored to a control do not
+  move. The move is the CSS `translate` property on top of wherever the
+  dialog was placed, so its size and its centring are untouched until it is
+  dragged. (#75)
+
+### Compatibility
+
+- **Additive in every tier.** `npm run check:compat` holds each tier's
+  declarations to 2.5.1, 2.6.0, 2.6.4, 2.6.5, 2.6.6, 2.7.2, 2.7.3 (the
+  version OpenAlgo pins) and 2.7.4, which joins the baselines as the previous
+  release. The documents 2.7.4 saved (chart state, drawings, widget layout,
+  workspace and alerts) load and save again with only the changes 2.7.3's
+  did. No public export is added or removed.
+- **A host that sets `timeScale.rightOffset` now gets it.** Such a host has
+  been seeing four bars of space since the option existed; after this
+  release it sees its own value. A host that liked the four it was shown
+  removes the option. `chart.timeScale.setRightOffset` is unchanged, and a
+  pan still moves the gap freely until the next fit.
+- **The menu's row order.** `chart-reset` sits between `chart-fit` and
+  `chart-indicators`. A host that finds rows by `id` is unaffected.
+- **A host dialog opened through the widget's overlay stack** with centre
+  placement and an `.oac-dialog__head` moves the same way. One that used the
+  `translate` property on that element itself would have it overwritten by a
+  drag; `transform`, `left` and `top` are not touched.
+
+### Size
+
+Two bundles grow, and each budget moves only to the measured build. The
+widget tier is 132.91 kB Brotli, 551 bytes more than 2.7.4, for the dialog
+drag and the Reset view row. The base engine is 141.95 kB, 43 bytes more,
+for the remembered right offset (base + trade 159.24 kB). The widget
+terminal is 382.72 kB, all tiers 446.40 kB and the nine classic scripts
+460.03 kB. The widget classic script is 146.33 kB; the base classic script
+measures 142.00 kB, 53 bytes less than 2.7.4, and its budget falls with it.
+The chart-only import is 90,343 bytes, 14 more. The indicator (46.00 kB),
+draw (61.86 kB), transform (6.55 kB), profile (20.96 kB), WebGL2 (6.99 kB)
+and workspace (11.89 kB) tiers, the trade tier (17.29 kB) and the widget's
+first-use parts (21.04 kB) keep their sizes. The change adds 122 lines under
+`src` and removes 21; no public export is added.
+
+### Performance
+
+Five runs per version in one session on one machine (a GitHub-hosted
+runner: Intel Xeon 6975P-C, 4 logical CPUs, Linux, headless Chromium
+149.0.7827.55, software GL), under the unchanged render budgets, with
+nothing else on the machine. No rendering code changed. At 200,000 bars the
+lowest Canvas 2D p95 pan, full zoom-out and ten-study tick are 4.7, 82.8 and
+112.9 ms against 4.2, 76.3 and 126.0 ms for 2.7.4 in the same session.
+Fourteen of the eighteen cells read the same; the tick at 200,000 bars reads
+1.1x faster, two pan cells and one zoom-out cell 1.1x slower, and the full
+zoom-out at 50,000 bars 1.3x slower, 34.8 ms against 26.9 ms. That cell rests
+on one low 2.7.4 run: its five were 37.3, 38.2, 26.9, 34.0 and 31.1 ms, and
+2.7.5's 38.7, 37.3, 35.5, 35.7 and 34.8 ms. The row was timed again on the
+machine that prepared the release (Apple M4, hardware GL) with the two
+builds alternating, twelve passes each: the median zoom-out was 11.8 ms for
+2.7.5 and 11.3 ms for 2.7.4, and the lowest 11.1 ms and 10.5 ms. A control
+then timed the 2.7.5 build against a second copy built from the same commit
+into the baseline folder, eight passes each, and read 11.6 ms against
+11.1 ms, the same margin between two copies of one build. The difference is
+the harness's, not the release's. As with 2.7.4, this entry was measured on a
+hosted runner through the nightly workflow's release benchmark job, a
+different runner model from the 2.7.4 entry's, so compare it only with its
+own 2.7.4 column: the build it timed is byte for byte the one published. See
+the [same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#275).
+
+### Tests
+
+12,553 engine tests across 564 files and 740 reference-host tests across 69
+files. Each fix has a test that was run against the code with the fix
+removed and failed: the configured offset through the first view, a fit and
+a reset, with the built-in gap kept for a host that sets none; the Reset
+view row against a panned chart and a manual price axis, and with zooming
+switched off; and the dialog drag's limits, its continuation from an earlier
+drag, and the presses it must leave alone (the close button, the body, a
+secondary button, a bottom sheet, an anchored popover). The browser spec
+drives all three in Chromium, Firefox and WebKit with a real pointer. It
+caught one defect before release: Safari selected the title text under a
+drag, fixed with the prefixed `user-select`. The reference host's browser
+suite passes (25 tests). OpenAlgo at the commit that pins 2.7.3 typechecks
+and builds against the packed candidate, and its `/trading` harness passes
+14 of 14 checks in each of the three engines; its unit suite fails only the
+two tests of its generated indicator catalogue, which lacks the
+`pivot-points` id 2.7.4 added and is regenerated on upgrade.
+
 ## 2.7.4
 
 2026-11-24

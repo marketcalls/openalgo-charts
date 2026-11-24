@@ -328,6 +328,14 @@ order among the studies it shares a pane with. A study that reads on its own sca
 not offered the price pane, and a study whose policy sets `movable: false` gets none of
 these rows.
 
+Since 2.7.5 the right-click menu carries **Reset view** after Fit all bars. A fit shows
+every loaded bar; a reset is the default view: the default bar count again, and every
+price axis a drag left manual back on auto-fit (`chart.resetScale()`). The same release
+lets a centred dialog be dragged by its title bar, so it can be slid off the study or
+the candles it is editing. The bar always stays inside the widget, and a dialog opens
+centred again: no position is remembered. The phone layout's bottom sheets and the
+popovers anchored to a control do not move.
+
 ## Install
 
 ```bash
@@ -988,14 +996,14 @@ exact version, never a range or no version at all (see
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.7.4 build, decimal
+Budgets from `.size-limit.json` and measurements from the 2.7.5 build, decimal
 Brotli kB, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 132.36 kB | 132.36 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 132.91 kB | 132.91 kB |
 | Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.05 kB | 21.04 kB |
-| Widget terminal | base + draw + indicators + widget | 382.13 kB | 382.13 kB |
+| Widget terminal | base + draw + indicators + widget | 382.73 kB | 382.72 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.

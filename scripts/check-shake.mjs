@@ -286,7 +286,9 @@ const BUNDLE = new URL('../dist/openalgo-charts.mjs', import.meta.url).pathname.
 // restored, the context-menu snapshot released, and the live close and
 // alert judging across refreshes. The final build measures 90329 bytes, 718
 // more than 2.7.2, which kept the 2.6.8 figure; retain the exact ceiling.
-const LIMIT_BYTES = 90329;
+// 2.7.5 remembers the right offset a host configures, so a fit returns to
+// it. The final build measures 90343 bytes, 14 more than 2.7.3 and 2.7.4.
+const LIMIT_BYTES = 90343;
 
 // Absent from a chart-only build. Each is a string that appears in the adapter
 // source and nowhere in the rendering core.

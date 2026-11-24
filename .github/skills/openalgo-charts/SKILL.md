@@ -58,17 +58,17 @@ Import only what you use. Each tier is a separate entry point, so a feature you 
 
 | Import | Contents | Brotli limit |
 |---|---|---|
-| `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking with appearance adapters, grouped timeline events, shared loading controller, request pool, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators, vector SVG export, the render backend port | 141.91 kB |
+| `openalgo-charts` | Engine, 13 chart types, panes and scales, primitives, registries, chart state and settings schema, market replay, symbol comparison, chart linking with appearance adapters, grouped timeline events, shared loading controller, request pool, warm-load bar cache, interval registry, chart timezone, trading visualization, OpenAlgo feeds, EMA/RSI/ATR/Supertrend calculators, vector SVG export, the render backend port | 141.95 kB |
 | `openalgo-charts/indicators` | 113 built-in indicators + the Tier-2 external-data contract | 46.00 kB |
 | `openalgo-charts/draw` | 90 drawing tools, including Anchored VWAP and fixed-range Volume Profile, opt-in drawing links and a headless `DrawingController` with multi-select, z-order, a per-tool settings schema, the 1.9.x migration, the clipboard and the icon builders | 61.86 kB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point and Figure, Kagi | 6.55 kB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow | 20.96 kB |
-| `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 159.19 kB with base |
+| `openalgo-charts/trade` | Order engine, state machine, order/position/bracket lines, DOM ladder | 159.24 kB with base |
 | `openalgo-charts/webgl` | The WebGL2 series backend behind `renderer: 'auto' \| 'webgl2'`; composites into the pane's canvas, falls back to 2D for the session on context loss | 6.99 kB |
 | `openalgo-charts/widget` | `createWidget`: the chart with a top bar, drawing rail, responsive mobile controls with drawing search, tool groups and shared Favorites, status line, settings and indicator dialogs with Running studies first, drawing properties, event details, right-click menu, keymap and optional persistence. The only tier that ships DOM; imports the draw tier itself | 131.31 kB |
 | `openalgo-charts/workspace` | Portable workspace/template documents, asynchronous catalog repository and atomic IndexedDB adapter; no UI or market data | 11.89 kB |
 
-Limits are the CI-enforced budgets in `.size-limit.json`. This reference targets 2.7.4.
+Limits are the CI-enforced budgets in `.size-limit.json`. This reference targets 2.7.5.
 In a source checkout, run `npm run size` before quoting byte counts. In a consumer app,
 check the installed version and measure its actual imports with the app's bundler.
 Reference measurements and every budget row live in [bundling-and-tiers](references/bundling-and-tiers.md).
