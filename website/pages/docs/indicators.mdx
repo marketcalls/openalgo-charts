@@ -236,7 +236,7 @@ or folds the chart's bars otherwise: see
 | Linear Regression Slope | `linreg-slope` | pane | `periods=14` |
 | MA Cross | `ma-cross` | onchart | `shortLength=9`, `longLength=26` |
 | CPR with Floor Pivot | `cpr` | onchart | `pivotMode=auto`, `showDaily=true`, `showWeekly=false`, `showMonthly=false`, `displaypivots=true`, `displaysupport=true`, `displayresistance=true`, `displaycpr=true`, `displayS1R1=false` |
-| Pivot Points Standard | `pivot-points` | onchart | `kind=traditional`, `frame=auto`, `showP=true`, `show1`..`show5=true` |
+| Pivot Points Standard | `pivot-points` | onchart | `kind=traditional`, `frame=auto`, `showP=true`, `show1`..`show3=true`, `show4`..`show5=false` |
 | McGinley Dynamic | `mcginley-dynamic` | onchart | `length=14` |
 | Median | `median` | onchart | `source=hl2`, `length=3`, `atrLength=14`, `atrMult=2` |
 | Moving Average Ribbon | `ma-ribbon` | onchart | four groups `showMaN=true`, `maNType=SMA`, `maNSource=close`, `maNLength` (20 / 50 / 100 / 200) for `N` = 1..4 |
@@ -354,7 +354,9 @@ instance keeps whatever the descriptor chose.
 `pivot-points` draws the pivot and up to five support and resistance pairs from the
 finished period before the one on screen. `kind` picks the level set: `traditional` and
 `camarilla` carry five pairs, `woodie` and `classic` four, `fibonacci` three and `demark`
-one, and a pair the set does not have stays empty. `frame` is `daily`, `weekly`, `monthly`,
+one, and a pair the set does not have stays empty. The fourth and fifth pairs start
+hidden (`show4`, `show5`): they sit far from price, and a scale that fits them flattens
+the candles. Switch them on with `priceOnlyAutoScale` to keep the scale on price. `frame` is `daily`, `weekly`, `monthly`,
 `quarterly`, `yearly` or `auto`, which takes sessions under bars of fifteen minutes or
 less, weeks under coarser intraday bars, months under daily bars and years above that.
 The forming period is never read, so a live tick does not move a level, and the rules

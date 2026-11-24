@@ -107,6 +107,16 @@ routes are hidden; replay and host selection locks disable placement. Callbacks
 recheck capabilities, replay and chart context immediately before `onOrder`.
 Throwing capability/lock providers refuse the action. Execution remains host-owned.
 
+Since 2.7.4 `WidgetOptions.contextMenuItems?: (event: ContextMenuEvent) => MenuEntry[]`
+appends host rows to the right-click menu (it is `ContextMenuHooks.items`, forwarded); a
+hook that throws adds none. The same release adds, with no option: a full screen button
+at the end of the top bar where `document.fullscreenEnabled` is true (it takes the whole
+`.oac-grid` when the widget is a grid cell), and placement rows on a study's menu
+(`ind-new-pane`, `ind-price-pane`, `ind-forward`, `ind-backward`) that call
+`chart.moveIndicator` and `chart.reorderIndicator`. A study whose descriptor is not
+`onchart` is never offered the price pane, and `policy.movable === false` withholds all
+four. `ind-remove` stays the last of a study's rows.
+
 Everything `src/widget/index.ts` exports at runtime. The shell (`createWidget` and the handle) is what a host uses; the rest is exported so a host that wants one piece of the chrome and its own for the rest can have it, or so a dialog module of the host's own can register with the shell.
 
 ### The shell (`widget.ts`)
@@ -217,13 +227,13 @@ the captured visible range fills both to the second.
 
 | Export | Kind | What |
 |---|---|---|
-| `mountBottombar(ctx, host, opts?)` | function | The strip under the chart: preset ranges and Go to on the left; on the right the market status (from `marketStatusAt` on the chart's calendar, in a `role="status"` region so a change of phase is announced; hidden without a calendar, or with the "Session state" switch off), a clock in the chart's zone that opens a searchable timezone menu, and the Auto, Log and Percent price scale toggles, which follow the scale (an axis drag, an undo, a reset). `opts.target` is read at every use, so one bar can serve whichever chart has the focus; `ranges`, `onGoTo`, `now`, `timezones` and `onTimezone` are optional. `ctx` is a `BottombarContext`: a `WidgetContext` is one, and a custom host builds one from `createOverlayStack` and `createTipController` over an `.oac-widget` root. One timer a second, stopped while the page is hidden. Returns a `BottombarHandle` (`el`, `controls`, `refresh`, `destroy`); `controls` are the same actions without the markup, which the phone layout's More sheet lists. |
+| `mountBottombar(ctx, host, opts?)` | function | The strip under the chart: preset ranges and Go to on the left; on the right the market status (from `marketStatusAt` on the chart's calendar, in a `role="status"` region so a change of phase is announced; hidden without a calendar, or with the "Session state" switch off), a clock in the chart's zone that opens a searchable timezone menu, and the Auto, Log and Percent price scale toggles, which follow the scale (an axis drag, an undo, a reset). `opts.target` is read at every use, so one bar can serve whichever chart has the focus; `ranges`, `onGoTo`, `now`, `timezones` and `onTimezone` are optional. `ctx` is a `BottombarContext`: a `WidgetContext` is one, and a custom host builds one from `createOverlayStack` and `createTipController` over an `.oac-widget` root. One timer a second, stopped while the page is hidden. Returns a `BottombarHandle` (`el`, `controls`, `refresh`, `destroy`); `controls` are the same actions without the markup, which the phone layout's More sheet lists. Since 2.7.4 a Session button picks regular or extended hours: it is drawn only when `opts.target().session?.()` returns a `BottombarSession` (the widget returns one when the feed's `dataVariants` declares both sessions for the instrument and interval, and asks again when either changes), and `setSession` calls `setDataVariant` with the variant's other fields kept. `controls.session` and `controls.setSession` are optional members, so controls a host built before 2.7.4 still type-check. |
 | `BOTTOMBAR_HEIGHT` | const `28` | The strip's height in CSS px. |
 | `BOTTOMBAR_CSS` | const | Its rules, part of `WIDGET_COMPONENT_CSS`. A widget root carrying the bar (`.has-bottombar`) takes a fourth grid row for it, between the stage and the status line; `.is-mobile` hides it, except a bar marked `is-kept` (a widget with `topbar: false`, which has no More sheet), which stays above the phone footer. On a narrow bar the ranges scroll; the status, the clock and the toggles keep their size. |
 | `DEFAULT_RANGES` | const | `1D` (`1m`, one session), `5D` (`5m`, five sessions), `1M` (`30m`), `3M` (`1h`), `6M` (`1d`), `YTD` (`1d`), `1Y` (`1d`), `5Y` (`1w`), `All` (`1w`). |
 | `rangeWindow(range, { end, zone?, calendar?, bars? })` | function | The `{ from, to }` a range covers, ending at `end`. A `session` range walks back through the calendar's sessions (a weekend or a closed date is skipped, a date with a midday break counts once, its pre-open belongs to it), so one NSE day at `1m` is the 375 bars from 09:15, not 1,440 minutes; without a calendar it counts the dates the `bars` fall on, or weekdays. Months and years run from midnight on the same date that far back in `zone`, `ytd` from 1 January, `all` from the first bar (or 30 years back without `bars`). |
 | `rangeInterval(range, offered)` | function | The range's own interval when offered, else the nearest time-based one by ratio, the longer on a tie. |
-| `WidgetRange`, `WidgetRangeUnit`, `WidgetRangeWindow`, `RangeWindowOptions`, `BottombarContext`, `BottombarTarget`, `BottombarOptions`, `BottombarControls`, `BottombarHandle`, `BottombarScaleToggle`, `BottombarScaleState`, `MarketStatusReading`, `WidgetBottombarOptions`, `WidgetSessionCalendar` | types | |
+| `WidgetRange`, `WidgetRangeUnit`, `WidgetRangeWindow`, `RangeWindowOptions`, `BottombarContext`, `BottombarTarget`, `BottombarOptions`, `BottombarControls`, `BottombarHandle`, `BottombarScaleToggle`, `BottombarScaleState`, `BottombarSession`, `MarketStatusReading`, `WidgetBottombarOptions`, `WidgetSessionCalendar` | types | |
 
 ### Status line, toasts, tokens, styles
 

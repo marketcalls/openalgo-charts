@@ -42,7 +42,7 @@ const WED = 12;
 const THU = 18;
 
 const settings = (over: IndicatorSettings = {}): IndicatorSettings =>
-  ({ ...indicatorDefaults(PIVOT_POINTS), frame: 'daily', ...over });
+  ({ ...indicatorDefaults(PIVOT_POINTS), frame: 'daily', show4: true, show5: true, ...over });
 const calc = (over: IndicatorSettings = {}, input: readonly Bar[] = bars): Record<string, (number | null)[]> =>
   PIVOT_POINTS.calc(input, settings(over), {}) as Record<string, (number | null)[]>;
 const at = (values: Record<string, (number | null)[]>, i: number): Record<string, number | null> =>
@@ -176,6 +176,15 @@ describe('Pivot Points Standard: frames', () => {
 });
 
 describe('Pivot Points Standard: inputs reach the output', () => {
+  it('draws three pairs until the outer two are switched on', () => {
+    const row = at(PIVOT_POINTS.calc(bars, { ...indicatorDefaults(PIVOT_POINTS), frame: 'daily' }, {}) as Record<string, (number | null)[]>, WED);
+    expect([row.s3, row.r3]).toEqual([70, 130]);
+    expect([row.s4, row.r4, row.s5, row.r5]).toEqual([null, null, null, null]);
+    // A settings blob without the keys, as a host passing `{}` sends, reads the same.
+    const bare = at(PIVOT_POINTS.calc(bars, { frame: 'daily' }, {}) as Record<string, (number | null)[]>, WED);
+    expect([bare.r3, bare.r4]).toEqual([130, null]);
+  });
+
   it('hides a level pair, and the pivot, on request', () => {
     const values = calc({ showP: false, show2: false });
     const row = at(values, WED);

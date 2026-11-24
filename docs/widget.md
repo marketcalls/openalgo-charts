@@ -222,6 +222,9 @@ that opens a timezone menu, and the Auto, Log and Percent price scale toggles. G
 lives in this bar; with `bottombar: false` it is back in the top bar and the status line
 shows the market status. `sessionCalendar` gives the chart its trading hours, and
 `sessionShading` (default on) washes pre-open, post-close and extended-hours bars. The
+Since 2.7.4 a **Session** button picks regular or extended hours where the feed's
+`dataVariants` declares both for the instrument and interval; it calls `setDataVariant`
+and is left out everywhere else. The
 phone layout hides the bar and lists its controls in the More sheet. In a chart grid the
 bar is the grid's: `ChartGridOptions.bottombar` (default false) puts one bar under the grid
 for the active chart; see the
@@ -520,3 +523,18 @@ The injector preserves existing populated host styles and can fill an empty
 SSR placeholder. This authorizes the style element only; the host must also
 permit the widget's style attributes. See the
 [widget CSP guide](https://marketcalls.github.io/openalgo-charts/docs/widget/).
+
+## Host menu rows, full screen and study placement
+
+Since 2.7.4:
+
+- `contextMenuItems: (event) => MenuEntry[]` appends a host's own rows to the
+  right-click menu, under a separator. It receives the chart's `ContextMenuEvent`; a
+  hook that throws adds no rows.
+- The top bar ends in a full screen button where the page may enter full screen
+  (`document.fullscreenEnabled`). Inside a chart grid it takes the whole grid.
+- A study's right-click menu moves a price overlay to a pane of its own and back, and
+  steps its stacking order. A study on its own scale is not offered the price pane, and
+  `movable: false` in its policy withholds every placement row.
+- The timezone list in the settings dialog and the bottom bar grows from 14 zones to 30.
+  Any IANA zone is still accepted by `chart.setTimezone`.

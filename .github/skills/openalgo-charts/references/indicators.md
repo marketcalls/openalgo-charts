@@ -128,7 +128,7 @@ import 'openalgo-charts/indicators'; // side effect: registers all 113 built-ins
 | `linreg-slope` | Linear Regression Slope | pane | `slope` | `periods` 14 |
 | `ma-cross` | MA Cross | onchart | `short`, `long`, `cross` | `shortLength` 9, `longLength` 26 |
 | `cpr` | CPR with Floor Pivot | onchart | 27: `{d,w,m}` x `Pivot`, `S1`-`S3`, `R1`-`R3`, `Bc`, `Tc` | `pivotMode` `'auto'`, `showDaily` `true`, `showWeekly` `false`, `showMonthly` `false`, `displayS1R1` `false` |
-| `pivot-points` | Pivot Points Standard | onchart | 11: `p`, `s1`-`s5`, `r1`-`r5` (step lines; a level the chosen type lacks is all null) | `kind` `'traditional'` (`fibonacci`, `woodie`, `classic`, `demark`, `camarilla`), `frame` `'auto'` (`daily`, `weekly`, `monthly`, `quarterly`, `yearly`), `showP` `true`, `show1`-`show5` `true` |
+| `pivot-points` | Pivot Points Standard | onchart | 11: `p`, `s1`-`s5`, `r1`-`r5` (step lines; a level the chosen type lacks is all null) | `kind` `'traditional'` (`fibonacci`, `woodie`, `classic`, `demark`, `camarilla`), `frame` `'auto'` (`daily`, `weekly`, `monthly`, `quarterly`, `yearly`), `showP` `true`, `show1`-`show3` `true`, `show4`-`show5` `false` |
 | `mcginley-dynamic` | McGinley Dynamic | onchart | `mg` | `length` 14, `timeframe` `''` |
 | `median` | Median | onchart | `median`, `upper`, `lower`, `medianEma` | `source` `'hl2'`, `length` 3, `atrLength` 14, `atrMult` 2 |
 | `ma-ribbon` | Moving Average Ribbon | onchart | `ma1`, `ma2`, `ma3`, `ma4` | `showMa1` `true`, `ma1Type` `'SMA'`, `ma1Source` `'close'`, `ma1Length` 20, `showMa2` `true`, `ma2Type` `'SMA'`, `ma2Source` `'close'`, `ma2Length` 50, `showMa3` `true`, `ma3Type` `'SMA'`, `ma3Source` `'close'`, `ma3Length` 100, `showMa4` `true`, `ma4Type` `'SMA'`, `ma4Source` `'close'`, `ma4Length` 200 |
@@ -243,7 +243,7 @@ Notes that bite:
   Hull Suite's Hma mode uses the same kernel. Odd and non-square lengths differ
   from the fractional-half and floored-root convention used before 2.5.4.
 - `cpr` requires finite highs and lows for every observation in its prior period.
-- `pivot-points` builds each period's levels from the finished period before it, and shares `cpr`'s rules: a nonfinite extreme voids that period, and the first two loaded periods show nothing. `frame` `'auto'` takes sessions under bars of fifteen minutes or less, weeks under coarser intraday bars, months under daily bars and years above that. Traditional and Camarilla carry five pairs, Woodie and Classic four, Fibonacci three, DeMark one; Woodie reads the open of the period being traded, DeMark the prior period's open.
+- `pivot-points` builds each period's levels from the finished period before it, and shares `cpr`'s rules: a nonfinite extreme voids that period, and the first two loaded periods show nothing. `frame` `'auto'` takes sessions under bars of fifteen minutes or less, weeks under coarser intraday bars, months under daily bars and years above that. Traditional and Camarilla carry five pairs, Woodie and Classic four, Fibonacci three, DeMark one; Woodie reads the open of the period being traded, DeMark the prior period's open. The fourth and fifth pairs start hidden (`show4`, `show5`), since a pane that fits them to its scale flattens the candles; `priceOnlyAutoScale` keeps the scale on price when they are on.
   A nonfinite extreme invalidates that period until the next existing session or
   calendar boundary. A complete later period recovers. Only the period's final
   close is used; the schedule, display controls and pivot formulas are unchanged.

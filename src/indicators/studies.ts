@@ -351,6 +351,8 @@ type PivotKind = 'traditional' | 'fibonacci' | 'woodie' | 'classic' | 'demark' |
 
 /** How many support and resistance pairs a pivot study can carry. */
 const PIVOT_PAIRS = 5;
+/** How many of them are drawn until the user asks for more. */
+const PIVOT_SHOWN = 3;
 
 /** Range fractions for the three Fibonacci pairs, and the range divisors for Camarilla's first four. */
 const FIB_PIVOT_RATIOS = [0.382, 0.618, 1] as const;
@@ -467,8 +469,10 @@ export const PIVOT_POINTS: IndicatorDescriptor = {
       ],
     },
     { key: 'showP', type: 'boolean', label: 'Pivot', default: true },
+    // The two outer pairs start off: they sit far from price, and a pane that
+    // fits them to its scale flattens the candles a pivot is read against.
     ...Array.from({ length: PIVOT_PAIRS }, (_, k): IndicatorInput => (
-      { key: `show${k + 1}`, type: 'boolean', label: `S${k + 1} / R${k + 1}`, default: true }
+      { key: `show${k + 1}`, type: 'boolean', label: `S${k + 1} / R${k + 1}`, default: k < PIVOT_SHOWN }
     )),
     { key: 'pivotColor', type: 'color', label: 'Pivot', default: '#ff9800' },
     { key: 'supportColor', type: 'color', label: 'Support', default: '#4caf50' },
@@ -485,7 +489,7 @@ export const PIVOT_POINTS: IndicatorDescriptor = {
     const levels = PIVOT_LEVELS[Object.keys(PIVOT_LEVELS).includes(kind) ? kind as PivotKind : 'traditional'];
     const wanted = str(s, 'frame', 'auto');
     const frame = FRAME_PERIODS.find((f) => f === wanted) ?? autoPivotFrame(bars);
-    const shown = PIVOT_KEYS.map((key) => flag(s, key === 'p' ? 'showP' : `show${key.slice(1)}`, true));
+    const shown = PIVOT_KEYS.map((key) => (key === 'p' ? flag(s, 'showP', true) : flag(s, `show${key.slice(1)}`, Number(key.slice(1)) <= PIVOT_SHOWN)));
     const columns = PIVOT_KEYS.map(() => blank(bars.length));
     const row = blank(PIVOT_KEYS.length);
     eachPriorPeriod(bars, frame, zoneOf(s), (i, prior) => {

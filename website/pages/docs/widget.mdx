@@ -303,6 +303,26 @@ Order-entry hosts can also pass `tradingCapabilities`, `tradingMode` and
 disable placement. The menu rechecks current capabilities and chart context when
 clicked. The existing `onOrder` callback remains the execution boundary.
 
+Since 2.7.4 a host can add its own rows to the right-click menu with
+`contextMenuItems`. It is called for each menu with the chart's event (the pane, the
+price and the object under the pointer) and returns `MenuEntry` rows, drawn after the
+widget's own under a separator. A hook that throws adds no rows.
+
+```ts
+createWidget('#chart', {
+  contextMenuItems: (event) => event.price === null ? [] : [
+    { id: 'scan-level', label: 'Scan near this price', run: () => openScanner(event.price) },
+  ],
+});
+```
+
+The same release adds two controls that need no option. The top bar ends in a **full
+screen** button wherever the page is allowed to enter full screen; inside a chart grid
+it takes the whole grid. A study's right-click menu moves a price overlay to a pane of
+its own and back to the price pane, and steps its stacking order among the studies it
+shares a pane with. A study that reads on its own scale is not offered the price pane,
+and a study whose policy sets `movable: false` gets none of these rows.
+
 ## Install
 
 ```bash
@@ -512,6 +532,15 @@ settings, no status is shown. With the bar off, the status line says it instead.
 UTC, and a click opens a searchable menu: the zones the settings dialog offers first,
 then every zone the runtime knows. A zone picked there moves the time axis and the
 sessions, and is saved with the layout.
+
+**Session picks regular or extended hours** (since 2.7.4). The button is drawn only when
+the feed's `dataVariants` declares both `regular` and `extended` sessions for the
+instrument and interval on screen, and it is asked again when either changes. A choice
+calls `setDataVariant`, keeping the variant's other fields, so the feed serves the other
+series: the widget never filters bars itself. Until a choice is made neither row is
+marked, because the feed's default session is not known to be either. The phone
+layout's More sheet carries the same two rows. A chart grid's shared bar does not show
+it.
 
 **The scale toggles follow the price scale.** Auto-fit, logarithmic and percent act on
 the scale the primary series reads from, and show what it is doing, including after a
