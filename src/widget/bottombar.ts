@@ -75,17 +75,22 @@ export interface BottombarTarget {
   /** Apply a range. The bar reports what it returns. Without it the range buttons are greyed. */
   setRange?(id: string): Promise<DateNavigationResult> | DateNavigationResult | void;
   /**
-   * The session choice, when the source serves this instrument with and
-   * without its extended hours: the session asked for, undefined while the
-   * source's own default is on screen. Null, or no method, leaves the control out.
+   * The session choice: drawn when the source serves this instrument with
+   * and without its extended hours, and kept while the chart still asks for a
+   * session the source does not serve here, so there is a way back from it.
+   * Null, or no method, leaves the control out.
    */
   session?(): BottombarSession | null;
-  setSession?(session: DataSession): void;
+  /** Ask the source for a session, or with undefined for its own default. */
+  setSession?(session: DataSession | undefined): void;
 }
 
-/** The session a chart asked its source for; undefined is the source's default, which the bar cannot name. */
+/** What the session control shows. */
 export interface BottombarSession {
+  /** The session the chart asked its source for; undefined is the source's default, which the bar cannot name. */
   readonly current: DataSession | undefined;
+  /** The sessions the source serves for the instrument and interval on screen. */
+  readonly available: readonly DataSession[];
 }
 
 export interface BottombarOptions {
@@ -138,7 +143,7 @@ export interface BottombarControls {
    * Optional, with `setSession`: controls built before 2.7.4 have neither.
    */
   session?(): BottombarSession | null;
-  setSession?(session: DataSession): void;
+  setSession?(session: DataSession | undefined): void;
   /** Null when the chart has no price scale to act on yet. */
   scale(): BottombarScaleState | null;
   toggleScale(which: BottombarScaleToggle): void;
@@ -155,7 +160,7 @@ export interface BottombarHandle {
 }
 
 /** The two sessions a source can serve, in the words the bar and the phone layout's sheet show. */
-export const SESSION_CHOICES: ReadonlyArray<{ id: DataSession; label: 'Regular hours only' | 'With extended hours' }> = [
+const SESSION_CHOICES: ReadonlyArray<{ id: DataSession; label: 'Regular hours only' | 'With extended hours' }> = [
   { id: 'regular', label: 'Regular hours only' },
   { id: 'extended', label: 'With extended hours' },
 ];
@@ -255,6 +260,27 @@ function openZoneMenu(ctx: BottombarContext, anchor: HTMLElement, controls: Bott
 }
 
 /**
+ * The rows of the session choice, shared by the bar's menu and the phone
+ * layout's sheet. A session the source does not serve here is listed greyed
+ * with the reason. When the chart still asks for such a session, as after a
+ * change of interval, a last row goes back to the source's own default: the
+ * way out of a series the source will not serve.
+ */
+export function sessionRows(ctx: WidgetTranslationOptions, state: BottombarSession, pick: (session: DataSession | undefined) => void): MenuRow[] {
+  const rows: MenuRow[] = SESSION_CHOICES.map((choice) => {
+    const offered = state.available.includes(choice.id);
+    return {
+      label: widgetText(ctx, choice.label), on: state.current === choice.id, disabled: !offered,
+      sub: offered ? undefined : widgetText(ctx, 'Not offered for this interval'), onSelect: () => pick(choice.id),
+    };
+  });
+  if (state.current !== undefined && !state.available.includes(state.current)) {
+    rows.push({ label: widgetText(ctx, 'Source default'), onSelect: () => pick(undefined) });
+  }
+  return rows;
+}
+
+/**
  * The button that picks regular or extended hours, appended to `host` with
  * its separator. Drawn only where the source serves both sessions.
  */
@@ -269,9 +295,7 @@ function mountSessionControl(ctx: BottombarContext, host: HTMLElement, controls:
   button.addEventListener('click', () => {
     const state = controls().session?.() ?? null;
     if (state === null) return;
-    close = openMenu(ctx, button, SESSION_CHOICES.map(choice => ({
-      label: widgetText(ctx, choice.label), on: state.current === choice.id, onSelect: () => controls().setSession?.(choice.id),
-    })), { ariaLabel: widgetText(ctx, 'Session') });
+    close = openMenu(ctx, button, sessionRows(ctx, state, session => controls().setSession?.(session)), { ariaLabel: widgetText(ctx, 'Session') });
   });
   host.append(button, sep);
   return {

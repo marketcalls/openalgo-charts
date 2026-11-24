@@ -108,6 +108,8 @@ export interface TopbarOptions {
   canSelectInterval?: (code: string) => boolean;
   /** Show the indicators button. Default true. */
   indicators?: boolean | undefined;
+  /** The full screen button: true for the widget, or the element that enters full screen. Default off. */
+  fullscreen?: boolean | HTMLElement | undefined;
   search?: SymbolSearch | undefined;
   /** The current facts, read on every refresh. */
   state: () => TopbarState;
@@ -169,15 +171,20 @@ export function brandingLink(chart: WidgetContext['chart'], translation: WidgetT
  * The full screen button, appended to `host`; returns its teardown, which
  * does nothing where the button was left out.
  *
- * Drawn only where the page may enter full screen: an embed without the
- * permission would otherwise carry a button that can do nothing. A chart in a
- * grid takes the whole grid with it, since one cell filling the display is
- * what maximise does. It is the last control in the bar, so it is mounted last.
+ * Drawn only when the host asks for it and the page may enter full screen: an
+ * embed without the permission would otherwise carry a button that can do
+ * nothing, and a host that draws its order ticket outside the widget would
+ * lose it behind the full screen element. A chart in a grid takes the whole
+ * grid with it, since one cell filling the display is what maximise does; a
+ * host element stands in for both. It is the last control in the bar, so it
+ * is mounted last.
  */
-function mountFullscreenButton(ctx: WidgetContext, host: HTMLElement, btn: (label: string, cls?: string) => HTMLButtonElement): () => void {
+function mountFullscreenButton(
+  ctx: WidgetContext, host: HTMLElement, btn: (label: string, cls?: string) => HTMLButtonElement, target: boolean | HTMLElement | undefined,
+): () => void {
   const doc = ctx.document;
-  if (doc.fullscreenEnabled !== true || typeof ctx.root.requestFullscreen !== 'function') return () => {};
-  const stage = (): HTMLElement => host.closest<HTMLElement>('.oac-grid') ?? ctx.root;
+  if (target === undefined || target === false || doc.fullscreenEnabled !== true || typeof ctx.root.requestFullscreen !== 'function') return () => {};
+  const stage = (): HTMLElement => (target === true ? host.closest<HTMLElement>('.oac-grid') ?? ctx.root : target);
   const fullBtn = btn(widgetText(ctx, 'Full screen'), 'oac-btn--icon oac-topbar__fullscreen');
   const fullGlyph = glyph(doc, '', 'chrome');
   fullBtn.appendChild(fullGlyph);
@@ -589,7 +596,7 @@ export function mountTopbar(ctx: WidgetContext, host: HTMLElement, opts: TopbarO
       brandingAnchor.setAttribute('aria-label', link.label);
     }
   };
-  const offs = [ctx.chart.on('branding:changed', refresh), mountFullscreenButton(ctx, host, btn)];
+  const offs = [ctx.chart.on('branding:changed', refresh), mountFullscreenButton(ctx, host, btn, opts.fullscreen)];
   refresh();
 
   return {

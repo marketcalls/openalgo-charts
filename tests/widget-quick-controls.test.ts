@@ -78,14 +78,33 @@ describe('full screen from the top bar', () => {
     return { document, holder: () => holder, restore: () => { delete proto.requestFullscreen; } };
   }
 
-  it('is left out where the page cannot enter full screen', () => {
-    expect(root(make()).querySelector('.oac-topbar__fullscreen')).toBeNull();
+  it('is left out where the page cannot enter full screen, and unless the host asks for it', () => {
+    expect(root(make({ fullscreen: true })).querySelector('.oac-topbar__fullscreen')).toBeNull();
+    const page = fullscreenDocument();
+    try {
+      // A host that draws its order ticket outside the widget would lose it in full screen.
+      expect(root(make({}, page.document)).querySelector('.oac-topbar__fullscreen')).toBeNull();
+      expect(root(make({ fullscreen: false }, page.document)).querySelector('.oac-topbar__fullscreen')).toBeNull();
+    } finally { page.restore(); }
+  });
+
+  it('puts the element the host names on the display, so its own chrome comes along', () => {
+    const page = fullscreenDocument();
+    try {
+      const shell = page.document.createElement('div');
+      page.document.body.appendChild(shell);
+      const widget = make({ fullscreen: shell as unknown as HTMLElement }, page.document);
+      const button = root(widget).querySelector('.oac-topbar__fullscreen')!;
+      fire(button, 'click');
+      expect(page.holder()).toBe(shell);
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+    } finally { page.restore(); }
   });
 
   it('puts the widget on the whole display and brings it back', () => {
     const page = fullscreenDocument();
     try {
-      const widget = make({}, page.document);
+      const widget = make({ fullscreen: true }, page.document);
       const button = root(widget).querySelector('.oac-topbar__fullscreen')!;
       expect(button.getAttribute('aria-pressed')).toBe('false');
       fire(button, 'click');
@@ -100,7 +119,7 @@ describe('full screen from the top bar', () => {
   it('follows a change it did not make, and stops listening once destroyed', () => {
     const page = fullscreenDocument();
     try {
-      const widget = make({}, page.document);
+      const widget = make({ fullscreen: true }, page.document);
       const button = root(widget).querySelector('.oac-topbar__fullscreen')!;
       void (root(widget) as unknown as { requestFullscreen(): Promise<void> }).requestFullscreen();
       expect(button.getAttribute('aria-pressed')).toBe('true');
@@ -115,7 +134,7 @@ describe('full screen from the top bar', () => {
     const page = fullscreenDocument();
     const proto = FakeElement.prototype as unknown as { requestFullscreen?: () => Promise<void> };
     try {
-      const widget = make({}, page.document);
+      const widget = make({ fullscreen: true }, page.document);
       proto.requestFullscreen = () => Promise.reject(new Error('denied'));
       fire(root(widget).querySelector('.oac-topbar__fullscreen')!, 'click');
       await settled();
@@ -269,9 +288,54 @@ describe('regular or extended hours in the bottom bar', () => {
     const more = root(widget).querySelectorAll('button').find(button => button.dataset.mobileAction === 'more');
     fire(more!, 'click');
     const rows = root(widget).querySelectorAll('button').filter(button => button.dataset.mobileAction === 'session');
-    expect(rows.map(button => button.dataset.session)).toEqual(['regular', 'extended']);
+    expect(rows.map(button => button.textContent)).toEqual(['Regular hours only', 'With extended hours']);
     fire(rows[1]!, 'click');
     expect(widget.variant()).toEqual({ session: 'extended' });
+  });
+
+  it('keeps a way back when the chart asks for a session the next interval does not have', async () => {
+    const asked: (string | undefined)[] = [];
+    const feed: DataFeed = {
+      getBars: async request => { asked.push(request.variant?.session); return BARS; },
+      dataVariants: query => (query.interval === '5m' ? BOTH : {}),
+    };
+    const widget = make({ feed, interval: '5m' });
+    await settled();
+    choose(widget, 'With extended hours');
+    await settled();
+    widget.setInterval('1d');
+    await settled();
+    // The source serves no named session on daily bars, so the chart reports
+    // the series unavailable. The control must stay, or nothing in the widget
+    // could take the chart back to a series the source does serve.
+    expect(widget.variant()).toEqual({ session: 'extended' });
+    expect(control(widget).hidden).toBe(false);
+    fire(control(widget), 'click');
+    const rows = root(widget).querySelectorAll('.oac-menu button');
+    expect(rows.map(button => button.textContent)).toEqual([
+      expect.stringContaining('Regular hours only'), expect.stringContaining('With extended hours'), expect.stringContaining('Source default'),
+    ]);
+    // A session the source does not serve here cannot be picked.
+    fire(rows[0]!, 'click');
+    expect(widget.variant()).toEqual({ session: 'extended' });
+    fire(control(widget), 'click');
+    fire(root(widget).querySelectorAll('.oac-menu button').find(button => button.textContent?.includes('Source default'))!, 'click');
+    await settled();
+    expect(widget.variant()).toBeUndefined();
+    expect(asked[asked.length - 1]).toBeUndefined();
+    expect(control(widget).hidden).toBe(true);
+  });
+
+  it('tells the source a superseded question is no longer wanted', async () => {
+    const signals: AbortSignal[] = [];
+    const feed: DataFeed = { getBars: async () => BARS, dataVariants: (query) => { signals.push(query.signal!); return new Promise(() => {}); } };
+    const widget = make({ feed, interval: '5m' });
+    await settled();
+    widget.setInterval('15m');
+    await settled();
+    expect(signals.map(signal => signal.aborted)).toEqual([true, false]);
+    widget.destroy();
+    expect(signals[1]!.aborted).toBe(true);
   });
 });
 
@@ -283,6 +347,7 @@ describe('the timezone list', () => {
     expect(CHART_TIMEZONES.filter(zone => !isValidTimezone(zone))).toEqual([]);
     expect(CHART_TIMEZONES).toContain('Asia/Kolkata');
     // The zones a chart saved before the list grew are still on it.
+    expect(CHART_TIMEZONES).toHaveLength(30);
     for (const zone of ['UTC', 'Europe/London', 'Europe/Berlin', 'Europe/Moscow', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Hong_Kong',
       'Asia/Tokyo', 'Australia/Sydney', 'America/Sao_Paulo', 'America/New_York', 'America/Chicago', 'America/Los_Angeles']) {
       expect(CHART_TIMEZONES, zone).toContain(zone);

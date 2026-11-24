@@ -224,7 +224,8 @@ shows the market status. `sessionCalendar` gives the chart its trading hours, an
 `sessionShading` (default on) washes pre-open, post-close and extended-hours bars. The
 Since 2.7.4 a **Session** button picks regular or extended hours where the feed's
 `dataVariants` declares both for the instrument and interval; it calls `setDataVariant`
-and is left out everywhere else. The
+and is left out everywhere else, except while the chart still asks for a session the
+feed does not serve on the interval now shown, when it stays and offers the way back. The
 phone layout hides the bar and lists its controls in the More sheet. In a chart grid the
 bar is the grid's: `ChartGridOptions.bottombar` (default false) puts one bar under the grid
 for the active chart; see the
@@ -467,14 +468,14 @@ cannot name a part either: allow the origin, or the directory as a path ending i
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.7.3 build, decimal Brotli kB, enforced by
+Budgets from `.size-limit.json` and measurements from the 2.7.4 build, decimal Brotli kB, enforced by
 `npm run size`:
 
 | Row | Files | Budget | Actual |
 |---|---|---|---|
-| Widget tier | `openalgo-charts.widget.mjs` | 131.55 kB | 131.55 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 132.36 kB | 132.36 kB |
 | Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.05 kB | 21.04 kB |
-| Widget terminal | base + draw + indicators + widget | 380.40 kB | 380.39 kB |
+| Widget terminal | base + draw + indicators + widget | 382.13 kB | 382.13 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged. Measure, do not
@@ -531,8 +532,11 @@ Since 2.7.4:
 - `contextMenuItems: (event) => MenuEntry[]` appends a host's own rows to the
   right-click menu, under a separator. It receives the chart's `ContextMenuEvent`; a
   hook that throws adds no rows.
-- The top bar ends in a full screen button where the page may enter full screen
-  (`document.fullscreenEnabled`). Inside a chart grid it takes the whole grid.
+- `fullscreen: true` ends the top bar in a full screen button where the page may enter
+  full screen (`document.fullscreenEnabled`); inside a chart grid it takes the whole
+  grid. Off by default, since only the element that enters full screen stays on the
+  display: pass an element (`fullscreen: shellElement`) when the host draws its order
+  ticket or dialogs outside the widget, and that element is the one shown.
 - A study's right-click menu moves a price overlay to a pane of its own and back, and
   steps its stacking order. A study on its own scale is not offered the price pane, and
   `movable: false` in its policy withholds every placement row.

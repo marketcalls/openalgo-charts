@@ -162,6 +162,15 @@ export interface WidgetOptions extends Omit<ChartOptions, 'theme'>, WidgetBottom
   /** The drawing rail. `false` hides it; an object restricts its tools or seeds its pins. Default on. */
   rail?: boolean | RailOptions;
   topbar?: boolean;
+  /**
+   * A full screen button at the end of the top bar. Off by default, since
+   * only the element that enters full screen stays on the display: `true`
+   * takes the widget (a chart grid whole when the widget is one of its
+   * cells), and an element takes that element, for a host whose own order
+   * ticket or dialogs are drawn outside the widget and must come along.
+   * Left out wherever the page may not enter full screen.
+   */
+  fullscreen?: boolean | HTMLElement;
   statusline?: boolean;
   /** Narrow controls. Auto activates when the container is at most 640 CSS px wide, or, with a coarse primary pointer, at most 960 px wide and under 600 px tall (a phone on its side); a tablet or a touch laptop keeps the desktop chrome. Default auto. */
   mobile?: MobileMode;
@@ -401,7 +410,7 @@ export interface Widget {
 
 /** The options the shell consumes; the rest of `WidgetOptions` is the chart's. */
 const WIDGET_ONLY_KEYS: ReadonlyArray<keyof WidgetOptions> = [
-  'feed', 'symbol', 'exchange', 'interval', 'variant', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'statusline',
+  'feed', 'symbol', 'exchange', 'interval', 'variant', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'fullscreen', 'statusline',
   'mobile', 'loading', 'persist', 'storage', 'timeframePreferences', 'canSelectInterval', 'drawingScope', 'drawingStore', 'locale', 'translate', 'indicators', 'symbolSearch', 'lookbackBars', 'now', 'onOrder', 'styleNonce',
   'tradingCapabilities', 'tradingMode', 'tradingLocked', 'contextMenuItems', 'account',
   'eventDetails', 'captureRows',
@@ -896,7 +905,7 @@ class WidgetImpl implements Widget {
       this._topbar = mountTopbar(this.context, topbarEl, {
         intervals: this._intervals,
         timeframePreferences: this._timeframePreferences, canSelectInterval,
-        indicators: options.indicators,
+        indicators: options.indicators, fullscreen: options.fullscreen,
         search: this.context.symbolSearch,
         state: () => ({ symbol: this._symbol, exchange: this._exchange, interval: this._interval, chartType: this.chartType(), theme: this._themeName }),
         onSymbol: (s, ex) => this.setSymbol(s, ex),

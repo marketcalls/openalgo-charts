@@ -403,6 +403,8 @@ const PIVOT_LEVELS: Record<PivotKind, (o: PriorPeriod, out: number[]) => void> =
     }
   },
   demark: ({ open: o, high: h, low: l, close: c }, out) => {
+    // Without the open there is no telling which way the period closed.
+    if (!Number.isFinite(o)) return;
     // The sum leans on the extreme the period closed towards.
     const x = c === o ? h + l + 2 * c : c > o ? 2 * h + l + c : 2 * l + h + c;
     out[0] = x / 4;

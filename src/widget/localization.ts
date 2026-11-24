@@ -16,6 +16,8 @@ export type WidgetBuiltinMessage =
   | "Session"
   | "Regular hours only"
   | "With extended hours"
+  | "Source default"
+  | "Not offered for this interval"
   | "Timeframes"
   | "Type"
   | "Add"

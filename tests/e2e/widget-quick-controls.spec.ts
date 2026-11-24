@@ -65,10 +65,28 @@ test('the session button asks the source for extended hours and back', async ({ 
   await page.locator('.oac-menu button', { hasText: 'Regular hours only' }).click();
   await expect.poll(() => count(page)).toBe(40);
   await expect(button).toHaveAttribute('data-session', 'regular');
-  // Daily bars have one session at this provider: the choice goes away.
-  await page.evaluate(() => (window as any).fixture.widget.setDataVariant(undefined));
+  // Daily bars have one session at this provider, and regular is it: the
+  // chart keeps loading and the choice goes away.
   await page.evaluate(() => (window as any).fixture.widget.setInterval('1d'));
+  await expect.poll(() => count(page)).toBe(40);
   await expect(button).toBeHidden();
+
+  // Extended hours carried to daily bars is a series the provider does not
+  // serve. The chart says so, and the control stays as the way back.
+  await page.evaluate(() => (window as any).fixture.widget.setInterval('1m'));
+  await expect(button).toBeVisible();
+  await button.click();
+  await page.locator('.oac-menu button', { hasText: 'With extended hours' }).click();
+  await expect.poll(() => count(page)).toBe(60);
+  await page.evaluate(() => (window as any).fixture.widget.setInterval('1d'));
+  await expect(page.locator('.oac-data-status')).toContainText('Not available from this source');
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(page.locator('.oac-menu button', { hasText: 'With extended hours' })).toBeDisabled();
+  await page.screenshot({ path: info.outputPath('stranded.png') });
+  await page.locator('.oac-menu button', { hasText: 'Regular hours only' }).click();
+  await expect.poll(() => count(page)).toBe(40);
+  await expect(page.locator('.oac-data-status')).toBeHidden();
   expect(errors).toEqual([]);
 });
 

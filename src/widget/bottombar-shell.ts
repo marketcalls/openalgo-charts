@@ -18,7 +18,7 @@
 import { attachSessionShading, type DataSession, type SessionCalendarSource } from 'openalgo-charts';
 import { h } from './context';
 import type { DateNavigationResult } from './date-navigator';
-import { mountBottombar, type BottombarControls, type BottombarTarget } from './bottombar';
+import { mountBottombar, type BottombarControls, type BottombarSession, type BottombarTarget } from './bottombar';
 import { DEFAULT_RANGES, rangeInterval, rangeWindow, type WidgetRange, type WidgetRangeWindow } from './ranges';
 import type { WidgetImpl } from './widget';
 
@@ -108,18 +108,20 @@ export function attachBottombar(this: BottombarHost, before: HTMLElement): Shell
  * draws no control for it.
  */
 function sessionChoice(host: BottombarHost): {
-  session(): { current: DataSession | undefined } | null;
-  setSession(next: DataSession): void;
+  session(): BottombarSession | null;
+  setSession(next: DataSession | undefined): void;
   /** Start asking, and repaint the bar with each answer. */
   follow(repaint: () => void): void;
 } {
   let sessions: readonly DataSession[] = [];
-  let asked = 0;
+  let asking: AbortController | null = null;
   let repaint: (() => void) | undefined;
   const ask = (): void => {
-    const mine = ++asked;
+    // The answer for the last instrument is no longer wanted, here or at the source.
+    asking?.abort();
+    const mine = asking = new AbortController();
     const settle = (next: readonly DataSession[]): void => {
-      if (mine !== asked || host._destroyed) return;
+      if (mine !== asking || host._destroyed) return;
       sessions = next;
       repaint?.();
     };
@@ -127,16 +129,26 @@ function sessionChoice(host: BottombarHost): {
     const feed = host._opts.feed;
     if (feed?.dataVariants === undefined) return;
     void Promise.resolve()
-      .then(() => feed.dataVariants!({ symbol: host._symbol, exchange: host._exchange, interval: host._interval }))
+      .then(() => feed.dataVariants!({ symbol: host._symbol, exchange: host._exchange, interval: host._interval, signal: mine.signal }))
       .then(capabilities => settle(capabilities?.sessions ?? []), () => settle([]));
   };
   return {
-    session: () => (sessions.includes('regular') && sessions.includes('extended') ? { current: host.variant()?.session } : null),
+    session: () => {
+      const current = host.variant()?.session;
+      // Kept while the chart asks for a session the source does not serve
+      // here: the chart then says the series is unavailable, and this control
+      // is the only way back from it.
+      const offered = sessions.includes('regular') && sessions.includes('extended');
+      return offered || (current !== undefined && !sessions.includes(current)) ? { current, available: sessions } : null;
+    },
     // The other fields of the variant are the user's as well, and stay.
-    setSession: (next) => { host.setDataVariant({ ...host.variant(), session: next }); },
+    setSession: (next) => {
+      const { session: _dropped, ...rest } = host.variant() ?? {};
+      host.setDataVariant(next === undefined ? rest : { ...rest, session: next });
+    },
     follow: (paint) => {
       repaint = paint;
-      host._cleanups.push(host._bus.on('symbol', ask), host._bus.on('interval', ask), host._bus.on('variant', paint));
+      host._cleanups.push(host._bus.on('symbol', ask), host._bus.on('interval', ask), host._bus.on('variant', paint), () => asking?.abort());
       ask();
     },
   };

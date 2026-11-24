@@ -119,6 +119,8 @@ Rechecked on 2.7.2 with `npx size-limit` on the final versioned release build: b
 
 Rechecked on 2.7.3 with `npx size-limit` on the final versioned release build: base 141.88 kB, indicators 45.10 kB, draw 61.86 kB, profile 20.96 kB, transform 6.55 kB, trade 17.29 kB on its own (base + trade 159.17 kB), workspace 11.89 kB, WebGL2 6.99 kB, widget 131.55 kB, and 444.07 kB for all tiers. Registry counts are unchanged: 112 indicators, 90 drawing tools, 13 base chart types, 15 with the transform tier, and six series transforms. The diagram shows the 2.7.3 title, version label and every tier size. The release adds no box or arrow.
 
+Rechecked on 2.7.4 with `npx size-limit` on the final versioned release build: base 141.91 kB, indicators 46.00 kB, draw 61.86 kB, profile 20.96 kB, transform 6.55 kB, trade 17.29 kB on its own (base + trade 159.19 kB), workspace 11.89 kB, WebGL2 6.99 kB, widget 132.36 kB, and 445.81 kB for all tiers. Registry counts: 113 indicators (Trend 41, Momentum 31, Volatility 23, Volume 18) with the Pivot Points Standard study, 90 drawing tools, 13 base chart types, 15 with the transform tier, and six series transforms. The diagram shows the 2.7.4 title, version label, the 113 built-in studies chip and every tier size. The release adds no box or arrow.
+
 Source references: `src/index.ts`, `src/feed/data-controller.ts`,
 `src/feed/instrument.ts`, `src/model/bar.ts`, `src/core/pane.ts`,
 `src/alerts/controller.ts`, `src/replay/group.ts`, `src/link/group.ts`,

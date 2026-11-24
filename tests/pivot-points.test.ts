@@ -107,6 +107,13 @@ describe('Pivot Points Standard: the six level sets', () => {
     expectLevels(at(calc({ kind: 'demark' }, flat), WED), { p: 100, r1: 110, s1: 90 });
   });
 
+  it('demark shows nothing when the prior period has no open to judge by', () => {
+    const noOpen = bars.map((b, i) => (i === 6 ? { ...b, open: NaN } : b));
+    expectLevels(at(calc({ kind: 'demark' }, noOpen), WED), {});
+    // The sets that never read that open are unaffected.
+    expectLevels(at(calc({ kind: 'classic' }, noOpen), WED), at(calc({ kind: 'classic' }), WED));
+  });
+
   it('camarilla', () => {
     expectLevels(at(calc({ kind: 'camarilla' }), WED), {
       p: 100,

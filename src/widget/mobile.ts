@@ -9,7 +9,7 @@ import {
 } from './topbar';
 import { mountSymbolPicker, type SymbolPickerHandle } from './symbol-picker';
 import { timeBuckets } from './date-navigator';
-import { SCALE_TOGGLES, SESSION_CHOICES, type BottombarControls } from './bottombar';
+import { SCALE_TOGGLES, sessionRows, type BottombarControls } from './bottombar';
 import { mountMobileDrawings } from './mobile-drawings';
 import { openTimeframeMenu } from './timeframe-menu';
 import type { TimeframePreferences } from './timeframe-preferences';
@@ -154,13 +154,10 @@ function scaleAndSessionRows(
   const session = controls.session?.() ?? null;
   if (session === null) return;
   const sessions = row('oac-mobile-sheet__sessions', widgetText(ctx, 'Session'));
-  for (const choice of SESSION_CHOICES) {
-    const button = makeAction('session', widgetText(ctx, choice.label), () => {
-      controls.setSession?.(choice.id);
-      close();
-    });
-    button.dataset.session = choice.id;
-    button.setAttribute('aria-pressed', String(session.current === choice.id));
+  for (const choice of sessionRows(ctx, session, (next) => { controls.setSession?.(next); close(); })) {
+    const button = makeAction('session', choice.label, () => { if (choice.disabled !== true) choice.onSelect(); });
+    button.setAttribute('aria-pressed', String(choice.on === true));
+    button.setAttribute('aria-disabled', String(choice.disabled === true));
     sessions.appendChild(button);
   }
 }

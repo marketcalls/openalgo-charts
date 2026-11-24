@@ -599,7 +599,6 @@ export const CHART_TIMEZONES: readonly string[] = [
   'Asia/Tokyo',
   'Australia/Sydney',
   'Pacific/Auckland',
-  'Pacific/Honolulu',
   'America/Sao_Paulo',
   'America/New_York',
   'America/Toronto',
@@ -607,6 +606,7 @@ export const CHART_TIMEZONES: readonly string[] = [
   'America/Mexico_City',
   'America/Denver',
   'America/Los_Angeles',
+  'Pacific/Honolulu',
 ];
 
 /**
