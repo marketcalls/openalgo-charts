@@ -1001,9 +1001,9 @@ Brotli kB, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 132.36 kB | 132.36 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 132.91 kB | 132.91 kB |
 | Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.05 kB | 21.04 kB |
-| Widget terminal | base + draw + indicators + widget | 382.13 kB | 382.13 kB |
+| Widget terminal | base + draw + indicators + widget | 382.73 kB | 382.72 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.
