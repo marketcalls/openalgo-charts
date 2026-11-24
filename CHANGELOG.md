@@ -2,6 +2,147 @@
 
 All notable changes to OpenAlgo Charts.
 
+## 2.7.4
+
+2026-11-24
+
+Pivot points in six level sets, and five additions to the widget: rows a host
+adds to the right-click menu, a full screen button, a study's placement from
+its own menu, the choice of regular or extended hours, and a longer timezone
+list. Every change is additive, and a host that sets nothing new sees the
+chart it had, with two visible additions: placement rows on a study's menu,
+and the Session button where its feed declares both sessions.
+
+### Added
+
+- **Pivot Points Standard.** `pivot-points` draws the pivot and its support
+  and resistance pairs from the finished period before the one on screen, as
+  step lines: flat through a period, with a riser at its boundary. `kind`
+  picks the level set: Traditional and Camarilla carry five pairs, Woodie and
+  Classic four, Fibonacci three and DeMark one. `frame` is daily, weekly,
+  monthly, quarterly, yearly or auto, which takes sessions under bars of
+  fifteen minutes or less, weeks under coarser intraday bars, months under
+  daily bars and years above that. The pivot and each pair has its own
+  switch, and the fourth and fifth pairs start hidden: they sit far from
+  price, and a scale that fits them flattens the candles. The study shares
+  the prior-period walk with `cpr`, so the forming period is never read, a
+  live tick moves no level, a nonfinite extreme voids its period alone, and
+  the first two loaded periods show nothing. The registry holds 113
+  indicators, from 112.
+- **Host rows on the right-click menu.** `WidgetOptions.contextMenuItems`
+  is called for each menu with the chart's event (the pane, the price and the
+  object under the pointer) and returns `MenuEntry` rows, drawn after the
+  widget's own under a separator. It is `ContextMenuHooks.items`, which the
+  widget did not forward before. A hook that throws adds no rows and leaves
+  the menu's own in place.
+- **Full screen.** `WidgetOptions.fullscreen` ends the widget's top bar in a
+  full screen button wherever the page may enter full screen
+  (`document.fullscreenEnabled`); it is left out elsewhere, such as an embed
+  without the permission. `true` takes the widget, and a chart grid whole
+  when the widget is one of its cells. It is off by default, because only the
+  element that enters full screen stays on the display: a host that draws its
+  order ticket or dialogs outside the widget passes the element holding both,
+  and that element is shown. The button follows a change it did not make,
+  such as Escape.
+- **A study's placement from its menu.** A study's right-click menu moves a
+  price overlay to a pane of its own and back to the price pane, and steps
+  its stacking order among the studies sharing its pane. A study that reads
+  on its own scale is not offered the price pane, where it would share the
+  instrument's axis, and a study whose policy sets `movable: false` gets none
+  of these rows. Removal stays the last of a study's rows.
+- **Regular or extended hours.** The bottom bar gains a Session button, and
+  the phone layout's More sheet the same two rows, where the feed's
+  `dataVariants` declares both `regular` and `extended` sessions for the
+  instrument and interval on screen. A choice calls `setDataVariant` with the
+  variant's other fields kept, so the feed serves the other series; the
+  widget filters no bars. Neither row is marked until a choice is made,
+  since the feed's default session is not known to be either. A feed that
+  declares no variants, or one session, gets no control, and a chart grid's
+  shared bar does not show it. When the chart still asks for a session after
+  a change of interval or symbol to one the feed serves without it, the chart
+  reports the series unavailable as before, and the button stays: it greys
+  the session that is not offered and adds Source default, the way back to
+  the feed's own series.
+- **Thirty timezones.** The list the settings dialog and the bottom bar
+  offer grows from 14 zones to 30, with the zone of each large exchange and
+  one for every other offset a trader is likely to sit in. Every zone listed
+  before is still listed, and `chart.setTimezone` accepts any IANA zone as
+  before.
+
+### Compatibility
+
+- **Additive in every tier.** `npm run check:compat` holds each tier's
+  declarations to 2.5.1, 2.6.0, 2.6.4, 2.6.5, 2.6.6, 2.7.2 and 2.7.3, which
+  joins the baselines as the previous release and the version OpenAlgo pins.
+  The documents 2.7.3 saved (chart state, drawings, widget layout, workspace
+  and alerts) load and save again with only the changes 2.7.2's did.
+- **`BottombarControls.session` and `setSession` are optional members**, so
+  controls a host built for `mountMobile` before this release still
+  type-check. A host that mounts `mountBottombar` itself sees no Session
+  button unless its target supplies `session`.
+- **A host that pins the indicator list** will see one more id,
+  `pivot-points`, in `registeredIndicators()`. OpenAlgo keeps a generated
+  catalogue of the registry and regenerates it on upgrade.
+- **`cpr` is unchanged.** It now reads its prior period through the walker
+  the pivot study uses; its tests, its numerical parity fixtures and its
+  three-browser spec pass as they were.
+- **The study menu's row order.** Placement rows sit between a study's
+  visibility row and its removal row. A host that finds rows by `id` is
+  unaffected.
+
+### Size
+
+Three bundles grow, and each budget rises only to the measured build. The
+indicator tier is 46.00 kB Brotli, 907 bytes more than 2.7.3, for the pivot
+study's six level sets and the prior-period walk it now shares with `cpr`.
+The widget tier is 132.36 kB, 804 bytes more, for the session control, the
+study placement rows, the full screen button and the host rows. The base
+engine is 141.91 kB, 22 bytes more, for the sixteen added timezone names
+(base + trade 159.19 kB). The widget terminal is 382.13 kB, all tiers
+445.81 kB and the nine classic scripts 459.54 kB; the base classic script is
+142.05 kB and the widget classic script 145.79 kB. Draw (61.86 kB), transform
+(6.55 kB), profile (20.96 kB), WebGL2 (6.99 kB), workspace (11.89 kB), the
+trade tier (17.29 kB) and the widget's first-use parts (21.04 kB) keep their
+sizes, and the chart-only import keeps its 90,329 bytes.
+
+### Performance
+
+Five runs per version in one session on one machine (a GitHub-hosted
+runner: AMD EPYC 9V45, 4 logical CPUs, Linux, headless Chromium
+149.0.7827.55, software GL), under the unchanged render budgets, with
+nothing else on the machine. No rendering code changed, and the figures say
+so. At 200,000 bars the lowest Canvas 2D p95 pan, full zoom-out and ten-study
+tick are 4.5, 62.4 and 93.8 ms against 4.3, 66.9 and 91.4 ms for 2.7.3 in the
+same session. No cell reads slower, and the five cells that read 1.1x faster
+are run-to-run variation, not an improvement. This entry was measured on the
+hosted runner, through the nightly workflow's release benchmark job, because
+the Windows reference machine was not available: the build it timed is byte
+for byte the one published, but its figures are about twice the 2.7.3
+entry's, so compare it only with its own 2.7.3 column. See the
+[same-session benchmark](https://marketcalls.github.io/openalgo-charts/benchmarks#274).
+
+### Tests
+
+12,535 engine tests across 563 files and 740 reference-host tests across 69
+files. The pivot study's tests check each of the six level sets against
+hand-computed levels, the frames, the chart zone and the forming period; the
+widget tests cover each new control, and each was run against the code with
+its feature or fix removed and failed. An independent review of the
+candidate found the Session control could leave a chart on a series its
+feed does not serve with no way back, a full screen button that would hide a
+host's own order ticket, and DeMark levels drawn from a missing open; all
+three are fixed above, each with a test that fails without the fix. A new
+browser spec drives the host rows, the study placement, the session choice
+and its way back, and full screen in Chromium, Firefox and WebKit. The
+reference host's browser suite passes, and the pivot study was added through
+its picker in the three engines. OpenAlgo at the commit that pins 2.7.3
+typechecks, builds and passes its unit suite against the packed candidate
+with no new failure, and its `/trading` harness passes 14 of 14 checks in
+each of the three engines. On the macOS machine that prepared this release,
+23 browser tests in four existing specs (keyboard chords, one price pill
+test, table widths in WebKit and Tab focus in WebKit) fail on 2.7.4 and on
+an untouched 2.7.3 build alike; CI runs them on Linux.
+
 ## 2.7.3
 
 2026-11-15
