@@ -9,7 +9,7 @@ import {
 } from './topbar';
 import { mountSymbolPicker, type SymbolPickerHandle } from './symbol-picker';
 import { timeBuckets } from './date-navigator';
-import { SCALE_TOGGLES, type BottombarControls } from './bottombar';
+import { SCALE_TOGGLES, SESSION_CHOICES, type BottombarControls } from './bottombar';
 import { mountMobileDrawings } from './mobile-drawings';
 import { openTimeframeMenu } from './timeframe-menu';
 import type { TimeframePreferences } from './timeframe-preferences';
@@ -125,6 +125,43 @@ function fillIntervals(opts: MobileOptions, body: HTMLElement, close: () => void
     const selected = opts.state().interval === code;
     button.setAttribute('aria-pressed', String(selected));
     body.appendChild(button);
+  }
+}
+
+/**
+ * The More sheet's price scale toggles and, where the source serves both, its
+ * choice of regular or extended hours: what the bottom bar shows on a desktop.
+ */
+function scaleAndSessionRows(
+  ctx: WidgetContext, controls: BottombarControls,
+  row: (cls: string, text: string) => HTMLElement,
+  makeAction: (name: string, label: string, run: (button: HTMLButtonElement) => void) => HTMLButtonElement,
+  refresh: () => void, close: () => void,
+): void {
+  const scales = row('oac-mobile-sheet__scales', widgetText(ctx, 'schema.ui.bottombar.scale', {}, 'Price scale'));
+  const scale = controls.scale();
+  // Words, not the bar's glyphs: a phone has no hover to explain a glyph.
+  for (const toggle of SCALE_TOGGLES) {
+    const button = makeAction('scale', widgetText(ctx, toggle.key, {}, toggle.label), () => {
+      controls.toggleScale(toggle.id);
+      refresh();
+    });
+    button.dataset.scale = toggle.id;
+    button.setAttribute('aria-pressed', String(scale !== null && scale[toggle.id]));
+    button.setAttribute('aria-disabled', String(scale === null));
+    scales.appendChild(button);
+  }
+  const session = controls.session?.() ?? null;
+  if (session === null) return;
+  const sessions = row('oac-mobile-sheet__sessions', widgetText(ctx, 'Session'));
+  for (const choice of SESSION_CHOICES) {
+    const button = makeAction('session', widgetText(ctx, choice.label), () => {
+      controls.setSession?.(choice.id);
+      close();
+    });
+    button.dataset.session = choice.id;
+    button.setAttribute('aria-pressed', String(session.current === choice.id));
+    sessions.appendChild(button);
   }
 }
 
@@ -424,19 +461,7 @@ export function mountMobile(ctx: WidgetContext, opts: MobileOptions): MobileHand
         group.appendChild(button);
       }
     }
-    const scales = row('oac-mobile-sheet__scales', widgetText(ctx, 'schema.ui.bottombar.scale', {}, 'Price scale'));
-    const scale = controls.scale();
-    // Words, not the bar's glyphs: a phone has no hover to explain a glyph.
-    for (const toggle of SCALE_TOGGLES) {
-      const button = makeAction('scale', widgetText(ctx, toggle.key, {}, toggle.label), () => {
-        controls.toggleScale(toggle.id);
-        refresh();
-      });
-      button.dataset.scale = toggle.id;
-      button.setAttribute('aria-pressed', String(scale !== null && scale[toggle.id]));
-      button.setAttribute('aria-disabled', String(scale === null));
-      scales.appendChild(button);
-    }
+    scaleAndSessionRows(ctx, controls, row, makeAction, refresh, close);
     head(widgetText(ctx, 'schema.ui.bottombar.timezones', {}, 'Timezone'));
     const zone = makeAction('timezone', controls.timezone(), () => {
       openSheet(widgetText(ctx, 'schema.ui.bottombar.timezones', {}, 'Timezone'), anchor, (list, done) => {

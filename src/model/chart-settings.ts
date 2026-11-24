@@ -573,22 +573,39 @@ const SCALE_MODES: readonly { label: string; value: string }[] =
  * like a trading day. IANA names, never fixed offsets: an offset is silently
  * wrong for half the year anywhere that observes DST. A host wanting a longer
  * list can render its own control and call `chart.setTimezone` directly; this is
- * the set a settings dialog can show without a search field.
+ * the set a settings dialog can show without a search field: the zone of each
+ * large exchange, and one for every other offset a trader is likely to sit in.
  */
 export const CHART_TIMEZONES: readonly string[] = [
   'UTC',
   'Europe/London',
   'Europe/Berlin',
+  'Europe/Zurich',
+  'Africa/Johannesburg',
+  'Europe/Istanbul',
   'Europe/Moscow',
+  'Asia/Riyadh',
   'Asia/Dubai',
+  'Asia/Karachi',
   'Asia/Kolkata',
+  'Asia/Dhaka',
+  'Asia/Bangkok',
+  'Asia/Jakarta',
   'Asia/Singapore',
   'Asia/Hong_Kong',
+  'Asia/Shanghai',
+  'Asia/Taipei',
+  'Asia/Seoul',
   'Asia/Tokyo',
   'Australia/Sydney',
+  'Pacific/Auckland',
+  'Pacific/Honolulu',
   'America/Sao_Paulo',
   'America/New_York',
+  'America/Toronto',
   'America/Chicago',
+  'America/Mexico_City',
+  'America/Denver',
   'America/Los_Angeles',
 ];
 

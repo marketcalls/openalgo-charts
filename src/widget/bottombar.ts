@@ -26,7 +26,7 @@
  */
 import {
   chartSettingsSchema,
-  type Chart, type PriceAxisState, type PriceScaleId,
+  type Chart, type DataSession, type PriceAxisState, type PriceScaleId,
 } from 'openalgo-charts';
 import { chromeIconSvg } from 'openalgo-charts/draw';
 import { glyph, h, type OverlayOptions, type TipController } from './context';
@@ -74,6 +74,18 @@ export interface BottombarTarget {
   range?(): string | null;
   /** Apply a range. The bar reports what it returns. Without it the range buttons are greyed. */
   setRange?(id: string): Promise<DateNavigationResult> | DateNavigationResult | void;
+  /**
+   * The session choice, when the source serves this instrument with and
+   * without its extended hours: the session asked for, undefined while the
+   * source's own default is on screen. Null, or no method, leaves the control out.
+   */
+  session?(): BottombarSession | null;
+  setSession?(session: DataSession): void;
+}
+
+/** The session a chart asked its source for; undefined is the source's default, which the bar cannot name. */
+export interface BottombarSession {
+  readonly current: DataSession | undefined;
 }
 
 export interface BottombarOptions {
@@ -121,6 +133,12 @@ export interface BottombarControls {
   /** The zones the timezone choice lists, the current one included. */
   timezones(): readonly string[];
   setTimezone(zone: string): void;
+  /**
+   * Null unless the source offers both regular and extended hours here.
+   * Optional, with `setSession`: controls built before 2.7.4 have neither.
+   */
+  session?(): BottombarSession | null;
+  setSession?(session: DataSession): void;
   /** Null when the chart has no price scale to act on yet. */
   scale(): BottombarScaleState | null;
   toggleScale(which: BottombarScaleToggle): void;
@@ -135,6 +153,12 @@ export interface BottombarHandle {
   refresh(): void;
   destroy(): void;
 }
+
+/** The two sessions a source can serve, in the words the bar and the phone layout's sheet show. */
+export const SESSION_CHOICES: ReadonlyArray<{ id: DataSession; label: 'Regular hours only' | 'With extended hours' }> = [
+  { id: 'regular', label: 'Regular hours only' },
+  { id: 'extended', label: 'With extended hours' },
+];
 
 /** The glyph and the words for each scale toggle; the phone layout's sheet shows the same words. */
 export const SCALE_TOGGLES: ReadonlyArray<{ id: BottombarScaleToggle; icon: string; key: `schema.${string}`; label: string }> = [
@@ -213,6 +237,56 @@ function describeRange(ctx: BottombarContext, chart: Chart, label: string, resul
   }
 }
 
+/** The timezone menu: the bar's own zones first, then every other zone the runtime knows. */
+function openZoneMenu(ctx: BottombarContext, anchor: HTMLElement, controls: BottombarControls, current: string, t: number): () => void {
+  const first = controls.timezones();
+  const row = (zone: string): MenuRow => {
+    let sub = '';
+    try { sub = utcOffsetLabel(t, zone); } catch { /* a zone the runtime cannot format is still listed by name */ }
+    return { label: zone, sub, on: zone === current, onSelect: () => controls.setTimezone(zone) };
+  };
+  const rest = runtimeZones().filter(zone => !first.includes(zone));
+  const rows: Array<MenuRow | string> = [...first.map(row)];
+  if (rest.length > 0) rows.push(widgetText(ctx, 'schema.ui.bottombar.allZones', {}, 'All zones'), ...rest.map(row));
+  return openMenu(ctx, anchor, rows, {
+    find: widgetText(ctx, 'schema.ui.bottombar.findZone', {}, 'Find a zone'),
+    ariaLabel: widgetText(ctx, 'schema.ui.bottombar.timezones', {}, 'Timezone'),
+  });
+}
+
+/**
+ * The button that picks regular or extended hours, appended to `host` with
+ * its separator. Drawn only where the source serves both sessions.
+ */
+function mountSessionControl(ctx: BottombarContext, host: HTMLElement, controls: () => BottombarControls): { paint(): void; close(): void } {
+  const doc = ctx.document;
+  const button = h(doc, 'button', 'oac-bottombar__session', { type: 'button', 'aria-label': widgetText(ctx, 'Session'), 'aria-haspopup': 'menu' });
+  button.textContent = widgetText(ctx, 'Session');
+  button.hidden = true;
+  const sep = h(doc, 'span', 'oac-sep', { role: 'separator' });
+  sep.hidden = true;
+  let close: (() => void) | null = null;
+  button.addEventListener('click', () => {
+    const state = controls().session?.() ?? null;
+    if (state === null) return;
+    close = openMenu(ctx, button, SESSION_CHOICES.map(choice => ({
+      label: widgetText(ctx, choice.label), on: state.current === choice.id, onSelect: () => controls().setSession?.(choice.id),
+    })), { ariaLabel: widgetText(ctx, 'Session') });
+  });
+  host.append(button, sep);
+  return {
+    paint: () => {
+      const state = controls().session?.() ?? null;
+      button.hidden = state === null;
+      sep.hidden = state === null;
+      // Marked only for an explicit choice: the source's default is not known to be either.
+      if (state === null || state.current === undefined) delete button.dataset.session;
+      else button.dataset.session = state.current;
+    },
+    close: () => { close?.(); },
+  };
+}
+
 /** Mount the bottom bar into `host`. */
 export function mountBottombar(ctx: BottombarContext, host: HTMLElement, opts: BottombarOptions = {}): BottombarHandle {
   const doc = ctx.document;
@@ -289,6 +363,13 @@ export function mountBottombar(ctx: BottombarContext, host: HTMLElement, opts: B
         return;
       }
       opts.onTimezone?.(zone);
+      changed();
+    },
+    session: () => target()?.session?.() ?? null,
+    setSession: (session) => {
+      const t = target();
+      if (t?.session?.() == null || t.setSession === undefined) return;
+      t.setSession(session);
       changed();
     },
     scale: () => {
@@ -380,6 +461,8 @@ export function mountBottombar(ctx: BottombarContext, host: HTMLElement, opts: B
 
   host.appendChild(h(doc, 'span', 'oac-bottombar__spacer'));
 
+  const sessionControl = mountSessionControl(ctx, host, () => controls);
+
   // A status region: it can carry the full reading as its name while a narrow
   // bar hides the detail, and a change of phase is announced, not only recoloured.
   const status = h(doc, 'span', 'oac-bottombar__status', { role: 'status' });
@@ -432,25 +515,10 @@ export function mountBottombar(ctx: BottombarContext, host: HTMLElement, opts: B
   }
 
   let closeZones: (() => void) | null = null;
-  function openZones(anchor: HTMLElement): void {
+  const openZones = (anchor: HTMLElement): void => {
     const chart = chartOf();
-    if (chart === null) return;
-    const current = chart.timezone();
-    const t = now();
-    const first = controls.timezones();
-    const row = (zone: string): MenuRow => {
-      let sub = '';
-      try { sub = utcOffsetLabel(t, zone); } catch { /* a zone the runtime cannot format is still listed by name */ }
-      return { label: zone, sub, on: zone === current, onSelect: () => controls.setTimezone(zone) };
-    };
-    const rest = runtimeZones().filter(zone => !first.includes(zone));
-    const rows: Array<MenuRow | string> = [...first.map(row)];
-    if (rest.length > 0) rows.push(widgetText(ctx, 'schema.ui.bottombar.allZones', {}, 'All zones'), ...rest.map(row));
-    closeZones = openMenu(ctx, anchor, rows, {
-      find: widgetText(ctx, 'schema.ui.bottombar.findZone', {}, 'Find a zone'),
-      ariaLabel: widgetText(ctx, 'schema.ui.bottombar.timezones', {}, 'Timezone'),
-    });
-  }
+    if (chart !== null) closeZones = openZoneMenu(ctx, anchor, controls, chart.timezone(), now());
+  };
 
   // ── painting ─────────────────────────────────────────────────────────
   let zoneShown = '';
@@ -509,6 +577,7 @@ export function mountBottombar(ctx: BottombarContext, host: HTMLElement, opts: B
     if (destroyed) return;
     bind();
     paintRanges();
+    sessionControl.paint();
     paintStatus();
     paintClock();
     paintScale();
@@ -575,6 +644,7 @@ export function mountBottombar(ctx: BottombarContext, host: HTMLElement, opts: B
       request++;
       // Its menu and tip live in the host's overlay layer, which outlives the bar.
       closeZones?.();
+      sessionControl.close();
       if (ctx.tips.target() !== null && host.contains(ctx.tips.target())) ctx.tips.hide();
       if (timer !== 0) clearTimeout(timer);
       timer = 0;
@@ -632,6 +702,7 @@ export const BOTTOMBAR_CSS = `
 .oac-widget .oac-bottombar__status[data-phase="regular"] .oac-bottombar__phase { color: ${v('up')}; }
 .oac-widget .oac-bottombar__status:is([data-phase="pre"], [data-phase="post"], [data-phase="extended"]) .oac-bottombar__phase { color: ${v('amber')}; }
 .oac-widget .oac-bottombar__detail { color: ${v('faint')}; }
+.oac-widget .oac-bottombar__session[data-session="extended"] { color: ${v('amber')}; }
 .oac-widget .oac-bottombar__clock { color: ${v('tx')}; }
 .oac-widget .oac-bottombar__time { font-weight: 500; }
 .oac-widget .oac-bottombar__clock > small { color: ${v('faint')}; font-size: 10.5px; font-weight: 600; }
@@ -639,7 +710,8 @@ export const BOTTOMBAR_CSS = `
   border-bottom: 1px solid ${v('bd-soft')}; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
 .oac-widget .oac-mobile-sheet__note > b { color: ${v('tx')}; font-weight: 600; }
 .oac-widget .oac-mobile-sheet__body > [data-mobile-action="timezone"] { grid-column: 1 / -1; }
-.oac-widget .oac-mobile-sheet__ranges, .oac-widget .oac-mobile-sheet__scales { grid-column: 1 / -1; display: grid; }
+.oac-widget .oac-mobile-sheet__ranges, .oac-widget .oac-mobile-sheet__scales, .oac-widget .oac-mobile-sheet__sessions { grid-column: 1 / -1; display: grid; }
+.oac-widget .oac-mobile-sheet__sessions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .oac-widget .oac-mobile-sheet__ranges { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .oac-widget .oac-mobile-sheet__scales { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .oac-widget .oac-statusline__market[data-phase="regular"] { color: ${v('up')}; }

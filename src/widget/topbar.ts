@@ -166,6 +166,42 @@ export function brandingLink(chart: WidgetContext['chart'], translation: WidgetT
 }
 
 /**
+ * The full screen button, appended to `host`; returns its teardown, which
+ * does nothing where the button was left out.
+ *
+ * Drawn only where the page may enter full screen: an embed without the
+ * permission would otherwise carry a button that can do nothing. A chart in a
+ * grid takes the whole grid with it, since one cell filling the display is
+ * what maximise does. It is the last control in the bar, so it is mounted last.
+ */
+function mountFullscreenButton(ctx: WidgetContext, host: HTMLElement, btn: (label: string, cls?: string) => HTMLButtonElement): () => void {
+  const doc = ctx.document;
+  if (doc.fullscreenEnabled !== true || typeof ctx.root.requestFullscreen !== 'function') return () => {};
+  const stage = (): HTMLElement => host.closest<HTMLElement>('.oac-grid') ?? ctx.root;
+  const fullBtn = btn(widgetText(ctx, 'Full screen'), 'oac-btn--icon oac-topbar__fullscreen');
+  const fullGlyph = glyph(doc, '', 'chrome');
+  fullBtn.appendChild(fullGlyph);
+  const isFull = (): boolean => doc.fullscreenElement !== null && doc.fullscreenElement === stage();
+  const paint = (): void => {
+    fullGlyph.innerHTML = chromeIconSvg(isFull() ? 'fullscreen-exit' : 'fullscreen');
+    fullBtn.setAttribute('aria-pressed', String(isFull()));
+    ctx.tips.refreshLabel(fullBtn);
+  };
+  ctx.tips.attach(fullBtn, () => ({ title: isFull() ? widgetText(ctx, 'Leave full screen') : widgetText(ctx, 'Full screen'), side: 'bottom' }));
+  fullBtn.addEventListener('click', () => {
+    const refused = (): void => ctx.status(widgetText(ctx, 'The browser refused full screen'), 'error');
+    try {
+      void (isFull() ? doc.exitFullscreen() : stage().requestFullscreen()).catch(refused);
+    } catch { refused(); }
+  });
+  // Escape and the browser's own controls leave full screen without a click here.
+  doc.addEventListener('fullscreenchange', paint);
+  paint();
+  host.appendChild(fullBtn);
+  return () => doc.removeEventListener('fullscreenchange', paint);
+}
+
+/**
  * The settings control beside the chart type, shown only while the chart
  * builds point and figure or Renko itself: drawn from a host's own elements,
  * point and figure has no box size to set. Its dialog loads on first use.
@@ -553,7 +589,7 @@ export function mountTopbar(ctx: WidgetContext, host: HTMLElement, opts: TopbarO
       brandingAnchor.setAttribute('aria-label', link.label);
     }
   };
-  const offBranding = ctx.chart.on('branding:changed', refresh);
+  const offs = [ctx.chart.on('branding:changed', refresh), mountFullscreenButton(ctx, host, btn)];
   refresh();
 
   return {
@@ -566,7 +602,7 @@ export function mountTopbar(ctx: WidgetContext, host: HTMLElement, opts: TopbarO
       dataDialog?.close();
       typeSettings.close();
       offLayouts?.();
-      offBranding();
+      for (const off of offs) off();
       picker?.destroy();
       host.textContent = '';
     },

@@ -891,7 +891,8 @@ describe('contextMenuEntries', () => {
     const rig = makeRig();
     const inst = rig.chart.addIndicator('test-ma');
     const entries = contextMenuEntries(rig.ctx, event(rig, { kind: 'indicator', id: `indicator:${inst.id}:ma`, instanceId: inst.id }));
-    expect(ids(entries).slice(0, 3)).toEqual(['ind-settings', 'ind-visible', 'ind-remove']);
+    // Placement rows sit between these; removal stays the last of the study's rows.
+    expect(ids(entries).filter(id => ['ind-settings', 'ind-visible', 'ind-remove'].includes(id))).toEqual(['ind-settings', 'ind-visible', 'ind-remove']);
     const by = (id: string): MenuItem => items(entries).find((i) => i.id === id) as MenuItem;
     expect(by('ind-settings').label).toBe('Test MA settings...');
     by('ind-visible').run?.();

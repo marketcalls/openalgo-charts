@@ -29,7 +29,7 @@ import {
   AlertController, ChartObjects, DataLoadingController, ShortcutManager, createChart, darkTheme, lightTheme, registeredIntervals, registeredChartTypes, tryResolveInterval, resolveInterval, isKnownInterval,
   dataVariantKey, normalizeDataVariant, publishDataContext, getSeriesTransform, registeredSeriesTransforms, VERSION,
   type Chart, type ChartOptions, type ChartTheme, type DataFeed, type Bar, type SeriesApi, type SeriesType, type DataVariant, type SeriesTransformSpec,
-  type RestoreReport, type ChartSettingsValues, type BarsRequest, type DataLoadingOptions, type DataLoadingSnapshot, type AlertTriggeredPayload, type TradingCapabilityRequest, type TradingCapabilitySource,
+  type RestoreReport, type ChartSettingsValues, type BarsRequest, type ContextMenuEvent, type DataLoadingOptions, type DataLoadingSnapshot, type AlertTriggeredPayload, type TradingCapabilityRequest, type TradingCapabilitySource,
 } from 'openalgo-charts';
 import { DrawingController, type DrawingDocumentStore, type InstrumentDrawings } from 'openalgo-charts/draw';
 import {
@@ -50,7 +50,7 @@ import { mountToasts, type ToastHandle, type ToastKind, type Toaster } from './t
 import { applyTokens, themeMode, widgetTokens, type WidgetThemeName } from './tokens';
 import { injectWidgetStyles } from './styles';
 import { mountDataStatus, type DataStatusHandle } from './data-status';
-import { attachContextMenu, mountIndicatorSettings, mountDrawingProperties, mountAlertsPanel, type OrderRequest, type PanelHandle } from './dialogs/index';
+import { attachContextMenu, mountIndicatorSettings, mountDrawingProperties, mountAlertsPanel, type MenuEntry, type OrderRequest, type PanelHandle } from './dialogs/index';
 import { mountObjectsPanel, createObjectsPanelContent } from './objects-panel';
 import { mountMobile, type MobileHandle, type MobileMode } from './mobile';
 import { mountDrawingToolbar, type DrawingToolbarHandle } from './drawing-toolbar';
@@ -241,6 +241,12 @@ export interface WidgetOptions extends Omit<ChartOptions, 'theme'>, WidgetBottom
   /** Locks order entry during host replay selection or workspace transitions. */
   tradingLocked?: () => boolean;
   /**
+   * Rows the host appends to the right-click menu, built for each event: the
+   * event names the pane, the price and the object under the pointer. A hook
+   * that throws adds no rows and leaves the menu's own rows in place.
+   */
+  contextMenuItems?: (event: ContextMenuEvent) => MenuEntry[];
+  /**
    * Account state for the status line, usually a trade-tier `AccountManager`.
    * Omitted shows no account; a source whose provider declares no accounts is
    * shown disabled with the reason. It only reads and switches accounts.
@@ -397,7 +403,7 @@ export interface Widget {
 const WIDGET_ONLY_KEYS: ReadonlyArray<keyof WidgetOptions> = [
   'feed', 'symbol', 'exchange', 'interval', 'variant', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'statusline',
   'mobile', 'loading', 'persist', 'storage', 'timeframePreferences', 'canSelectInterval', 'drawingScope', 'drawingStore', 'locale', 'translate', 'indicators', 'symbolSearch', 'lookbackBars', 'now', 'onOrder', 'styleNonce',
-  'tradingCapabilities', 'tradingMode', 'tradingLocked', 'account',
+  'tradingCapabilities', 'tradingMode', 'tradingLocked', 'contextMenuItems', 'account',
   'eventDetails', 'captureRows',
   'panels', 'typingNavigation', 'keyboardRoute', 'watchlist', 'news', 'drawingTemplates', 'drawingToolbar',
   'shortcutsEditor',
@@ -860,7 +866,7 @@ class WidgetImpl implements Widget {
     // The right-click menu is the one dialog nothing in the chrome opens, so
     // the shell subscribes it to the chart itself.
     this._cleanups.push(attachContextMenu(this.context, {
-      ...(options.onOrder ? { onOrder: options.onOrder } : {}), tradingCapabilities: options.tradingCapabilities, tradingMode: options.tradingMode,
+      ...(options.onOrder ? { onOrder: options.onOrder } : {}), tradingCapabilities: options.tradingCapabilities, tradingMode: options.tradingMode, items: options.contextMenuItems,
       ...(options.tradingLocked ? { tradingLocked: options.tradingLocked } : {}),
     }));
 
