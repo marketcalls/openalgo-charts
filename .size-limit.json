@@ -15,9 +15,9 @@
     "brotli": true
   },
   {
-    "name": "Indicator tier (112 built-ins + Tier-2 contract)",
+    "name": "Indicator tier (113 built-ins + Tier-2 contract)",
     "path": "dist/openalgo-charts.indicators.mjs",
-    "limit": "45.10 kB",
+    "limit": "45.91 kB",
     "brotli": true
   },
   {
@@ -64,7 +64,7 @@
       "dist/openalgo-charts.indicators.mjs",
       "dist/openalgo-charts.widget.mjs"
     ],
-    "limit": "380.40 kB",
+    "limit": "381.21 kB",
     "brotli": true
   },
   {
@@ -86,7 +86,7 @@
       "dist/openalgo-charts.widget.mjs",
       "dist/openalgo-charts.workspace.mjs"
     ],
-    "limit": "444.08 kB",
+    "limit": "444.89 kB",
     "brotli": true
   },
   {
@@ -102,7 +102,7 @@
       "dist/openalgo-charts.widget.standalone.js",
       "dist/openalgo-charts.workspace.standalone.js"
     ],
-    "limit": "457.62 kB",
+    "limit": "458.45 kB",
     "brotli": true
   },
   {

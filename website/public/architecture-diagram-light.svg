@@ -119,7 +119,7 @@
 <text x="68" y="1095" class="tier-title" >/indicators</text>
 <text x="306" y="1095" class="tier-size" text-anchor="end">45.10 kB</text>
 <path d="M68 1111h238" stroke="#d4d1e8"/>
-<text x="68" y="1144" class="tier-body" >112 built-in studies</text>
+<text x="68" y="1144" class="tier-body" >113 built-in studies</text>
 <text x="68" y="1172" class="tier-body" >Independent history + warmup</text>
 <text x="68" y="1200" class="tier-body" >3 open-interest studies</text>
 </g>

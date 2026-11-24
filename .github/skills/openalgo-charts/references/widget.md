@@ -70,7 +70,7 @@ const widget = createWidget('#terminal', {
 });
 ```
 
-`container` is an `HTMLElement`, a CSS selector, or an element id and must exist before the call. Give it a real height for rendering; since 2.1.3 an initially hidden chart can receive data and apply its pending initial view when layout reports a usable width. See [host-integration](host-integration.md#hidden-charts-and-preferred-views). The widget imports `openalgo-charts` and `openalgo-charts/draw` itself; the indicator tier is the host's import because not every terminal wants 112 indicators.
+`container` is an `HTMLElement`, a CSS selector, or an element id and must exist before the call. Give it a real height for rendering; since 2.1.3 an initially hidden chart can receive data and apply its pending initial view when layout reports a usable width. See [host-integration](host-integration.md#hidden-charts-and-preferred-views). The widget imports `openalgo-charts` and `openalgo-charts/draw` itself; the indicator tier is the host's import because not every terminal wants 113 indicators.
 
 Importing the module touches no DOM; only `createWidget` does (it injects the stylesheet and builds the root then). Import it anywhere, call it once the container exists. `npm run skills:coverage` imports the built tier under Node and fails on a module-scope `document` access.
 

@@ -40,7 +40,7 @@ npm install openalgo-charts
 
 The widget entry imports `openalgo-charts` and `openalgo-charts/draw` itself. The
 indicator picker offers whatever the indicator registry holds, so import
-`openalgo-charts/indicators` alongside it for the 112 built-ins; without that import the
+`openalgo-charts/indicators` alongside it for the 113 built-ins; without that import the
 picker offers only what you registered yourself.
 
 ## One call

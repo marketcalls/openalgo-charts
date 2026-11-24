@@ -12,7 +12,7 @@ with no runtime dependencies.
 [![npm version](https://img.shields.io/npm/v/openalgo-charts.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/openalgo-charts)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![npm downloads](https://img.shields.io/npm/dm/openalgo-charts.svg?color=0ea5e9&label=npm%20downloads)](https://www.npmjs.com/package/openalgo-charts)
-[![tests](https://img.shields.io/badge/engine%20tests-12488%20passing-brightgreen.svg)](#develop)
+[![tests](https://img.shields.io/badge/engine%20tests-12505%20passing-brightgreen.svg)](#develop)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](#principles)
 
 [**Documentation**](https://marketcalls.github.io/openalgo-charts/) &nbsp;·&nbsp; [**Live examples**](https://marketcalls.github.io/openalgo-charts/examples) &nbsp;·&nbsp; [**Getting started**](./docs/getting-started.md) &nbsp;·&nbsp; [**Migrating to 2.0**](./docs/migrating-to-2.md) &nbsp;·&nbsp; [**Architecture**](./ARCHITECTURE.md)
@@ -127,7 +127,7 @@ You can also load the library from a CDN in a plain HTML page:
 ```
 
 Each optional tier has its own file. For example,
-`openalgo-charts.indicators.mjs` registers all 112 built-in indicators. Pin the
+`openalgo-charts.indicators.mjs` registers all 113 built-in indicators. Pin the
 version in production. The base chart needs no stylesheet; the widget adds its
 own styles. See
 [Use from a CDN](https://marketcalls.github.io/openalgo-charts/docs/cdn).
@@ -182,7 +182,7 @@ Unused optional tiers stay out of the base chart download.
 | Import | Contents | Brotli |
 |---|---|---|
 | `openalgo-charts` | Engine, 13 chart types, panes and scales, custom indicator registry, primitives, alerts, replay, comparisons, chart linking, state, feeds, bar cache, trading overlays, CSV and SVG export | 141.88 kB |
-| `openalgo-charts/indicators` | 112 built-in indicators, calculation helpers and helpers for studies that use external data | 45.10 kB |
+| `openalgo-charts/indicators` | 113 built-in indicators, calculation helpers and helpers for studies that use external data | 45.10 kB |
 | `openalgo-charts/draw` | 90 drawing tools + a headless drawing controller, clipboard, settings schema, level palette, freehand geometry and SVG icons | 61.86 kB |
 | `openalgo-charts/transform` | Heikin Ashi, Renko, Range bars, Line Break, Point &amp; Figure, Kagi, and symbol arithmetic (`AAPL/MSFT`) | 6.55 kB |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO) with compact pixel letters, Footprint, order flow | 20.96 kB |
@@ -208,7 +208,7 @@ const macd = chart.addIndicator('macd', { fastPeriod: 8 });   // gets its own pa
 macd.setSettings({ 'macd:width': 2, 'macd:lineStyle': 'dashed' });
 ```
 
-112 built-ins across Trend, Momentum, Volatility and Volume, from the everyday (SMA, EMA, WMA, VWAP, Bollinger Bands, RSI, MACD, Stochastic, ADX/DMI, ATR) through Supertrend, HalfTrend, Ichimoku, Keltner, Donchian, Chandelier Exit and CPR with floor pivots to Connors RSI, Fisher Transform, Woodies CCI, Klinger, Vortex, WaveTrend Pro, Chop Zone and Williams Fractals, with a least-squares family (Least Squares Moving Average, Linear Regression Slope, Standard Error, Standard Error Bands) and a Smoothed Moving Average alongside them, joined in 1.8.3 by the T3 average, the Hull Suite (Hma / Ehma / Thma with a displaced band) and Consolidation and Breakout, which tracks inside-bar ranges and marks the bar that leaves one. Version 2.6.0 adds ZigZag, 52 Week High/Low, Zero Lag EMA, Variable Index Dynamic Average, Elder-Ray Index, Schaff Trend Cycle and Volatility Squeeze. Twenty-eight of them draw shaded bands, six emit named buy/sell markers, three recolour the price candles, and Seasonality draws a monthly return heatmap as a table over the chart. The full catalogue with ids and defaults is in the docs.
+113 built-ins across Trend, Momentum, Volatility and Volume, from the everyday (SMA, EMA, WMA, VWAP, Bollinger Bands, RSI, MACD, Stochastic, ADX/DMI, ATR) through Supertrend, HalfTrend, Ichimoku, Keltner, Donchian, Chandelier Exit and CPR with floor pivots to Connors RSI, Fisher Transform, Woodies CCI, Klinger, Vortex, WaveTrend Pro, Chop Zone and Williams Fractals, with a least-squares family (Least Squares Moving Average, Linear Regression Slope, Standard Error, Standard Error Bands) and a Smoothed Moving Average alongside them, joined in 1.8.3 by the T3 average, the Hull Suite (Hma / Ehma / Thma with a displaced band) and Consolidation and Breakout, which tracks inside-bar ranges and marks the bar that leaves one. Version 2.6.0 adds ZigZag, 52 Week High/Low, Zero Lag EMA, Variable Index Dynamic Average, Elder-Ray Index, Schaff Trend Cycle and Volatility Squeeze. Twenty-eight of them draw shaded bands, six emit named buy/sell markers, three recolour the price candles, and Seasonality draws a monthly return heatmap as a table over the chart. The full catalogue with ids and defaults is in the docs.
 
 Since 2.4.0 a study can fold the chart's own bars up to a higher timeframe with `securitySeries` (as the bucket stood at each bar, or the last completed one, or with lookahead when reproducing a source that repaints), paint a plot displaced by a number of bars, colour a candle's wick and border apart from its body, pin a marker to the pane edge, put a tooltip on a drawn zone, compute an alert message from the bar that fired, and ask the host for another instrument's bars through `chart.setBarsProvider`. A calculation that throws once it is on the chart is reported on that study's data status rather than thrown into the render loop.
 
@@ -580,7 +580,7 @@ See [Contributing](./CONTRIBUTING.md) for setup, targeted checks, documentation 
 ```bash
 npm install        # install dev toolchain
 npm run typecheck  # TypeScript: src with the stricter flags, then the tests
-npm test           # engine unit tests (Vitest): 12488 across 561 files
+npm test           # engine unit tests (Vitest): 12505 across 561 files
 npm run test:demo  # reference-host tests: 740 across 69 files
 npm run test:endurance # node endurance-harness tests: 7 cases
 npm run build      # Rollup -> dist/ (minified ESM per tier + types)

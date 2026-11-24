@@ -43,7 +43,7 @@ export function Hero() {
       <div className="oac-capability-strip" aria-label="Chart capabilities">
         <span>More ways to see the market</span>
         <div><strong>13</strong> chart types</div>
-        <div><strong>112</strong> indicators</div>
+        <div><strong>113</strong> indicators</div>
         <div><strong>90</strong> drawing tools</div>
       </div>
     </section>
@@ -144,7 +144,7 @@ export function Features() {
       <div className="oac-features">
         <Reveal className="oac-feature">
           <FeatureArt type="indicators" />
-          <div className="oac-feature__copy"><span className="oac-feature__index">01 / DISCOVER</span><h3>Look beneath the surface.</h3><p>Bring price, momentum, and volatility into focus with 112 indicators. Layer your favorites and explore the bigger picture.</p><Link href="/examples#custom-indicators" className="oac-text-link">Explore indicators <Arrow /></Link></div>
+          <div className="oac-feature__copy"><span className="oac-feature__index">01 / DISCOVER</span><h3>Look beneath the surface.</h3><p>Bring price, momentum, and volatility into focus with 113 indicators. Layer your favorites and explore the bigger picture.</p><Link href="/examples#custom-indicators" className="oac-text-link">Explore indicators <Arrow /></Link></div>
         </Reveal>
         <Reveal className="oac-feature">
           <FeatureArt type="drawings" />
@@ -216,7 +216,7 @@ export function TrendSystems() {
       <Reveal className="oac-section-heading">
         <span className="oac-eyebrow">THE TREND SYSTEMS TRADERS ASK FOR</span>
         <h2 id="trends-title">Built in.<br /><span className="oac-text-muted">Drawn on real prices.</span></h2>
-        <p>Supertrend, HalfTrend and AlphaTrend are part of the 112 indicators, not plugins, and each study draws its own signals.</p>
+        <p>Supertrend, HalfTrend and AlphaTrend are part of the 113 indicators, not plugins, and each study draws its own signals.</p>
       </Reveal>
       <div className="oac-trend-grid">
         {TREND_SYSTEMS.map((t) => (

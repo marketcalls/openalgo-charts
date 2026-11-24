@@ -70,8 +70,8 @@ const periodKeys = (prefix: string): string[] =>
 describe('study descriptors', () => {
   const data = wave();
 
-  it('exports the three studies under their published ids', () => {
-    expect(STUDY_INDICATORS.map((d) => d.id)).toEqual(['cpr', 'alphatrend', 'range-analysis']);
+  it('exports the studies under their published ids', () => {
+    expect(STUDY_INDICATORS.map((d) => d.id)).toEqual(['cpr', 'pivot-points', 'alphatrend', 'range-analysis']);
     expect(CPR.placement).toBe('onchart');
     expect(ALPHATREND.placement).toBe('onchart');
     expect(RANGE_ANALYSIS.placement).toBe('pane');

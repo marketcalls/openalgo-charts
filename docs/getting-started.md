@@ -63,7 +63,7 @@ Only pay for what you use: each of the nine tiers is a separate entry point.
 | `openalgo-charts/trade` | order/position/bracket lines, DOM ladder, order engine |
 | `openalgo-charts/transform` | Renko, Range, Point &amp; Figure, Kagi, Line Break, Heikin Ashi |
 | `openalgo-charts/profile` | Volume Profile, Market Profile (TPO), Footprint, order flow |
-| `openalgo-charts/indicators` | 112 built-in indicators (SMA/EMA/MACD/Bollinger/RSI/ADX/...) + the Tier-2 contract |
+| `openalgo-charts/indicators` | 113 built-in indicators (SMA/EMA/MACD/Bollinger/RSI/ADX/...) + the Tier-2 contract |
 | `openalgo-charts/draw` | 90 drawing tools, including Anchored VWAP and fixed-range Volume Profile, a headless controller and opt-in drawing linking |
 | `openalgo-charts/webgl` | the WebGL2 series backend behind `renderer: 'auto'` |
 | `openalgo-charts/workspace` | portable layouts, indicator templates, revisioned catalogs and asynchronous storage |

@@ -145,7 +145,7 @@ tiers stay outside the base bundle.
 | Tier | Brotli | Contents |
 |---|--:|---|
 | `openalgo-charts` | 141.88 kB | Data/model/render engine, 13 chart types, panes and scales, grouped events, primitives, registries, alerts, replay, appearance linking, comparisons, interaction, chart state, CSV/SVG export, bar cache, trading overlay, feeds |
-| `openalgo-charts/indicators` | 45.10 kB | 112 built-ins, shared TA helpers, and the Tier-2 external-data contract |
+| `openalgo-charts/indicators` | 45.10 kB | 113 built-ins, shared TA helpers, and the Tier-2 external-data contract |
 | `openalgo-charts/draw` | 61.86 kB | 90 drawing tools, Anchored VWAP, fixed-range Volume Profile, headless controller, drawing linking, clipboard, settings schema |
 | `openalgo-charts/profile` | 20.96 kB | Volume Profile, Market Profile (TPO), Footprint, order flow |
 | `openalgo-charts/transform` | 6.55 kB | Heikin Ashi, Renko, Range, Line Break, Point and Figure, Kagi, symbol arithmetic |
@@ -166,7 +166,7 @@ controls. See [The Widget Tier](/docs/widget).
 
 ## Custom indicators
 
-The 112 built-ins are not special-cased. Each one is a descriptor: inputs, plots and
+The 113 built-ins are not special-cased. Each one is a descriptor: inputs, plots and
 a `calc` function, optionally with `markers`, `draws`, `levels`, `background`,
 `barColors`, `fills`, `alerts` and a `table`. Anything you register through
 `registerIndicator` uses exactly the same contract and gets the same treatment,
