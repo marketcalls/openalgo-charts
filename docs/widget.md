@@ -40,7 +40,7 @@ npm install openalgo-charts
 
 The widget entry imports `openalgo-charts` and `openalgo-charts/draw` itself. The
 indicator picker offers whatever the indicator registry holds, so import
-`openalgo-charts/indicators` alongside it for the 112 built-ins; without that import the
+`openalgo-charts/indicators` alongside it for the 113 built-ins; without that import the
 picker offers only what you registered yourself.
 
 ## One call
@@ -222,6 +222,10 @@ that opens a timezone menu, and the Auto, Log and Percent price scale toggles. G
 lives in this bar; with `bottombar: false` it is back in the top bar and the status line
 shows the market status. `sessionCalendar` gives the chart its trading hours, and
 `sessionShading` (default on) washes pre-open, post-close and extended-hours bars. The
+Since 2.7.4 a **Session** button picks regular or extended hours where the feed's
+`dataVariants` declares both for the instrument and interval; it calls `setDataVariant`
+and is left out everywhere else, except while the chart still asks for a session the
+feed does not serve on the interval now shown, when it stays and offers the way back. The
 phone layout hides the bar and lists its controls in the More sheet. In a chart grid the
 bar is the grid's: `ChartGridOptions.bottombar` (default false) puts one bar under the grid
 for the active chart; see the
@@ -464,14 +468,14 @@ cannot name a part either: allow the origin, or the directory as a path ending i
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.7.3 build, decimal Brotli kB, enforced by
+Budgets from `.size-limit.json` and measurements from the 2.7.4 build, decimal Brotli kB, enforced by
 `npm run size`:
 
 | Row | Files | Budget | Actual |
 |---|---|---|---|
-| Widget tier | `openalgo-charts.widget.mjs` | 131.55 kB | 131.55 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 132.36 kB | 132.36 kB |
 | Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.05 kB | 21.04 kB |
-| Widget terminal | base + draw + indicators + widget | 380.40 kB | 380.39 kB |
+| Widget terminal | base + draw + indicators + widget | 382.13 kB | 382.13 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged. Measure, do not
@@ -520,3 +524,21 @@ The injector preserves existing populated host styles and can fill an empty
 SSR placeholder. This authorizes the style element only; the host must also
 permit the widget's style attributes. See the
 [widget CSP guide](https://marketcalls.github.io/openalgo-charts/docs/widget/).
+
+## Host menu rows, full screen and study placement
+
+Since 2.7.4:
+
+- `contextMenuItems: (event) => MenuEntry[]` appends a host's own rows to the
+  right-click menu, under a separator. It receives the chart's `ContextMenuEvent`; a
+  hook that throws adds no rows.
+- `fullscreen: true` ends the top bar in a full screen button where the page may enter
+  full screen (`document.fullscreenEnabled`); inside a chart grid it takes the whole
+  grid. Off by default, since only the element that enters full screen stays on the
+  display: pass an element (`fullscreen: shellElement`) when the host draws its order
+  ticket or dialogs outside the widget, and that element is the one shown.
+- A study's right-click menu moves a price overlay to a pane of its own and back, and
+  steps its stacking order. A study on its own scale is not offered the price pane, and
+  `movable: false` in its policy withholds every placement row.
+- The timezone list in the settings dialog and the bottom bar grows from 14 zones to 30.
+  Any IANA zone is still accepted by `chart.setTimezone`.

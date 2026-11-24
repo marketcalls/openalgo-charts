@@ -303,6 +303,31 @@ Order-entry hosts can also pass `tradingCapabilities`, `tradingMode` and
 disable placement. The menu rechecks current capabilities and chart context when
 clicked. The existing `onOrder` callback remains the execution boundary.
 
+Since 2.7.4 a host can add its own rows to the right-click menu with
+`contextMenuItems`. It is called for each menu with the chart's event (the pane, the
+price and the object under the pointer) and returns `MenuEntry` rows, drawn after the
+widget's own under a separator. A hook that throws adds no rows.
+
+```ts
+createWidget('#chart', {
+  contextMenuItems: (event) => event.price === null ? [] : [
+    { id: 'scan-level', label: 'Scan near this price', run: () => openScanner(event.price) },
+  ],
+});
+```
+
+`fullscreen: true` ends the top bar in a **full screen** button, wherever the page is
+allowed to enter full screen; inside a chart grid it takes the whole grid. It is off by
+default because only the element that enters full screen stays on the display: a host
+that draws its order ticket or its dialogs outside the widget passes the element that
+holds both, `fullscreen: document.getElementById('terminal')`, and they come along.
+
+The same release adds placement to a study's right-click menu, with no option: a price
+overlay moves to a pane of its own and back to the price pane, and steps its stacking
+order among the studies it shares a pane with. A study that reads on its own scale is
+not offered the price pane, and a study whose policy sets `movable: false` gets none of
+these rows.
+
 ## Install
 
 ```bash
@@ -311,7 +336,7 @@ npm install openalgo-charts
 
 The widget entry imports `openalgo-charts` and `openalgo-charts/draw` itself. The
 indicator picker offers whatever the indicator registry holds, so import
-`openalgo-charts/indicators` alongside it for the 112 built-ins; without that import the
+`openalgo-charts/indicators` alongside it for the 113 built-ins; without that import the
 picker offers only what you registered yourself.
 
 ## One call
@@ -512,6 +537,19 @@ settings, no status is shown. With the bar off, the status line says it instead.
 UTC, and a click opens a searchable menu: the zones the settings dialog offers first,
 then every zone the runtime knows. A zone picked there moves the time axis and the
 sessions, and is saved with the layout.
+
+**Session picks regular or extended hours** (since 2.7.4). The button is drawn only when
+the feed's `dataVariants` declares both `regular` and `extended` sessions for the
+instrument and interval on screen, and it is asked again when either changes. A choice
+calls `setDataVariant`, keeping the variant's other fields, so the feed serves the other
+series: the widget never filters bars itself. Until a choice is made neither row is
+marked, because the feed's default session is not known to be either. The phone
+layout's More sheet carries the same two rows. A chart grid's shared bar does not show
+it. If the chart still asks for a session after a change of interval or symbol to one
+the feed serves without it, the chart reports the series unavailable, as it does for
+any variant the feed does not declare; the button then stays, greys the session that is
+not offered, and adds **Source default**, which takes the chart back to the feed's own
+series.
 
 **The scale toggles follow the price scale.** Auto-fit, logarithmic and percent act on
 the scale the primary series reads from, and show what it is doing, including after a
@@ -950,14 +988,14 @@ exact version, never a range or no version at all (see
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.7.3 build, decimal
+Budgets from `.size-limit.json` and measurements from the 2.7.4 build, decimal
 Brotli kB, enforced by `npm run size`:
 
 | Row | Files | Budget | Measured |
 |---|---|--:|--:|
-| Widget tier | `openalgo-charts.widget.mjs` | 131.55 kB | 131.55 kB |
+| Widget tier | `openalgo-charts.widget.mjs` | 132.36 kB | 132.36 kB |
 | Widget first-use parts | `openalgo-charts.widget.<part>-<hash>.mjs`, eight files | 21.05 kB | 21.04 kB |
-| Widget terminal | base + draw + indicators + widget | 380.40 kB | 380.39 kB |
+| Widget terminal | base + draw + indicators + widget | 382.13 kB | 382.13 kB |
 
 The widget is a tier because of these rows. A host that never calls `createWidget`
 downloads none of it, and the base engine's own budget is unchanged.

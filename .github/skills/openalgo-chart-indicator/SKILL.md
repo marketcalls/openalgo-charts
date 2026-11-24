@@ -15,7 +15,7 @@ Add or author an indicator. Read [indicators](../openalgo-charts/references/indi
 ## Step 0 - the tier must be imported
 
 ```ts
-import 'openalgo-charts/indicators';   // side effect: registers the 112 built-ins
+import 'openalgo-charts/indicators';   // side effect: registers the 113 built-ins
 ```
 
 Without it `chart.addIndicator` throws. Add this import once, at the app entry, not in every module. Verify it is present before adding an indicator:
@@ -123,7 +123,7 @@ Two optional hooks are worth knowing before you reach for a plot that cannot exp
 - `markers(ctx)` returns bar-anchored `SeriesMarker[]` and runs after every `calc`, so it reads the values `calc` just produced. Use it for discrete named events (a crossover arrow, a "Buy" plate) rather than trying to encode them as a price column. The `labelUp` / `labelDown` shapes are text plates whose tail points at the anchor price; both require `text`. Return `[]` to clear the layer. `halftrend`, `williams-fractals` and `rsi-divergence` are the built-in examples.
 - `fills` shades a band, and `between` resolves against `calc` output columns rather than declared plots. A background band is therefore a fill between two constant columns that are never plotted.
 
-`registerIndicator` overwrites an existing id. With 112 built-ins registered, namespace a custom id (`my-momentum`, `acme-vwap`) unless replacing a built-in is the intent.
+`registerIndicator` overwrites an existing id. With 113 built-ins registered, namespace a custom id (`my-momentum`, `acme-vwap`) unless replacing a built-in is the intent.
 
 **If the indicator anchors on a calendar (a session, week or month reset), it needs the chart's zone.** `calc` is handed `(bars, settings, store)` and never the chart, so the chart injects its timezone into the settings blob under a reserved `timezone` key. Read it defensively (missing or unrecognised means `DEFAULT_TIMEZONE`, never a throw), do not write it back into your own settings, and prefer `sessionStartFlags(times)` over any calendar rule when what you actually mean is "the trading session". The recipe is in [indicators](../openalgo-charts/references/indicators.md#trading-sessions).
 

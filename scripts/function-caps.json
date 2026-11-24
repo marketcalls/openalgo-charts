@@ -26,11 +26,8 @@
     "src/render/axis.ts": {
       "drawTimeAxis": 155
     },
-    "src/widget/bottombar-shell.ts": {
-      "wire": 156
-    },
     "src/widget/bottombar.ts": {
-      "mountBottombar": 373
+      "mountBottombar": 369
     },
     "src/widget/color-picker.ts": {
       "createColorPicker": 186
@@ -39,7 +36,7 @@
       "openDateNavigation": 152
     },
     "src/widget/dialogs/context-menu.ts": {
-      "contextMenuEntries": 171
+      "contextMenuEntries": 157
     },
     "src/widget/dialogs/drawing-coordinates.ts": {
       "mountDrawingCoordinates": 189
@@ -78,7 +75,7 @@
       "createLayoutsController": 387
     },
     "src/widget/mobile.ts": {
-      "mountMobile": 443
+      "mountMobile": 431
     },
     "src/widget/news-panel.ts": {
       "mountNewsPanel": 194

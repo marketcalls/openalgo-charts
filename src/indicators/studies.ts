@@ -47,11 +47,79 @@ const DAY_SECONDS = 86400;
  * to hand the last ninety minutes of a month-end session to the next month's
  * frame, so a monthly pivot opened while the old month was still trading.
  */
-function pivotFrameStarts(bars: readonly Bar[], period: PivotPeriod, zone: string): boolean[] {
+function pivotFrameStarts(bars: readonly Bar[], period: FramePeriod, zone: string): boolean[] {
   const times = bars.map((b) => b.time);
   return period === 'daily'
     ? sessionStartFlags(times, zone)
-    : calendarPeriodFlags(times, periodBoundary(period === 'weekly' ? 'week' : 'month', zone));
+    : calendarPeriodFlags(times, periodBoundary(CALENDAR_PERIOD[period], zone));
+}
+
+/** The frames a pivot study can stand on: the three CPR offers, and the two longer ones. */
+type FramePeriod = PivotPeriod | 'quarterly' | 'yearly';
+
+const CALENDAR_PERIOD = { weekly: 'week', monthly: 'month', quarterly: 'quarter', yearly: 'year' } as const;
+
+/** The finished period a bar's levels are built from, and the open of the period it is in. */
+interface PriorPeriod {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  /** Open of the period being traded, which is what Woodie's pivot weights. */
+  nextOpen: number;
+}
+
+/**
+ * Walk the bars, calling `visit` on each one that has a whole prior period.
+ *
+ * A period is derived from the bars themselves: extremes accumulate inside it
+ * and are handed over whole at the boundary, so every bar of a period sees one
+ * frozen frame and never the forming one.
+ *
+ * Only a period whose start the loaded bars show is handed over. The first one
+ * may be any slice of the real period (a history cut at 12:35, on a Thursday, on
+ * the 20th), and nothing before its first bar says which, so its levels would be
+ * a plausible frame that loading older history later moves. The first two
+ * periods therefore stay unvisited, the rule 52 Week High/Low keeps for its window.
+ */
+function eachPriorPeriod(
+  bars: readonly Bar[],
+  period: FramePeriod,
+  zone: string,
+  visit: (i: number, prior: PriorPeriod) => void,
+): void {
+  const opensFrame = pivotFrameStarts(bars, period, zone);
+  const prior: PriorPeriod = { open: NaN, high: NaN, low: NaN, close: NaN, nextOpen: NaN };
+  let curOpen = NaN;
+  let curHigh = NaN;
+  let curLow = NaN;
+  let curClose = NaN;
+  // Bar 0 never opens a frame, so the first boundary closes the partial period.
+  let covered = false;
+
+  for (let i = 0; i < bars.length; i++) {
+    const bar = bars[i]!;
+    if (opensFrame[i]) {
+      if (covered) {
+        prior.open = curOpen;
+        prior.high = curHigh;
+        prior.low = curLow;
+        prior.close = curClose;
+      }
+      covered = true;
+    }
+    const high = Number.isFinite(bar.high) ? bar.high : NaN;
+    const low = Number.isFinite(bar.low) ? bar.low : NaN;
+    // An unknown extreme invalidates this period; only a boundary can seed again.
+    const starts = i === 0 || opensFrame[i];
+    if (starts) curOpen = bar.open;
+    curHigh = starts ? high : Math.max(curHigh, high);
+    curLow = starts ? low : Math.min(curLow, low);
+    curClose = bar.close;
+    if (!Number.isFinite(prior.high) || !Number.isFinite(prior.low) || !Number.isFinite(prior.close)) continue;
+    prior.nextOpen = curOpen;
+    visit(i, prior);
+  }
 }
 
 /**
@@ -149,16 +217,8 @@ interface PivotVisibility {
  * One period's nine columns.
  *
  * The published script pulls the previous higher-timeframe bar through a
- * timeframe request. There is no such request here, so the previous period is
- * derived from the bars themselves: extremes accumulate inside a period and are
- * handed over whole at the boundary. Every bar of a period therefore carries
- * one frozen frame.
- *
- * Only a period whose start the loaded bars show is handed over. The first one
- * may be any slice of the real period (a history cut at 12:35, on a Thursday, on
- * the 20th), and nothing before its first bar says which, so its levels would be
- * a plausible frame that loading older history later moves. The first two
- * periods therefore stay null, the rule 52 Week High/Low keeps for its window.
+ * timeframe request. There is no such request here, so the previous period
+ * comes from `eachPriorPeriod`, and the first two loaded periods stay null.
  */
 function pivotColumns(
   bars: readonly Bar[],
@@ -179,35 +239,7 @@ function pivotColumns(
   const tc = blank(n);
 
   if (active) {
-    const opensFrame = pivotFrameStarts(bars, period, zone);
-    let prevHigh = NaN;
-    let prevLow = NaN;
-    let prevClose = NaN;
-    let curHigh = NaN;
-    let curLow = NaN;
-    let curClose = NaN;
-    // Bar 0 never opens a frame, so the first boundary closes the partial period.
-    let covered = false;
-
-    for (let i = 0; i < n; i++) {
-      if (opensFrame[i]) {
-        if (covered) {
-          prevHigh = curHigh;
-          prevLow = curLow;
-          prevClose = curClose;
-        }
-        covered = true;
-      }
-      const bar = bars[i]!;
-      const high = Number.isFinite(bar.high) ? bar.high : NaN;
-      const low = Number.isFinite(bar.low) ? bar.low : NaN;
-      // An unknown extreme invalidates this period; only a boundary can seed again.
-      const starts = i === 0 || opensFrame[i];
-      curHigh = starts ? high : Math.max(curHigh, high);
-      curLow = starts ? low : Math.min(curLow, low);
-      curClose = bar.close;
-      if (!Number.isFinite(prevHigh) || !Number.isFinite(prevLow) || !Number.isFinite(prevClose)) continue;
-
+    eachPriorPeriod(bars, period, zone, (i, { high: prevHigh, low: prevLow, close: prevClose }) => {
       const p = (prevHigh + prevLow + prevClose) / 3;
       const width = prevHigh - prevLow;
       const sup1 = 2 * p - prevHigh;
@@ -230,7 +262,7 @@ function pivotColumns(
         // Mirrored through the pivot, so the pivot always bisects the range.
         tc[i] = 2 * p - bottom;
       }
-    }
+    });
   }
 
   const k = PERIOD_PREFIX[period];
@@ -310,6 +342,164 @@ export const CPR: IndicatorDescriptor = {
       ...pivotColumns(bars, 'weekly', wanted.weekly, show, zone),
       ...pivotColumns(bars, 'monthly', wanted.monthly, show, zone),
     };
+  },
+};
+
+// ── Pivot Points Standard ────────────────────────────────────────────────────
+
+type PivotKind = 'traditional' | 'fibonacci' | 'woodie' | 'classic' | 'demark' | 'camarilla';
+
+/** How many support and resistance pairs a pivot study can carry. */
+const PIVOT_PAIRS = 5;
+/** How many of them are drawn until the user asks for more. */
+const PIVOT_SHOWN = 3;
+
+/** Range fractions for the three Fibonacci pairs, and the range divisors for Camarilla's first four. */
+const FIB_PIVOT_RATIOS = [0.382, 0.618, 1] as const;
+const CAMARILLA_DIVISORS = [12, 6, 4, 2] as const;
+
+/**
+ * The pivot and its pairs for one finished period, written into `out` as the
+ * pivot, then S1, R1, S2, R2 and so on. A kind with fewer than five pairs
+ * leaves the rest NaN: Fibonacci stops at three, Woodie and Classic at four,
+ * DeMark at one.
+ */
+const PIVOT_LEVELS: Record<PivotKind, (o: PriorPeriod, out: number[]) => void> = {
+  traditional: ({ high: h, low: l, close: c }, out) => {
+    const p = (h + l + c) / 3;
+    out[0] = p;
+    out[1] = 2 * p - h; out[2] = 2 * p - l;
+    out[3] = p - (h - l); out[4] = p + (h - l);
+    // From the third pair on each level steps out by pivot minus low above,
+    // and by high minus pivot below.
+    for (let k = 3; k <= PIVOT_PAIRS; k++) {
+      out[2 * k - 1] = (k - 1) * p - ((k - 1) * h - l);
+      out[2 * k] = (k - 1) * p + (h - (k - 1) * l);
+    }
+  },
+  fibonacci: ({ high: h, low: l, close: c }, out) => {
+    const p = (h + l + c) / 3;
+    out[0] = p;
+    FIB_PIVOT_RATIOS.forEach((ratio, k) => {
+      out[2 * k + 1] = p - ratio * (h - l);
+      out[2 * k + 2] = p + ratio * (h - l);
+    });
+  },
+  woodie: ({ high: h, low: l, nextOpen }, out) => {
+    const p = (h + l + 2 * nextOpen) / 4;
+    out[0] = p;
+    out[1] = 2 * p - h; out[2] = 2 * p - l;
+    out[3] = p - (h - l); out[4] = p + (h - l);
+    out[5] = l - 2 * (h - p); out[6] = h + 2 * (p - l);
+    out[7] = out[5] - (h - l); out[8] = out[6] + (h - l);
+  },
+  classic: ({ high: h, low: l, close: c }, out) => {
+    const p = (h + l + c) / 3;
+    out[0] = p;
+    out[1] = 2 * p - h; out[2] = 2 * p - l;
+    for (let k = 2; k <= 4; k++) {
+      out[2 * k - 1] = p - (k - 1) * (h - l);
+      out[2 * k] = p + (k - 1) * (h - l);
+    }
+  },
+  demark: ({ open: o, high: h, low: l, close: c }, out) => {
+    // Without the open there is no telling which way the period closed.
+    if (!Number.isFinite(o)) return;
+    // The sum leans on the extreme the period closed towards.
+    const x = c === o ? h + l + 2 * c : c > o ? 2 * h + l + c : 2 * l + h + c;
+    out[0] = x / 4;
+    out[1] = x / 2 - h; out[2] = x / 2 - l;
+  },
+  camarilla: ({ high: h, low: l, close: c }, out) => {
+    out[0] = (h + l + c) / 3;
+    CAMARILLA_DIVISORS.forEach((divisor, k) => {
+      out[2 * k + 1] = c - (1.1 * (h - l)) / divisor;
+      out[2 * k + 2] = c + (1.1 * (h - l)) / divisor;
+    });
+    // The fifth pair is the breakout target: the close scaled by the range ratio,
+    // and its mirror through the close.
+    const r5 = l === 0 ? NaN : (h / l) * c;
+    out[9] = 2 * c - r5; out[10] = r5;
+  },
+};
+
+/**
+ * The frame a pivot study stands on when left on automatic: sessions under
+ * bars of fifteen minutes or less, weeks under coarser intraday bars, months
+ * under daily bars and years above that. With nothing to measure, the session
+ * is the only frame a short series can resolve.
+ */
+function autoPivotFrame(bars: readonly Bar[]): FramePeriod {
+  const gap = medianSpacing(bars);
+  if (gap <= 15 * 60) return 'daily';
+  if (gap < DAY_SECONDS) return 'weekly';
+  if (gap < 7 * DAY_SECONDS) return 'monthly';
+  return 'yearly';
+}
+
+const FRAME_PERIODS: readonly FramePeriod[] = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'];
+
+/** Plot keys in the order `PIVOT_LEVELS` writes them: p, s1, r1, s2, r2 and so on. */
+const PIVOT_KEYS: readonly string[] = ['p', ...Array.from({ length: PIVOT_PAIRS }, (_, k) => [`s${k + 1}`, `r${k + 1}`]).flat()];
+
+export const PIVOT_POINTS: IndicatorDescriptor = {
+  id: 'pivot-points',
+  name: 'Pivot Points Standard',
+  category: 'Trend',
+  placement: 'onchart',
+  inputs: [
+    {
+      key: 'kind', type: 'select', label: 'Type', default: 'traditional',
+      options: [
+        { label: 'Traditional', value: 'traditional' },
+        { label: 'Fibonacci', value: 'fibonacci' },
+        { label: 'Woodie', value: 'woodie' },
+        { label: 'Classic', value: 'classic' },
+        { label: 'DeMark', value: 'demark' },
+        { label: 'Camarilla', value: 'camarilla' },
+      ],
+    },
+    {
+      key: 'frame', type: 'select', label: 'Pivot period', default: 'auto',
+      options: [
+        { label: 'Auto', value: 'auto' },
+        { label: 'Daily', value: 'daily' },
+        { label: 'Weekly', value: 'weekly' },
+        { label: 'Monthly', value: 'monthly' },
+        { label: 'Quarterly', value: 'quarterly' },
+        { label: 'Yearly', value: 'yearly' },
+      ],
+    },
+    { key: 'showP', type: 'boolean', label: 'Pivot', default: true },
+    // The two outer pairs start off: they sit far from price, and a pane that
+    // fits them to its scale flattens the candles a pivot is read against.
+    ...Array.from({ length: PIVOT_PAIRS }, (_, k): IndicatorInput => (
+      { key: `show${k + 1}`, type: 'boolean', label: `S${k + 1} / R${k + 1}`, default: k < PIVOT_SHOWN }
+    )),
+    { key: 'pivotColor', type: 'color', label: 'Pivot', default: '#ff9800' },
+    { key: 'supportColor', type: 'color', label: 'Support', default: '#4caf50' },
+    { key: 'resistanceColor', type: 'color', label: 'Resistance', default: '#ff5252' },
+  ],
+  // A step, so a level is flat through its period and rises at the boundary
+  // where a line would slope from one frame's level to the next.
+  plots: PIVOT_KEYS.map((key): IndicatorPlot => ({
+    key, type: 'step', title: key.toUpperCase(),
+    colorKey: key === 'p' ? 'pivotColor' : key.startsWith('s') ? 'supportColor' : 'resistanceColor',
+  })),
+  calc: (bars, s) => {
+    const kind = str(s, 'kind', 'traditional');
+    const levels = PIVOT_LEVELS[Object.keys(PIVOT_LEVELS).includes(kind) ? kind as PivotKind : 'traditional'];
+    const wanted = str(s, 'frame', 'auto');
+    const frame = FRAME_PERIODS.find((f) => f === wanted) ?? autoPivotFrame(bars);
+    const shown = PIVOT_KEYS.map((key) => (key === 'p' ? flag(s, 'showP', true) : flag(s, `show${key.slice(1)}`, Number(key.slice(1)) <= PIVOT_SHOWN)));
+    const columns = PIVOT_KEYS.map(() => blank(bars.length));
+    const row = blank(PIVOT_KEYS.length);
+    eachPriorPeriod(bars, frame, zoneOf(s), (i, prior) => {
+      row.fill(NaN);
+      levels(prior, row);
+      for (let k = 0; k < row.length; k++) if (shown[k]) columns[k]![i] = row[k]!;
+    });
+    return Object.fromEntries(PIVOT_KEYS.map((key, k) => [key, nulls(columns[k]!)]));
   },
 };
 
@@ -510,4 +700,4 @@ export const RANGE_ANALYSIS: IndicatorDescriptor = {
   },
 };
 
-export const STUDY_INDICATORS: readonly IndicatorDescriptor[] = [CPR, ALPHATREND, RANGE_ANALYSIS];
+export const STUDY_INDICATORS: readonly IndicatorDescriptor[] = [CPR, PIVOT_POINTS, ALPHATREND, RANGE_ANALYSIS];

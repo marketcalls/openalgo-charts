@@ -29,7 +29,7 @@ import {
   AlertController, ChartObjects, DataLoadingController, ShortcutManager, createChart, darkTheme, lightTheme, registeredIntervals, registeredChartTypes, tryResolveInterval, resolveInterval, isKnownInterval,
   dataVariantKey, normalizeDataVariant, publishDataContext, getSeriesTransform, registeredSeriesTransforms, VERSION,
   type Chart, type ChartOptions, type ChartTheme, type DataFeed, type Bar, type SeriesApi, type SeriesType, type DataVariant, type SeriesTransformSpec,
-  type RestoreReport, type ChartSettingsValues, type BarsRequest, type DataLoadingOptions, type DataLoadingSnapshot, type AlertTriggeredPayload, type TradingCapabilityRequest, type TradingCapabilitySource,
+  type RestoreReport, type ChartSettingsValues, type BarsRequest, type ContextMenuEvent, type DataLoadingOptions, type DataLoadingSnapshot, type AlertTriggeredPayload, type TradingCapabilityRequest, type TradingCapabilitySource,
 } from 'openalgo-charts';
 import { DrawingController, type DrawingDocumentStore, type InstrumentDrawings } from 'openalgo-charts/draw';
 import {
@@ -50,7 +50,7 @@ import { mountToasts, type ToastHandle, type ToastKind, type Toaster } from './t
 import { applyTokens, themeMode, widgetTokens, type WidgetThemeName } from './tokens';
 import { injectWidgetStyles } from './styles';
 import { mountDataStatus, type DataStatusHandle } from './data-status';
-import { attachContextMenu, mountIndicatorSettings, mountDrawingProperties, mountAlertsPanel, type OrderRequest, type PanelHandle } from './dialogs/index';
+import { attachContextMenu, mountIndicatorSettings, mountDrawingProperties, mountAlertsPanel, type MenuEntry, type OrderRequest, type PanelHandle } from './dialogs/index';
 import { mountObjectsPanel, createObjectsPanelContent } from './objects-panel';
 import { mountMobile, type MobileHandle, type MobileMode } from './mobile';
 import { mountDrawingToolbar, type DrawingToolbarHandle } from './drawing-toolbar';
@@ -162,6 +162,15 @@ export interface WidgetOptions extends Omit<ChartOptions, 'theme'>, WidgetBottom
   /** The drawing rail. `false` hides it; an object restricts its tools or seeds its pins. Default on. */
   rail?: boolean | RailOptions;
   topbar?: boolean;
+  /**
+   * A full screen button at the end of the top bar. Off by default, since
+   * only the element that enters full screen stays on the display: `true`
+   * takes the widget (a chart grid whole when the widget is one of its
+   * cells), and an element takes that element, for a host whose own order
+   * ticket or dialogs are drawn outside the widget and must come along.
+   * Left out wherever the page may not enter full screen.
+   */
+  fullscreen?: boolean | HTMLElement;
   statusline?: boolean;
   /** Narrow controls. Auto activates when the container is at most 640 CSS px wide, or, with a coarse primary pointer, at most 960 px wide and under 600 px tall (a phone on its side); a tablet or a touch laptop keeps the desktop chrome. Default auto. */
   mobile?: MobileMode;
@@ -240,6 +249,12 @@ export interface WidgetOptions extends Omit<ChartOptions, 'theme'>, WidgetBottom
   tradingMode?: TradingCapabilityRequest['mode'];
   /** Locks order entry during host replay selection or workspace transitions. */
   tradingLocked?: () => boolean;
+  /**
+   * Rows the host appends to the right-click menu, built for each event: the
+   * event names the pane, the price and the object under the pointer. A hook
+   * that throws adds no rows and leaves the menu's own rows in place.
+   */
+  contextMenuItems?: (event: ContextMenuEvent) => MenuEntry[];
   /**
    * Account state for the status line, usually a trade-tier `AccountManager`.
    * Omitted shows no account; a source whose provider declares no accounts is
@@ -395,9 +410,9 @@ export interface Widget {
 
 /** The options the shell consumes; the rest of `WidgetOptions` is the chart's. */
 const WIDGET_ONLY_KEYS: ReadonlyArray<keyof WidgetOptions> = [
-  'feed', 'symbol', 'exchange', 'interval', 'variant', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'statusline',
+  'feed', 'symbol', 'exchange', 'interval', 'variant', 'intervals', 'chartType', 'theme', 'rail', 'topbar', 'fullscreen', 'statusline',
   'mobile', 'loading', 'persist', 'storage', 'timeframePreferences', 'canSelectInterval', 'drawingScope', 'drawingStore', 'locale', 'translate', 'indicators', 'symbolSearch', 'lookbackBars', 'now', 'onOrder', 'styleNonce',
-  'tradingCapabilities', 'tradingMode', 'tradingLocked', 'account',
+  'tradingCapabilities', 'tradingMode', 'tradingLocked', 'contextMenuItems', 'account',
   'eventDetails', 'captureRows',
   'panels', 'typingNavigation', 'keyboardRoute', 'watchlist', 'news', 'drawingTemplates', 'drawingToolbar',
   'shortcutsEditor',
@@ -860,7 +875,7 @@ class WidgetImpl implements Widget {
     // The right-click menu is the one dialog nothing in the chrome opens, so
     // the shell subscribes it to the chart itself.
     this._cleanups.push(attachContextMenu(this.context, {
-      ...(options.onOrder ? { onOrder: options.onOrder } : {}), tradingCapabilities: options.tradingCapabilities, tradingMode: options.tradingMode,
+      ...(options.onOrder ? { onOrder: options.onOrder } : {}), tradingCapabilities: options.tradingCapabilities, tradingMode: options.tradingMode, items: options.contextMenuItems,
       ...(options.tradingLocked ? { tradingLocked: options.tradingLocked } : {}),
     }));
 
@@ -890,7 +905,7 @@ class WidgetImpl implements Widget {
       this._topbar = mountTopbar(this.context, topbarEl, {
         intervals: this._intervals,
         timeframePreferences: this._timeframePreferences, canSelectInterval,
-        indicators: options.indicators,
+        indicators: options.indicators, fullscreen: options.fullscreen,
         search: this.context.symbolSearch,
         state: () => ({ symbol: this._symbol, exchange: this._exchange, interval: this._interval, chartType: this.chartType(), theme: this._themeName }),
         onSymbol: (s, ex) => this.setSymbol(s, ex),

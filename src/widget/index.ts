@@ -126,7 +126,7 @@ export { WIDGET_COMPONENT_CSS } from './component-styles';
 export { mountMobile } from './mobile';
 // The strip under the chart, its preset ranges and the widget options it reads.
 export { mountBottombar, BOTTOMBAR_CSS, BOTTOMBAR_HEIGHT } from './bottombar';
-export type { BottombarContext, BottombarTarget, BottombarOptions, BottombarControls, BottombarHandle, BottombarScaleToggle, BottombarScaleState } from './bottombar';
+export type { BottombarContext, BottombarTarget, BottombarOptions, BottombarControls, BottombarHandle, BottombarScaleToggle, BottombarScaleState, BottombarSession } from './bottombar';
 export type { MarketStatusReading } from './bottombar-status';
 export { DEFAULT_RANGES, rangeWindow, rangeInterval } from './ranges';
 export type { WidgetRange, WidgetRangeUnit, WidgetRangeWindow, RangeWindowOptions } from './ranges';

@@ -82,8 +82,8 @@ export interface ContextMenuHooks {
   tradingMode?: TradingCapabilityRequest['mode'];
   /** Host replay selection or workspace transitions that also prevent order entry. */
   tradingLocked?(): boolean;
-  /** Extra rows a host appends, built per event. */
-  items?(e: ContextMenuEvent): MenuEntry[];
+  /** Extra rows a host appends, built per event. A hook that throws adds none. */
+  items?: ((e: ContextMenuEvent) => MenuEntry[]) | undefined;
 }
 
 export interface ContextMenuOptions {
@@ -341,21 +341,7 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
 
   if (target.kind === 'indicator' && target.instanceId !== undefined) {
     const inst = chart.indicators().find((i) => i.id === target.instanceId);
-    if (inst !== undefined) {
-      sep();
-      // A study its host protects shows the rows its policy withholds greyed,
-      // with the reason, rather than rows that would silently do nothing.
-      const policy = inst.policy();
-      const note = (flag: 'configurable' | 'removable'): string | undefined => policy[flag] === false ? widgetText(ctx, 'protected') : undefined;
-      out.push({ id: 'ind-settings', label: widgetText(ctx, '{name} settings...', { name: inst.name }), icon: 'settings',
-        disabled: note('configurable') !== undefined, note: note('configurable'),
-        run: () => { mountIndicatorSettings(ctx, undefined, { instanceId: inst.id }); } });
-      out.push({ id: 'ind-visible', label: inst.visible() ? widgetText(ctx, 'Hide {name}', { name: inst.name }) : widgetText(ctx, 'Show {name}', { name: inst.name }), icon: inst.visible() ? 'eye' : 'eye-off',
-        run: () => { inst.setVisible(!inst.visible()); } });
-      out.push({ id: 'ind-remove', label: widgetText(ctx, 'Remove {name}', { name: inst.name }), icon: 'trash', danger: true,
-        disabled: note('removable') !== undefined, note: note('removable'),
-        run: () => { chart.removeIndicator(inst.id); } });
-    }
+    if (inst !== undefined) { sep(); out.push(...indicatorEntries(ctx, inst, pricePane)); }
   }
 
   // The pane under the pointer: it moves up or down a slot, the price pane
@@ -405,9 +391,58 @@ export function contextMenuEntries(ctx: WidgetContext, e: ContextMenuEvent, hook
   }
   out.push({ id: 'chart-settings', label: widgetText(ctx, 'Settings...'), icon: 'settings', run: () => { mountSettingsDialog(ctx); } });
 
-  const extra = hooks.items?.(e) ?? [];
+  const extra = hostEntries(hooks, e);
   if (extra.length > 0) { sep(); out.push(...extra); }
   return out;
+}
+
+/** The host's own rows. A hook that throws must not take the chart's rows down with it. */
+function hostEntries(hooks: ContextMenuHooks, e: ContextMenuEvent): MenuEntry[] {
+  try { return hooks.items?.(e) ?? []; } catch { return []; }
+}
+
+/**
+ * The rows for the study under the pointer: its settings, its visibility, where
+ * it sits and how it stacks, and its removal last.
+ */
+function indicatorEntries(ctx: WidgetContext, inst: ReturnType<Chart['indicators']>[number], pricePane: number): MenuEntry[] {
+  const chart = ctx.chart;
+  const rows: MenuEntry[] = [];
+  // A study its host protects shows the rows its policy withholds greyed,
+  // with the reason, rather than rows that would silently do nothing.
+  const policy = inst.policy();
+  const note = (flag: 'configurable' | 'removable'): string | undefined => policy[flag] === false ? widgetText(ctx, 'protected') : undefined;
+  rows.push({ id: 'ind-settings', label: widgetText(ctx, '{name} settings...', { name: inst.name }), icon: 'settings',
+    disabled: note('configurable') !== undefined, note: note('configurable'),
+    run: () => { mountIndicatorSettings(ctx, undefined, { instanceId: inst.id }); } });
+  rows.push({ id: 'ind-visible', label: inst.visible() ? widgetText(ctx, 'Hide {name}', { name: inst.name }) : widgetText(ctx, 'Show {name}', { name: inst.name }), icon: inst.visible() ? 'eye' : 'eye-off',
+    run: () => { inst.setVisible(!inst.visible()); } });
+  // Placement and stacking, for a study its policy lets move. A price
+  // overlay can take a pane of its own and come back; a study that reads
+  // on its own scale is not offered the price pane, where it would share
+  // the instrument's axis and flatten the candles.
+  if (policy.movable !== false) {
+    const name = { name: inst.name };
+    const peers = chart.indicators().filter(other => other.paneIndex === inst.paneIndex);
+    const failed = (): void => ctx.status(widgetText(ctx, '{name} cannot move to that pane', name), 'error');
+    if (inst.paneIndex === pricePane || peers.length > 1) {
+      rows.push({ id: 'ind-new-pane', label: widgetText(ctx, 'Move {name} to a new pane', name),
+        run: () => { if (!chart.moveIndicator(inst.id, chart.panes().length)) failed(); } });
+    } else if (getIndicator(inst.indicatorId)?.placement === 'onchart') {
+      rows.push({ id: 'ind-price-pane', label: widgetText(ctx, 'Move {name} to the price pane', name),
+        run: () => { if (!chart.moveIndicator(inst.id, chart.primaryPaneIndex())) failed(); } });
+    }
+    // Later in the list paints on top.
+    const at = peers.indexOf(inst);
+    if (at < peers.length - 1) rows.push({ id: 'ind-forward', label: widgetText(ctx, 'Bring {name} forward', name),
+      run: () => { chart.reorderIndicator(inst.id, 1); } });
+    if (at > 0) rows.push({ id: 'ind-backward', label: widgetText(ctx, 'Send {name} backward', name),
+      run: () => { chart.reorderIndicator(inst.id, -1); } });
+  }
+  rows.push({ id: 'ind-remove', label: widgetText(ctx, 'Remove {name}', { name: inst.name }), icon: 'trash', danger: true,
+    disabled: note('removable') !== undefined, note: note('removable'),
+    run: () => { chart.removeIndicator(inst.id); } });
+  return rows;
 }
 
 /** Events made for a menu raised from a button: they name no pane under a pointer. */

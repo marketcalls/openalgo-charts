@@ -15,10 +15,10 @@
  * it and places it again on the new instrument; an interval changed by any
  * other means leaves it, and loads go back to the ordinary lookback.
  */
-import { attachSessionShading, type SessionCalendarSource } from 'openalgo-charts';
+import { attachSessionShading, type DataSession, type SessionCalendarSource } from 'openalgo-charts';
 import { h } from './context';
 import type { DateNavigationResult } from './date-navigator';
-import { mountBottombar, type BottombarControls } from './bottombar';
+import { mountBottombar, type BottombarControls, type BottombarSession, type BottombarTarget } from './bottombar';
 import { DEFAULT_RANGES, rangeInterval, rangeWindow, type WidgetRange, type WidgetRangeWindow } from './ranges';
 import type { WidgetImpl } from './widget';
 
@@ -77,6 +77,8 @@ export interface BottombarHost {
   readonly _exchange: WidgetImpl['_exchange'];
   readonly _interval: WidgetImpl['_interval'];
   readonly setInterval: WidgetImpl['setInterval'];
+  readonly variant: WidgetImpl['variant'];
+  readonly setDataVariant: WidgetImpl['setDataVariant'];
   readonly goTo: WidgetImpl['goTo'];
   readonly _openGoTo: WidgetImpl['_openGoTo'];
   readonly _scheduleSave: WidgetImpl['_scheduleSave'];
@@ -97,6 +99,84 @@ const asError = (error: unknown): Error => (error instanceof Error ? error : new
 /** Wire the calendar, the shading, the ranges and, unless it is off, the bar, inserted before `before`. */
 export function attachBottombar(this: BottombarHost, before: HTMLElement): ShellBottombar {
   return wire(this, before);
+}
+
+/**
+ * The choice between regular and extended hours. The source is asked for each
+ * instrument and interval, since the answer belongs to both. Until it answers,
+ * and whenever it serves one session only, there is no choice and the bar
+ * draws no control for it.
+ */
+function sessionChoice(host: BottombarHost): {
+  session(): BottombarSession | null;
+  setSession(next: DataSession | undefined): void;
+  /** Start asking, and repaint the bar with each answer. */
+  follow(repaint: () => void): void;
+} {
+  let sessions: readonly DataSession[] = [];
+  let asking: AbortController | null = null;
+  let repaint: (() => void) | undefined;
+  const ask = (): void => {
+    // The answer for the last instrument is no longer wanted, here or at the source.
+    asking?.abort();
+    const mine = asking = new AbortController();
+    const settle = (next: readonly DataSession[]): void => {
+      if (mine !== asking || host._destroyed) return;
+      sessions = next;
+      repaint?.();
+    };
+    settle([]);
+    const feed = host._opts.feed;
+    if (feed?.dataVariants === undefined) return;
+    void Promise.resolve()
+      .then(() => feed.dataVariants!({ symbol: host._symbol, exchange: host._exchange, interval: host._interval, signal: mine.signal }))
+      .then(capabilities => settle(capabilities?.sessions ?? []), () => settle([]));
+  };
+  return {
+    session: () => {
+      const current = host.variant()?.session;
+      // Kept while the chart asks for a session the source does not serve
+      // here: the chart then says the series is unavailable, and this control
+      // is the only way back from it.
+      const offered = sessions.includes('regular') && sessions.includes('extended');
+      return offered || (current !== undefined && !sessions.includes(current)) ? { current, available: sessions } : null;
+    },
+    // The other fields of the variant are the user's as well, and stay.
+    setSession: (next) => {
+      const { session: _dropped, ...rest } = host.variant() ?? {};
+      host.setDataVariant(next === undefined ? rest : { ...rest, session: next });
+    },
+    follow: (paint) => {
+      repaint = paint;
+      host._cleanups.push(host._bus.on('symbol', ask), host._bus.on('interval', ask), host._bus.on('variant', paint), () => asking?.abort());
+      ask();
+    },
+  };
+}
+
+/** Insert the bar before `before`, on `target` and the instrument's session choice, and hand back its controls. */
+function mountBar(host: BottombarHost, before: HTMLElement, ranges: readonly WidgetRange[], target: BottombarTarget): BottombarControls {
+  const opts = host._opts;
+  const el = h(host.context.document, 'div', 'oac-bottombar');
+  // Without a top bar the phone layout has no More sheet to take the bar's
+  // controls, so the bar stays there instead of hiding.
+  if (opts.topbar === false) el.classList.add('is-kept');
+  host.root.insertBefore(el, before);
+  host.root.classList.add('has-bottombar');
+  const hours = sessionChoice(host);
+  const bar = mountBottombar(host.context, el, {
+    target: () => ({ ...target, session: hours.session, setSession: hours.setSession }),
+    ranges,
+    onGoTo: anchor => host._openGoTo(anchor),
+    now: () => (opts.now ?? Date.now)(),
+  });
+  hours.follow(bar.refresh);
+  host._cleanups.push(() => {
+    bar.destroy();
+    el.remove();
+    host.root.classList.remove('has-bottombar');
+  });
+  return bar.controls;
 }
 
 function wire(host: BottombarHost, before: HTMLElement): ShellBottombar {
@@ -230,28 +310,9 @@ function wire(host: BottombarHost, before: HTMLElement): ShellBottombar {
     return { from: Math.min(w.from, fallback.from), to: fallback.to };
   };
 
-  // ── the bar ──────────────────────────────────────────────────────────
-  let controls: BottombarControls | undefined;
-  if (opts.bottombar !== false) {
-    const el = h(host.context.document, 'div', 'oac-bottombar');
-    // Without a top bar the phone layout has no More sheet to take the bar's
-    // controls, so the bar stays there instead of hiding.
-    if (opts.topbar === false) el.classList.add('is-kept');
-    host.root.insertBefore(el, before);
-    host.root.classList.add('has-bottombar');
-    const bar = mountBottombar(host.context, el, {
-      target: () => ({ chart, interval: () => host._interval, range: () => current()?.id ?? null, setRange }),
-      ranges,
-      onGoTo: anchor => host._openGoTo(anchor),
-      now: () => (opts.now ?? Date.now)(),
-    });
-    controls = bar.controls;
-    host._cleanups.push(() => {
-      bar.destroy();
-      el.remove();
-      host.root.classList.remove('has-bottombar');
-    });
-  }
+  const controls = opts.bottombar === false ? undefined : mountBar(host, before, ranges, {
+    chart, interval: () => host._interval, range: () => current()?.id ?? null, setRange,
+  });
 
   return { setRange, range: () => current()?.id ?? null, fetchWindow, controls };
 }

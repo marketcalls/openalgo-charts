@@ -117,9 +117,9 @@ macd.setSettings({ macdColor: '#f00', 'macd:width': 2 }); // right
 
 **`descriptor.range()` (e.g. RSI 0..100) applies only when the indicator created its own pane.** Two indicators sharing a pane would otherwise fight over the fixed range, so an indicator added onto an existing pane silently autoscales instead.
 
-**There are 112 built-ins, and their ids are not derivable from the display names.** `williams-percent-r`, `bollinger-percent-b`, `smi-ergodic-oscillator`, `special-k`. Read `BUILTIN_INDICATORS` or the table in [indicators](./indicators.md) and probe with `hasIndicator(id)` rather than catching the throw from `getIndicator`. The second and later instances of the same indicator id get auto-rotated colours: only keys you left unset are filled, an explicit colour always wins, and the first instance keeps the descriptor's own choice.
+**There are 113 built-ins, and their ids are not derivable from the display names.** `williams-percent-r`, `bollinger-percent-b`, `smi-ergodic-oscillator`, `special-k`. Read `BUILTIN_INDICATORS` or the table in [indicators](./indicators.md) and probe with `hasIndicator(id)` rather than catching the throw from `getIndicator`. The second and later instances of the same indicator id get auto-rotated colours: only keys you left unset are filled, an explicit colour always wins, and the first instance keeps the descriptor's own choice.
 
-**`registerIndicator` overwrites by id, and 112 ids are already taken.** Registering `momentum`, `median`, `volume` or `atr` for a custom study silently replaces the built-in for the whole page. Namespace custom ids.
+**`registerIndicator` overwrites by id, and 113 ids are already taken.** Registering `momentum`, `median`, `volume` or `atr` for a custom study silently replaces the built-in for the whole page. Namespace custom ids.
 
 **`IndicatorFillSpec.between` names `calc` output columns, not declared plots.** A fill whose `between` references a plot key that `calc` happens not to return draws nothing, with no error. The shaded overbought/oversold bands in the catalogue rely on this the other way round: they fill between two constant columns that no plot names.
 

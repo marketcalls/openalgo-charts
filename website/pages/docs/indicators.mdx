@@ -1,6 +1,6 @@
 ---
 title: Indicators
-description: 112 built-in indicators via chart.addIndicator, plus the registry for your own.
+description: 113 built-in indicators via chart.addIndicator, plus the registry for your own.
 ---
 
 import RunnableExample from '../../components/RunnableExample'
@@ -149,11 +149,11 @@ There are two ways to put an indicator on a chart, and they suit different jobs.
 
 **`chart.addIndicator(id)`** is the managed path: the chart creates the series, picks the
 pane, draws reference levels, recomputes on every data change, and cleans up on removal.
-The 112 built-ins live in the lazy `openalgo-charts/indicators` tier, 40.38 kB Brotli.
+The 113 built-ins live in the lazy `openalgo-charts/indicators` tier, 40.38 kB Brotli.
 
 ```ts
 import { createChart } from 'openalgo-charts';
-import 'openalgo-charts/indicators';   // registers all 112 built-ins
+import 'openalgo-charts/indicators';   // registers all 113 built-ins
 
 const chart = createChart(el);
 chart.addSeries('candlestick').setData(bars);
@@ -197,8 +197,8 @@ chart.addIndicator('macd');
 chart.timeScale.fitContent(bars.length);
 return chart;`} />
 
-112 descriptors ship in the tier, split across the four categories a picker reads off
-`descriptor.category`: Trend (40), Momentum (31), Volatility (23), and Volume (18).
+113 descriptors ship in the tier, split across the four categories a picker reads off
+`descriptor.category`: Trend (41), Momentum (31), Volatility (23), and Volume (18).
 
 `onchart` indicators overlay the price pane; `pane` indicators create their own. Override
 with `chart.addIndicator('rsi', {}, { paneIndex: 2 })`.
@@ -212,7 +212,7 @@ with `hasIndicator(id)`. The moving averages, the bands and ten other studies al
 or folds the chart's bars otherwise: see
 [a built-in on a higher timeframe](#a-built-in-on-a-higher-timeframe).
 
-### Trend (40)
+### Trend (41)
 
 | Indicator | `id` | Placement | Key settings |
 |---|---|---|---|
@@ -236,6 +236,7 @@ or folds the chart's bars otherwise: see
 | Linear Regression Slope | `linreg-slope` | pane | `periods=14` |
 | MA Cross | `ma-cross` | onchart | `shortLength=9`, `longLength=26` |
 | CPR with Floor Pivot | `cpr` | onchart | `pivotMode=auto`, `showDaily=true`, `showWeekly=false`, `showMonthly=false`, `displaypivots=true`, `displaysupport=true`, `displayresistance=true`, `displaycpr=true`, `displayS1R1=false` |
+| Pivot Points Standard | `pivot-points` | onchart | `kind=traditional`, `frame=auto`, `showP=true`, `show1`..`show3=true`, `show4`..`show5=false` |
 | McGinley Dynamic | `mcginley-dynamic` | onchart | `length=14` |
 | Median | `median` | onchart | `source=hl2`, `length=3`, `atrLength=14`, `atrMult=2` |
 | Moving Average Ribbon | `ma-ribbon` | onchart | four groups `showMaN=true`, `maNType=SMA`, `maNSource=close`, `maNLength` (20 / 50 / 100 / 200) for `N` = 1..4 |
@@ -349,6 +350,17 @@ three EMAs in one default blue are indistinguishable on the chart and in the
 legend alike. Only colour keys you leave unset are filled, so
 `chart.addIndicator('ema', { color: '#123456' })` always wins, and the first
 instance keeps whatever the descriptor chose.
+
+`pivot-points` draws the pivot and up to five support and resistance pairs from the
+finished period before the one on screen. `kind` picks the level set: `traditional` and
+`camarilla` carry five pairs, `woodie` and `classic` four, `fibonacci` three and `demark`
+one, and a pair the set does not have stays empty. The fourth and fifth pairs start
+hidden (`show4`, `show5`): they sit far from price, and a scale that fits them flattens
+the candles. Switch them on with `priceOnlyAutoScale` to keep the scale on price. `frame` is `daily`, `weekly`, `monthly`,
+`quarterly`, `yearly` or `auto`, which takes sessions under bars of fifteen minutes or
+less, weeks under coarser intraday bars, months under daily bars and years above that.
+The forming period is never read, so a live tick does not move a level, and the rules
+below for `cpr` apply to it unchanged.
 
 For `cpr`, every high and low in the prior period must be finite. One nonfinite
 extreme invalidates that period until the next existing session or calendar
@@ -1398,7 +1410,7 @@ typeInput.options;   // same list as INDICATOR_PLOT_STYLES
 import {
   registeredIndicators, hasIndicator, indicatorDefaults,
 } from 'openalgo-charts';
-import 'openalgo-charts/indicators';   // registers the 112 built-ins
+import 'openalgo-charts/indicators';   // registers the 113 built-ins
 
 // Group the catalog for a menu, with no per-indicator code.
 const byCategory = new Map<string, string[]>();
@@ -1464,7 +1476,7 @@ chart.addIndicator('momentum', { length: 14 });
 ### Shaded bands between plots
 
 A pair of lines is not the same picture as a filled region, so a descriptor can
-declare `fills`: the Ichimoku cloud, a Bollinger channel. 28 of the 112 built-ins
+declare `fills`: the Ichimoku cloud, a Bollinger channel. 28 of the 113 built-ins
 declare one or more, 38 fills in total.
 
 ```ts
@@ -1643,7 +1655,7 @@ calc: (bars) => ({
 
 The four columns live in the **same `IndicatorValues`** every other descriptor returns, so
 `calc` keeps one shape and every helper written against it keeps working. A second return
-type would have forked the contract for all 112 built-ins.
+type would have forked the contract for all 113 built-ins.
 
 - `key` stays the series identity, the thing `instance.series('ha')` resolves and the thing
   the style settings are keyed on. The legend reading falls back to the `close` column.
@@ -2145,7 +2157,7 @@ MACD, Stochastic, Stochastic RSI, Williams Percent Range, CCI and ADX.
 | Studies | Why |
 |---|---|
 | VWAP, TWAP | Anchored to the session or a period and accumulated within it: folded, the line barely moves and loses its anchor. |
-| CPR, Average Daily Range, 52 Week High/Low | Already computed from daily or longer periods. |
+| CPR, Pivot Points Standard, Average Daily Range, 52 Week High/Low | Already computed from daily or longer periods. |
 | On-Balance Volume, Accumulation/Distribution, Price Volume Trend, Negative and Positive Volume Index, Net Volume | Running totals from the first loaded bar: a fold changes the step, not the reading. |
 | Volume and the three open interest studies | Each bar's own reading, which is the chart's timeframe. |
 | Ichimoku Cloud, Detrended Price Oscillator, Williams Alligator | Displaced or centred by a count of chart bars. |

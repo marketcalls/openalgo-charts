@@ -22,7 +22,7 @@ Works with Claude Code, Cursor, Codex, Copilot, Gemini CLI, Windsurf, Zed and th
 |---|---|---|
 | `openalgo-charts` | Reference hub | Mental model, tiers, core API, triage table, and 23 deep reference files under `references/`. |
 | `openalgo-chart-setup` | Task | Scaffold a first chart into an existing project, host detection included. |
-| `openalgo-chart-indicator` | Task | Add one of the 112 built-in indicators, restyle it, or author a custom or Tier-2 one. |
+| `openalgo-chart-indicator` | Task | Add one of the 113 built-in indicators, restyle it, or author a custom or Tier-2 one. |
 | `openalgo-chart-terminal` | Task | Build a full trading terminal: live data, indicators, drawings, order lines, depth, layout persistence. |
 | `openalgo-chart-plugin` | Task | Author a primitive, drawing tool, chart type, or indicator descriptor. |
 | `openalgo-chart-debug` | Task | Diagnose a chart that renders wrong, will not repaint, or throws. |

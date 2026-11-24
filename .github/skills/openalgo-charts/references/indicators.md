@@ -82,7 +82,7 @@ controls configure the line. Turning the average off leaves gaps, not zeroes.
 
 ```ts
 import { createChart } from 'openalgo-charts';
-import 'openalgo-charts/indicators'; // side effect: registers all 112 built-ins
+import 'openalgo-charts/indicators'; // side effect: registers all 113 built-ins
 ```
 
 - The base bundle ships **only** the registry (`registerIndicator`, `getIndicator`, ...) and the runtime (`IndicatorInstance`). The catalog lives in the lazy `openalgo-charts/indicators` tier.
@@ -92,15 +92,15 @@ import 'openalgo-charts/indicators'; // side effect: registers all 112 built-ins
 
 **A tier must import the registry from the package entry (`'openalgo-charts'`), never a deep path.** Each tier is its own rollup bundle with `openalgo-charts` marked external (`rollup.config.js`, `tierExternal`). A deep import is *inlined* instead (a second, private `Map`), so the tier registers into a registry `createChart` never reads. This applies to any tier bundle you build yourself.
 
-## The 112 built-ins
+## The 113 built-ins
 
 `onchart` overlays the price pane (slot 0 unless the host moved it; `chart.primaryPaneIndex()`); `pane` claims a fresh pane. Defaults shown are the descriptor's declared `input.default`.
 
 **Colour inputs are omitted from these tables on purpose.** Every descriptor declares its own colour keys (`color`, `upColor`, `macdColor`, `bandColor`, ...), and the only safe way to read one is `plotStyleKeys(plot).color`. Hand-composing `` `${plotKey}:color` `` is the single most common way to write an indicator patch that is silently ignored. See the settings model below.
 
-`category` is one of exactly four strings, used only to group a picker UI: Trend (40), Momentum (31), Volatility (23), Volume (18).
+`category` is one of exactly four strings, used only to group a picker UI: Trend (41), Momentum (31), Volatility (23), Volume (18).
 
-### Trend (40)
+### Trend (41)
 
 | id | Name | Placement | Plot keys | Inputs (defaults) |
 |---|---|---|---|---|
@@ -128,6 +128,7 @@ import 'openalgo-charts/indicators'; // side effect: registers all 112 built-ins
 | `linreg-slope` | Linear Regression Slope | pane | `slope` | `periods` 14 |
 | `ma-cross` | MA Cross | onchart | `short`, `long`, `cross` | `shortLength` 9, `longLength` 26 |
 | `cpr` | CPR with Floor Pivot | onchart | 27: `{d,w,m}` x `Pivot`, `S1`-`S3`, `R1`-`R3`, `Bc`, `Tc` | `pivotMode` `'auto'`, `showDaily` `true`, `showWeekly` `false`, `showMonthly` `false`, `displayS1R1` `false` |
+| `pivot-points` | Pivot Points Standard | onchart | 11: `p`, `s1`-`s5`, `r1`-`r5` (step lines; a level the chosen type lacks is all null) | `kind` `'traditional'` (`fibonacci`, `woodie`, `classic`, `demark`, `camarilla`), `frame` `'auto'` (`daily`, `weekly`, `monthly`, `quarterly`, `yearly`), `showP` `true`, `show1`-`show3` `true`, `show4`-`show5` `false` |
 | `mcginley-dynamic` | McGinley Dynamic | onchart | `mg` | `length` 14, `timeframe` `''` |
 | `median` | Median | onchart | `median`, `upper`, `lower`, `medianEma` | `source` `'hl2'`, `length` 3, `atrLength` 14, `atrMult` 2 |
 | `ma-ribbon` | Moving Average Ribbon | onchart | `ma1`, `ma2`, `ma3`, `ma4` | `showMa1` `true`, `ma1Type` `'SMA'`, `ma1Source` `'close'`, `ma1Length` 20, `showMa2` `true`, `ma2Type` `'SMA'`, `ma2Source` `'close'`, `ma2Length` 50, `showMa3` `true`, `ma3Type` `'SMA'`, `ma3Source` `'close'`, `ma3Length` 100, `showMa4` `true`, `ma4Type` `'SMA'`, `ma4Source` `'close'`, `ma4Length` 200 |
@@ -242,6 +243,7 @@ Notes that bite:
   Hull Suite's Hma mode uses the same kernel. Odd and non-square lengths differ
   from the fractional-half and floored-root convention used before 2.5.4.
 - `cpr` requires finite highs and lows for every observation in its prior period.
+- `pivot-points` builds each period's levels from the finished period before it, and shares `cpr`'s rules: a nonfinite extreme voids that period, and the first two loaded periods show nothing. `frame` `'auto'` takes sessions under bars of fifteen minutes or less, weeks under coarser intraday bars, months under daily bars and years above that. Traditional and Camarilla carry five pairs, Woodie and Classic four, Fibonacci three, DeMark one; Woodie reads the open of the period being traded, DeMark the prior period's open. The fourth and fifth pairs start hidden (`show4`, `show5`), since a pane that fits them to its scale flattens the candles; `priceOnlyAutoScale` keeps the scale on price when they are on.
   A nonfinite extreme invalidates that period until the next existing session or
   calendar boundary. A complete later period recovers. Only the period's final
   close is used; the schedule, display controls and pivot formulas are unchanged.
@@ -1028,7 +1030,7 @@ single `table` hook is unchanged; when both hooks exist, `tables` takes preceden
 
 **Spreading a built-in does not carry its `calcTail` (since 2.5.8).** The built-ins hold `calcTail` as a property that is not enumerable, so `{ ...getIndicator('ema'), id: 'my-ema', calc: myCalc }` has none and recomputes in full on every tick, through `myCalc`, exactly as it did before the built-ins had tails. That is deliberate: the runtime keeps only the columns a tail returns and never calls your `calc` on a tail, so an inherited tail would drop a column you add, fill a forming bar you blank, and ignore settings you rewrite. To keep the tail, copy it by name, `calcTail: getIndicator('ema').calcTail`, and only when your `calc` returns the built-in's result unchanged for the settings it is given. A copied tail still resumes only from a store the built-in's own `calc` ran on, declines when the held result has a column it does not write, and compares the bar before the tail with what the runtime holds, giving up for that instance after three disagreements in a row; those checks catch most reshaping, not all of it.
 
-`registerIndicator` overwrites an existing id, later registration wins. With 112 built-ins the id space is crowded, so namespace a custom id (`my-momentum`, `acme-vwap`) unless you intend to replace a built-in. Register before `addIndicator`.
+`registerIndicator` overwrites an existing id, later registration wins. With 113 built-ins the id space is crowded, so namespace a custom id (`my-momentum`, `acme-vwap`) unless you intend to replace a built-in. Register before `addIndicator`.
 
 ## The calculation context (1.8.1, extended 1.8.2)
 
@@ -1641,7 +1643,7 @@ intervals)` takes the list as its third argument for a host building its own for
 | Studies | Why a timeframe is not offered |
 |---|---|
 | `vwap`, `twap` | Anchored to the session (or a period) and accumulated within it: folded, the line barely moves and loses the anchor. |
-| `cpr`, `average-daily-range`, `high-low-52-week` | Already computed from daily or longer periods of the chart's bars. |
+| `cpr`, `pivot-points`, `average-daily-range`, `high-low-52-week` | Already computed from daily or longer periods of the chart's bars. |
 | `obv`, `adl`, `pvt`, `nvi`, `pvi`, `net-volume` | Running totals from the first loaded bar: folding changes only the step, not the reading. |
 | `volume`, `open-interest`, `open-interest-change`, `open-interest-buildup` | Each bar's own reading; the chart's timeframe is the reading. |
 | `ichimoku`, `dpo`, `alligator` | Displaced or centred by a count of chart bars, which a fold would count in folded bars. |
@@ -1991,8 +1993,8 @@ Related: [core-api](./core-api.md), [chart-types](./chart-types.md), [scales-and
 
 ## Every built-in is also a named export
 
-The tier's import side effect registers all 112. You do not have to take all
-112. Each descriptor is exported individually under the UPPER_SNAKE form of its
+The tier's import side effect registers all 113. You do not have to take all
+113. Each descriptor is exported individually under the UPPER_SNAKE form of its
 id, so a bundle can register only what it draws:
 
 ```ts
@@ -2054,7 +2056,7 @@ the version the user has on the chart, and the plot keys are the built-in's, not
 | `VWAP`: `vwap` | `VWMA`: `vwma` | `WAVETREND`: `wavetrend` |
 | `WILLIAMS_FRACTALS`: `williams-fractals` | `WILLIAMS_PERCENT_R`: `williams-percent-r` | `WILLIAMS_VIX_FIX`: `williams-vix-fix` |
 | `WMA`: `wma` | `WOODIES_CCI`: `woodies-cci` | `ZIGZAG`: `zigzag` |
-| `ZLEMA`: `zlema` |  |  |
+| `ZLEMA`: `zlema` | `PIVOT_POINTS`: `pivot-points` |  |
 
 `INDICATORS_TIER` is the tier's identity constant (`'indicators'`), for feature
 detection without a bare string.
@@ -2159,7 +2161,7 @@ member. They are already included in the tier's own registration.
 
 | Export | Contents |
 |---|---|
-| `STUDY_INDICATORS` | `cpr`, `alphatrend`, `range-analysis` |
+| `STUDY_INDICATORS` | `cpr`, `pivot-points`, `alphatrend`, `range-analysis` |
 | `SEASONALITY_INDICATORS` | `seasonality` |
 | `WAVETREND_INDICATORS` | `wavetrend` |
 | `EXPONENTIAL_INDICATORS` | `zlema`, `vidya`, `elder-ray`, `schaff-trend-cycle` |
