@@ -26,9 +26,12 @@ const feed = {
     return request.variant?.session === 'extended' ? extended() : regular();
   },
 };
+const offset = new URLSearchParams(location.search).get('offset');
 const widget = createWidget(document.getElementById('chart'), {
   feed, symbol: 'AAPL', exchange: 'US', interval: '1m', now: () => (T + 80 * 60) * 1000,
   lookbackBars: 80, navigation: { defaultVisibleBars: 70 }, fullscreen: true,
+  // ?offset=<bars> is the host's own gap right of the last bar.
+  ...(offset === null ? {} : { timeScale: { rightOffset: Number(offset) } }),
   contextMenuItems: event => [{ id: 'host-row', label: 'Send to scanner', run: () => { hostRows.push(event.target.kind); } }],
 });
 window.fixture = { version: VERSION, widget, requests, hostRows };

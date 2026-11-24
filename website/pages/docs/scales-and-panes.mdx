@@ -1001,7 +1001,7 @@ import { DEFAULT_TIME_SCALE_OPTIONS } from 'openalgo-charts';
 | `barSpacing` | `number` | `8` | Pixels per bar at initialisation. Clamped to `[minBarSpacing, maxBarSpacing]` at all times. |
 | `minBarSpacing` | `number` | `1` | Hard floor on bar spacing, reached at maximum zoom-in. |
 | `maxBarSpacing` | `number` | `80` | Hard ceiling on bar spacing, reached at maximum zoom-out. |
-| `rightOffset` | `number` | `4` | Empty bar slots kept to the right of the latest bar, leaving a small look-ahead margin. |
+| `rightOffset` | `number` | `4` | Empty bar slots kept to the right of the latest bar, leaving a small look-ahead margin. The chart opens with this gap, and `fitContent()` and `resetScale()` return to it (since 2.7.5; earlier releases returned to 4 whatever was set). |
 
 `TimeScaleOptions` is an init-time snapshot. To change values at runtime use the
 setter methods on the live `TimeScale` instance:

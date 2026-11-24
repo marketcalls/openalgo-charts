@@ -36,7 +36,7 @@
       "openDateNavigation": 152
     },
     "src/widget/dialogs/context-menu.ts": {
-      "contextMenuEntries": 157
+      "contextMenuEntries": 155
     },
     "src/widget/dialogs/drawing-coordinates.ts": {
       "mountDrawingCoordinates": 189
@@ -84,7 +84,7 @@
       "createObjectsPanelContent": 445
     },
     "src/widget/overlays.ts": {
-      "createOverlayStack": 168
+      "createOverlayStack": 154
     },
     "src/widget/rail.ts": {
       "mountRail": 602

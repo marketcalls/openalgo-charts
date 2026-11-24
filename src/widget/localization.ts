@@ -351,6 +351,7 @@ export type WidgetBuiltinMessage =
   | "Removed {count} drawing"
   | "Removed {count} drawings"
   | "Reset"
+  | "Reset view"
   | "Restore defaults"
   | "Restore this tab"
   | "Retry"

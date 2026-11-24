@@ -68,7 +68,7 @@ Import only what you use. Each tier is a separate entry point, so a feature you 
 | `openalgo-charts/widget` | `createWidget`: the chart with a top bar, drawing rail, responsive mobile controls with drawing search, tool groups and shared Favorites, status line, settings and indicator dialogs with Running studies first, drawing properties, event details, right-click menu, keymap and optional persistence. The only tier that ships DOM; imports the draw tier itself | 131.31 kB |
 | `openalgo-charts/workspace` | Portable workspace/template documents, asynchronous catalog repository and atomic IndexedDB adapter; no UI or market data | 11.89 kB |
 
-Limits are the CI-enforced budgets in `.size-limit.json`. This reference targets 2.7.4.
+Limits are the CI-enforced budgets in `.size-limit.json`. This reference targets 2.7.5.
 In a source checkout, run `npm run size` before quoting byte counts. In a consumer app,
 check the installed version and measure its actual imports with the app's bundler.
 Reference measurements and every budget row live in [bundling-and-tiers](references/bundling-and-tiers.md).

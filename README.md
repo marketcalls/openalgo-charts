@@ -25,7 +25,7 @@ with no runtime dependencies.
 npm install openalgo-charts
 ```
 
-Current version: **2.7.4**. Pivot points in six level sets (Traditional, Fibonacci, Woodie, Classic, DeMark and Camarilla), and in the widget: rows a host adds to the right-click menu, an opt-in full screen button, a study's placement from its own menu, a choice of regular or extended hours where the feed serves both, and thirty timezones. 2.7.3 was a correctness release: saved drawings and layouts survive reloads, a second tab and a reopened layout; alerts fire across history refreshes; live candles follow the history they continue; the price axis labels only tradable prices; and orders and positions keep the exchange and product that identify them. 2.7.2 numbered Elliott wave counts from the point after their origin, as a count is read, with each label centred on its point, and 2.7.1 added the five Elliott wave counts, each drawn from its origin and labelled by degree, for 90 drawing tools.
+Current version: **2.7.5**. Three reports fixed: a fit keeps the right offset its host configured, the widget's right-click menu has Reset view, and its dialogs move by their title bar. 2.7.4 added: Pivot points in six level sets (Traditional, Fibonacci, Woodie, Classic, DeMark and Camarilla), and in the widget: rows a host adds to the right-click menu, an opt-in full screen button, a study's placement from its own menu, a choice of regular or extended hours where the feed serves both, and thirty timezones. 2.7.3 was a correctness release: saved drawings and layouts survive reloads, a second tab and a reopened layout; alerts fire across history refreshes; live candles follow the history they continue; the price axis labels only tradable prices; and orders and positions keep the exchange and product that identify them. 2.7.2 numbered Elliott wave counts from the point after their origin, as a count is read, with each label centred on its point, and 2.7.1 added the five Elliott wave counts, each drawn from its origin and labelled by degree, for 90 drawing tools.
 
 2.6.4 was an order flow release: a footprint finds the imbalances beside a row that never traded, prints volume shaded by delta, alerts once when price comes back to a zone, extends only the zone kinds you pick, and takes a colour for each of its parts or one of six named themes; the website gains an Order flow page of live footprint and market profile examples. 2.6.3 was a finish release: finer glyphs at one line weight, a drawing rail that folds away, a smoother wheel and trackpad zoom, a widget whose drag keeps the price scale fitting, and a log scale that fills the pane. 2.6.2 was a fix for the bottom bar's ranges and Go to, which reported missing history across a weekend or another gap no session trades in. 2.6.1 was order flow analytics for the footprint (trade classification, a trade size filter, imbalance and delta views, zones, unfinished auctions, delta flips and session statistics), rows aligned on the even boundary, Renko and point and figure sizing from price or the ATR, and settings dialogs for both chart types in the widget and the reference host. 2.6.0 was analysis depth and a stricter API: the chart applies Heikin Ashi, Renko, range bars, line break, point and figure and Kagi to the bars you feed, live, with each study on the elements or the underlying bars; seven new built-ins and a timeframe input on 29 of them; symbol search through the OpenAlgo feed; rich event details with host actions; a typed event map for `chart.on`; a classic-script build of every tier and `require()` of the ESM files; and declarations that hold for a host compiling with both strict flags. 2.5.10 was the persistence, saved layouts and chart grid release.
 See the [changelog](./CHANGELOG.md) for release notes.
@@ -119,7 +119,7 @@ You can also load the library from a CDN in a plain HTML page:
 ```html
 <div id="chart" style="width:100vw;height:100vh"></div>
 <script type="module">
-  import { createChart, generateBars } from 'https://unpkg.com/openalgo-charts@2.7.4/dist/openalgo-charts.mjs';
+  import { createChart, generateBars } from 'https://unpkg.com/openalgo-charts@2.7.5/dist/openalgo-charts.mjs';
   const chart = createChart(document.getElementById('chart'), { timezone: 'Asia/Kolkata' });
   chart.addSeries('candlestick').setData(generateBars(1700000000, 200, 3600));
   chart.fitContent();
@@ -601,7 +601,7 @@ npm run verify     # lint + types + cycles + unused exports + unit + endurance h
 
 ## Status &amp; limitations
 
-Version **2.7.4**. All engine build phases are implemented. Upgrading a 1.9.x host: [Migrating to 2.0](./docs/migrating-to-2.md).
+Version **2.7.5**. All engine build phases are implemented. Upgrading a 1.9.x host: [Migrating to 2.0](./docs/migrating-to-2.md).
 
 Known gaps, stated plainly:
 

@@ -468,7 +468,7 @@ cannot name a part either: allow the origin, or the directory as a path ending i
 
 ## Size
 
-Budgets from `.size-limit.json` and measurements from the 2.7.4 build, decimal Brotli kB, enforced by
+Budgets from `.size-limit.json` and measurements from the 2.7.5 build, decimal Brotli kB, enforced by
 `npm run size`:
 
 | Row | Files | Budget | Actual |
@@ -542,3 +542,16 @@ Since 2.7.4:
   `movable: false` in its policy withholds every placement row.
 - The timezone list in the settings dialog and the bottom bar grows from 14 zones to 30.
   Any IANA zone is still accepted by `chart.setTimezone`.
+
+## Reset view and movable dialogs
+
+Since 2.7.5:
+
+- The right-click menu carries **Reset view** (`chart-reset`) after Fit all bars. It
+  runs `chart.resetScale()`: the default bar count again, and every price axis a drag
+  left manual back on auto-fit. Where the host sets `zoomEnabled: false` it is
+  disabled, as the fit row is.
+- A centred dialog is dragged by its title bar, so it can be slid off the study or the
+  candles it is editing. The bar always stays inside the widget; a press on a control
+  in the bar is that control's. Nothing is remembered: a dialog opens centred again.
+  The phone layout's bottom sheets and popovers anchored to a control do not move.

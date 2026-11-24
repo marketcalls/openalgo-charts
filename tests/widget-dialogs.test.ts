@@ -803,7 +803,7 @@ describe('contextMenuEntries', () => {
     const rig = makeRig();
     const plain = contextMenuEntries(rig.ctx, event(rig, { kind: 'empty', id: null }));
     expect(ids(plain).some((i) => i.startsWith('order-'))).toBe(false);
-    expect(ids(plain)).toEqual(['draw-paste', 'chart-fit', 'chart-indicators', 'chart-settings']);
+    expect(ids(plain)).toEqual(['draw-paste', 'chart-fit', 'chart-reset', 'chart-indicators', 'chart-settings']);
     const orders: OrderRequest[] = [];
     const traded = contextMenuEntries(rig.ctx, event(rig, { kind: 'series', id: null, seriesType: 'candlestick' }), { onOrder: (o) => orders.push(o) });
     expect(ids(traded).filter((i) => i.startsWith('order-'))).toEqual([
@@ -842,7 +842,7 @@ describe('contextMenuEntries', () => {
     expect(ids(entries)).toEqual([
       'draw-props', 'draw-copy', 'draw-cut', 'draw-duplicate', 'draw-lock', 'draw-hide',
       'draw-front', 'draw-back', 'draw-above', 'draw-behind', 'draw-delete',
-      'draw-paste', 'draw-clear', 'chart-fit', 'chart-indicators', 'chart-settings',
+      'draw-paste', 'draw-clear', 'chart-fit', 'chart-reset', 'chart-indicators', 'chart-settings',
     ]);
     const by = (id: string): MenuItem => items(entries).find((i) => i.id === id) as MenuItem;
     expect(by('draw-above').on).toBe(true);
@@ -1043,7 +1043,7 @@ describe('mountContextMenu', () => {
     WIDGET_DIALOGS.contextMenu(rig.ctx, asEl(btn));
     const menu = rig.q('.oac-ctx') as FakeElement;
     expect(menu.style.left).toBe('500px');
-    expect(menu.querySelectorAll('[data-act]').map((r) => r.dataset.act)).toEqual(['draw-paste', 'chart-fit', 'chart-indicators', 'chart-settings']);
+    expect(menu.querySelectorAll('[data-act]').map((r) => r.dataset.act)).toEqual(['draw-paste', 'chart-fit', 'chart-reset', 'chart-indicators', 'chart-settings']);
   });
 });
 

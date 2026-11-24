@@ -3,6 +3,7 @@
  * so owns Escape, the focus trap, the outside press and where focus goes
  * back, and the tooltip every control's hover label shares.
  */
+import { dragDialog } from './dialog-drag';
 import { boxIn, focusables, h, placeBelow, placeBeside, placeTip, type TipSide } from './dom';
 
 // ── overlay stack ──────────────────────────────────────────────────────
@@ -160,22 +161,8 @@ export function createOverlayStack(root: HTMLElement, doc: Document): OverlaySta
     }
     if (!el.hasAttribute('tabindex')) el.tabIndex = -1;
     layer.appendChild(el);
-    if (placement !== 'center' && opts.anchor) {
-      const bounds = root.getBoundingClientRect();
-      let anchorBox = boxIn(root, opts.anchor);
-      if (placement === 'beside' && opts.edge) {
-        const edge = boxIn(root, opts.edge);
-        const right = Math.max(anchorBox.right, edge.right);
-        anchorBox = { ...anchorBox, right, width: right - anchorBox.left };
-      }
-      const size = { width: el.offsetWidth, height: el.offsetHeight };
-      const at = placement === 'beside'
-        ? placeBeside(anchorBox, size, bounds)
-        : placeBelow(anchorBox, size, bounds);
-      el.style.left = at.left + 'px';
-      el.style.top = at.top + 'px';
-      opts.anchor.setAttribute('aria-expanded', 'true');
-    }
+    if (placement === 'center') dragDialog(root, el);
+    else if (opts.anchor) placeAtAnchor(root, el, opts.anchor, placement, opts.edge);
     stack.push(entry);
     listen();
     if (opts.initialFocus !== null) {
@@ -224,6 +211,22 @@ export function createOverlayStack(root: HTMLElement, doc: Document): OverlaySta
       layer.remove();
     },
   };
+}
+
+/** Put a popover below or beside the control it opened from, inside the widget. */
+function placeAtAnchor(root: HTMLElement, el: HTMLElement, anchor: HTMLElement, placement: 'below' | 'beside', edge: HTMLElement | undefined): void {
+  const bounds = root.getBoundingClientRect();
+  let anchorBox = boxIn(root, anchor);
+  if (placement === 'beside' && edge) {
+    const far = boxIn(root, edge);
+    const right = Math.max(anchorBox.right, far.right);
+    anchorBox = { ...anchorBox, right, width: right - anchorBox.left };
+  }
+  const size = { width: el.offsetWidth, height: el.offsetHeight };
+  const at = placement === 'beside' ? placeBeside(anchorBox, size, bounds) : placeBelow(anchorBox, size, bounds);
+  el.style.left = at.left + 'px';
+  el.style.top = at.top + 'px';
+  anchor.setAttribute('aria-expanded', 'true');
 }
 
 /**

@@ -469,7 +469,9 @@ or malformed values are ignored without invoking a getter; unchanged patches
 do not interrupt motion. Old state without these keys retains the current policy.
 
 `defaultVisibleBars` defaults to `0`, fitting all loaded bars. A positive count targets
-the newest N loaded bars plus four empty slots on the right, bounded by available data
+the newest N loaded bars plus the time scale's `rightOffset` in empty slots on the right
+(four by default; since 2.7.5 a configured `timeScale.rightOffset` is kept by the initial
+view, `fitContent()` and `resetScale()`, where earlier releases returned to four), bounded by available data
 and the time scale's spacing limits. Initial data loads and `resetScale()` honour this
 count; changing it applies the default view immediately. `fitContent()` still explicitly
 fits all loaded bars. The count does not change history requests or discard loaded data.

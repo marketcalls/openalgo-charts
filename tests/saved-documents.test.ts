@@ -138,6 +138,7 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
     '2.6.6': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
     '2.7.2': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
     '2.7.3': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
+    '2.7.4': [{ path: 'canvas.grid.horzLines', change: 'added', why: GRID_MIRROR }],
   },
   'widget-state': {
     '2.5.1': [
@@ -179,6 +180,11 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
       { path: 'chart.barSpacing', change: 'changed', why: PLOT_WIDTH },
       { path: 'savedBy', change: 'changed', why: 'the restored state records the current writer version' },
     ],
+    '2.7.4': [
+      { path: 'chart.canvas.grid', change: 'added', why: GRID_MIRROR },
+      { path: 'chart.barSpacing', change: 'changed', why: PLOT_WIDTH },
+      { path: 'savedBy', change: 'changed', why: 'the restored state records the current writer version' },
+    ],
   },
   'widget-storage': {
     '2.5.1': [
@@ -195,8 +201,9 @@ const CHANGES: Record<string, Record<string, readonly Named[]>> = {
     '2.6.6': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'changed', why: 'the restored state records the current writer version' }],
     '2.7.2': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'changed', why: 'the restored state records the current writer version' }],
     '2.7.3': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'changed', why: 'the restored state records the current writer version' }],
+    '2.7.4': [...WIDGET_START, { path: 'oac-widget:compat:state.savedBy', change: 'changed', why: 'the restored state records the current writer version' }],
   },
-  'workspace-catalog': { '2.5.1': OPENED, '2.6.0': OPENED, '2.6.4': OPENED, '2.6.5': OPENED, '2.6.6': OPENED, '2.7.2': OPENED, '2.7.3': OPENED },
+  'workspace-catalog': { '2.5.1': OPENED, '2.6.0': OPENED, '2.6.4': OPENED, '2.6.5': OPENED, '2.6.6': OPENED, '2.7.2': OPENED, '2.7.3': OPENED, '2.7.4': OPENED },
 };
 const named = (doc: string, version: string): readonly Named[] => CHANGES[doc]?.[version] ?? [];
 
