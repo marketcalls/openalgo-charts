@@ -316,7 +316,7 @@ export function createStandaloneDomPanel(options: StandaloneDomOptions): Standal
     minHeight: 300,
     linkGroup: options.linkGroup ?? null,
     mount(host: HTMLElement) {
-      instance = new StandaloneDomLadder(options);
+      instance = new StandaloneDomLadder({ ...options, document: options.document ?? host.ownerDocument });
       host.appendChild(instance.element);
       return {
         destroy() {

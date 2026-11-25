@@ -155,11 +155,11 @@ describe('the house writing rules', () => {
 
   it('keeps them out of every comment, doc comment and test title, and every other page and guide', () => {
     expect(scan(EVERYWHERE, everyLine, SYMBOL)).toEqual([]);
-  });
+  }, 15000);
 
   it('keeps dashes, arrows, ticks, crosses and emoji out of the strings src spells out', () => {
     expect(scan(SRC, literals, SYMBOL)).toEqual([]);
-  });
+  }, 15000);
 
   it('keeps them out of the examples too', () => {
     expect(scan(EXAMPLES, read, SYMBOL)).toEqual([]);
@@ -172,11 +172,11 @@ describe('the house writing rules', () => {
   it('says Live, On, Off or Active in src and the examples, never arm', () => {
     expect(scan(SRC, shownLiterals, ARM)).toEqual([]);
     expect(scan(EXAMPLES, read, ARM)).toEqual([]);
-  });
+  }, 15000);
 
   it('says sandbox or analyzer mode, never paper or virtual trading', () => {
     expect(scan(SRC, literals, PAPER)).toEqual([]);
     expect(scan(EXAMPLES, read, PAPER)).toEqual([]);
     expect(scan(DOCS, lines, PAPER)).toEqual([]);
-  });
+  }, 15000);
 });

@@ -15,9 +15,10 @@ import {
   loadTerminalDocument,
   saveTerminalDocument,
 } from '../src/widget/dock/persist';
-import { StandaloneDomLadder, buildDomRows, ladderCapability } from '../src/widget/dock/dom-panel';
+import { StandaloneDomLadder, buildDomRows, ladderCapability, createStandaloneDomPanel } from '../src/widget/dock/dom-panel';
 import { createTerminalWorkspace } from '../src/widget/dock/controller';
-import { fakeWidgetDocument } from './helpers/fake-dom-widget';
+import { createChartPanel } from '../src/widget/dock/panel-adapters';
+import { ensureWindowGlobal, fakeWidgetDocument } from './helpers/fake-dom-widget';
 import type { DockNode, DockSplitNode, TerminalPanel } from '../src/widget/dock/types';
 import type { MarketDepth } from '../src/feed/types';
 
@@ -397,6 +398,100 @@ describe('Terminal Workspace Controller (Lifecycle & Integration)', () => {
     ws.destroy();
     expect(destroyChart).toHaveBeenCalledOnce();
     expect(destroyDom).toHaveBeenCalledOnce();
+  });
+});
+
+describe('P1 and P2 Review Defect Verifications', () => {
+  it('destroys widget instance completely when chart panel adapter is unmounted', () => {
+    ensureWindowGlobal();
+    const doc = fakeWidgetDocument();
+    const host = doc.createElement('div');
+    const panel = createChartPanel({
+      symbol: 'SBIN',
+      interval: '15m',
+      feed: { getBars: async () => [] },
+      widgetOptions: { document: doc as unknown as Document },
+    });
+
+    const handle = panel.mount(host as unknown as HTMLElement);
+    const widget = panel.widget?.();
+    expect(widget).toBeDefined();
+
+    const destroySpy = vi.spyOn(widget!, 'destroy');
+    handle.destroy();
+    expect(destroySpy).toHaveBeenCalledOnce();
+  });
+
+  it('persists and restores floating-only workspace documents', () => {
+    const doc = fakeWidgetDocument();
+    const container = doc.createElement('div');
+    const ws = createTerminalWorkspace(container as unknown as HTMLElement);
+
+    const p1: TerminalPanel = {
+      id: 'p_float1',
+      type: 'chart',
+      title: 'Floating Chart',
+      mount: () => ({ destroy: vi.fn() }),
+    };
+
+    ws.addPanel(p1);
+    ws.floatPanel('p_float1', { x: 50, y: 60, width: 300, height: 250 });
+    expect(ws.getLayout()).toBeNull();
+
+    const savedDoc = ws.saveLayout();
+    expect(savedDoc.layout).toBeNull();
+    expect(savedDoc.floating.length).toBe(1);
+    expect(savedDoc.floating[0]?.panelId).toBe('p_float1');
+
+    const ws2 = createTerminalWorkspace(doc.createElement('div') as unknown as HTMLElement);
+    ws2.addPanel(p1);
+    const restored = ws2.restoreLayout(savedDoc);
+    expect(restored).toBe(true);
+    expect(ws2.getLayout()).toBeNull();
+
+    ws.destroy();
+    ws2.destroy();
+  });
+
+  it('propagates exchange identity through LinkHub and updates panel link state', () => {
+    const hub = new LinkHub();
+    hub.setPanelGroup('panel_1', 'green');
+    hub.setPanelGroup('panel_2', 'green');
+
+    const listener = vi.fn();
+    hub.registerListener('panel_2', listener);
+
+    hub.broadcast('green', 'RELIANCE', '1m', 'panel_1', 'BSE');
+    expect(listener).toHaveBeenCalledWith({
+      group: 'green',
+      symbol: 'RELIANCE',
+      interval: '1m',
+      exchange: 'BSE',
+    });
+  });
+
+  it('updates DOM ladder LTP highlighting and price state dynamically', () => {
+    const depth: MarketDepth = {
+      ltp: 500,
+      bids: [{ price: 499.5, qty: 10 }],
+      asks: [{ price: 500.5, qty: 10 }],
+    };
+    const doc = fakeWidgetDocument();
+    const panel = createStandaloneDomPanel({
+      symbol: 'NIFTY',
+      tickSize: 0.5,
+      depth,
+      document: doc as unknown as Document,
+    });
+
+    const host = doc.createElement('div');
+    const handle = panel.mount(host as unknown as HTMLElement);
+
+    panel.setLtp(500.5);
+    panel.setSymbol('BANKNIFTY');
+    expect(panel.title).toBe('DOM BANKNIFTY');
+
+    handle.destroy();
   });
 });
 

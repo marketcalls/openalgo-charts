@@ -117,7 +117,7 @@
       "dist/openalgo-charts.widget.standalone.js",
       "dist/openalgo-charts.workspace.standalone.js"
     ],
-    "limit": "450.43 kB",
+    "limit": "450.48 kB",
     "brotli": true
   },
   {
@@ -129,7 +129,7 @@
   {
     "name": "Widget classic script (widget first-use parts inlined)",
     "path": "dist/openalgo-charts.widget.standalone.js",
-    "limit": "154.74 kB",
+    "limit": "154.78 kB",
     "brotli": true
   }
 ]
